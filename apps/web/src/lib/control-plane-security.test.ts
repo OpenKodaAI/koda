@@ -38,7 +38,7 @@ describe("control-plane security gates", () => {
     await controlPlaneFetch("/api/control-plane/agents");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0] as
+    const firstCall = fetchMock.mock.calls[0] as unknown as
       | [RequestInfo | URL, RequestInit | undefined]
       | undefined;
     const init = firstCall?.[1];

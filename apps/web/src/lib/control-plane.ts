@@ -523,6 +523,9 @@ export type ControlPlaneRuntimeAccess = {
   health_url: string;
   runtime_base_url: string;
   runtime_token?: string | null;
+  runtime_request_token?: string | null;
+  runtime_request_expires_at?: string | null;
+  runtime_request_capability?: string | null;
   access_scope?: Record<string, unknown> | null;
   access_scope_token?: string | null;
   access_scope_expires_at?: string | null;
@@ -558,7 +561,11 @@ function sanitizeControlPlaneNode(value: unknown): unknown {
   const result: Record<string, unknown> = {};
 
   for (const [key, rawChild] of Object.entries(value)) {
-    if (key === "runtime_token" || key === "access_scope_token") {
+    if (
+      key === "runtime_token" ||
+      key === "runtime_request_token" ||
+      key === "access_scope_token"
+    ) {
       result[key] = null;
       continue;
     }
@@ -746,9 +753,25 @@ export async function getControlPlaneRuntimeAccess(botId: string) {
   );
 }
 
-export async function getServerControlPlaneRuntimeAccess(botId: string) {
+type ControlPlaneRuntimeAccessRequest = {
+  capability?: "read" | "mutate" | "attach";
+  includeSensitive?: boolean;
+};
+
+export async function getServerControlPlaneRuntimeAccess(
+  botId: string,
+  options: ControlPlaneRuntimeAccessRequest = {},
+) {
+  const searchParams = new URLSearchParams();
+  if (options.capability) {
+    searchParams.set("capability", options.capability);
+  }
+  if (options.includeSensitive) {
+    searchParams.set("include_sensitive", "true");
+  }
+  const suffix = searchParams.size ? `?${searchParams.toString()}` : "";
   const response = await controlPlaneFetch(
-    `/api/control-plane/agents/${botId}/runtime-access`,
+    `/api/control-plane/agents/${botId}/runtime-access${suffix}`,
     {},
     {
       tier: "live",

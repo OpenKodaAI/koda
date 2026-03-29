@@ -2829,9 +2829,9 @@ class ControlPlaneManager:
         if not payload_text:
             raise ValueError("text is required")
 
-        runtime_access = self.get_runtime_access(normalized)
+        runtime_access = self.get_runtime_access(normalized, capability="mutate")
         runtime_base_url = str(runtime_access.get("runtime_base_url") or "").rstrip("/")
-        runtime_token = str(runtime_access.get("runtime_token") or "").strip()
+        runtime_token = str(runtime_access.get("runtime_request_token") or "").strip()
         if not runtime_base_url:
             raise RuntimeError("runtime base URL is unavailable for this agent")
         if not runtime_token:
@@ -7013,82 +7013,20 @@ class ControlPlaneManager:
             persisted_to_disk=persisted_to_disk,
         )
 
-    def get_runtime_access(self, agent_id: str) -> dict[str, Any]:
-        normalized, agent_row = self._require_agent_row(agent_id)
-        from koda.services.runtime_access_service import RuntimeAccessService
+    def get_runtime_access(
+        self,
+        agent_id: str,
+        *,
+        capability: str = "read",
+        include_sensitive: bool = False,
+    ) -> dict[str, Any]:
+        from .runtime_access import ControlPlaneRuntimeAccessBroker
 
-        applied_version = int(agent_row["applied_version"] or 0)
-        desired_version = int(agent_row["desired_version"] or 0)
-        selected_version = applied_version or desired_version
-
-        snapshot_candidate = (
-            self.get_published_snapshot(normalized, version=selected_version)
-            if selected_version > 0
-            else self.build_draft_snapshot(normalized)
+        return ControlPlaneRuntimeAccessBroker(self).get_runtime_access(
+            agent_id,
+            capability=capability,
+            include_sensitive=include_sensitive,
         )
-        snapshot = snapshot_candidate or self.build_draft_snapshot(normalized)
-        agent_payload = _safe_json_object(snapshot.get("agent"))
-        runtime_endpoint = _safe_json_object(agent_payload.get("runtime_endpoint"))
-        health_url = str(
-            runtime_endpoint.get("health_url")
-            or f"http://127.0.0.1:{runtime_endpoint.get('health_port') or 8080}/health"
-        )
-        runtime_base_url = str(
-            runtime_endpoint.get("runtime_base_url") or health_url.removesuffix("/health").rstrip("/")
-        )
-        secrets = _safe_json_object(snapshot.get("secrets"))
-        runtime_token = ""
-        payload = _safe_json_object(secrets.get("RUNTIME_LOCAL_UI_TOKEN"))
-        encrypted_value = str(payload.get("encrypted_value") or "").strip()
-        if encrypted_value:
-            runtime_token = decrypt_secret(encrypted_value)
-        if not runtime_token:
-            row = fetch_one(
-                "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
-                ("RUNTIME_LOCAL_UI_TOKEN",),
-            )
-            encrypted_value = str(row["encrypted_value"] or "").strip() if row else ""
-            if encrypted_value:
-                runtime_token = decrypt_secret(encrypted_value)
-        sections = _safe_json_object(snapshot.get("sections"))
-        knowledge_section = _safe_json_object(sections.get("knowledge"))
-        knowledge_policy = normalize_knowledge_policy(_safe_json_object(knowledge_section.get("policy")))
-        workspace_scope = tuple(
-            item
-            for item in [str(agent_row["workspace_id"]).strip() if _row_has_column(agent_row, "workspace_id") else ""]
-            if item
-        )
-        source_scope = tuple(normalize_string_list(knowledge_policy.get("allowed_source_labels")))
-        access_scope = {
-            "agent_scope": normalized,
-            "workspace_scope": list(workspace_scope),
-            "source_scope": list(source_scope),
-            "sensitive_allowed": bool(runtime_token),
-        }
-        access_scope_token = None
-        access_scope_expires_at = None
-        if runtime_token:
-            envelope, access_scope_token = RuntimeAccessService(runtime_token).issue(
-                agent_scope=normalized,
-                workspace_scope=workspace_scope,
-                source_scope=source_scope,
-                sensitive_allowed=True,
-            )
-            access_scope_expires_at = envelope.expires_at
-
-        return {
-            "agent_id": normalized,
-            "applied_version": applied_version or None,
-            "desired_version": desired_version or None,
-            "selected_version": selected_version or None,
-            "health_url": health_url,
-            "runtime_base_url": runtime_base_url,
-            "runtime_token": runtime_token or None,
-            "runtime_token_present": bool(runtime_token),
-            "access_scope": access_scope,
-            "access_scope_token": access_scope_token,
-            "access_scope_expires_at": access_scope_expires_at,
-        }
 
     def mark_apply_started(self, agent_id: str, version: int) -> None:
         normalized = _normalize_agent_id(agent_id)

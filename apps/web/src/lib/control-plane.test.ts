@@ -113,7 +113,8 @@ describe("control-plane fetch tiers", () => {
             bot_id: "ATLAS",
             health_url: "http://127.0.0.1:8080/health",
             runtime_base_url: "http://127.0.0.1:8080",
-            runtime_token: "super-secret-runtime-token",
+            runtime_token: null,
+            runtime_request_token: "scoped-runtime-request-token",
             access_scope_token: "signed-scope-token",
             runtime_token_present: true,
           }),
@@ -129,6 +130,7 @@ describe("control-plane fetch tiers", () => {
     const payload = await getControlPlaneRuntimeAccess("ATLAS");
 
     expect(payload.runtime_token).toBeNull();
+    expect(payload.runtime_request_token).toBeNull();
     expect(payload.access_scope_token).toBeNull();
     expect(payload.runtime_token_present).toBe(true);
   });
@@ -142,7 +144,8 @@ describe("control-plane fetch tiers", () => {
             bot_id: "ATLAS",
             health_url: "http://127.0.0.1:8080/health",
             runtime_base_url: "http://127.0.0.1:8080",
-            runtime_token: "super-secret-runtime-token",
+            runtime_token: null,
+            runtime_request_token: "scoped-runtime-request-token",
             access_scope_token: "signed-scope-token",
             runtime_token_present: true,
           }),
@@ -157,7 +160,8 @@ describe("control-plane fetch tiers", () => {
     const { getServerControlPlaneRuntimeAccess } = await import("@/lib/control-plane");
     const payload = await getServerControlPlaneRuntimeAccess("ATLAS");
 
-    expect(payload.runtime_token).toBe("super-secret-runtime-token");
+    expect(payload.runtime_token).toBeNull();
+    expect(payload.runtime_request_token).toBe("scoped-runtime-request-token");
     expect(payload.access_scope_token).toBe("signed-scope-token");
   });
 

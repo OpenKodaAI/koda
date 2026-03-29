@@ -62,13 +62,24 @@ class _SilentRuntimeBot:
         return None
 
 
-def _authorize_runtime_access(request: web.Request) -> web.Response | None:
+def _authorize_runtime_access(
+    request: web.Request,
+    *,
+    capability: str = "read",
+) -> web.Response | None:
     token = RUNTIME_LOCAL_UI_TOKEN.strip()
     if not token:
         return web.json_response({"error": "runtime UI token is not configured"}, status=403)
     headers = getattr(request, "headers", {})
-    request_token = headers.get("X-Runtime-Token", "")
-    if request_token != token:
+    request_token = headers.get("X-Runtime-Token", "").strip()
+    if not request_token:
+        return web.json_response({"error": "missing runtime token"}, status=403)
+    envelope = RuntimeAccessService(token).authorize(
+        request_token,
+        agent_scope=str(AGENT_ID or "").strip().upper(),
+        capability=capability,
+    )
+    if envelope is None:
         return web.json_response({"error": "invalid runtime token"}, status=403)
     return None
 
@@ -83,7 +94,7 @@ def _is_mutation_allowed(task_id: int) -> tuple[bool, str | None]:
 
 
 def _authorize_mutation(request: web.Request) -> web.Response | None:
-    return _authorize_runtime_access(request)
+    return _authorize_runtime_access(request, capability="mutate")
 
 
 async def _json_payload(request: web.Request) -> dict[str, object]:
@@ -205,6 +216,9 @@ async def _runtime_environments(request: web.Request) -> web.Response:
 
 
 async def _runtime_readiness(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
     controller = get_runtime_controller()
     snapshot_getter = getattr(controller, "get_runtime_health_snapshot", None) or getattr(
         controller,
@@ -844,7 +858,7 @@ async def _runtime_save(request: web.Request) -> web.Response:
 
 
 async def _runtime_attach_terminal(request: web.Request) -> web.Response:
-    auth = _authorize_mutation(request)
+    auth = _authorize_runtime_access(request, capability="attach")
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])
@@ -892,7 +906,7 @@ async def _runtime_attach_terminal(request: web.Request) -> web.Response:
 
 
 async def _runtime_attach_browser(request: web.Request) -> web.Response:
-    auth = _authorize_mutation(request)
+    auth = _authorize_runtime_access(request, capability="attach")
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])

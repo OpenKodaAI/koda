@@ -30,7 +30,8 @@ describe("runtime-api", () => {
           bot_id: "ATLAS",
           health_url: "http://runtime.local/health",
           runtime_base_url: "http://runtime.local",
-          runtime_token: "runtime-token",
+          runtime_token: null,
+          runtime_request_token: "runtime-request-token",
           access_scope_token: "scope-token",
           runtime_token_present: true,
         });
@@ -110,7 +111,8 @@ describe("runtime-api", () => {
           bot_id: "ATLAS",
           health_url: "http://runtime.local/health",
           runtime_base_url: "http://runtime.local",
-          runtime_token: "runtime-token",
+          runtime_token: null,
+          runtime_request_token: "runtime-request-token",
           access_scope_token: "scope-token",
           runtime_token_present: true,
         });
@@ -134,7 +136,7 @@ describe("runtime-api", () => {
 
       if (url === "http://runtime.local/api/runtime/tasks/7?include_sensitive=true") {
         const headers = new Headers(init?.headers);
-        expect(headers.get("X-Runtime-Token")).toBe("runtime-token");
+        expect(headers.get("X-Runtime-Token")).toBe("runtime-request-token");
         expect(headers.get("X-Runtime-Access-Scope")).toBe("scope-token");
         return jsonResponse({ task: { id: 7, status: "running" } });
       }
@@ -154,5 +156,12 @@ describe("runtime-api", () => {
 
     expect(result.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes(
+          "/api/control-plane/agents/ATLAS/runtime-access?capability=read&include_sensitive=true",
+        ),
+      ),
+    ).toBe(true);
   });
 });

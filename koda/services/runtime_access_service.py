@@ -25,6 +25,7 @@ class RuntimeAccessEnvelope:
     """Signed access scope for sensitive runtime reads."""
 
     agent_scope: str
+    capabilities: tuple[str, ...] = ("read",)
     workspace_scope: tuple[str, ...] = ()
     source_scope: tuple[str, ...] = ()
     sensitive_allowed: bool = False
@@ -34,6 +35,7 @@ class RuntimeAccessEnvelope:
     def to_dict(self) -> dict[str, Any]:
         return {
             "agent_scope": self.agent_scope,
+            "capabilities": list(self.capabilities),
             "workspace_scope": list(self.workspace_scope),
             "source_scope": list(self.source_scope),
             "sensitive_allowed": self.sensitive_allowed,
@@ -52,14 +54,19 @@ class RuntimeAccessService:
         self,
         *,
         agent_scope: str,
+        capabilities: tuple[str, ...] = ("read",),
         workspace_scope: tuple[str, ...] = (),
         source_scope: tuple[str, ...] = (),
         sensitive_allowed: bool = False,
         ttl_seconds: int = 900,
     ) -> tuple[RuntimeAccessEnvelope, str]:
         now = datetime.now(tz=UTC)
+        normalized_capabilities = tuple(
+            sorted({str(item).strip().lower() for item in capabilities if str(item).strip()})
+        ) or ("read",)
         envelope = RuntimeAccessEnvelope(
             agent_scope=str(agent_scope or "").strip().upper(),
+            capabilities=normalized_capabilities,
             workspace_scope=tuple(str(item).strip() for item in workspace_scope if str(item).strip()),
             source_scope=tuple(str(item).strip() for item in source_scope if str(item).strip()),
             sensitive_allowed=bool(sensitive_allowed),
@@ -77,6 +84,7 @@ class RuntimeAccessService:
         *,
         agent_scope: str,
         sensitive_required: bool = False,
+        capability: str | None = None,
     ) -> RuntimeAccessEnvelope | None:
         if not token:
             return None
@@ -97,6 +105,12 @@ class RuntimeAccessService:
             return None
         envelope = RuntimeAccessEnvelope(
             agent_scope=str(raw.get("agent_scope") or "").strip().upper(),
+            capabilities=tuple(
+                str(item).strip().lower()
+                for item in (raw.get("capabilities") or ["read"])
+                if str(item).strip()
+            )
+            or ("read",),
             workspace_scope=tuple(str(item).strip() for item in raw.get("workspace_scope") or [] if str(item).strip()),
             source_scope=tuple(str(item).strip() for item in raw.get("source_scope") or [] if str(item).strip()),
             sensitive_allowed=bool(raw.get("sensitive_allowed") or False),
@@ -104,6 +118,9 @@ class RuntimeAccessService:
             expires_at=str(raw.get("expires_at") or ""),
         )
         if envelope.agent_scope and str(agent_scope or "").strip().upper() not in {"", envelope.agent_scope}:
+            return None
+        normalized_capability = str(capability or "").strip().lower()
+        if normalized_capability and normalized_capability not in envelope.capabilities:
             return None
         if sensitive_required and not envelope.sensitive_allowed:
             return None

@@ -41,6 +41,13 @@ interface RuntimeJsonResponse<T> {
   error?: string;
 }
 
+type RuntimeAccessCapability = "read" | "mutate" | "attach";
+
+type RuntimeAccessOptions = {
+  capability?: RuntimeAccessCapability;
+  includeSensitive?: boolean;
+};
+
 export interface RuntimeBotConfig {
   id: string;
   label: string;
@@ -48,7 +55,7 @@ export interface RuntimeBotConfig {
   colorRgb: string;
   healthUrl: string;
   runtimeBaseUrl: string;
-  runtimeToken: string | null;
+  runtimeRequestToken: string | null;
   accessScopeToken: string | null;
   status?: string;
 }
@@ -96,7 +103,7 @@ function buildBotConfigFromControlPlane(bot: ControlPlaneBot): RuntimeBotConfig 
     runtimeBaseUrl:
       String(runtimeEndpoint.runtime_base_url || "").trim() ||
       deriveRuntimeBaseUrl(healthUrl),
-    runtimeToken: null,
+    runtimeRequestToken: null,
     accessScopeToken: null,
     status: bot.status,
   };
@@ -114,17 +121,19 @@ function applyRuntimeAccess(
     ...bot,
     healthUrl: runtimeAccess.health_url || bot.healthUrl,
     runtimeBaseUrl: runtimeAccess.runtime_base_url || bot.runtimeBaseUrl,
-    runtimeToken: runtimeAccess.runtime_token || bot.runtimeToken,
+    runtimeRequestToken:
+      runtimeAccess.runtime_request_token || bot.runtimeRequestToken,
     accessScopeToken: runtimeAccess.access_scope_token || bot.accessScopeToken,
   };
 }
 
 export async function getRuntimeBotConfig(
   botId: string,
+  options: RuntimeAccessOptions = {},
 ): Promise<RuntimeBotConfig | null> {
   const [botFromControlPlane, runtimeAccess] = await Promise.all([
     getControlPlaneBot(botId).catch(() => null),
-    getServerControlPlaneRuntimeAccess(botId).catch(() => null),
+    getServerControlPlaneRuntimeAccess(botId, options).catch(() => null),
   ]);
 
   const baseBot = botFromControlPlane
@@ -139,8 +148,9 @@ export async function getRuntimeBotConfig(
 
 export async function requireRuntimeBotConfig(
   botId: string,
+  options: RuntimeAccessOptions = {},
 ): Promise<RuntimeBotConfig> {
-  const bot = await getRuntimeBotConfig(botId);
+  const bot = await getRuntimeBotConfig(botId, options);
   if (!bot) {
     throw new RuntimeRequestError("Bot not found", 404);
   }
@@ -178,8 +188,8 @@ async function runtimeFetchForBot(
 ) {
   const headers = new Headers(init.headers);
 
-  if (bot.runtimeToken) {
-    headers.set("X-Runtime-Token", bot.runtimeToken);
+  if (bot.runtimeRequestToken) {
+    headers.set("X-Runtime-Token", bot.runtimeRequestToken);
   }
 
   if (
@@ -203,8 +213,14 @@ export async function runtimeFetch(
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
+  access: RuntimeAccessOptions = {},
 ) {
-  const bot = await requireRuntimeBotConfig(botId);
+  const bot = await requireRuntimeBotConfig(botId, {
+    capability: access.capability ?? "read",
+    includeSensitive:
+      access.includeSensitive ??
+      searchParams?.get("include_sensitive")?.trim().toLowerCase() === "true",
+  });
   return runtimeFetchForBot(bot, pathname, init, searchParams);
 }
 
@@ -252,8 +268,14 @@ export async function runtimeFetchJson<T>(
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
+  access: RuntimeAccessOptions = {},
 ): Promise<RuntimeJsonResponse<T>> {
-  const bot = await requireRuntimeBotConfig(botId);
+  const bot = await requireRuntimeBotConfig(botId, {
+    capability: access.capability ?? "read",
+    includeSensitive:
+      access.includeSensitive ??
+      searchParams?.get("include_sensitive")?.trim().toLowerCase() === "true",
+  });
   return runtimeFetchJsonForBot(bot, pathname, init, searchParams);
 }
 
@@ -349,7 +371,7 @@ export async function getRuntimeOverview(
     health,
     queues,
     environments,
-    hasRuntimeToken: Boolean(bot.runtimeToken),
+    hasRuntimeToken: Boolean(bot.runtimeRequestToken),
   });
 
   const activeTaskIds = Array.from(
@@ -617,7 +639,7 @@ export async function getRuntimeTaskBundle(
       database: "unknown",
       runtime: "available",
       browser: browser.ok ? "available" : "partial",
-      attach: bot.runtimeToken ? "available" : "unavailable",
+      attach: bot.runtimeRequestToken ? "available" : "unavailable",
       errors,
     },
     task: detail.data.task,

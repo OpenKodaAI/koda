@@ -70,6 +70,7 @@ from koda.services.llm_runner import (
 )
 from koda.services.prompt_budget import PromptBudgetPlanner, PromptSegment
 from koda.services.provider_runtime import TurnMode, infer_turn_mode
+from koda.services.response_markup import build_response_markup
 from koda.state.history_store import (
     create_task,
     delete_provider_session_mapping,
@@ -3180,25 +3181,6 @@ async def _run_agent_loop(
 # ---------------------------------------------------------------------------
 
 
-def _build_response_markup(task_id: int | None) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton("📌 Bookmark", callback_data="bookmark:save")]]
-    if task_id is not None:
-        rows.append(
-            [
-                InlineKeyboardButton("✅ Aprovado", callback_data=f"feedback:approved:{task_id}"),
-                InlineKeyboardButton("🛠 Corrigir", callback_data=f"feedback:corrected:{task_id}"),
-            ]
-        )
-        rows.append(
-            [
-                InlineKeyboardButton("❌ Falhou", callback_data=f"feedback:failed:{task_id}"),
-                InlineKeyboardButton("⚠️ Risco", callback_data=f"feedback:risky:{task_id}"),
-            ]
-        )
-        rows.append([InlineKeyboardButton("📈 Promover", callback_data=f"feedback:promote:{task_id}")])
-    return InlineKeyboardMarkup(rows)
-
-
 def _build_operational_footer(ctx: QueryContext | None, run_result: RunResult) -> str:
     if ctx is None:
         return ""
@@ -3332,7 +3314,7 @@ async def _send_response(
         include_tool_summary=include_tool_summary,
     )
 
-    response_markup = _build_response_markup(task_id)
+    response_markup = build_response_markup(task_id)
 
     # --- TTS voice response branch ---
     audio_sent = False

@@ -126,7 +126,21 @@ def _patch_knowledge_modules(
 
 def _request(*, task_id: int | None = None, headers: dict[str, str] | None = None, query: dict[str, str] | None = None):
     match_info = {"task_id": str(task_id)} if task_id is not None else {}
-    return SimpleNamespace(match_info=match_info, headers=headers or {}, query=query or {})
+    normalized_headers = dict(headers or {})
+    runtime_token = str(normalized_headers.get("X-Runtime-Token") or "").strip()
+    if runtime_token:
+        capabilities = tuple(
+            str(item).strip()
+            for item in normalized_headers.pop("X-Runtime-Capabilities", "read,mutate,attach").split(",")
+            if str(item).strip()
+        )
+        _, signed_runtime_token = RuntimeAccessService(runtime_token).issue(
+            agent_scope="",
+            capabilities=capabilities,
+            sensitive_allowed=True,
+        )
+        normalized_headers["X-Runtime-Token"] = signed_runtime_token
+    return SimpleNamespace(match_info=match_info, headers=normalized_headers, query=query or {})
 
 
 def _patch_agent_asset_registry(registry: object):
@@ -253,7 +267,7 @@ async def test_runtime_task_browser_exposes_preview_url(tmp_path):
 @pytest.mark.asyncio
 async def test_runtime_readiness_includes_knowledge_v2_health(tmp_path):
     controller = _ControllerStub(runtime_root=tmp_path / "runtime")
-    request = _request(headers={})
+    request = _request(headers={"X-Runtime-Token": "secret"})
     supervisor = SimpleNamespace(
         health=AsyncMock(
             return_value={
@@ -279,6 +293,7 @@ async def test_runtime_readiness_includes_knowledge_v2_health(tmp_path):
 
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
         _patch_knowledge_modules(supervisor=supervisor),
         patch(
             "koda.services.health.get_runtime_startup_state",
@@ -302,10 +317,11 @@ async def test_runtime_readiness_includes_knowledge_v2_health(tmp_path):
 @pytest.mark.asyncio
 async def test_runtime_readiness_is_not_ready_while_startup_is_bootstrapping(tmp_path):
     controller = _ControllerStub(runtime_root=tmp_path / "runtime")
-    request = _request(headers={})
+    request = _request(headers={"X-Runtime-Token": "secret"})
 
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
         patch(
             "koda.services.health.get_runtime_startup_state",
             return_value={"phase": "bootstrapping", "details": {}, "expected_background_loops": []},
@@ -356,10 +372,11 @@ async def test_runtime_readiness_surfaces_kernel_reason(tmp_path):
             }
         },
     )()
-    request = _request(headers={})
+    request = _request(headers={"X-Runtime-Token": "secret"})
 
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
         patch(
             "koda.services.health.get_runtime_startup_state",
             return_value={"phase": "ready", "details": {}, "expected_background_loops": []},
@@ -418,10 +435,11 @@ async def test_runtime_readiness_inherits_kernel_health_from_snapshot(tmp_path):
             },
         },
     )()
-    request = _request(headers={})
+    request = _request(headers={"X-Runtime-Token": "secret"})
 
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
         patch(
             "koda.services.health.get_runtime_startup_state",
             return_value={"phase": "ready", "details": {}, "expected_background_loops": []},
@@ -619,6 +637,24 @@ async def test_runtime_task_detail_requires_token(tmp_path):
         response = await _runtime_task_detail(request)
 
     assert response.status == 403
+
+
+@pytest.mark.asyncio
+async def test_runtime_readiness_rejects_raw_secret_header(tmp_path):
+    request = SimpleNamespace(match_info={}, headers={"X-Runtime-Token": "secret"}, query={})
+
+    with (
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch(
+            "koda.services.runtime.api.get_runtime_controller",
+            return_value=_ControllerStub(runtime_root=tmp_path / "runtime"),
+        ),
+    ):
+        response = await _runtime_readiness(request)
+
+    assert response.status == 403
+    payload = json.loads(response.text)
+    assert payload["error"] == "invalid runtime token"
 
 
 @pytest.mark.asyncio

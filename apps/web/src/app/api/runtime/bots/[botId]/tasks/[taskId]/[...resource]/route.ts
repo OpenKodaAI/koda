@@ -63,8 +63,11 @@ async function proxyJson(
   pathname: string,
   init: RequestInit = {},
   searchParams?: URLSearchParams,
+  capability: "read" | "mutate" | "attach" = "read",
 ) {
-  const response = await runtimeFetch(botId, pathname, init, searchParams);
+  const response = await runtimeFetch(botId, pathname, init, searchParams, {
+    capability,
+  });
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json")
     ? await response.json().catch(() => ({ error: "Invalid JSON response" }))
@@ -77,8 +80,11 @@ async function proxyBinary(
   pathname: string,
   init: RequestInit = {},
   searchParams?: URLSearchParams,
+  capability: "read" | "mutate" | "attach" = "read",
 ) {
-  const response = await runtimeFetch(botId, pathname, init, searchParams);
+  const response = await runtimeFetch(botId, pathname, init, searchParams, {
+    capability,
+  });
   const body = await response.arrayBuffer();
   const headers = new Headers();
   const contentType = response.headers.get("content-type");
@@ -203,6 +209,7 @@ export async function GET(
         `/api/runtime/tasks/${numericTaskId}/browser/screenshot`,
         { method: "GET" },
         cloneSearchParams(request),
+        "read",
       );
     }
 
@@ -211,6 +218,7 @@ export async function GET(
       `/api/runtime/tasks/${numericTaskId}/${resourcePath}`,
       { method: "GET" },
       cloneSearchParams(request),
+      "read",
     );
   } catch (error) {
     if (error instanceof RuntimeRequestError) {
@@ -257,6 +265,7 @@ export async function POST(
         `/api/runtime/tasks/${numericTaskId}/attach/terminal`,
         { method: "POST", timeoutMs: ATTACH_TERMINAL_TIMEOUT_MS },
         searchParams,
+        { capability: "attach" },
       );
 
       if (!response.ok || !response.data) {
@@ -275,6 +284,7 @@ export async function POST(
         `/api/runtime/tasks/${numericTaskId}/attach/browser`,
         { method: "POST", timeoutMs: ATTACH_BROWSER_TIMEOUT_MS },
         searchParams,
+        { capability: "attach" },
       );
 
       if (!response.ok || !response.data) {
@@ -305,6 +315,7 @@ export async function POST(
           : {}),
       },
       searchParams,
+      { capability: "mutate" },
     );
 
     return NextResponse.json(

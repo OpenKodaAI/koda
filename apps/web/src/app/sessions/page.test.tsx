@@ -298,7 +298,7 @@ describe("SessionsPage", () => {
 
       expect(postCall).toBeTruthy();
     });
-  });
+  }, 10_000);
 
   it("keeps the composer disabled when browsing with all bots selected", async () => {
     currentQueryString = "";

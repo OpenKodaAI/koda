@@ -713,7 +713,17 @@ async def delete_secret(request: web.Request) -> web.Response:
 
 
 async def get_runtime_access(request: web.Request) -> web.Response:
-    return web.json_response(_manager().get_runtime_access(request.match_info["agent_id"]))
+    capability = str(request.query.get("capability") or "read").strip().lower() or "read"
+    if capability not in {"read", "mutate", "attach"}:
+        raise ValueError("invalid capability")
+    include_sensitive = _query_bool(request, "include_sensitive") or False
+    return web.json_response(
+        _manager().get_runtime_access(
+            request.match_info["agent_id"],
+            capability=capability,
+            include_sensitive=include_sensitive,
+        )
+    )
 
 
 async def get_core_providers(request: web.Request) -> web.Response:
