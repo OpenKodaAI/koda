@@ -24,13 +24,13 @@ function ShellViewportFrame({
   pathname,
   isSessionsRoute,
   isControlPlaneCatalogRoute,
-  isControlPlaneBotRoute,
+  isControlPlaneAgentRoute,
 }: {
   children: React.ReactNode;
   pathname: string;
   isSessionsRoute: boolean;
   isControlPlaneCatalogRoute: boolean;
-  isControlPlaneBotRoute: boolean;
+  isControlPlaneAgentRoute: boolean;
 }) {
   const isGeneralSettingsRoute = pathname.startsWith("/control-plane/system");
   const sessionsTopOffset = isSessionsRoute ? "0px" : "var(--shell-topbar-height)";
@@ -44,7 +44,7 @@ function ShellViewportFrame({
           "!px-0 !pb-0 !pt-[var(--shell-topbar-height)] overflow-x-clip lg:h-screen lg:overflow-hidden lg:!pl-[var(--shell-sidebar-width)]",
         isControlPlaneCatalogRoute &&
           "!px-0 !pb-0 !pt-[var(--shell-topbar-height)] overflow-x-clip lg:h-screen lg:overflow-hidden lg:!pl-[var(--shell-sidebar-width)]",
-        isControlPlaneBotRoute &&
+        isControlPlaneAgentRoute &&
           "!px-0 !pb-0 !pt-[var(--shell-topbar-height)] overflow-x-clip lg:h-screen lg:overflow-hidden lg:!pl-[var(--shell-sidebar-width)]",
         isSessionsRoute &&
           "!px-0 !pb-0 !pt-0 overflow-hidden lg:!pl-[var(--shell-sidebar-width)]"
@@ -59,7 +59,7 @@ function ShellViewportFrame({
                 ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full"
             : isGeneralSettingsRoute
                 ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full lg:[&>.route-stage]:overflow-hidden"
-              : isControlPlaneBotRoute
+              : isControlPlaneAgentRoute
                   ? "w-full min-h-[calc(100vh-var(--shell-topbar-height))] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full"
               : "mx-auto min-h-[calc(100vh-var(--shell-topbar-height)-2rem)] max-w-[1720px]"
           )}
@@ -75,7 +75,8 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const isSessionsRoute = pathname.startsWith("/sessions");
   const isControlPlaneCatalogRoute = pathname === "/control-plane";
-  const isControlPlaneBotRoute = pathname.startsWith("/control-plane/bots/");
+  const isControlPlaneAgentRoute =
+    pathname.startsWith("/control-plane/agents/") || pathname.startsWith("/control-plane/bots/");
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage(
     "ui:sidebar-collapsed",
@@ -127,7 +128,7 @@ export function AppShell({ children }: AppShellProps) {
             pathname={pathname}
             isSessionsRoute={isSessionsRoute}
             isControlPlaneCatalogRoute={isControlPlaneCatalogRoute}
-            isControlPlaneBotRoute={isControlPlaneBotRoute}
+            isControlPlaneAgentRoute={isControlPlaneAgentRoute}
           >
             {children}
           </ShellViewportFrame>

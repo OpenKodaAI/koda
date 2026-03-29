@@ -50,7 +50,7 @@ Persistent volumes are managed by Docker Compose and are intended to survive con
 When the installer finishes, open the bootstrap URL it prints:
 
 - `http://127.0.0.1:3000`
-- `http://127.0.0.1:8090/setup?token=<CONTROL_PLANE_API_TOKEN>`
+- `http://127.0.0.1:8090/setup`
 
 ![Koda control plane interface](../assets/screenshots/setup.png)
 
@@ -70,6 +70,8 @@ Use the control plane UI to complete product configuration:
 3. connect and verify a provider
 4. create or publish the first agent
 5. continue ongoing configuration in the control plane
+
+When the dashboard asks for the operator session, paste the control-plane token once and let the browser store it as an HTTP-only session cookie. The token is never placed in the URL or local storage.
 
 The quickstart path does not require per-agent env configuration, provider credentials in `.env`, or manual Telegram runtime wiring before first boot.
 

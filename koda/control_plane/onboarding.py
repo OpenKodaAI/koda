@@ -22,9 +22,7 @@ def load_control_plane_openapi_spec() -> dict[str, Any]:
 
 def render_setup_page(request: web.Request) -> str:
     """Render a lightweight setup UI backed by the existing control-plane API."""
-    token_hint = request.query.get("token", "").strip()
-    escaped_hint = json.dumps(token_hint)
-    return f"""<!doctype html>
+    return """<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -306,7 +304,7 @@ def render_setup_page(request: web.Request) -> str:
 
     <script>
       const state = {{
-        token: {escaped_hint} || "",
+        token: "",
         providers: [],
       }};
 
@@ -318,21 +316,11 @@ def render_setup_page(request: web.Request) -> str:
       const statusEl = document.getElementById("service-status");
 
       function getToken() {{
-        const queryToken = new URLSearchParams(window.location.search).get("token");
-        return queryToken || tokenInput.value.trim() || window.localStorage.getItem("kodaSetupToken") || "";
-      }}
-
-      function persistToken() {{
-        const value = getToken();
-        state.token = value;
-        if (value) {{
-          window.localStorage.setItem("kodaSetupToken", value);
-          tokenInput.value = value;
-        }}
+        return tokenInput.value.trim();
       }}
 
       function authHeaders() {{
-        persistToken();
+        state.token = getToken();
         const headers = {{"Content-Type": "application/json"}};
         if (state.token) {{
           headers["Authorization"] = `Bearer ${{state.token}}`;
@@ -396,7 +384,7 @@ def render_setup_page(request: web.Request) -> str:
       }}
 
       async function refreshStatus() {{
-        persistToken();
+        state.token = getToken();
         resultEl.textContent = "Loading status...";
         try {{
           const response = await fetch("/api/control-plane/onboarding/status", {{
@@ -413,7 +401,7 @@ def render_setup_page(request: web.Request) -> str:
       }}
 
       async function applySetup() {{
-        persistToken();
+        state.token = getToken();
         resultEl.textContent = "Applying setup...";
         const payload = {{
           account: {{
@@ -452,8 +440,7 @@ def render_setup_page(request: web.Request) -> str:
         }}
       }}
 
-      tokenInput.value = getToken();
-      tokenInput.addEventListener("change", persistToken);
+      tokenInput.value = "";
       providerSelect.addEventListener("change", updateProviderHelp);
       authModeSelect.addEventListener("change", updateProviderHelp);
       document.getElementById("refresh-status").addEventListener("click", refreshStatus);

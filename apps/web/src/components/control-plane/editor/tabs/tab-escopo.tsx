@@ -46,6 +46,18 @@ type AccessOption = {
   status: string;
 };
 
+type SecretSummaryLike = {
+  scope: string;
+  secret_key: string;
+  preview: string;
+  grantable_to_agents?: boolean;
+  grantable_to_bots?: boolean;
+};
+
+function isGrantableSecret(secret: SecretSummaryLike) {
+  return (secret.grantable_to_agents ?? secret.grantable_to_bots) !== false;
+}
+
 function ResourceListCard({
   title,
   description,
@@ -188,8 +200,8 @@ export function TabEscopo() {
     description: item.value || tl("Sem valor configurado"),
     status: tl("Disponível globalmente"),
   }));
-  const grantableGlobalSecrets = systemSettings.global_secrets.filter(
-    (item) => item.grantable_to_bots !== false,
+  const grantableGlobalSecrets = (systemSettings.global_secrets as SecretSummaryLike[]).filter(
+    isGrantableSecret,
   );
   const grantedSharedKeys = resourcePolicy.allowed_shared_env_keys;
   const grantedSecretKeys = resourcePolicy.allowed_global_secret_keys;
@@ -203,17 +215,19 @@ export function TabEscopo() {
     ...grantedSecretKeys
       .filter((key) => !grantableGlobalSecrets.some((item) => item.secret_key === key))
       .map((key) => {
-        const protectedSecret = systemSettings.global_secrets.find((item) => item.secret_key === key);
+        const protectedSecret = (systemSettings.global_secrets as SecretSummaryLike[]).find(
+          (item) => item.secret_key === key,
+        );
         return {
           value: key,
           title: key,
           description:
             protectedSecret?.preview ||
-            (protectedSecret && protectedSecret.grantable_to_bots === false
+            (protectedSecret && isGrantableSecret(protectedSecret) === false
               ? tl("Protegido no sistema")
               : tl("Não encontrado no vault atual")),
           status:
-            protectedSecret && protectedSecret.grantable_to_bots === false
+            protectedSecret && isGrantableSecret(protectedSecret) === false
               ? tl("Somente sistema")
               : tl("Indisponível"),
         };

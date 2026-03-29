@@ -119,6 +119,20 @@ function toExecutionSummary(botId: string, row: RuntimeRoomRow, task: RuntimeTas
           ? task.status
           : null,
     error_message: legacyTask.error_message,
+    feedback_status: null,
+    retrieval_trace_id: null,
+    retrieval_strategy: null,
+    grounding_score: null,
+    citation_coverage: null,
+    answer_citation_coverage: null,
+    answer_gate_status: null,
+    answer_gate_reasons: [],
+    post_write_review_required: false,
+    stale_sources_present: false,
+    ungrounded_operationally: false,
+    source_ref_count: 0,
+    winning_source_count: 0,
+    provenance_source: "missing",
   };
 }
 
@@ -428,6 +442,20 @@ export async function getOperationalExecutionDetail(
     reasoning_summary: warnings,
     artifacts: mapRuntimeArtifacts(bundle),
     redactions: null,
+    feedback_status: null,
+    retrieval_trace_id: null,
+    retrieval_strategy: null,
+    grounding_score: null,
+    citation_coverage: null,
+    answer_citation_coverage: null,
+    answer_gate_status: null,
+    answer_gate_reasons: [],
+    post_write_review_required: false,
+    stale_sources_present: false,
+    ungrounded_operationally: false,
+    source_ref_count: 0,
+    winning_source_count: 0,
+    provenance_source: "missing",
   } satisfies ExecutionDetail;
 }
 
@@ -499,6 +527,14 @@ export async function getOperationalSessionDetail(botId: string, sessionId: stri
     .filter((execution) => (execution.session_id || `runtime-task-${execution.task_id}`) === sessionId)
     .sort((left, right) => toTimestamp(left.created_at) - toTimestamp(right.created_at));
 
+  return buildOperationalSessionDetail(botId, sessionId, executions);
+}
+
+export function buildOperationalSessionDetail(
+  botId: string,
+  sessionId: string,
+  executions: ExecutionSummary[],
+) {
   if (executions.length === 0) {
     throw new Error("Session not found");
   }
@@ -524,6 +560,9 @@ export async function getOperationalSessionDetail(botId: string, sessionId: stri
   };
 
   const messages: SessionMessage[] = executions.flatMap((execution) => {
+    if (!execution.query_text) {
+      return [];
+    }
     const userMessage: SessionMessage = {
       id: `${execution.task_id}-user`,
       role: "user",
@@ -536,27 +575,13 @@ export async function getOperationalSessionDetail(botId: string, sessionId: stri
       error: false,
       linked_execution: execution,
     };
-    const assistantMessage: SessionMessage = {
-      id: `${execution.task_id}-assistant`,
-      role: "assistant",
-      text:
-        execution.error_message ||
-        `Execution ${execution.status} in runtime room #${execution.task_id}.`,
-      timestamp: execution.completed_at || execution.started_at || execution.created_at,
-      model: execution.model,
-      cost_usd: execution.cost_usd,
-      query_id: execution.task_id,
-      session_id: sessionId,
-      error: execution.status === "failed",
-      linked_execution: execution,
-    };
-    return execution.query_text ? [userMessage, assistantMessage] : [assistantMessage];
+    return [userMessage];
   });
 
   return {
     summary,
     messages,
-    orphan_executions: [],
+    orphan_executions: executions.filter((execution) => !execution.query_text),
     totals: {
       messages: messages.length,
       executions: executions.length,

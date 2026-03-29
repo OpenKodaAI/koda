@@ -58,7 +58,10 @@ def _bounded_int(raw_value: str | None, *, name: str, default: int, minimum: int
 def _authorize_request(request: web.Request) -> web.Response | None:
     token = CONTROL_PLANE_API_TOKEN.strip()
     if not token:
-        return None
+        return web.json_response(
+            {"error": "control plane token is not configured"},
+            status=500,
+        )
     auth_header = request.headers.get("Authorization", "").strip()
     if not auth_header.startswith("Bearer "):
         return web.json_response({"error": "missing control plane token"}, status=401)

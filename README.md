@@ -65,7 +65,7 @@ cd /opt/koda
 When the installer completes, use the two URLs it prints:
 
 - Dashboard: `http://127.0.0.1:3000`
-- Bootstrap: `http://127.0.0.1:8090/setup?token=<CONTROL_PLANE_API_TOKEN>`
+- Bootstrap: `http://127.0.0.1:8090/setup`
 
 From there you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
 

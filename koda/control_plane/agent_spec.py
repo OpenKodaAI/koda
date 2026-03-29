@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import string
 from typing import Any
 
@@ -47,6 +48,7 @@ _DOCUMENT_KINDS: tuple[str, ...] = (
     "image_prompt_md",
     "memory_extraction_prompt_md",
 )
+_RESERVED_PROMPT_TAG_RE = re.compile(r"</?agent(?:_[a-z0-9_]+)+\s*>", re.IGNORECASE)
 _BOOLEAN_MEMORY_POLICY_FIELDS = frozenset(
     {
         "enabled",
@@ -129,8 +131,15 @@ def _trimmed(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _escape_reserved_prompt_tags(value: Any) -> str:
+    text = _trimmed(value)
+    if not text:
+        return ""
+    return _RESERVED_PROMPT_TAG_RE.sub(lambda match: match.group(0).replace("<", "&lt;").replace(">", "&gt;"), text)
+
+
 def _normalize_markdown_block(value: Any) -> str:
-    return _trimmed(value)
+    return _escape_reserved_prompt_tags(value)
 
 
 def _as_bool(value: Any, default: bool | None = None) -> bool | None:
@@ -242,7 +251,7 @@ def _render_section(title: str, mapping: dict[str, Any], *, order: tuple[str, ..
             lines.extend(f"- {item}" for item in _as_list(raw))
             continue
         lines.extend(["", f"## {label}", _trimmed(raw)])
-    return "\n".join(lines).strip()
+    return _escape_reserved_prompt_tags("\n".join(lines).strip())
 
 
 def render_markdown_documents_from_agent_spec(agent_spec: dict[str, Any]) -> dict[str, str]:
@@ -368,9 +377,11 @@ def iter_agent_prompt_blocks(documents: dict[str, Any]) -> list[tuple[str, str, 
     """Return prompt-ready agent contract blocks using the runtime order and tags."""
     blocks: list[tuple[str, str, str]] = []
     for kind, tag in _AGENT_DOCUMENT_LAYOUT:
-        content = _trimmed(_safe_json_object(documents).get(kind) if isinstance(documents, dict) else "")
+        content = _escape_reserved_prompt_tags(
+            _safe_json_object(documents).get(kind) if isinstance(documents, dict) else ""
+        )
         if not content and isinstance(documents, dict):
-            content = _trimmed(documents.get(kind))
+            content = _escape_reserved_prompt_tags(documents.get(kind))
         if not content:
             continue
         blocks.append((kind, tag, content))

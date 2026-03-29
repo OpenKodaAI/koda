@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_env_example_is_bootstrap_only() -> None:
     env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    web_env_text = (ROOT / "apps" / "web" / ".env.example").read_text(encoding="utf-8")
 
     assert "CONTROL_PLANE_API_TOKEN=" in env_text
     assert "RUNTIME_LOCAL_UI_TOKEN=" in env_text
@@ -19,6 +20,8 @@ def test_env_example_is_bootstrap_only() -> None:
     assert "infrastructure/bootstrap concerns" in env_text
     assert "AGENT_TOKEN=" not in env_text
     assert "ALLOWED_USER_IDS=" not in env_text
+    assert "CONTROL_PLANE_MASTER_KEY=" not in env_text
+    assert "CONTROL_PLANE_API_TOKEN=" not in web_env_text
 
 
 def test_docker_compose_quickstart_stack_includes_core_services() -> None:
@@ -30,6 +33,8 @@ def test_docker_compose_quickstart_stack_includes_core_services() -> None:
     assert 'CONTROL_PLANE_BASE_URL: "http://app:8090"' in compose_text
     assert "${WEB_PORT:-3000}:3000" in compose_text
     assert "http://seaweedfs:8333" in compose_text
+    assert 'CONTROL_PLANE_API_TOKEN: "${CONTROL_PLANE_API_TOKEN:-}"' not in compose_text
+    assert "env_file: .env" not in compose_text.split("web:")[1].split("postgres:")[0]
 
 
 def test_install_script_bootstraps_compose_and_doctor() -> None:
@@ -39,7 +44,8 @@ def test_install_script_bootstraps_compose_and_doctor() -> None:
     assert "python3 scripts/doctor.py" in script_text
     assert "--dashboard-url" in script_text
     assert "Dashboard URL:" in script_text
-    assert "/setup?token=" in script_text
+    assert "/setup?token=" not in script_text
+    assert "http://${host}:${port:-8090}/setup" in script_text
 
 
 def test_public_docs_cover_quickstart_and_vps() -> None:
@@ -72,9 +78,13 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "control-plane-first" in readme_text
     assert "apps/web" in readme_text
     assert "127.0.0.1:3000" in readme_text
+    assert "/setup" in readme_text
+    assert "?token=" not in readme_text
     assert "seaweedfs" in readme_text.lower()
     assert "Use Koda" in docs_index_text
     assert "apps/web/" in docs_index_text
+    assert "/setup" in local_text
+    assert "?token=" not in local_text
     assert "Product configuration stays inside the control-plane UI and API." in vps_text
     assert "The quickstart path does not require per-agent env configuration" in local_text
 
@@ -99,6 +109,8 @@ def test_doctor_checks_dashboard_and_control_plane() -> None:
     assert "web_dashboard" in doctor_text
     assert "WEB_PORT" in doctor_text
     assert "dashboard_url" in doctor_text
+    assert "/setup?token=" not in doctor_text
+    assert "CONTROL_PLANE_MASTER_KEY" not in doctor_text
 
 
 def test_steady_state_assets_do_not_reference_legacy_object_storage_branding() -> None:

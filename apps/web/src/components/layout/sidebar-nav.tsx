@@ -146,7 +146,11 @@ export function isSidebarItemActive(pathname: string, item: SidebarNavItem) {
   }
 
   if (item.href === "/control-plane") {
-    return pathname === "/control-plane" || pathname.startsWith("/control-plane/bots/");
+    return (
+      pathname === "/control-plane" ||
+      pathname.startsWith("/control-plane/agents/") ||
+      pathname.startsWith("/control-plane/bots/")
+    );
   }
 
   return pathname.startsWith(item.href);

@@ -77,7 +77,7 @@ The dynamic control plane is the versioned source of truth for agent definitions
 - `launcher.py` now starts the control-plane supervisor instead of a hardcoded agent list.
 - Workers still run through [`../../koda/__main__.py`](../../koda/__main__.py), but their effective runtime configuration is injected from the published control-plane snapshot before the normal runtime imports occur.
 - `CONTROL_PLANE_RUNTIME_DIR`, `CONTROL_PLANE_BIND`, `CONTROL_PLANE_PORT`, `CONTROL_PLANE_POLL_INTERVAL_SECONDS`, `CONTROL_PLANE_RESTART_GRACE_SECONDS`, and `CONTROL_PLANE_STARTUP_GRACE_SECONDS` configure the supervisor and its snapshot/bootstrap behavior.
-- `CONTROL_PLANE_API_TOKEN` optionally protects `/api/control-plane/*` with bearer-token auth for self-hosted dashboard or automation access.
+- `CONTROL_PLANE_API_TOKEN` is required to access `/api/control-plane/*`; the dashboard exchanges it for an HTTP-only browser session through `/api/control-plane/web-auth`.
 - Secrets stay encrypted at rest and are masked in list-style API responses. If a raw secret is needed for server-to-server runtime access, resolve it through the applied control-plane snapshot rather than rediscovering it from `.env`.
 - Agent identity and instruction layers are first-class control-plane documents: `identity_md`, `soul_md`, `system_prompt_md`, `instructions_md`, `rules_md`, `voice_prompt_md`, `image_prompt_md`, and `memory_extraction_prompt_md`.
 - The operational runtime contract is the compiled prompt generated from those documents and exposed through `/api/control-plane/agents/{agent_id}/compiled-prompt`. Repository prompt files are not part of the live source of truth for agent behavior.

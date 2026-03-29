@@ -1,5 +1,9 @@
 """Dynamic system prompt generation for agent tools available to the runtime."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from koda.agent_contract import normalize_string_list, resolve_allowed_tool_ids
 from koda.config import (
     AGENT_ALLOWED_TOOLS,
@@ -15,24 +19,141 @@ from koda.config import (
 from koda.services.cache_config import CACHE_ENABLED, SCRIPT_LIBRARY_ENABLED
 
 
-def build_agent_tools_prompt(postgres_env: str | None = None) -> str:
+def _tool_id_from_bullet_line(line: str) -> str | None:
+    stripped = line.lstrip()
+    if not stripped.startswith("- `"):
+        return None
+    end = stripped.find("`", 3)
+    if end == -1:
+        return None
+    return stripped[3:end].strip() or None
+
+
+def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> str:
+    if not prompt.strip():
+        return prompt
+
+    blocked_tool_ids = {
+        tool_id
+        for tool_id in {
+            "job_list",
+            "job_get",
+            "job_create",
+            "job_validate",
+            "job_activate",
+            "job_pause",
+            "job_resume",
+            "job_delete",
+            "job_run_now",
+            "job_runs",
+            "cron_list",
+            "cron_add",
+            "cron_delete",
+            "cron_toggle",
+            "web_search",
+            "fetch_url",
+            "http_request",
+            "agent_set_workdir",
+            "agent_get_status",
+            "browser_navigate",
+            "browser_click",
+            "browser_type",
+            "browser_submit",
+            "browser_screenshot",
+            "browser_get_text",
+            "browser_get_elements",
+            "browser_select",
+            "browser_scroll",
+            "browser_wait",
+            "browser_back",
+            "browser_forward",
+            "browser_hover",
+            "browser_press_key",
+            "browser_cookies",
+            "db_query",
+            "db_schema",
+            "db_explain",
+            "db_switch_env",
+            "script_list",
+            "script_get",
+            "script_save",
+            "script_delete",
+            "script_run",
+            "script_test",
+            "script_validate",
+            "cache_list",
+            "cache_get",
+            "cache_set",
+            "cache_delete",
+            "cache_clear",
+            "cache_stats",
+            "cache_invalidate",
+            "cache_keys",
+            "cache_ttl",
+        }
+        if tool_id not in allowed_tool_ids
+    }
+
+    lines = prompt.splitlines()
+    filtered: list[str] = []
+    skip_tool_block = False
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+
+        if skip_tool_block:
+            if line.startswith("#") or line.startswith("- `"):
+                skip_tool_block = False
+            else:
+                index += 1
+                continue
+
+        tool_id = _tool_id_from_bullet_line(line)
+        if tool_id and tool_id not in allowed_tool_ids:
+            skip_tool_block = True
+            index += 1
+            continue
+
+        if any(blocked_tool_id in line for blocked_tool_id in blocked_tool_ids):
+            index += 1
+            continue
+
+        filtered.append(line)
+        index += 1
+
+    return "\n".join(filtered).strip()
+
+
+def _configured_tool_policy(tool_policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    if tool_policy is not None:
+        return dict(tool_policy)
+    if AGENT_TOOL_POLICY:
+        return dict(AGENT_TOOL_POLICY)
+    if AGENT_ALLOWED_TOOLS:
+        return {"allowed_tool_ids": sorted(AGENT_ALLOWED_TOOLS)}
+    return {}
+
+
+def build_agent_tools_prompt(
+    postgres_env: str | None = None,
+    *,
+    tool_policy: dict[str, Any] | None = None,
+    feature_flags: dict[str, bool] | None = None,
+) -> str:
     """Generate the <agent_tools> section of the system prompt based on feature flags."""
     sections: list[str] = []
-    feature_flags = {
+    resolved_feature_flags = {
         "browser": BROWSER_FEATURES_ENABLED,
         "postgres": POSTGRES_ENABLED,
         "jira": JIRA_ENABLED,
         "confluence": CONFLUENCE_ENABLED,
         "gws": GWS_ENABLED,
+        **dict(feature_flags or {}),
     }
-    if AGENT_TOOL_POLICY:
-        tool_policy = AGENT_TOOL_POLICY
-    elif AGENT_ALLOWED_TOOLS:
-        tool_policy = {"allowed_tool_ids": sorted(AGENT_ALLOWED_TOOLS)}
-    else:
-        tool_policy = {}
+    tool_policy = _configured_tool_policy(tool_policy)
     has_explicit_tool_subset = bool(normalize_string_list(tool_policy.get("allowed_tool_ids")))
-    allowed_tool_ids = resolve_allowed_tool_ids(tool_policy, feature_flags=feature_flags)
+    allowed_tool_ids = resolve_allowed_tool_ids(tool_policy, feature_flags=resolved_feature_flags)
     if has_explicit_tool_subset and allowed_tool_ids:
         allowed_tool_ids = sorted(allowed_tool_ids)
 
@@ -76,7 +197,12 @@ Use this exact structure before any write operation:
 The runtime can block low-confidence writes if the plan or sources are missing.
 """)
 
-    if has_explicit_tool_subset and allowed_tool_ids:
+    if has_explicit_tool_subset:
+        tool_ids_line = (
+            ", ".join(f"`{tool_id}`" for tool_id in allowed_tool_ids)
+            if allowed_tool_ids
+            else "No core tools are enabled for this agent."
+        )
         sections.append(
             "\n".join(
                 [
@@ -84,7 +210,7 @@ The runtime can block low-confidence writes if the plan or sources are missing.
                     "## Enabled Tool Subset",
                     "Only the following core tools are enabled for this agent.",
                     "Do not emit any other <agent_cmd> tool ids because the runtime will reject them.",
-                    ", ".join(f"`{tool_id}`" for tool_id in allowed_tool_ids),
+                    tool_ids_line,
                     "",
                 ]
             )
@@ -330,4 +456,7 @@ Reusable code snippets saved by the user. Before generating code from scratch, c
 4. Wait for <tool_result> before composing your final response to the user.
 </agent_tools>""")
 
-    return "\n".join(sections)
+    prompt = "\n".join(sections)
+    if has_explicit_tool_subset:
+        prompt = _filter_prompt_to_allowed_tools(prompt, set(allowed_tool_ids))
+    return prompt

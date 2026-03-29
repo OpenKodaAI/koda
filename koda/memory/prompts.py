@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 _DEFAULT_EXTRACTION_PROMPT = """\
@@ -64,12 +65,44 @@ Return ONLY a JSON array:
 ]"""
 
 
-def _load_extraction_prompt() -> str:
+def _schema_extraction_prompt_from_agent_spec() -> str:
+    raw_spec = os.environ.get("AGENT_SPEC_JSON", "").strip()
+    if not raw_spec:
+        return ""
+    try:
+        payload = json.loads(raw_spec)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    memory_schema = payload.get("memory_extraction_schema")
+    if isinstance(memory_schema, dict):
+        inline_prompt = str(memory_schema.get("template") or memory_schema.get("content_md") or "").strip()
+        if inline_prompt:
+            return inline_prompt
+
+    documents = payload.get("documents")
+    if isinstance(documents, dict):
+        inline_prompt = str(documents.get("memory_extraction_prompt_md") or "").strip()
+        if inline_prompt:
+            return inline_prompt
+
+    return ""
+
+
+def get_extraction_prompt() -> str:
+    """Return the active memory extraction prompt, preferring runtime agent config."""
     inline_prompt = os.environ.get("MEMORY_EXTRACTION_PROMPT_TEXT", "").strip()
-    return inline_prompt or _DEFAULT_EXTRACTION_PROMPT
+    if inline_prompt:
+        return inline_prompt
+    schema_prompt = _schema_extraction_prompt_from_agent_spec()
+    if schema_prompt:
+        return schema_prompt
+    return _DEFAULT_EXTRACTION_PROMPT
 
 
-EXTRACTION_PROMPT = _load_extraction_prompt()
+EXTRACTION_PROMPT = get_extraction_prompt()
 
 RECALL_HEADER = "## Memória de Longo Prazo\nInformações relevantes de conversas anteriores:\n"
 

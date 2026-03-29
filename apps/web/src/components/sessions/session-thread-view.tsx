@@ -49,6 +49,9 @@ type ThreadRenderable =
     };
 
 function SessionExecutionMeta({ execution }: { execution: ExecutionSummary }) {
+  const feedbackStatus = execution.feedback_status?.trim() || null;
+  const retrievalStrategy = execution.retrieval_strategy?.trim() || null;
+  const answerGateStatus = execution.answer_gate_status?.trim() || null;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
       <span className="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5">
@@ -58,6 +61,14 @@ function SessionExecutionMeta({ execution }: { execution: ExecutionSummary }) {
       {execution.duration_ms != null ? <span>{formatDuration(execution.duration_ms)}</span> : null}
       {execution.tool_count > 0 ? <span>{execution.tool_count} tools</span> : null}
       <span>{formatCost(execution.cost_usd)}</span>
+      {feedbackStatus ? (
+        <span className="rounded-full border border-[rgba(130,255,186,0.18)] bg-[rgba(130,255,186,0.08)] px-2 py-0.5 text-[var(--text-secondary)]">
+          {`feedback: ${feedbackStatus}`}
+        </span>
+      ) : null}
+      {retrievalStrategy ? <span>{`provenance: ${retrievalStrategy}`}</span> : null}
+      {answerGateStatus ? <span>{`gate: ${answerGateStatus}`}</span> : null}
+      {execution.post_write_review_required ? <span>post-review required</span> : null}
     </div>
   );
 }

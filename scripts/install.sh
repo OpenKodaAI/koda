@@ -68,7 +68,6 @@ import string
 
 control_plane_token = secrets.token_urlsafe(32)
 runtime_token = secrets.token_urlsafe(32)
-master_key = secrets.token_urlsafe(48)
 postgres_password = secrets.token_urlsafe(24)
 s3_access_key = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(20))
 s3_secret = secrets.token_urlsafe(24)
@@ -82,7 +81,6 @@ print(
             "WEB_PORT=3000",
             f"CONTROL_PLANE_API_TOKEN={control_plane_token}",
             f"RUNTIME_LOCAL_UI_TOKEN={runtime_token}",
-            f"CONTROL_PLANE_MASTER_KEY={master_key}",
             "STATE_BACKEND=postgres",
             "OBJECT_STORAGE_REQUIRED=true",
             "STATE_ROOT_DIR=/var/lib/koda/state",
@@ -109,10 +107,9 @@ PY
 }
 
 show_next_steps() {
-  local port web_port token host
+  local port web_port host
   port="$(grep -E '^CONTROL_PLANE_PORT=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2-)"
   web_port="$(grep -E '^WEB_PORT=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2-)"
-  token="$(grep -E '^CONTROL_PLANE_API_TOKEN=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2-)"
   host="$(hostname -I 2>/dev/null | awk '{print $1}')"
   host="${host:-127.0.0.1}"
   echo
@@ -121,11 +118,11 @@ show_next_steps() {
   echo "  http://${host}:${web_port:-3000}"
   echo
   echo "Bootstrap URL:"
-  echo "  http://${host}:${port:-8090}/setup?token=${token}"
+  echo "  http://${host}:${port:-8090}/setup"
   echo
   echo "If you are on the same machine, localhost also works:"
   echo "  Dashboard: http://127.0.0.1:${web_port:-3000}"
-  echo "  Bootstrap: http://127.0.0.1:${port:-8090}/setup?token=${token}"
+  echo "  Bootstrap: http://127.0.0.1:${port:-8090}/setup"
   echo
   echo "No provider or agent env vars are required for bootstrap; configure them in the web UI."
 }

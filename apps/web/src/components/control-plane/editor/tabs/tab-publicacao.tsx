@@ -345,8 +345,10 @@ export function TabPublicacao() {
       (validationPayload.runtime_prompt_preview as ControlPlanePromptPreview | undefined) ??
       (validationPayload.prompt_preview as ControlPlanePromptPreview | undefined)) ||
     null;
-  const botContractPromptPreview =
+  const agentContractPromptPreview =
+    compiledPromptPayload?.agent_contract_prompt_preview ??
     compiledPromptPayload?.bot_contract_prompt_preview ??
+    (validationPayload.agent_contract_prompt_preview as ControlPlanePromptPreview | undefined) ??
     (validationPayload.bot_contract_prompt_preview as ControlPlanePromptPreview | undefined) ??
     null;
   const runtimeBudget =
@@ -780,11 +782,11 @@ export function TabPublicacao() {
           </SectionCollapsible>
         )}
 
-        {botContractPromptPreview && (
-          <SectionCollapsible title={tl("Preview do contrato local do bot")}>
+        {agentContractPromptPreview && (
+          <SectionCollapsible title={tl("Preview do contrato local do agente")}>
             <textarea
               readOnly
-              value={prettyJson(botContractPromptPreview)}
+              value={prettyJson(agentContractPromptPreview)}
               className="field-shell w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)] resize-y opacity-80 cursor-default"
               style={{ minHeight: "220px" }}
               spellCheck={false}

@@ -108,6 +108,20 @@ export interface ExecutionSummary {
   warning_count: number;
   stop_reason: string | null;
   error_message: string | null;
+  feedback_status?: string | null;
+  retrieval_trace_id?: number | null;
+  retrieval_strategy?: string | null;
+  grounding_score?: number | null;
+  citation_coverage?: number | null;
+  answer_citation_coverage?: number | null;
+  answer_gate_status?: string | null;
+  answer_gate_reasons?: string[];
+  post_write_review_required?: boolean;
+  stale_sources_present?: boolean;
+  ungrounded_operationally?: boolean;
+  source_ref_count?: number;
+  winning_source_count?: number;
+  provenance_source?: "trace" | "episode" | "legacy" | "missing";
 }
 
 export interface ExecutionDetail {
@@ -141,6 +155,20 @@ export interface ExecutionDetail {
   reasoning_summary: string[];
   artifacts: ExecutionArtifact[];
   redactions: ExecutionRedactionSummary | null;
+  feedback_status?: string | null;
+  retrieval_trace_id?: number | null;
+  retrieval_strategy?: string | null;
+  grounding_score?: number | null;
+  citation_coverage?: number | null;
+  answer_citation_coverage?: number | null;
+  answer_gate_status?: string | null;
+  answer_gate_reasons?: string[];
+  post_write_review_required?: boolean;
+  stale_sources_present?: boolean;
+  ungrounded_operationally?: boolean;
+  source_ref_count?: number;
+  winning_source_count?: number;
+  provenance_source?: "trace" | "episode" | "legacy" | "missing";
 }
 
 export interface CronJob {

@@ -235,8 +235,10 @@ def _fetch_latest_episodes(agent_ids: list[str], task_ids: list[int]) -> dict[in
     rows = _fetch_all(
         f"""
         SELECT DISTINCT ON (task_id)
-               task_id, tool_trace_json, feedback_status, retrieval_strategy, answer_gate_status,
-               answer_gate_reasons_json, created_at
+               task_id, tool_trace_json, source_refs_json, winning_sources_json, feedback_status,
+               retrieval_trace_id, retrieval_strategy, grounding_score, citation_coverage,
+               answer_citation_coverage, answer_gate_status, answer_gate_reasons_json,
+               stale_sources_present, ungrounded_operationally, post_write_review_required, created_at
           FROM execution_episodes
          WHERE agent_id IN ({_placeholders(len(resolved_agent_ids))})
            AND task_id IN ({_placeholders(len(task_ids))})
@@ -256,6 +258,9 @@ def _serialize_execution_summary(
     runtime = _trace_runtime(trace)
     tools = _trace_tools(trace) or _safe_list((episode or {}).get("tool_trace_json"))
     warnings = [str(item) for item in _safe_list(runtime.get("warnings"))]
+    source_refs = _safe_list((episode or {}).get("source_refs_json"))
+    winning_sources = [str(item) for item in _safe_list((episode or {}).get("winning_sources_json"))]
+    answer_gate_reasons = [str(item) for item in _safe_list((episode or {}).get("answer_gate_reasons_json"))]
     return {
         "task_id": int(row["id"]),
         "agent_id": str(row.get("agent_id") or ""),
@@ -282,6 +287,20 @@ def _serialize_execution_summary(
         "warning_count": len(warnings),
         "stop_reason": str(runtime.get("stop_reason") or "") or None,
         "error_message": str(row.get("error_message") or "") or None,
+        "feedback_status": str((episode or {}).get("feedback_status") or "pending"),
+        "retrieval_trace_id": (episode or {}).get("retrieval_trace_id"),
+        "retrieval_strategy": str((episode or {}).get("retrieval_strategy") or "") or None,
+        "grounding_score": float((episode or {}).get("grounding_score") or 0.0),
+        "citation_coverage": float((episode or {}).get("citation_coverage") or 0.0),
+        "answer_citation_coverage": float((episode or {}).get("answer_citation_coverage") or 0.0),
+        "answer_gate_status": str((episode or {}).get("answer_gate_status") or "") or None,
+        "answer_gate_reasons": answer_gate_reasons,
+        "post_write_review_required": bool((episode or {}).get("post_write_review_required")),
+        "stale_sources_present": bool((episode or {}).get("stale_sources_present")),
+        "ungrounded_operationally": bool((episode or {}).get("ungrounded_operationally")),
+        "source_ref_count": len(source_refs),
+        "winning_source_count": len(winning_sources),
+        "provenance_source": "episode" if episode else ("trace" if trace else "missing"),
     }
 
 

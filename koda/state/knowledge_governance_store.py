@@ -1822,6 +1822,58 @@ def get_execution_reliability_stats(
     }
 
 
+def get_correction_event(
+    *,
+    agent_id: str | None,
+    task_id: int,
+    feedback_type: str,
+    user_id: int,
+    episode_id: int,
+) -> dict[str, Any] | None:
+    scope = _primary_agent_id(agent_id)
+    query = (
+        "SELECT id, agent_id, task_id, episode_id, task_kind, feedback_type, note, user_id, project_key, "
+        "environment, created_at FROM correction_events "
+        "WHERE agent_id = ? AND task_id = ? AND episode_id = ? AND feedback_type = ? AND user_id = ? "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    params = (scope if _primary_enabled(agent_id) else agent_id, task_id, episode_id, feedback_type, user_id)
+    if _primary_enabled(agent_id):
+        row = run_coro_sync(primary_fetch_one(query, params, agent_id=scope))
+        if not row:
+            return None
+        return {
+            "id": int(row["id"]),
+            "agent_id": row.get("agent_id"),
+            "task_id": row.get("task_id"),
+            "episode_id": row.get("episode_id"),
+            "task_kind": row.get("task_kind") or "",
+            "feedback_type": row.get("feedback_type") or "",
+            "note": row.get("note") or "",
+            "user_id": row.get("user_id"),
+            "project_key": row.get("project_key") or "",
+            "environment": row.get("environment") or "",
+            "created_at": row.get("created_at"),
+        }
+    with _compat_backend_removed_conn() as conn:
+        row = conn.execute(query.replace("agent_id = ?", "agent_id IS ?"), params).fetchone()
+    if not row:
+        return None
+    return {
+        "id": int(row[0]),
+        "agent_id": row[1],
+        "task_id": row[2],
+        "episode_id": row[3],
+        "task_kind": row[4] or "",
+        "feedback_type": row[5] or "",
+        "note": row[6] or "",
+        "user_id": row[7],
+        "project_key": row[8] or "",
+        "environment": row[9] or "",
+        "created_at": row[10],
+    }
+
+
 def record_correction_event(
     *,
     agent_id: str | None,
@@ -1833,6 +1885,15 @@ def record_correction_event(
     episode = get_latest_execution_episode(task_id)
     if episode is None:
         return None
+    existing = get_correction_event(
+        agent_id=agent_id,
+        task_id=task_id,
+        feedback_type=feedback_type,
+        user_id=user_id,
+        episode_id=int(episode["id"]),
+    )
+    if existing is not None:
+        return int(existing["id"])
     now = _now_iso()
     scope = _primary_agent_id(agent_id)
     if _primary_enabled(agent_id):
@@ -1902,6 +1963,40 @@ def _default_runbook_key(candidate: dict[str, Any]) -> str:
     return ":".join(part for part in parts if part)
 
 
+def _normalize_runbook_field_list(value: Any) -> list[str]:
+    loaded = _json_loads(value, [])
+    if not isinstance(loaded, list):
+        return []
+    return [str(item).strip() for item in loaded if str(item).strip()]
+
+
+def _validate_minimum_runbook_payload(candidate: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    proposed = candidate.get("proposed_runbook") or {}
+    proposed_runbook = proposed if isinstance(proposed, dict) else {}
+    fallback_title = str(candidate.get("summary") or candidate.get("task_kind") or "").strip()
+    normalized = {
+        "title": str(proposed_runbook.get("title") or fallback_title).strip(),
+        "summary": str(proposed_runbook.get("summary") or candidate.get("summary") or "").strip(),
+        "prerequisites": _normalize_runbook_field_list(proposed_runbook.get("prerequisites")),
+        "steps": _normalize_runbook_field_list(proposed_runbook.get("steps")),
+        "verification": _normalize_runbook_field_list(proposed_runbook.get("verification")),
+        "rollback": str(proposed_runbook.get("rollback") or "").strip(),
+        "source_refs": _json_loads(candidate.get("source_refs"), []),
+    }
+    missing: list[str] = []
+    if not normalized["summary"]:
+        missing.append("summary")
+    if not normalized["steps"]:
+        missing.append("steps")
+    if not normalized["verification"]:
+        missing.append("verification")
+    if not normalized["rollback"]:
+        missing.append("rollback")
+    if not normalized["source_refs"]:
+        missing.append("source_refs")
+    return normalized, missing
+
+
 def approve_knowledge_candidate(candidate_id: int, *, reviewer: str) -> int | None:
     candidate = get_knowledge_candidate(candidate_id)
     if not candidate or candidate["review_status"] not in {"pending", "learning"}:
@@ -1927,6 +2022,15 @@ def approve_knowledge_candidate(candidate_id: int, *, reviewer: str) -> int | No
             review_note="promoted_to_guardrail",
         )
         return guardrail_id
+
+    normalized_runbook, missing_fields = _validate_minimum_runbook_payload(candidate)
+    if missing_fields:
+        set_knowledge_candidate_status(
+            candidate_id,
+            review_status=str(candidate["review_status"]),
+            review_note=f"promote_blocked_missing_fields:{','.join(missing_fields)}",
+        )
+        return None
 
     runbook_key = _default_runbook_key(candidate)
     existing_versions = [
@@ -1963,13 +2067,13 @@ def approve_knowledge_candidate(candidate_id: int, *, reviewer: str) -> int | No
         agent_id=candidate["agent_id"],
         runbook_key=runbook_key,
         version=next_version,
-        title=str(proposed.get("title") or candidate["summary"]),
+        title=str(normalized_runbook["title"] or candidate["summary"]),
         task_kind=str(candidate["task_kind"]),
-        summary=str(proposed.get("summary") or candidate["summary"]),
-        prerequisites=[str(item) for item in proposed.get("prerequisites", [])],
-        steps=[str(item) for item in proposed.get("steps", [])],
-        verification=[str(item) for item in proposed.get("verification", [])],
-        rollback=str(proposed.get("rollback") or ""),
+        summary=str(normalized_runbook["summary"] or candidate["summary"]),
+        prerequisites=list(normalized_runbook["prerequisites"]),
+        steps=list(normalized_runbook["steps"]),
+        verification=list(normalized_runbook["verification"]),
+        rollback=str(normalized_runbook["rollback"]),
         source_refs=list(candidate["source_refs"]),
         project_key=str(candidate["project_key"]),
         environment=str(candidate["environment"]),

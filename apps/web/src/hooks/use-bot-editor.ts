@@ -288,7 +288,10 @@ function normalizeCompiledPromptPayload(
     sections_present: bot.validation?.sections_present,
     document_lengths: bot.validation?.document_lengths,
     prompt_preview: bot.validation?.prompt_preview,
-    bot_contract_prompt_preview: bot.validation?.bot_contract_prompt_preview,
+    agent_contract_prompt_preview:
+      bot.validation?.agent_contract_prompt_preview ?? bot.validation?.bot_contract_prompt_preview,
+    bot_contract_prompt_preview:
+      bot.validation?.agent_contract_prompt_preview ?? bot.validation?.bot_contract_prompt_preview,
     runtime_prompt_preview: bot.validation?.runtime_prompt_preview,
   };
 }

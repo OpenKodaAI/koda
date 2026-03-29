@@ -44,6 +44,9 @@ function SessionExecutionInline({
   execution: ExecutionSummary;
 }) {
   const { t } = useAppI18n();
+  const feedbackStatus = execution.feedback_status?.trim() || null;
+  const retrievalStrategy = execution.retrieval_strategy?.trim() || null;
+  const answerGateStatus = execution.answer_gate_status?.trim() || null;
   const label =
     execution.status === "running"
       ? t("sessions.detail.runningExecution")
@@ -82,6 +85,30 @@ function SessionExecutionInline({
         ) : null}
         <span>•</span>
         <span>{formatCost(execution.cost_usd)}</span>
+        {feedbackStatus ? (
+          <>
+            <span>•</span>
+            <span>{`feedback: ${feedbackStatus}`}</span>
+          </>
+        ) : null}
+        {retrievalStrategy ? (
+          <>
+            <span>•</span>
+            <span>{`provenance: ${retrievalStrategy}`}</span>
+          </>
+        ) : null}
+        {answerGateStatus ? (
+          <>
+            <span>•</span>
+            <span>{`gate: ${answerGateStatus}`}</span>
+          </>
+        ) : null}
+        {execution.post_write_review_required ? (
+          <>
+            <span>•</span>
+            <span>post-review required</span>
+          </>
+        ) : null}
       </div>
     </div>
   );

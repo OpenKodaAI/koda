@@ -12,7 +12,7 @@ from .settings import CONTROL_PLANE_MASTER_KEY, CONTROL_PLANE_MASTER_KEY_FILE
 
 def _load_master_key() -> bytes:
     if CONTROL_PLANE_MASTER_KEY.strip():
-        return CONTROL_PLANE_MASTER_KEY.strip().encode("utf-8")
+        raise RuntimeError("CONTROL_PLANE_MASTER_KEY is deprecated; use CONTROL_PLANE_MASTER_KEY_FILE instead")
     if CONTROL_PLANE_MASTER_KEY_FILE.exists():
         try:
             current_mode = CONTROL_PLANE_MASTER_KEY_FILE.stat().st_mode & 0o777

@@ -1,8 +1,6 @@
 import "server-only";
 
-import { unstable_cache } from "next/cache";
 import { ControlPlaneRequestError, getControlPlaneBots } from "@/lib/control-plane";
-import { CONTROL_PLANE_CACHE_TAGS } from "@/lib/control-plane-cache";
 
 let didWarnBotCatalogUnavailable = false;
 
@@ -15,8 +13,8 @@ function isControlPlaneFetchFailure(error: unknown) {
   );
 }
 
-const readCachedBotDisplays = unstable_cache(
-  async () => {
+export async function getCachedBotDisplays() {
+  try {
     const bots = await getControlPlaneBots();
     return bots.map((bot) => ({
       id: bot.id,
@@ -24,17 +22,6 @@ const readCachedBotDisplays = unstable_cache(
       color: String(bot.appearance?.color || "#A7ADB4"),
       colorRgb: String(bot.appearance?.color_rgb || "167, 173, 180"),
     }));
-  },
-  ["dashboard-bot-displays"],
-  {
-    revalidate: 15,
-    tags: [CONTROL_PLANE_CACHE_TAGS.botCatalog],
-  },
-);
-
-export async function getCachedBotDisplays() {
-  try {
-    return await readCachedBotDisplays();
   } catch (error) {
     if (!isControlPlaneFetchFailure(error)) {
       throw error;

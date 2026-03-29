@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from koda.logging_config import get_logger
 from koda.memory.config import MEMORY_EXTRACTION_MODEL, MEMORY_EXTRACTION_PROVIDER, MEMORY_MAX_EXTRACTION_ITEMS
 from koda.memory.profile import MemoryProfile
-from koda.memory.prompts import EXTRACTION_PROMPT
+from koda.memory.prompts import get_extraction_prompt
 from koda.memory.types import Memory, MemoryStatus, MemoryType, build_conflict_key
 from koda.services.llm_runner import get_provider_fallback_chain, resolve_provider_model, run_llm
 
@@ -171,7 +171,7 @@ async def extract(
         MEMORY_MAX_EXTRACTION_ITEMS,
         profile.max_items_per_turn if profile else MEMORY_MAX_EXTRACTION_ITEMS,
     )
-    prompt = EXTRACTION_PROMPT.format(
+    prompt = get_extraction_prompt().format(
         query=query[:8000],
         response=response[:16000],
         max_items=max_items,

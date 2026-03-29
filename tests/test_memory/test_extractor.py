@@ -1,5 +1,6 @@
 """Tests for memory/extractor.py."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -119,6 +120,31 @@ async def test_extract_calls_runner():
         memories = await extract("what is the API?", "It uses REST.", user_id=111)
         assert len(memories) == 1
         assert memories[0].content == "test extracted"
+
+
+@pytest.mark.asyncio
+async def test_extract_uses_agent_spec_memory_schema(monkeypatch):
+    mock_result = {
+        "result": '[{"type": "fact", "content": "schema extracted", "importance": 0.6}]',
+        "error": False,
+    }
+    monkeypatch.delenv("MEMORY_EXTRACTION_PROMPT_TEXT", raising=False)
+    monkeypatch.setenv(
+        "AGENT_SPEC_JSON",
+        json.dumps(
+            {
+                "memory_extraction_schema": {
+                    "template": "Schema prompt {query} :: {response} :: {max_items}",
+                }
+            }
+        ),
+    )
+
+    with patch("koda.memory.extractor.run_llm", new_callable=AsyncMock, return_value=mock_result) as mocked_run_llm:
+        memories = await extract("what is the API?", "It uses REST.", user_id=111)
+
+    assert len(memories) == 1
+    assert mocked_run_llm.await_args.kwargs["query"].startswith("Schema prompt what is the API?")
 
 
 @pytest.mark.asyncio

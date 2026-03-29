@@ -73,10 +73,6 @@ def run_doctor(
     web_port = str(env.get("WEB_PORT", "3000")).strip() or "3000"
     api_token = str(env.get("CONTROL_PLANE_API_TOKEN", "")).strip()
     runtime_token = str(env.get("RUNTIME_LOCAL_UI_TOKEN", "")).strip()
-    master_key = (
-        str(env.get("CONTROL_PLANE_MASTER_KEY", "")).strip()
-        or str(env.get("CONTROL_PLANE_MASTER_KEY_FILE", "")).strip()
-    )
     postgres_dsn = str(env.get("KNOWLEDGE_V2_POSTGRES_DSN", "")).strip()
     object_storage_endpoint = str(env.get("KNOWLEDGE_V2_S3_ENDPOINT_URL", "")).strip()
     object_storage_bucket = str(env.get("KNOWLEDGE_V2_S3_BUCKET", "")).strip()
@@ -93,7 +89,6 @@ def run_doctor(
         {"name": "web_port", "ok": bool(web_port), "value": web_port},
         {"name": "control_plane_api_token", "ok": bool(api_token)},
         {"name": "runtime_local_ui_token", "ok": bool(runtime_token)},
-        {"name": "control_plane_master_key", "ok": bool(master_key)},
         {"name": "object_storage_endpoint", "ok": bool(object_storage_endpoint), "value": object_storage_endpoint},
         {"name": "object_storage_bucket", "ok": bool(object_storage_bucket), "value": object_storage_bucket},
         {"name": "object_storage_access_key", "ok": bool(object_storage_access_key)},
@@ -149,9 +144,7 @@ def run_doctor(
         "checks": checks,
         "base_url": base_url,
         "dashboard_url": dashboard_url,
-        "setup_url": f"{base_url.rstrip('/')}/setup?token={api_token}"
-        if api_token
-        else f"{base_url.rstrip('/')}/setup",
+        "setup_url": f"{base_url.rstrip('/')}/setup",
     }
 
 

@@ -63,3 +63,64 @@ def test_legacy_agent_discovery_uses_env_only(monkeypatch):
 
     monkeypatch.delenv("AGENT_ID", raising=False)
     assert manager._discover_legacy_agent_ids({}) == []
+
+
+def test_runtime_prompt_preview_respects_agent_tool_policy():
+    import koda.control_plane.manager as manager_mod
+
+    payload = manager_mod._build_runtime_prompt_preview_payload(
+        agent_id="ATLAS",
+        agent_spec={
+            "tool_policy": {
+                "allowed_tool_ids": ["web_search", "fetch_url"],
+            },
+            "memory_policy": {},
+            "knowledge_policy": {},
+            "model_policy": {},
+        },
+        compiled_prompt="<agent_configuration_contract>\ncontract\n</agent_configuration_contract>",
+    )
+
+    compiled_prompt = str(payload.get("compiled_prompt") or "")
+    assert "`web_search`" in compiled_prompt
+    assert "`fetch_url`" in compiled_prompt
+    assert "cron_list" not in compiled_prompt
+    assert "browser_navigate" not in compiled_prompt
+
+
+def test_runtime_access_ignores_legacy_runtime_token_secret():
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._require_agent_row = lambda agent_id: (  # type: ignore[attr-defined]
+        "ATLAS",
+        {
+            "id": "ATLAS",
+            "applied_version": 0,
+            "desired_version": 0,
+            "workspace_id": "",
+        },
+    )
+    manager.build_draft_snapshot = lambda agent_id: {  # type: ignore[attr-defined]
+        "agent": {"runtime_endpoint": {}},
+        "secrets": {
+            "RUNTIME_TOKEN": {
+                "encrypted_value": "legacy-token",
+            }
+        },
+        "sections": {},
+    }
+
+    original_decrypt = manager_mod.decrypt_secret
+    original_fetch_one = manager_mod.fetch_one
+    try:
+        manager_mod.decrypt_secret = lambda value: f"decrypted:{value}"  # type: ignore[assignment]
+        manager_mod.fetch_one = lambda *_args, **_kwargs: None  # type: ignore[assignment]
+        payload = manager.get_runtime_access("atlas")
+    finally:
+        manager_mod.decrypt_secret = original_decrypt  # type: ignore[assignment]
+        manager_mod.fetch_one = original_fetch_one  # type: ignore[assignment]
+
+    assert payload["runtime_token"] is None
+    assert payload["runtime_token_present"] is False
+    assert payload["access_scope_token"] is None

@@ -159,7 +159,7 @@ function makeCompiledPromptPayload(
         overflow_tokens: 0,
       },
     },
-    bot_contract_prompt_preview: {
+    agent_contract_prompt_preview: {
       preview_scope: "bot_contract_only",
       segment_order: ["identity_md", "system_prompt_md"],
     },

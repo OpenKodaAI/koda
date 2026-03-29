@@ -52,13 +52,15 @@ export function getControlPlaneMutationInvalidation(pathSegments: string[]) {
   const paths = new Set<string>(["/control-plane"]);
 
   const [root, maybeBotId, ...rest] = pathSegments;
+  const isAgentRoot = root === "agents" || root === "bots";
 
-  if (root === "bots") {
+  if (isAgentRoot) {
     tags.add(CONTROL_PLANE_CACHE_TAGS.catalog);
     tags.add(CONTROL_PLANE_CACHE_TAGS.botCatalog);
 
     if (maybeBotId && !["clone"].includes(maybeBotId)) {
       tags.add(CONTROL_PLANE_CACHE_TAGS.bot(maybeBotId));
+      paths.add(`/control-plane/agents/${maybeBotId}`);
       paths.add(`/control-plane/bots/${maybeBotId}`);
     }
 

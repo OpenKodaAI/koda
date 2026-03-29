@@ -11,6 +11,11 @@ describe("getRouteMeta", () => {
       title: "routeMeta.system.title",
       summary: "routeMeta.system.summary",
     });
+    expect(getRouteMeta("/control-plane/agents/abc123", t)).toEqual({
+      eyebrow: "routeMeta.agents.eyebrow",
+      title: "routeMeta.agents.title",
+      summary: "routeMeta.agents.summary",
+    });
     expect(getRouteMeta("/control-plane/bots/abc123", t)).toEqual({
       eyebrow: "routeMeta.agents.eyebrow",
       title: "routeMeta.agents.title",

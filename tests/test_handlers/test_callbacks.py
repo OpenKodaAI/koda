@@ -210,6 +210,7 @@ class TestCallbackFeedback:
                     "plan": {"summary": "Deploy safely"},
                 },
             ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value=None),
             patch("koda.handlers.callbacks.record_correction_event", return_value=9),
             patch("koda.handlers.callbacks.update_execution_reliability_stats") as mock_stats,
             patch("koda.handlers.callbacks.upsert_knowledge_candidate") as mock_candidate,
@@ -253,6 +254,43 @@ class TestCallbackFeedback:
         )
 
     @pytest.mark.asyncio
+    async def test_duplicate_feedback_is_idempotent(self, mock_callback_update, mock_context):
+        mock_callback_update.callback_query.data = "feedback:approved:77"
+        with (
+            patch(
+                "koda.handlers.callbacks.get_latest_execution_episode",
+                return_value={
+                    "id": 12,
+                    "task_kind": "deploy",
+                    "project_key": "workspace",
+                    "environment": "prod",
+                    "team": "agent_a",
+                    "status": "completed",
+                    "verified_before_finalize": True,
+                    "confidence_score": 0.91,
+                    "source_refs": [{"source_label": "agent_a.toml", "layer": "canonical_policy"}],
+                    "plan": {"summary": "Deploy safely", "verification": ["Run smoke tests"]},
+                    "stale_sources_present": False,
+                    "ungrounded_operationally": False,
+                    "answer_gate_status": "approved",
+                    "post_write_review_required": False,
+                },
+            ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value={"id": 33}),
+            patch("koda.handlers.callbacks.record_correction_event") as mock_record,
+            patch("koda.handlers.callbacks.upsert_knowledge_candidate") as mock_candidate,
+            patch("koda.services.metrics.HUMAN_CORRECTION_EVENTS"),
+        ):
+            await callback_feedback(mock_callback_update, mock_context)
+
+        mock_record.assert_not_called()
+        mock_candidate.assert_not_called()
+        mock_callback_update.callback_query.answer.assert_any_call(
+            "Feedback already recorded for this execution.",
+            show_alert=True,
+        )
+
+    @pytest.mark.asyncio
     async def test_promote_feedback_creates_success_candidate_and_marks_useful(
         self,
         mock_callback_update,
@@ -272,10 +310,21 @@ class TestCallbackFeedback:
                     "verified_before_finalize": True,
                     "confidence_score": 0.91,
                     "source_refs": [{"source_label": "agent_a.toml", "layer": "canonical_policy"}],
-                    "plan": {"summary": "Deploy safely", "verification": "Run smoke tests"},
+                    "plan": {
+                        "summary": "Deploy safely",
+                        "verification": ["Run smoke tests"],
+                        "steps": ["Apply deployment manifests", "Verify rollout"],
+                        "rollback": "Rollback deployment if smoke tests fail.",
+                    },
+                    "stale_sources_present": False,
+                    "ungrounded_operationally": False,
+                    "answer_gate_status": "approved",
+                    "post_write_review_required": False,
                 },
             ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value=None),
             patch("koda.handlers.callbacks.record_correction_event", return_value=9),
+            patch("koda.handlers.callbacks.update_execution_reliability_stats") as mock_stats,
             patch("koda.handlers.callbacks.upsert_knowledge_candidate") as mock_candidate,
             patch("koda.handlers.callbacks.record_utility_event") as mock_utility,
             patch("koda.services.metrics.HUMAN_CORRECTION_EVENTS"),
@@ -283,6 +332,7 @@ class TestCallbackFeedback:
             await callback_feedback(mock_callback_update, mock_context)
 
         assert mock_candidate.call_args.kwargs["candidate_type"] == "success_pattern"
+        mock_stats.assert_called_once()
         mock_utility.assert_called_once_with("AGENT_A", "useful")
 
     @pytest.mark.asyncio
@@ -304,6 +354,7 @@ class TestCallbackFeedback:
                     "plan": {"summary": "Deploy safely"},
                 },
             ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value=None),
             patch("koda.handlers.callbacks.record_correction_event", return_value=9),
             patch("koda.handlers.callbacks.update_execution_reliability_stats"),
             patch("koda.handlers.callbacks.upsert_knowledge_candidate"),
@@ -313,3 +364,88 @@ class TestCallbackFeedback:
             await callback_feedback(mock_callback_update, mock_context)
 
         mock_utility.assert_called_once_with("AGENT_A", "misleading")
+
+    @pytest.mark.asyncio
+    async def test_promote_feedback_is_blocked_when_gates_fail(self, mock_callback_update, mock_context):
+        mock_callback_update.callback_query.data = "feedback:promote:77"
+        with (
+            patch(
+                "koda.handlers.callbacks.get_latest_execution_episode",
+                return_value={
+                    "id": 12,
+                    "task_kind": "deploy",
+                    "project_key": "workspace",
+                    "environment": "prod",
+                    "team": "agent_a",
+                    "status": "completed",
+                    "verified_before_finalize": True,
+                    "confidence_score": 0.91,
+                    "source_refs": [],
+                    "plan": {"summary": "Deploy safely", "verification": ["Run smoke tests"]},
+                    "stale_sources_present": True,
+                    "ungrounded_operationally": True,
+                    "answer_gate_status": "needs_review",
+                    "post_write_review_required": True,
+                },
+            ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value=None),
+            patch("koda.handlers.callbacks.record_correction_event", return_value=9),
+            patch("koda.handlers.callbacks.update_execution_reliability_stats") as mock_stats,
+            patch("koda.handlers.callbacks.upsert_knowledge_candidate") as mock_candidate,
+            patch("koda.handlers.callbacks.record_utility_event") as mock_utility,
+            patch("koda.services.metrics.HUMAN_CORRECTION_EVENTS"),
+        ):
+            await callback_feedback(mock_callback_update, mock_context)
+
+        mock_candidate.assert_not_called()
+        mock_stats.assert_called_once()
+        mock_utility.assert_called_once_with("AGENT_A", "noise")
+        mock_callback_update.callback_query.answer.assert_any_call(
+            "Promotion blocked: missing minimum gates for reusable routine creation.",
+            show_alert=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_approved_feedback_reinforces_success_candidate(self, mock_callback_update, mock_context):
+        mock_callback_update.callback_query.data = "feedback:approved:77"
+        with (
+            patch(
+                "koda.handlers.callbacks.get_latest_execution_episode",
+                return_value={
+                    "id": 12,
+                    "task_kind": "deploy",
+                    "project_key": "workspace",
+                    "environment": "prod",
+                    "team": "agent_a",
+                    "status": "completed",
+                    "verified_before_finalize": True,
+                    "confidence_score": 0.91,
+                    "source_refs": [{"source_label": "agent_a.toml", "layer": "canonical_policy"}],
+                    "plan": {
+                        "summary": "Deploy safely",
+                        "verification": ["Run smoke tests"],
+                        "steps": ["Apply deployment manifests", "Verify rollout"],
+                        "rollback": "Rollback deployment if smoke tests fail.",
+                    },
+                    "stale_sources_present": False,
+                    "ungrounded_operationally": False,
+                    "answer_gate_status": "approved",
+                    "post_write_review_required": False,
+                },
+            ),
+            patch("koda.handlers.callbacks.get_correction_event", return_value=None),
+            patch("koda.handlers.callbacks.record_correction_event", return_value=9),
+            patch("koda.handlers.callbacks.update_execution_reliability_stats") as mock_stats,
+            patch("koda.handlers.callbacks.upsert_knowledge_candidate") as mock_candidate,
+            patch("koda.handlers.callbacks.record_utility_event") as mock_utility,
+            patch("koda.services.metrics.HUMAN_CORRECTION_EVENTS"),
+        ):
+            await callback_feedback(mock_callback_update, mock_context)
+
+        assert mock_candidate.call_args.kwargs["candidate_type"] == "success_pattern"
+        mock_stats.assert_called_once()
+        mock_utility.assert_called_once_with("AGENT_A", "useful")
+        mock_callback_update.callback_query.answer.assert_any_call(
+            "Feedback registrado como aprovado. Abri um candidato de rotina positiva para revisão.",
+            show_alert=True,
+        )

@@ -176,6 +176,15 @@ export function SessionContextPanel({
                       <p className="mt-1 truncate text-[12px] text-[var(--text-tertiary)]">
                         {execution.model || "—"} • {formatRelativeTime(execution.completed_at || execution.started_at || execution.created_at)}
                       </p>
+                      {(execution.feedback_status || execution.retrieval_strategy || execution.answer_gate_status) ? (
+                        <p className="mt-1 truncate text-[11px] text-[var(--text-quaternary)]">
+                          {execution.feedback_status ? `feedback: ${execution.feedback_status}` : ""}
+                          {execution.feedback_status && execution.retrieval_strategy ? " • " : ""}
+                          {execution.retrieval_strategy ? `provenance: ${execution.retrieval_strategy}` : ""}
+                          {(execution.feedback_status || execution.retrieval_strategy) && execution.answer_gate_status ? " • " : ""}
+                          {execution.answer_gate_status ? `gate: ${execution.answer_gate_status}` : ""}
+                        </p>
+                      ) : null}
                     </div>
                     <span className="shrink-0 text-[12px] font-semibold text-[var(--text-primary)]">
                       {formatCost(execution.cost_usd)}

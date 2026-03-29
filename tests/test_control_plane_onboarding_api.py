@@ -31,14 +31,24 @@ class _Request:
 
 
 @pytest.mark.asyncio
-async def test_setup_page_renders_token_aware_ui() -> None:
+async def test_setup_page_renders_token_free_ui() -> None:
     response = await control_plane_api.setup_page(_Request(query={"token": "bootstrap-token"}))
 
     assert response.content_type == "text/html"
     assert "Koda setup" in response.text
     assert "Infrastructure stays in" in response.text
     assert "/api/control-plane/onboarding/status" in response.text
-    assert "bootstrap-token" in response.text
+    assert "bootstrap-token" not in response.text
+    assert "localStorage" not in response.text
+
+
+def test_control_plane_authorization_fails_closed_without_token() -> None:
+    with patch.object(control_plane_api, "CONTROL_PLANE_API_TOKEN", ""):
+        response = control_plane_api._authorize_request(_Request())
+
+    assert response is not None
+    assert response.status == 500
+    assert json.loads(response.text) == {"error": "control plane token is not configured"}
 
 
 @pytest.mark.asyncio
@@ -102,7 +112,6 @@ def test_doctor_script_reports_expected_checks() -> None:
                 "CONTROL_PLANE_PORT": "8090",
                 "CONTROL_PLANE_API_TOKEN": "token",
                 "RUNTIME_LOCAL_UI_TOKEN": "runtime",
-                "CONTROL_PLANE_MASTER_KEY": "master",
                 "KNOWLEDGE_V2_POSTGRES_DSN": "postgresql://user:pass@postgres:5432/koda",
                 "KNOWLEDGE_V2_S3_ENDPOINT_URL": "http://seaweedfs:8333",
                 "KNOWLEDGE_V2_S3_BUCKET": "koda-objects",
@@ -113,4 +122,4 @@ def test_doctor_script_reports_expected_checks() -> None:
         )
 
     assert payload["ok"] is True
-    assert payload["setup_url"].endswith("/setup?token=token")
+    assert payload["setup_url"].endswith("/setup")

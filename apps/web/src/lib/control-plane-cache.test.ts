@@ -34,7 +34,20 @@ describe("control-plane cache helpers", () => {
     expect(getControlPlaneFetchConfig("live")).toEqual({ cache: "no-store" });
   });
 
-  it("invalidates bot detail and catalog paths for bot mutations", () => {
+  it("invalidates agent detail and catalog paths for agent mutations", () => {
+    expect(
+      getControlPlaneMutationInvalidation(["agents", "ATLAS", "publish"]),
+    ).toEqual({
+      tags: [
+        CONTROL_PLANE_CACHE_TAGS.catalog,
+        CONTROL_PLANE_CACHE_TAGS.botCatalog,
+        CONTROL_PLANE_CACHE_TAGS.bot("ATLAS"),
+      ],
+      paths: ["/control-plane", "/control-plane/agents/ATLAS", "/control-plane/bots/ATLAS"],
+    });
+  });
+
+  it("keeps legacy bot mutations compatible during migration", () => {
     expect(
       getControlPlaneMutationInvalidation(["bots", "ATLAS", "publish"]),
     ).toEqual({
@@ -43,7 +56,16 @@ describe("control-plane cache helpers", () => {
         CONTROL_PLANE_CACHE_TAGS.botCatalog,
         CONTROL_PLANE_CACHE_TAGS.bot("ATLAS"),
       ],
-      paths: ["/control-plane", "/control-plane/bots/ATLAS"],
+      paths: ["/control-plane", "/control-plane/agents/ATLAS", "/control-plane/bots/ATLAS"],
+    });
+  });
+
+  it("skips browser-side runtime access invalidation entirely", () => {
+    expect(
+      getControlPlaneMutationInvalidation(["agents", "ATLAS", "runtime-access"]),
+    ).toEqual({
+      tags: [],
+      paths: [],
     });
   });
 

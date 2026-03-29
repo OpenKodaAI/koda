@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import time
+from typing import Any, TypedDict
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -25,6 +26,7 @@ from koda.services.agent_settings import (
 )
 from koda.state.history_store import add_bookmark
 from koda.state.knowledge_governance_store import (
+    get_correction_event,
     get_latest_execution_episode,
     record_correction_event,
     update_execution_reliability_stats,
@@ -52,6 +54,28 @@ from koda.utils.messaging import split_message
 
 log = get_logger(__name__)
 _FUNCTION_DEFINITIONS = {str(item["id"]): dict(item) for item in resolve_model_function_catalog()}
+
+
+class KnowledgeCandidatePayload(TypedDict, total=False):
+    candidate_key: str
+    merge_key: str | None
+    task_kind: str
+    candidate_type: str
+    summary: str
+    evidence: list[dict[str, Any]]
+    source_refs: list[dict[str, Any]]
+    proposed_runbook: dict[str, Any]
+    confidence_score: float
+    agent_id: str | None
+    task_id: int | None
+    project_key: str
+    environment: str
+    team: str
+    success_delta: int
+    failure_delta: int
+    verification_delta: int
+    force_pending: bool
+    diff_summary: str
 
 
 def _general_provider_options(user_data: dict[str, object]) -> list[str]:
@@ -116,6 +140,117 @@ def _remember_feature_model_tokens(
     if isinstance(store, dict):
         store.update(tokens)
     return tokens
+
+
+def _normalize_feedback_runbook_steps(value: object, *, fallback: str) -> list[str]:
+    if isinstance(value, list):
+        steps = [str(item).strip() for item in value if str(item).strip()]
+        if steps:
+            return steps
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return [text]
+    return [fallback]
+
+
+def _episode_source_refs(episode: dict[str, object]) -> list[dict[str, Any]]:
+    payload = episode.get("source_refs")
+    if not isinstance(payload, list):
+        return []
+    return [dict(item) for item in payload if isinstance(item, dict)]
+
+
+def _episode_confidence_score(episode: dict[str, object]) -> float:
+    raw = episode.get("confidence_score")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        with contextlib.suppress(ValueError):
+            return float(raw)
+    return 0.0
+
+
+def _episode_feedback_gate_reasons(episode: dict[str, object]) -> list[str]:
+    reasons: list[str] = []
+    if str(episode.get("status") or "") != "completed":
+        reasons.append("task_not_completed")
+    if bool(episode.get("stale_sources_present")):
+        reasons.append("stale_sources_present")
+    if bool(episode.get("ungrounded_operationally")):
+        reasons.append("ungrounded_operationally")
+    if bool(episode.get("post_write_review_required")):
+        reasons.append("post_write_review_required")
+    if not bool(episode.get("verified_before_finalize")):
+        reasons.append("not_verified_before_finalize")
+    answer_gate_status = str(episode.get("answer_gate_status") or "").strip().lower()
+    if answer_gate_status not in {"approved", "accepted", "ok", "pass", "passed"}:
+        reasons.append(f"answer_gate_status:{answer_gate_status or 'missing'}")
+    if not _episode_source_refs(episode):
+        reasons.append("missing_source_refs")
+    plan = episode.get("plan") if isinstance(episode.get("plan"), dict) else {}
+    if not isinstance(plan, dict) or not str(plan.get("summary") or "").strip():
+        reasons.append("missing_plan_summary")
+    return reasons
+
+
+def _build_success_pattern_candidate(
+    *,
+    episode: dict[str, object],
+    feedback_type: str,
+    task_id: int,
+    agent_id: str | None,
+) -> KnowledgeCandidatePayload:
+    plan = episode.get("plan") if isinstance(episode.get("plan"), dict) else {}
+    plan = plan if isinstance(plan, dict) else {}
+    summary = str(plan.get("summary") or episode.get("task_kind") or "Promoted routine").strip()
+    verification = _normalize_feedback_runbook_steps(
+        plan.get("verification"),
+        fallback="Confirm the completed state matches the expected outcome.",
+    )
+    steps = _normalize_feedback_runbook_steps(
+        plan.get("steps"),
+        fallback="Repeat the structured workflow that produced the approved result.",
+    )
+    rollback = str(plan.get("rollback") or "Revert the last change and restore the previous known-good state.").strip()
+    return {
+        "candidate_key": hashlib.sha256(
+            f"{feedback_type}:{task_id}:{episode['task_kind']}:{episode['project_key']}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:24],
+        "merge_key": hashlib.sha256(
+            f"{feedback_type}:{episode['task_kind']}:{episode['project_key']}:{episode['environment']}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:24],
+        "agent_id": agent_id,
+        "task_id": task_id,
+        "task_kind": str(episode["task_kind"]),
+        "candidate_type": "success_pattern",
+        "summary": f"Human {feedback_type} feedback for task #{task_id} promoted into reusable routine.",
+        "evidence": [
+            {"kind": "human_feedback", "value": feedback_type},
+            {"kind": "verified_before_finalize", "value": bool(episode.get("verified_before_finalize"))},
+            {"kind": "answer_gate_status", "value": str(episode.get("answer_gate_status") or "")},
+        ],
+        "source_refs": _episode_source_refs(episode),
+        "proposed_runbook": {
+            "title": f"{str(episode['task_kind']).replace('_', ' ').title()} reusable routine",
+            "summary": summary,
+            "prerequisites": [str(item) for item in (plan.get("prerequisites") or []) if str(item).strip()],
+            "steps": steps,
+            "verification": verification,
+            "rollback": rollback,
+            "owner": str(plan.get("owner") or ""),
+        },
+        "confidence_score": max(0.8, _episode_confidence_score(episode)),
+        "project_key": str(episode.get("project_key") or ""),
+        "environment": str(episode.get("environment") or ""),
+        "team": str(episode.get("team") or ""),
+        "success_delta": 1,
+        "verification_delta": 1 if bool(episode.get("verified_before_finalize")) else 0,
+        "force_pending": True,
+        "diff_summary": f"Requested by operator from task #{task_id} with {feedback_type} feedback.",
+    }
 
 
 async def callback_setdir(update: Update, context: BotContext) -> None:
@@ -442,6 +577,17 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
         await query.answer("No execution episode found for this task.", show_alert=True)
         return
 
+    existing_feedback = get_correction_event(
+        agent_id=agent_id,
+        task_id=task_id,
+        feedback_type=feedback_type,
+        user_id=user_id,
+        episode_id=int(episode["id"]),
+    )
+    if existing_feedback is not None:
+        await query.answer("Feedback already recorded for this execution.", show_alert=True)
+        return
+
     event_id = record_correction_event(
         agent_id=agent_id,
         task_id=task_id,
@@ -451,6 +597,15 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
     if event_id is None:
         await query.answer("Could not record feedback.", show_alert=True)
         return
+
+    created_candidate = False
+    feedback_labels = {
+        "corrected": "Feedback registrado como correção. Abri um candidato de risco para revisão.",
+        "failed": "Feedback registrado como falha. Abri um candidato de risco para revisão.",
+        "risky": "Feedback registrado como risco alto. Abri um candidato de guardrail para revisão.",
+        "approved": "Feedback registrado como aprovado.",
+        "promote": "Feedback registrado como promoção.",
+    }
 
     if feedback_type in {"corrected", "failed", "risky"}:
         update_execution_reliability_stats(
@@ -483,7 +638,7 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
                 {"kind": "human_feedback", "value": feedback_type},
                 {"kind": "episode_status", "value": episode["status"]},
             ],
-            source_refs=list(episode["source_refs"]),
+            source_refs=_episode_source_refs(episode),
             proposed_runbook={
                 "title": f"{episode['task_kind'].replace('_', ' ').title()} risk guardrail",
                 "summary": f"Escalate when feedback type '{feedback_type}' matches similar executions.",
@@ -496,41 +651,47 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
             force_pending=True,
             diff_summary=f"Created from human feedback '{feedback_type}' on task #{task_id}.",
         )
+        created_candidate = True
     elif feedback_type == "promote":
-        candidate_key = hashlib.sha256(
-            f"promote:{task_id}:{episode['task_kind']}:{episode['project_key']}".encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:24]
-        merge_key = hashlib.sha256(
-            f"promote:{episode['task_kind']}:{episode['project_key']}:{episode['environment']}".encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:24]
-        upsert_knowledge_candidate(
-            candidate_key=candidate_key,
-            merge_key=merge_key,
+        gate_reasons = _episode_feedback_gate_reasons(episode)
+        if gate_reasons:
+            await query.answer(
+                "Promotion blocked: missing minimum gates for reusable routine creation.",
+                show_alert=True,
+            )
+        else:
+            upsert_knowledge_candidate(
+                **_build_success_pattern_candidate(
+                    episode=episode,
+                    feedback_type=feedback_type,
+                    task_id=task_id,
+                    agent_id=agent_id,
+                ),
+            )
+            created_candidate = True
+    elif feedback_type == "approved":
+        gate_reasons = _episode_feedback_gate_reasons(episode)
+        if not gate_reasons:
+            upsert_knowledge_candidate(
+                **_build_success_pattern_candidate(
+                    episode=episode,
+                    feedback_type=feedback_type,
+                    task_id=task_id,
+                    agent_id=agent_id,
+                ),
+            )
+            created_candidate = True
+
+    if feedback_type in {"approved", "promote"}:
+        update_execution_reliability_stats(
             agent_id=agent_id,
-            task_id=task_id,
             task_kind=episode["task_kind"],
-            candidate_type="success_pattern",
-            summary=f"Human requested promotion of task #{task_id} into reusable routine.",
-            evidence=[
-                {"kind": "human_feedback", "value": "promote"},
-                {"kind": "verified_before_finalize", "value": episode["verified_before_finalize"]},
-            ],
-            source_refs=list(episode["source_refs"]),
-            proposed_runbook={
-                "title": f"{episode['task_kind'].replace('_', ' ').title()} approved routine candidate",
-                "summary": str((episode["plan"] or {}).get("summary") or "Promoted from structured human feedback."),
-                "verification": [str((episode["plan"] or {}).get("verification") or "Verify post-change state.")],
-            },
-            confidence_score=max(0.8, float(episode["confidence_score"])),
             project_key=episode["project_key"],
             environment=episode["environment"],
-            team=episode["team"],
-            success_delta=1,
-            verification_delta=1 if episode["verified_before_finalize"] else 0,
-            force_pending=True,
-            diff_summary=f"Requested by operator from task #{task_id}.",
+            successful=episode["status"] == "completed",
+            verified=episode["verified_before_finalize"],
+            count_execution=False,
+            human_override_delta=1,
         )
 
     from koda.services.metrics import HUMAN_CORRECTION_EVENTS
@@ -538,21 +699,34 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
     HUMAN_CORRECTION_EVENTS.labels(agent_id=agent_id or "default", feedback_type=feedback_type).inc()
     utility_outcome = {
         "approved": "useful",
-        "promote": "useful",
+        "promote": "useful" if created_candidate else "noise",
         "risky": "noise",
         "corrected": "misleading",
         "failed": "misleading",
     }.get(feedback_type)
     if utility_outcome:
         record_utility_event(agent_id, utility_outcome)
-    labels = {
-        "approved": "Feedback registrado como aprovado.",
-        "corrected": "Feedback registrado como correção. Abri um candidato de risco para revisão.",
-        "failed": "Feedback registrado como falha. Abri um candidato de risco para revisão.",
-        "risky": "Feedback registrado como risco alto. Abri um candidato de guardrail para revisão.",
-        "promote": "Feedback registrado como promoção. Abri um candidato de runbook para revisão.",
-    }
-    await query.answer(labels.get(feedback_type, "Feedback registrado."), show_alert=True)
+    if feedback_type == "approved" and not created_candidate:
+        await query.answer(
+            "Feedback registrado como aprovado, mas faltam gates mínimos para promover em rotina reutilizável.",
+            show_alert=True,
+        )
+        return
+    if feedback_type == "promote" and not created_candidate:
+        return
+    if feedback_type == "approved" and created_candidate:
+        await query.answer(
+            "Feedback registrado como aprovado. Abri um candidato de rotina positiva para revisão.",
+            show_alert=True,
+        )
+        return
+    if feedback_type == "promote" and created_candidate:
+        await query.answer(
+            "Feedback registrado como promoção. Abri um candidato de runbook para revisão.",
+            show_alert=True,
+        )
+        return
+    await query.answer(feedback_labels.get(feedback_type, "Feedback registrado."), show_alert=True)
 
 
 async def callback_mode(update: Update, context: BotContext) -> None:

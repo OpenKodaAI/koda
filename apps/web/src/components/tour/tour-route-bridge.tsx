@@ -50,7 +50,11 @@ function resolveEditorHref() {
   }
 
   const candidate =
+    document.querySelector<HTMLAnchorElement>('a[href^="/control-plane/agents/"]') ??
     document.querySelector<HTMLAnchorElement>('a[href^="/control-plane/bots/"]') ??
+    document.querySelector<HTMLAnchorElement>(
+      '[data-tour-anchor="catalog.board"] a[href^="/control-plane/agents/"]',
+    ) ??
     document.querySelector<HTMLAnchorElement>(
       '[data-tour-anchor="catalog.board"] a[href^="/control-plane/bots/"]',
     );
@@ -92,9 +96,9 @@ export function TourRouteBridge({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!matchesTourRoutePattern(pathname, "/control-plane/bots/:botId")) return;
+    if (!matchesTourRoutePattern(pathname, "/control-plane/agents/:botId")) return;
 
-    rememberedRouteHrefsRef.current["/control-plane/bots/:botId"] = `${window.location.pathname}${window.location.search}`;
+    rememberedRouteHrefsRef.current["/control-plane/agents/:botId"] = `${window.location.pathname}${window.location.search}`;
   }, [pathname]);
 
   useEffect(() => {
@@ -135,9 +139,9 @@ export function TourRouteBridge({
 
     if (pendingRouteStepId === currentStep.id) {
       const targetHref =
-        currentStep.routePattern === "/control-plane/bots/:botId"
+        currentStep.routePattern === "/control-plane/agents/:botId"
           ? resolveNavigationHref(currentStep.navigationAnchor) ??
-            rememberedRouteHrefsRef.current["/control-plane/bots/:botId"] ??
+            rememberedRouteHrefsRef.current["/control-plane/agents/:botId"] ??
             resolveEditorHref()
           : currentStep.routePattern ?? null;
 

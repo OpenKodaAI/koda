@@ -128,7 +128,7 @@ function makeSystemSettings(): ControlPlaneSystemSettings {
         scope: "global",
         secret_key: "OPENAI_API_KEY",
         preview: "sk-****",
-        grantable_to_bots: true,
+        grantable_to_agents: true,
       },
       {
         scope: "global",

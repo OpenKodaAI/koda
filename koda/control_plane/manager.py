@@ -222,7 +222,10 @@ def _build_runtime_prompt_preview_payload(
         block for block in (compiled_prompt.strip(), _shared_platform_prompt().strip()) if block
     ).strip()
     static_segments: list[PromptSegment] = []
-    tool_contracts = build_agent_tools_prompt(postgres_env=None)
+    tool_contracts = build_agent_tools_prompt(
+        postgres_env=None,
+        tool_policy=_safe_json_object(agent_spec.get("tool_policy")) or None,
+    )
     if tool_contracts.strip():
         static_segments.append(
             PromptSegment(
@@ -7035,22 +7038,18 @@ class ControlPlaneManager:
         )
         secrets = _safe_json_object(snapshot.get("secrets"))
         runtime_token = ""
-        for candidate in ("RUNTIME_LOCAL_UI_TOKEN", "RUNTIME_TOKEN"):
-            payload = _safe_json_object(secrets.get(candidate))
-            encrypted_value = str(payload.get("encrypted_value") or "").strip()
+        payload = _safe_json_object(secrets.get("RUNTIME_LOCAL_UI_TOKEN"))
+        encrypted_value = str(payload.get("encrypted_value") or "").strip()
+        if encrypted_value:
+            runtime_token = decrypt_secret(encrypted_value)
+        if not runtime_token:
+            row = fetch_one(
+                "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
+                ("RUNTIME_LOCAL_UI_TOKEN",),
+            )
+            encrypted_value = str(row["encrypted_value"] or "").strip() if row else ""
             if encrypted_value:
                 runtime_token = decrypt_secret(encrypted_value)
-                break
-        if not runtime_token:
-            for candidate in ("RUNTIME_LOCAL_UI_TOKEN", "RUNTIME_TOKEN"):
-                row = fetch_one(
-                    "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
-                    (candidate,),
-                )
-                encrypted_value = str(row["encrypted_value"] or "").strip() if row else ""
-                if encrypted_value:
-                    runtime_token = decrypt_secret(encrypted_value)
-                    break
         sections = _safe_json_object(snapshot.get("sections"))
         knowledge_section = _safe_json_object(sections.get("knowledge"))
         knowledge_policy = normalize_knowledge_policy(_safe_json_object(knowledge_section.get("policy")))

@@ -54,7 +54,6 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
-    env_file: .env
     depends_on:
       app:
         condition: service_healthy
@@ -62,7 +61,6 @@ services:
       HOST: "0.0.0.0"
       PORT: "3000"
       CONTROL_PLANE_BASE_URL: "http://app:8090"
-      CONTROL_PLANE_API_TOKEN: "${CONTROL_PLANE_API_TOKEN:-}"
     ports:
       - "${WEB_PORT:-3000}:3000"
     healthcheck:

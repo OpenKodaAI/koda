@@ -1,12 +1,10 @@
 import "server-only";
 
 import { CONTROL_PLANE_CACHE_TAGS, getControlPlaneFetchConfig, type ControlPlaneFetchTier } from "@/lib/control-plane-cache";
+import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
 const CONTROL_PLANE_BASE_URL =
   process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
-
-const CONTROL_PLANE_API_TOKEN =
-  process.env.CONTROL_PLANE_API_TOKEN?.trim() || "";
 
 export class ControlPlaneRequestError extends Error {
   status: number;
@@ -99,6 +97,7 @@ export type ControlPlaneSecretSummary = {
   scope: string;
   secret_key: string;
   preview: string;
+  grantable_to_agents?: boolean;
   grantable_to_bots?: boolean;
   usage_scope?: string;
   updated_at?: string;
@@ -448,6 +447,7 @@ export type ControlPlaneCompiledPrompt = {
   sections_present?: string[];
   document_lengths?: Record<string, number>;
   prompt_preview?: ControlPlanePromptPreview;
+  agent_contract_prompt_preview?: ControlPlanePromptPreview;
   bot_contract_prompt_preview?: ControlPlanePromptPreview;
   runtime_prompt_preview?: ControlPlanePromptPreview;
 };
@@ -474,6 +474,7 @@ export type ControlPlaneValidation = {
   resource_errors?: string[];
   feature_flags?: Record<string, boolean>;
   prompt_preview?: ControlPlanePromptPreview;
+  agent_contract_prompt_preview?: ControlPlanePromptPreview;
   bot_contract_prompt_preview?: ControlPlanePromptPreview;
   runtime_prompt_preview?: ControlPlanePromptPreview;
 };
@@ -609,8 +610,14 @@ export async function controlPlaneFetch(
   options: ControlPlaneFetchOptions = {},
 ) {
   const headers = new Headers(init.headers);
-  if (CONTROL_PLANE_API_TOKEN) {
-    headers.set("Authorization", `Bearer ${CONTROL_PLANE_API_TOKEN}`);
+
+  const operatorToken = await getWebOperatorTokenFromCookie();
+  if (!operatorToken) {
+    throw new ControlPlaneRequestError("Operator session is required", 401);
+  }
+
+  if (operatorToken) {
+    headers.set("Authorization", `Bearer ${operatorToken}`);
   }
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");

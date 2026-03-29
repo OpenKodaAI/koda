@@ -117,3 +117,17 @@ class TestBuildBotToolsPrompt:
         assert "## Enabled Tool Subset" in prompt
         assert "`web_search`" in prompt
         assert "`fetch_url`" in prompt
+
+    def test_prompt_filters_out_disabled_tools_when_policy_is_present(self):
+        with (
+            patch("koda.services.tool_prompt.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["web_search", "fetch_url"]}),
+            patch("koda.services.tool_prompt.AGENT_ALLOWED_TOOLS", set()),
+        ):
+            prompt = build_agent_tools_prompt()
+
+        assert "cron_list" not in prompt
+        assert "cron_add" not in prompt
+        assert "browser_navigate" not in prompt
+        assert "db_query" not in prompt
+        assert "script_save" not in prompt
+        assert "cache_clear" not in prompt

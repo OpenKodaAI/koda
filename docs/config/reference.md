@@ -14,7 +14,6 @@ Koda keeps infrastructure bootstrap and product configuration separate on purpos
 - `CONTROL_PLANE_PORT`
 - `CONTROL_PLANE_API_TOKEN`
 - `RUNTIME_LOCAL_UI_TOKEN`
-- `CONTROL_PLANE_MASTER_KEY`
 - `CONTROL_PLANE_MASTER_KEY_FILE`
 
 ### Runtime And State
@@ -59,6 +58,7 @@ These settings belong in the control plane, not in `.env`:
 - `/setup`
 - `/api/control-plane/onboarding/status`
 - `/api/control-plane/onboarding/bootstrap`
+- `/api/control-plane/web-auth`
 - `/api/control-plane/system-settings`
 - `/api/control-plane/providers/{provider_id}/connection*`
 - `/api/control-plane/agents*`
