@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package koda.artifact.v1;
+
+import "common/v1/metadata.proto";
+
+message ArtifactDescriptor {
+  string artifact_id = 1;
+  string object_key = 2;
+  string content_hash = 3;
+  string mime_type = 4;
+}
+
+message PutArtifactRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string logical_filename = 3;
+  string object_key = 4;
+  string mime_type = 5;
+  string source_metadata_json = 6;
+  string purpose = 7;
+  bytes data = 8;
+}
+
+message PutArtifactResponse {
+  ArtifactDescriptor artifact = 1;
+  string metadata_json = 2;
+  string upload_outcome = 3;
+}
+
+message GenerateEvidenceResponse {
+  string evidence_json = 1;
+}
+
+message GenerateEvidenceByArtifactIdRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string artifact_id = 3;
+}
+
+message GetArtifactMetadataResponse {
+  ArtifactDescriptor artifact = 1;
+  string metadata_json = 2;
+}
+
+message GetArtifactMetadataByArtifactIdRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string artifact_id = 3;
+}
+
+service ArtifactEngineService {
+  rpc PutArtifact(stream PutArtifactRequest) returns (PutArtifactResponse);
+  rpc GenerateEvidenceByArtifactId(GenerateEvidenceByArtifactIdRequest) returns (GenerateEvidenceResponse);
+  rpc GetArtifactMetadataByArtifactId(GetArtifactMetadataByArtifactIdRequest) returns (GetArtifactMetadataResponse);
+  rpc Health(koda.common.v1.HealthRequest) returns (koda.common.v1.HealthResponse);
+}

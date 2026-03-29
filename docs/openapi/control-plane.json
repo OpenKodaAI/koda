@@ -1,0 +1,336 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Koda Control Plane API",
+    "version": "1.0.0",
+    "description": "Maintained public contract for platform setup, control-plane product configuration, and runtime access."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same-origin control-plane server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Control-plane health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Supervisor is healthy"
+          }
+        }
+      }
+    },
+    "/setup": {
+      "get": {
+        "summary": "Setup UI",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Minimal onboarding UI"
+          }
+        }
+      }
+    },
+    "/openapi/control-plane.json": {
+      "get": {
+        "summary": "OpenAPI document",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This document"
+          }
+        }
+      }
+    },
+    "/api/control-plane/onboarding/status": {
+      "get": {
+        "summary": "Onboarding status",
+        "responses": {
+          "200": {
+            "description": "Current quickstart, provider, agent, and storage status"
+          }
+        }
+      }
+    },
+    "/api/control-plane/onboarding/bootstrap": {
+      "post": {
+        "summary": "Apply initial onboarding configuration",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider, access, and optional agent configured"
+          }
+        }
+      }
+    },
+    "/api/control-plane/system-settings": {
+      "get": {
+        "summary": "Current global system settings",
+        "responses": {
+          "200": {
+            "description": "System settings payload"
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace global system settings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated system settings"
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/{provider_id}/connection": {
+      "get": {
+        "summary": "Provider connection state",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider connection details"
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/{provider_id}/connection/api-key": {
+      "put": {
+        "summary": "Configure provider via API key",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated provider connection"
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/{provider_id}/connection/local": {
+      "put": {
+        "summary": "Configure provider via local/server URL",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated provider connection"
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/{provider_id}/connection/verify": {
+      "post": {
+        "summary": "Verify provider connection",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification result"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents": {
+      "get": {
+        "summary": "List agents",
+        "responses": {
+          "200": {
+            "description": "Agent catalog"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create agent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Agent created"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/publish": {
+      "post": {
+        "summary": "Publish agent snapshot",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published snapshot"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/activate": {
+      "post": {
+        "summary": "Activate agent",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent activated"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/secrets/{secret_key}": {
+      "put": {
+        "summary": "Set agent secret",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "secret_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Secret persisted"
+          }
+        }
+      }
+    },
+    "/api/runtime/ready": {
+      "get": {
+        "summary": "Runtime readiness",
+        "responses": {
+          "200": {
+            "description": "Aggregated runtime readiness surface"
+          }
+        }
+      }
+    }
+  }
+}

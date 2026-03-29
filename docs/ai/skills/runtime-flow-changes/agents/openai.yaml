@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runtime Flow Changes"
+  short_description: "Change message-to-provider flows without regressions"
+  default_prompt: "Use $runtime-flow-changes to modify runtime execution flows safely."

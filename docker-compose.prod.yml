@@ -1,0 +1,20 @@
+services:
+  app:
+    ports:
+      - "127.0.0.1:${CONTROL_PLANE_PORT:-8090}:8090"
+    environment:
+      CONTROL_PLANE_BIND: "0.0.0.0"
+    restart: always
+
+  web:
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    restart: always
+
+  postgres:
+    restart: always
+
+  seaweedfs:
+    restart: always
+    ports:
+      - "127.0.0.1:${SEAWEEDFS_ADMIN_PORT:-9333}:9333"

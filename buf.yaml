@@ -1,0 +1,16 @@
+# Canonical lint/breaking config for internal RPC protos under `proto/`.
+# Use `scripts/internal_rpc_codegen.sh` from the repo root.
+version: v1beta1
+build:
+  roots:
+    - proto
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

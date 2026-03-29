@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package koda.common.v1;
+
+message RequestMetadata {
+  string request_id = 1;
+  string trace_id = 2;
+  string agent_id = 3;
+  string task_id = 4;
+  string user_id = 5;
+  map<string, string> labels = 6;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string service = 1;
+  bool ready = 2;
+  string status = 3;
+  map<string, string> details = 4;
+}

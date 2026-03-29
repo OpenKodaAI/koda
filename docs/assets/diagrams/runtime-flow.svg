@@ -1,0 +1,52 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Koda runtime flow</title>
+  <desc id="desc">Diagram of request intake, orchestration, context assembly, provider execution, tools, and durable persistence.</desc>
+  <style>
+    .title { font: 700 28px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #162126; }
+    .label { font: 600 20px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #162126; }
+    .body { font: 500 15px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #5C6B73; }
+    .step { fill: #FFFFFF; stroke: #D9E2E7; stroke-width: 2; }
+  </style>
+  <rect width="1200" height="760" fill="#F4F7F8"/>
+  <text x="64" y="74" class="title">Koda Runtime Flow</text>
+  <rect x="72" y="118" width="220" height="112" rx="24" class="step"/>
+  <text x="104" y="164" class="label">1. Input</text>
+  <text x="104" y="196" class="body">Telegram or operator-facing entrypoint</text>
+
+  <rect x="344" y="118" width="230" height="112" rx="24" class="step"/>
+  <text x="376" y="164" class="label">2. Orchestration</text>
+  <text x="376" y="196" class="body">Queue, session, policy, runtime context</text>
+
+  <rect x="628" y="118" width="236" height="112" rx="24" class="step"/>
+  <text x="660" y="164" class="label">3. Context Assembly</text>
+  <text x="660" y="196" class="body">Knowledge, memory, artifact grounding</text>
+
+  <rect x="916" y="118" width="212" height="112" rx="24" class="step"/>
+  <text x="948" y="164" class="label">4. Provider Run</text>
+  <text x="948" y="196" class="body">Streaming execution and fallback</text>
+
+  <rect x="344" y="330" width="230" height="112" rx="24" class="step"/>
+  <text x="376" y="376" class="label">5. Tool Loop</text>
+  <text x="376" y="408" class="body">Runtime tools, approvals, bounded results</text>
+
+  <rect x="628" y="330" width="236" height="112" rx="24" class="step"/>
+  <text x="660" y="376" class="label">6. Persistence</text>
+  <text x="660" y="408" class="body">Runtime state, audit, metadata, artifacts</text>
+
+  <rect x="916" y="330" width="212" height="112" rx="24" class="step"/>
+  <text x="948" y="376" class="label">7. Response</text>
+  <text x="948" y="408" class="body">Return result and operator feedback</text>
+
+  <rect x="628" y="544" width="236" height="118" rx="24" fill="#FFFFFF" stroke="#0F766E" stroke-width="3"/>
+  <text x="660" y="592" class="label">Durable platform state</text>
+  <text x="660" y="624" class="body">Postgres + S3-compatible storage</text>
+
+  <path d="M292 174H344" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M574 174H628" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M864 174H916" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M1022 230V330" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M916 386H864" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M628 386H574" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M459 230V330" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M746 442V544" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+</svg>

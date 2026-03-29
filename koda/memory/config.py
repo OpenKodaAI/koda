@@ -1,0 +1,36 @@
+"""Memory system configuration from environment variables."""
+
+from koda.config import _env
+
+MEMORY_ENABLED: bool = _env("MEMORY_ENABLED", "true").lower() == "true"
+MEMORY_EMBEDDING_MODEL: str = _env("MEMORY_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+MEMORY_MAX_RECALL: int = int(_env("MEMORY_MAX_RECALL", "25"))
+MEMORY_RECALL_THRESHOLD: float = float(_env("MEMORY_RECALL_THRESHOLD", "0.25"))
+MEMORY_EXTRACTION_PROVIDER: str = _env("MEMORY_EXTRACTION_PROVIDER", _env("DEFAULT_PROVIDER", "claude")).lower()
+MEMORY_EXTRACTION_MODEL: str = _env("MEMORY_EXTRACTION_MODEL", "claude-sonnet-4-6")
+MEMORY_MAX_CONTEXT_TOKENS: int = int(_env("MEMORY_MAX_CONTEXT_TOKENS", "3500"))
+MEMORY_RECENCY_HALF_LIFE_DAYS: float = float(_env("MEMORY_RECENCY_HALF_LIFE_DAYS", "120"))
+MEMORY_MAX_EXTRACTION_ITEMS: int = int(_env("MEMORY_MAX_EXTRACTION_ITEMS", "15"))
+MEMORY_SIMILARITY_DEDUP_THRESHOLD: float = float(_env("MEMORY_SIMILARITY_DEDUP_THRESHOLD", "0.92"))
+MEMORY_MAX_PER_USER: int = int(_env("MEMORY_MAX_PER_USER", "2000"))
+MEMORY_LEXICAL_CANDIDATES: int = int(_env("MEMORY_LEXICAL_CANDIDATES", "64"))
+MEMORY_EMBEDDING_REPAIR_ENABLED: bool = _env("MEMORY_EMBEDDING_REPAIR_ENABLED", "true").lower() == "true"
+MEMORY_EMBEDDING_REPAIR_INTERVAL_SECONDS: int = int(_env("MEMORY_EMBEDDING_REPAIR_INTERVAL_SECONDS", "120"))
+MEMORY_EMBEDDING_REPAIR_BATCH_SIZE: int = int(_env("MEMORY_EMBEDDING_REPAIR_BATCH_SIZE", "16"))
+
+# Maintenance
+MEMORY_MAINTENANCE_ENABLED: bool = _env("MEMORY_MAINTENANCE_ENABLED", "true").lower() == "true"
+MEMORY_MAINTENANCE_HOUR: int = int(_env("MEMORY_MAINTENANCE_HOUR", "3"))
+
+# Digest
+MEMORY_DIGEST_ENABLED: bool = _env("MEMORY_DIGEST_ENABLED", "true").lower() == "true"
+
+# Proactive context
+MEMORY_PROACTIVE_ENABLED: bool = _env("MEMORY_PROACTIVE_ENABLED", "true").lower() == "true"
+
+# Procedural memory
+MEMORY_PROCEDURAL_ENABLED: bool = _env("MEMORY_PROCEDURAL_ENABLED", "true").lower() == "true"
+MEMORY_PROCEDURAL_MAX_RECALL: int = int(_env("MEMORY_PROCEDURAL_MAX_RECALL", "4"))
+
+# Timeout for memory recall (seconds)
+MEMORY_RECALL_TIMEOUT: float = float(_env("MEMORY_RECALL_TIMEOUT", "3.0"))

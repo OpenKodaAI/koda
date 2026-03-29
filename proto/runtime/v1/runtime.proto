@@ -1,0 +1,441 @@
+syntax = "proto3";
+
+package koda.runtime.v1;
+
+import "common/v1/metadata.proto";
+
+message EnvironmentRef {
+  string environment_id = 1;
+  string task_id = 2;
+  string agent_id = 3;
+}
+
+message CreateEnvironmentRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string task_id = 3;
+  string workspace_path = 4;
+  string worktree_ref = 5;
+  string base_work_dir = 6;
+  string slug = 7;
+  bool create_worktree = 8;
+}
+
+message CreateEnvironmentResponse {
+  EnvironmentRef environment = 1;
+  string runtime_root = 2;
+  string workspace_path = 3;
+  string branch_name = 4;
+  bool created_worktree = 5;
+  string worktree_mode = 6;
+  string metadata_path = 7;
+}
+
+message StartTaskRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string command = 3;
+  repeated string args = 4;
+  string working_directory = 5;
+  map<string, string> environment_overrides = 6;
+  bytes stdin_payload = 7;
+  bool start_new_session = 8;
+}
+
+message ProcessRef {
+  string process_id = 1;
+  string task_id = 2;
+  string environment_id = 3;
+  int32 pid = 4;
+  int32 pgid = 5;
+  string command = 6;
+  repeated string args = 7;
+  string status = 8;
+  uint64 started_at_ms = 9;
+  int32 exit_code = 10;
+}
+
+message TerminalSessionRef {
+  string session_id = 1;
+  string task_id = 2;
+  string stream = 3;
+  string status = 4;
+  bool eof = 5;
+  uint64 opened_at_ms = 6;
+  uint64 closed_at_ms = 7;
+}
+
+message StartTaskResponse {
+  EnvironmentRef environment = 1;
+  string process_id = 2;
+  string phase = 3;
+  ProcessRef process = 4;
+  TerminalSessionRef stdout_terminal = 5;
+  TerminalSessionRef stderr_terminal = 6;
+}
+
+message ExecuteCommandRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string runtime_env_id = 3;
+  string command = 4;
+  repeated string argv = 5;
+  string working_directory = 6;
+  map<string, string> environment_overrides = 7;
+  bytes stdin_payload = 8;
+  uint32 timeout_seconds = 9;
+  bool allow_network = 10;
+  string purpose = 11;
+  map<string, string> env_labels = 12;
+  bool start_new_session = 13;
+}
+
+message ExecuteCommandResponse {
+  string command = 1;
+  repeated string argv = 2;
+  string working_directory = 3;
+  string stdout = 4;
+  string stderr = 5;
+  int32 exit_code = 6;
+  bool timed_out = 7;
+  bool killed = 8;
+  uint64 started_at_ms = 9;
+  uint64 finished_at_ms = 10;
+}
+
+message TerminateTaskRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  bool force = 3;
+}
+
+message TerminateTaskResponse {
+  string task_id = 1;
+  string phase = 2;
+  bool terminated = 3;
+  ProcessRef process = 4;
+}
+
+message AttachTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+}
+
+message AttachTerminalResponse {
+  string task_id = 1;
+  string session_id = 2;
+  bool attached = 3;
+}
+
+message OpenTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+  string command = 4;
+  repeated string args = 5;
+  string working_directory = 6;
+  map<string, string> environment_overrides = 7;
+  uint32 cols = 8;
+  uint32 rows = 9;
+  bytes stdin_payload = 10;
+}
+
+message OpenTerminalResponse {
+  TerminalSessionRef terminal = 1;
+  ProcessRef process = 2;
+  bool opened = 3;
+}
+
+message WriteTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+  bytes data = 4;
+  bool eof = 5;
+}
+
+message WriteTerminalResponse {
+  string task_id = 1;
+  string session_id = 2;
+  bool accepted = 3;
+  uint32 bytes_written = 4;
+  bool eof = 5;
+  string status = 6;
+}
+
+message ResizeTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message ResizeTerminalResponse {
+  string task_id = 1;
+  string session_id = 2;
+  bool resized = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+  string status = 6;
+}
+
+message CloseTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+  bool force = 4;
+}
+
+message CloseTerminalResponse {
+  string task_id = 1;
+  string session_id = 2;
+  bool closed = 3;
+  string status = 4;
+  uint64 closed_at_ms = 5;
+}
+
+message StreamTerminalRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string stream = 3;
+}
+
+message StreamTerminalSessionRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string session_id = 3;
+}
+
+message TerminalChunk {
+  string task_id = 1;
+  string stream = 2;
+  bytes data = 3;
+  bool eof = 4;
+  string session_id = 5;
+}
+
+message PauseTaskRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string reason = 3;
+}
+
+message PauseTaskResponse {
+  string task_id = 1;
+  string phase = 2;
+}
+
+message ResumeTaskRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string phase = 3;
+}
+
+message ResumeTaskResponse {
+  string task_id = 1;
+  string phase = 2;
+}
+
+message FinalizeTaskRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  bool success = 3;
+  string error_message = 4;
+  string final_phase = 5;
+}
+
+message FinalizeTaskResponse {
+  string task_id = 1;
+  string final_phase = 2;
+  string environment_id = 3;
+}
+
+message CollectSnapshotRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+}
+
+message CollectSnapshotResponse {
+  string task_id = 1;
+  string environment_id = 2;
+  bytes payload_json = 3;
+  string task_phase = 4;
+  string final_phase = 5;
+  string runtime_root = 6;
+  uint32 browser_session_count = 7;
+  uint32 checkpoint_count = 8;
+  uint32 interactive_terminal_count = 9;
+}
+
+message ReconcileRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+}
+
+message ReconcileResponse {
+  uint32 active_environments = 1;
+  uint32 reconciled_environments = 2;
+}
+
+message CleanupEnvironmentRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  bool force = 3;
+}
+
+message CleanupEnvironmentResponse {
+  string task_id = 1;
+  string environment_id = 2;
+  bool cleaned = 3;
+  bool workspace_removed = 4;
+  bool runtime_root_removed = 5;
+  string worktree_mode = 6;
+}
+
+message BrowserSessionRef {
+  string session_id = 1;
+  string task_id = 2;
+  string environment_id = 3;
+  string scope_id = 4;
+  string transport = 5;
+  string status = 6;
+  string runtime_dir = 7;
+  int32 display_id = 8;
+  int32 vnc_port = 9;
+  int32 novnc_port = 10;
+  repeated string missing_binaries = 11;
+  uint64 created_at_ms = 12;
+  uint64 ended_at_ms = 13;
+  map<string, string> metadata = 14;
+}
+
+message StartBrowserSessionRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string scope_id = 3;
+  string runtime_dir = 4;
+  string transport = 5;
+  int32 display_id = 6;
+  int32 vnc_port = 7;
+  int32 novnc_port = 8;
+  repeated string missing_binaries = 9;
+  map<string, string> metadata_labels = 10;
+}
+
+message StartBrowserSessionResponse {
+  BrowserSessionRef session = 1;
+  bool started = 2;
+}
+
+message StopBrowserSessionRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string scope_id = 3;
+  bool force = 4;
+}
+
+message StopBrowserSessionResponse {
+  string task_id = 1;
+  string scope_id = 2;
+  bool stopped = 3;
+  string status = 4;
+}
+
+message GetBrowserSessionRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string scope_id = 3;
+}
+
+message GetBrowserSessionResponse {
+  BrowserSessionRef session = 1;
+  bool found = 2;
+}
+
+message CheckpointRef {
+  string checkpoint_id = 1;
+  string task_id = 2;
+  string environment_id = 3;
+  bool success = 4;
+  string final_phase = 5;
+  string checkpoint_dir = 6;
+  string manifest_path = 7;
+  string snapshot_path = 8;
+  uint64 created_at_ms = 9;
+  uint64 expires_at_ms = 10;
+  string patch_path = 11;
+  string git_status_path = 12;
+  string untracked_bundle_path = 13;
+  string commit_sha = 14;
+  bool has_untracked_bundle = 15;
+}
+
+message SaveCheckpointRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string environment_id = 3;
+  bool success = 4;
+  string final_phase = 5;
+  uint32 retention_hours = 6;
+}
+
+message SaveCheckpointResponse {
+  CheckpointRef checkpoint = 1;
+  bool saved = 2;
+}
+
+message GetCheckpointRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string checkpoint_id = 3;
+}
+
+message GetCheckpointResponse {
+  CheckpointRef checkpoint = 1;
+  bool found = 2;
+}
+
+message RestoreCheckpointRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string task_id = 2;
+  string checkpoint_id = 3;
+  string workspace_path = 4;
+}
+
+message RestoreCheckpointResponse {
+  CheckpointRef checkpoint = 1;
+  bool found = 2;
+  bool restored = 3;
+  string workspace_path = 4;
+  string restored_commit_sha = 5;
+  repeated string restored_paths = 6;
+  string error_message = 7;
+}
+
+service RuntimeKernelService {
+  rpc CreateEnvironment(CreateEnvironmentRequest) returns (CreateEnvironmentResponse);
+  rpc StartTask(StartTaskRequest) returns (StartTaskResponse);
+  rpc ExecuteCommand(ExecuteCommandRequest) returns (ExecuteCommandResponse);
+  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskResponse);
+  rpc AttachTerminal(AttachTerminalRequest) returns (AttachTerminalResponse);
+  rpc OpenTerminal(OpenTerminalRequest) returns (OpenTerminalResponse);
+  rpc WriteTerminal(WriteTerminalRequest) returns (WriteTerminalResponse);
+  rpc ResizeTerminal(ResizeTerminalRequest) returns (ResizeTerminalResponse);
+  rpc CloseTerminal(CloseTerminalRequest) returns (CloseTerminalResponse);
+  rpc StreamTerminal(StreamTerminalRequest) returns (stream TerminalChunk);
+  rpc StreamTerminalSession(StreamTerminalSessionRequest) returns (stream TerminalChunk);
+  rpc PauseTask(PauseTaskRequest) returns (PauseTaskResponse);
+  rpc ResumeTask(ResumeTaskRequest) returns (ResumeTaskResponse);
+  rpc FinalizeTask(FinalizeTaskRequest) returns (FinalizeTaskResponse);
+  rpc CollectSnapshot(CollectSnapshotRequest) returns (CollectSnapshotResponse);
+  rpc Reconcile(ReconcileRequest) returns (ReconcileResponse);
+  rpc CleanupEnvironment(CleanupEnvironmentRequest) returns (CleanupEnvironmentResponse);
+  rpc StartBrowserSession(StartBrowserSessionRequest) returns (StartBrowserSessionResponse);
+  rpc StopBrowserSession(StopBrowserSessionRequest) returns (StopBrowserSessionResponse);
+  rpc GetBrowserSession(GetBrowserSessionRequest) returns (GetBrowserSessionResponse);
+  rpc SaveCheckpoint(SaveCheckpointRequest) returns (SaveCheckpointResponse);
+  rpc GetCheckpoint(GetCheckpointRequest) returns (GetCheckpointResponse);
+  rpc RestoreCheckpoint(RestoreCheckpointRequest) returns (RestoreCheckpointResponse);
+  rpc Health(koda.common.v1.HealthRequest) returns (koda.common.v1.HealthResponse);
+}

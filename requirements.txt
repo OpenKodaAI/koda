@@ -1,0 +1,17 @@
+python-telegram-bot[job-queue]>=22.0
+python-dotenv>=1.0.0
+structlog>=24.0
+tenacity>=8.2
+aiohttp>=3.9
+aiolimiter>=1.1
+beautifulsoup4>=4.12
+boto3>=1.35
+atlassian-python-api>=3.41
+asyncpg>=0.30.0
+asyncssh>=2.14.0
+PyMuPDF>=1.24
+openpyxl>=3.1
+pillow>=10.0
+python-docx>=1.1
+PyYAML>=6.0
+rapidocr-onnxruntime>=1.2.3

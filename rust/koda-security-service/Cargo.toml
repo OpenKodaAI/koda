@@ -1,0 +1,14 @@
+[package]
+name = "koda-security-service"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+koda-observability = { path = "../koda-observability" }
+koda-proto = { path = "../koda-proto" }
+koda-security-core = { path = "../koda-security-core" }
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true

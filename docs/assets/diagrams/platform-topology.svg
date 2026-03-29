@@ -1,0 +1,57 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Koda platform topology</title>
+  <desc id="desc">Diagram showing operator access, control plane, runtime services, durable storage, and bundled infrastructure.</desc>
+  <style>
+    .title { font: 700 28px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #162126; }
+    .label { font: 600 20px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #162126; }
+    .body { font: 500 16px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #5C6B73; }
+    .chip { font: 600 14px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #0F766E; }
+  </style>
+  <rect width="1200" height="760" fill="#F4F7F8"/>
+  <text x="64" y="74" class="title">Koda Platform Topology</text>
+  <rect x="64" y="116" width="240" height="132" rx="24" fill="#FFFFFF" stroke="#D9E2E7" stroke-width="2"/>
+  <text x="92" y="160" class="label">Operators and clients</text>
+  <text x="92" y="194" class="body">Setup UI</text>
+  <text x="92" y="222" class="body">Control-plane API</text>
+  <text x="92" y="250" class="body">Runtime API and supported interfaces</text>
+
+  <rect x="388" y="96" width="430" height="192" rx="28" fill="#FFFFFF" stroke="#0F766E" stroke-width="3"/>
+  <text x="424" y="148" class="label">Control plane</text>
+  <text x="424" y="184" class="body">Bootstrap, providers, secrets, agents, publication, policy</text>
+  <rect x="424" y="208" width="132" height="34" rx="17" fill="#DFF4F1"/>
+  <text x="448" y="230" class="chip">/setup</text>
+  <rect x="570" y="208" width="190" height="34" rx="17" fill="#DFF4F1"/>
+  <text x="598" y="230" class="chip">/api/control-plane/*</text>
+
+  <rect x="388" y="340" width="430" height="234" rx="28" fill="#FFFFFF" stroke="#D9E2E7" stroke-width="2"/>
+  <text x="424" y="392" class="label">Runtime and context services</text>
+  <text x="424" y="428" class="body">Queue orchestration, provider execution, runtime tools</text>
+  <text x="424" y="456" class="body">Knowledge retrieval, memory recall, artifact ingestion</text>
+  <text x="424" y="484" class="body">Health, inspection, and operator surfaces</text>
+  <rect x="424" y="510" width="166" height="34" rx="17" fill="#DFF4F1"/>
+  <text x="452" y="532" class="chip">/api/runtime/*</text>
+
+  <rect x="888" y="120" width="248" height="156" rx="24" fill="#FFFFFF" stroke="#D9E2E7" stroke-width="2"/>
+  <text x="920" y="166" class="label">External providers</text>
+  <text x="920" y="202" class="body">Model runtimes</text>
+  <text x="920" y="230" class="body">Integrations</text>
+  <text x="920" y="258" class="body">Network-facing services</text>
+
+  <rect x="888" y="356" width="248" height="220" rx="24" fill="#FFFFFF" stroke="#D9E2E7" stroke-width="2"/>
+  <text x="920" y="402" class="label">Durable storage</text>
+  <text x="920" y="438" class="body">Postgres</text>
+  <text x="920" y="466" class="body">SeaweedFS via S3-compatible contract</text>
+  <text x="920" y="494" class="body">Artifact metadata and evidence</text>
+  <text x="920" y="522" class="body">Runtime, knowledge, and memory state</text>
+
+  <rect x="64" y="396" width="240" height="132" rx="24" fill="#FFFFFF" stroke="#D9E2E7" stroke-width="2"/>
+  <text x="92" y="440" class="label">Infrastructure layer</text>
+  <text x="92" y="476" class="body">Docker Compose</text>
+  <text x="92" y="504" class="body">Doctor and health checks</text>
+
+  <path d="M304 182H388" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M818 190H888" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M603 288V340" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M818 458H888" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M304 462H388" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+</svg>

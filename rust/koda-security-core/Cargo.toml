@@ -1,0 +1,8 @@
+[package]
+name = "koda-security-core"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+regex = "1.11"
+serde_json.workspace = true

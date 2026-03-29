@@ -1,0 +1,10 @@
+# Canonical Python/grpc stub generation for internal RPC protos.
+# Regenerate from the repo root with `scripts/internal_rpc_codegen.sh`.
+version: v1
+managed:
+  enabled: true
+plugins:
+  - plugin: buf.build/protocolbuffers/python
+    out: koda/internal_rpc/generated
+  - plugin: buf.build/grpc/python
+    out: koda/internal_rpc/generated

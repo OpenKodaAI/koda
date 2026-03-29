@@ -1,0 +1,11 @@
+{
+  "name": "koda",
+  "private": true,
+  "packageManager": "pnpm@10.26.2",
+  "scripts": {
+    "dev:web": "pnpm --filter koda-web dev",
+    "lint:web": "pnpm --filter koda-web lint",
+    "test:web": "pnpm --filter koda-web test",
+    "build:web": "pnpm --filter koda-web build"
+  }
+}

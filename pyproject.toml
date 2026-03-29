@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "koda"
+version = "1.0.0"
+description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[job-queue]>=22.0",
+    "python-dotenv>=1.0.0",
+    "structlog>=24.0",
+    "tenacity>=8.2",
+    "aiohttp>=3.9",
+    "aiolimiter>=1.1",
+    "playwright>=1.40",
+    "croniter>=2.0",
+    "beautifulsoup4>=4.12",
+    "boto3>=1.35",
+    "atlassian-python-api>=3.41",
+    "asyncpg>=0.30.0",
+    "asyncssh>=2.14.0",
+    "PyMuPDF>=1.24",
+    "kokoro-onnx>=0.4",
+    "openpyxl>=3.1",
+    "pillow>=10.0",
+    "soundfile>=0.12",
+    "python-docx>=1.1",
+    "PyYAML>=6.0",
+    "rapidocr-onnxruntime>=1.2.3",
+    "chromadb>=0.5.0",
+    "langgraph>=0.2",
+    "sentence-transformers>=3.0",
+    "prometheus_client>=0.20",
+    "pybreaker>=1.0",
+    "cryptography>=43.0",
+    "grpcio>=1.74",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "ruff>=0.3",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+koda = "koda.control_plane.__main__:main"
+koda-control-plane = "koda.control_plane.__main__:main"
+koda-runtime-worker = "koda.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["koda*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore:'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction\\(\\) instead:DeprecationWarning:chromadb\\.telemetry\\.opentelemetry",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["runtime_*", "control_plane_runtime", "logs", "koda/internal_rpc/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["SIM108"]  # ternary operator suggestions reduce readability for complex expressions
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.handlers.atlassian",
+    "koda.handlers.automation",
+    "koda.handlers.browser",
+    "koda.handlers.devops",
+    "koda.handlers.fileops",
+    "koda.handlers.google_workspace",
+    "koda.handlers.messages",
+    "koda.handlers.packages",
+    "koda.services.atlassian_client",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.internal_rpc.generated.*",
+]
+ignore_errors = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "ruff>=0.3",
+    "mypy>=1.8",
+]
