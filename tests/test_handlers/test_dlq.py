@@ -1,6 +1,6 @@
 """Tests for /dlq command handler."""
 
-import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +21,8 @@ def mock_context():
     context = MagicMock()
     context.args = []
     context.bot = AsyncMock()
+    context.application = MagicMock()
+    context.application.user_data = {}
     context.user_data = {}
     return context
 
@@ -73,7 +75,13 @@ class TestCmdDlq:
             "failed_at": "2026-01-01T01:00:00",
             "retry_eligible": 1,
             "retried_at": None,
-            "metadata_json": "{}",
+            "metadata_json": json.dumps(
+                {
+                    "history": [{"event": "dlq_inserted", "at": "2026-01-01T01:00:00"}],
+                    "last_reprocessed_task_id": 77,
+                    "last_reprocessed_at": "2026-01-01T02:00:00",
+                }
+            ),
         }
         with (
             patch("koda.handlers.commands.auth_check", return_value=True),
@@ -86,6 +94,8 @@ class TestCmdDlq:
             assert "DLQ #1" in call_text
             assert "Task: #10" in call_text
             assert "sonnet" in call_text
+            assert "History events: 1" in call_text
+            assert "Last reprocess task: #77" in call_text
 
     @pytest.mark.asyncio
     async def test_dlq_inspect_not_found(self, mock_update, mock_context):
@@ -120,20 +130,17 @@ class TestCmdDlq:
             "retried_at": None,
             "metadata_json": "{}",
         }
-        mock_queue = AsyncMock()
         with (
             patch("koda.handlers.commands.auth_check", return_value=True),
             patch("koda.handlers.commands.dlq_get_dict", return_value=entry_dict),
-            patch("koda.handlers.commands.dlq_mark_retried", return_value=True),
-            patch("koda.services.queue_manager.get_queue", return_value=mock_queue),
-            patch("koda.services.queue_manager._get_worker_lock", return_value=asyncio.Lock()),
-            patch("koda.services.queue_manager._queue_workers", {}),
+            patch("koda.handlers.commands.requeue_dlq_entry", new_callable=AsyncMock, return_value=77),
         ):
             from koda.handlers.commands import cmd_dlq
 
             await cmd_dlq(mock_update, mock_context)
             call_text = mock_update.message.reply_text.call_args[0][0]
-            assert "re-queued" in call_text
+            assert "reprocessada com sucesso" in call_text
+            assert "#77" in call_text
 
     @pytest.mark.asyncio
     async def test_dlq_retry_not_eligible(self, mock_update, mock_context):

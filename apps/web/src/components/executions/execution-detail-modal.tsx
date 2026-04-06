@@ -80,10 +80,10 @@ export function ExecutionDetailModal({
             id: data.task_id,
           })}
           className={cn(
-            "app-modal-panel relative flex h-[min(92vh,980px)] w-[min(92vw,1180px)] flex-col overflow-hidden will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "app-modal-panel relative flex h-[min(92vh,980px)] w-[min(92vw,1180px)] flex-col overflow-hidden transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
             presence.isVisible
-              ? "translate-y-0 opacity-100"
-              : "pointer-events-none translate-y-2 opacity-0"
+              ? "opacity-100"
+              : "pointer-events-none opacity-0"
           )}
           style={
             botColor

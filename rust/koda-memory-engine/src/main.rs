@@ -21,7 +21,7 @@ use tokio::fs;
 use tokio::net::UnixListener;
 use tokio_postgres::{Client, NoTls, Row};
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::Server;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 #[derive(Default)]
@@ -65,7 +65,7 @@ const MEMORY_SELECT_SQL: &str = r#"
         COALESCE(n.last_recalled_at::text, '') AS last_recalled_at,
         COALESCE(n.created_at::text, '') AS created_at,
         COALESCE(n.expires_at::text, '') AS expires_at,
-        COALESCE(n.is_active, false) AS is_active,
+        COALESCE(n.is_active, 0) AS is_active,
         COALESCE(n.metadata_json::text, '{}') AS metadata_json,
         COALESCE(n.vector_ref_id, '') AS vector_ref_id,
         COALESCE(
@@ -271,7 +271,7 @@ async fn load_list_curation_payload(agent_id: &str, filters: &Value) -> Result<V
     .await?;
     let cluster_rows = client
         .query(
-            "SELECT conflict_key, memory_count::BIGINT AS memory_count, COALESCE(latest_created_at::text, '') AS latest_created_at FROM memory_clusters WHERE agent_id = $1 ORDER BY latest_created_at DESC LIMIT 200",
+            "SELECT conflict_key, COUNT(*)::BIGINT AS memory_count, COALESCE(MAX(created_at)::text, '') AS latest_created_at FROM napkin_log WHERE agent_id = $1 AND conflict_key IS NOT NULL AND conflict_key != '' GROUP BY conflict_key ORDER BY latest_created_at DESC LIMIT 200",
             &[&agent_id],
         )
         .await
@@ -298,7 +298,7 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
             r#"
             SELECT
                 COUNT(*)::BIGINT AS total_memories,
-                SUM(CASE WHEN is_active = true THEN 1 ELSE 0 END)::BIGINT AS active_memories,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)::BIGINT AS active_memories,
                 SUM(CASE WHEN COALESCE(memory_status, 'active') = 'superseded' THEN 1 ELSE 0 END)::BIGINT AS superseded_memories,
                 SUM(CASE WHEN COALESCE(memory_status, 'active') = 'stale' THEN 1 ELSE 0 END)::BIGINT AS stale_memories,
                 SUM(CASE WHEN COALESCE(memory_status, 'active') = 'invalidated' THEN 1 ELSE 0 END)::BIGINT AS invalidated_memories
@@ -311,21 +311,21 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
         .map_err(|error| Status::internal(format!("failed to query memory summary: {error}")))?;
     let type_rows = client
         .query(
-            "SELECT memory_type, memory_count::BIGINT AS memory_count FROM memory_type_counts WHERE agent_id = $1",
+            "SELECT memory_type, COUNT(*)::BIGINT AS memory_count FROM napkin_log WHERE agent_id = $1 GROUP BY memory_type",
             &[&agent_id],
         )
         .await
         .map_err(|error| Status::internal(format!("failed to query memory type counts: {error}")))?;
     let user_rows = client
         .query(
-            "SELECT user_id::BIGINT AS user_id, memory_count::BIGINT AS memory_count, active_count::BIGINT AS active_count FROM memory_user_counts WHERE agent_id = $1",
+            "SELECT user_id::BIGINT AS user_id, COUNT(*)::BIGINT AS memory_count, SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)::BIGINT AS active_count FROM napkin_log WHERE agent_id = $1 GROUP BY user_id",
             &[&agent_id],
         )
         .await
         .map_err(|error| Status::internal(format!("failed to query memory user counts: {error}")))?;
     let embedding_rows = client
         .query(
-            "SELECT status, job_count::BIGINT AS job_count FROM memory_embedding_job_counts WHERE agent_id = $1",
+            "SELECT embedding_status AS status, COUNT(*)::BIGINT AS job_count FROM napkin_log WHERE agent_id = $1 GROUP BY embedding_status",
             &[&agent_id],
         )
         .await
@@ -339,7 +339,7 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
         .map_err(|error| Status::internal(format!("failed to query memory quality counters: {error}")))?;
     let cluster_rows = client
         .query(
-            "SELECT conflict_key, memory_count::BIGINT AS memory_count, COALESCE(latest_created_at::text, '') AS latest_created_at FROM memory_clusters WHERE agent_id = $1",
+            "SELECT conflict_key, COUNT(*)::BIGINT AS memory_count, COALESCE(MAX(created_at)::text, '') AS latest_created_at FROM napkin_log WHERE agent_id = $1 AND conflict_key IS NOT NULL AND conflict_key != '' GROUP BY conflict_key",
             &[&agent_id],
         )
         .await
@@ -359,7 +359,7 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
                    trust_score, total_considered::BIGINT AS total_considered, total_selected::BIGINT AS total_selected,
                    total_discarded::BIGINT AS total_discarded, conflict_group_count::BIGINT AS conflict_group_count,
                    selected_layers_csv, retrieval_sources_csv, COALESCE(created_at::text, '') AS created_at
-            FROM memory_recall_log
+            FROM memory_recall_audit
             WHERE agent_id = $1
             ORDER BY created_at DESC, id DESC
             LIMIT 12
@@ -373,11 +373,10 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
             r#"
             SELECT operation, memories_affected::BIGINT AS memories_affected, details, COALESCE(executed_at::text, '') AS executed_at
             FROM memory_maintenance_log
-            WHERE agent_id = $1
             ORDER BY executed_at DESC
             LIMIT 12
             "#,
-            &[&agent_id],
+            &[],
         )
         .await
         .map_err(|error| Status::internal(format!("failed to query memory maintenance log: {error}")))?;
@@ -551,7 +550,7 @@ async fn load_curation_detail_payload(
                    trust_score, considered_json::text AS considered_json, selected_json::text AS selected_json,
                    discarded_json::text AS discarded_json, conflicts_json::text AS conflicts_json,
                    explanations_json::text AS explanations_json, COALESCE(created_at::text, '') AS created_at
-            FROM memory_recall_log
+            FROM memory_recall_audit
             WHERE agent_id = $1
             ORDER BY created_at DESC, id DESC
             LIMIT 12
@@ -582,7 +581,10 @@ async fn load_curation_detail_payload(
     }))
 }
 
-async fn execute_action_plan(agent_id: &str, action_json: &Value) -> Result<(i64, Vec<i64>), Status> {
+async fn execute_action_plan(
+    agent_id: &str,
+    action_json: &Value,
+) -> Result<(i64, Vec<i64>), Status> {
     let operations = action_json
         .get("operations")
         .and_then(Value::as_array)
@@ -604,7 +606,7 @@ async fn execute_action_plan(agent_id: &str, action_json: &Value) -> Result<(i64
                 }
                 let updated = client
                     .execute(
-                        "UPDATE napkin_log SET is_active = false WHERE agent_id = $1 AND id = ANY($2::BIGINT[]) AND is_active = true",
+                        "UPDATE napkin_log SET is_active = 0 WHERE agent_id = $1 AND id = ANY($2::BIGINT[]) AND is_active = 1",
                         &[&agent_id, &ids],
                     )
                     .await
@@ -3110,7 +3112,18 @@ async fn serve_target(target: &str) -> Result<()> {
             .await?;
     } else {
         let addr = target.parse()?;
-        Server::builder().add_service(service).serve(addr).await?;
+        let mut server = Server::builder();
+        if let (Ok(cert), Ok(key)) = (
+            std::env::var("GRPC_TLS_SERVER_CERT"),
+            std::env::var("GRPC_TLS_SERVER_KEY"),
+        ) {
+            let cert_pem = std::fs::read_to_string(&cert)?;
+            let key_pem = std::fs::read_to_string(&key)?;
+            let identity = Identity::from_pem(cert_pem, key_pem);
+            let tls = ServerTlsConfig::new().identity(identity);
+            server = server.tls_config(tls)?;
+        }
+        server.add_service(service).serve(addr).await?;
     }
     Ok(())
 }

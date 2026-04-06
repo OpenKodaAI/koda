@@ -366,11 +366,20 @@ def preview_compiled_prompt(
         content = str(documents.get(kind) or "").strip()
         if not content:
             continue
+        # Detect origin from hierarchical markers
+        origin = "agent"
+        if "<!-- origin:workspace -->" in content and "<!-- origin:agent -->" not in content:
+            origin = "workspace"
+        elif "<!-- origin:squad -->" in content and "<!-- origin:agent -->" not in content:
+            origin = "squad"
+        elif "<!-- origin:workspace -->" in content or "<!-- origin:squad -->" in content:
+            origin = "merged"
         segments.append(
             {
                 "segment_id": kind,
                 "runtime_tag": tag,
                 "scope": "agent_contract",
+                "origin": origin,
                 "token_estimate": estimate_tokens(content),
                 "char_count": len(content),
             }

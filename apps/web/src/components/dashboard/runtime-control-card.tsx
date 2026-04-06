@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { ArrowRight, ShieldAlert } from "lucide-react";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
@@ -17,7 +18,7 @@ interface RuntimeControlCardProps {
   selectedBotIds?: string[];
 }
 
-export function RuntimeControlCard({ selectedBotIds }: RuntimeControlCardProps) {
+export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBotIds }: RuntimeControlCardProps) {
   const { t } = useAppI18n();
   const { overviews, loading, connected } = useRuntimeOverview(selectedBotIds);
   const selected = Object.values(overviews);
@@ -105,7 +106,7 @@ export function RuntimeControlCard({ selectedBotIds }: RuntimeControlCardProps) 
                 <p className="text-xs text-[var(--text-tertiary)]">
                   {formatRelativeTime(row.updatedAt)}
                 </p>
-                <ArrowRight className="ml-auto mt-2 h-4 w-4 text-[var(--text-quaternary)] transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight className="ml-auto mt-2 h-4 w-4 text-[var(--text-quaternary)] transition-colors group-hover:text-[var(--text-secondary)]" />
               </div>
             </Link>
           ))
@@ -124,7 +125,7 @@ export function RuntimeControlCard({ selectedBotIds }: RuntimeControlCardProps) 
       ) : null}
     </section>
   );
-}
+});
 
 function RuntimeControlStat({ label, value }: { label: string; value: string }) {
   return (

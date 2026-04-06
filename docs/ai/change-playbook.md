@@ -67,15 +67,24 @@ Run at least these commands after code changes:
 - `ruff format --check .`
 - `mypy koda/ --ignore-missing-imports`
 - `pytest --cov=koda --cov-report=term-missing`
+- `pnpm lint:web`
+- `pnpm test:web`
+- `pnpm build:web`
 
 Run this extra check after AI-doc changes:
 
 - `python3 ../../scripts/generate_repo_map.py --check`
-- `pytest -q ../../tests/test_ai_docs.py ../../tests/test_repo_map.py`
+- `pytest -q ../../tests/test_ai_docs.py ../../tests/test_repo_map.py ../../tests/test_open_source_hygiene.py`
+
+Run these extra checks when the change touches the Rust workspace:
+
+- `cargo fmt --check --manifest-path ../../rust/Cargo.toml`
+- `cargo clippy --manifest-path ../../rust/Cargo.toml --workspace --all-targets -- -D warnings`
+- `cargo test --manifest-path ../../rust/Cargo.toml --workspace`
 
 ## Change The Repo Map
 
 1. Update the relevant AI docs, `AGENTS.md` and `CLAUDE.md` entrypoints, repo-local skills, or tests.
 2. Regenerate the canonical map with `python3 ../../scripts/generate_repo_map.py --write`.
 3. Re-run `python3 ../../scripts/generate_repo_map.py --check`.
-4. Re-run [`../../tests/test_ai_docs.py`](../../tests/test_ai_docs.py) and [`../../tests/test_repo_map.py`](../../tests/test_repo_map.py).
+4. Re-run [`../../tests/test_ai_docs.py`](../../tests/test_ai_docs.py), [`../../tests/test_repo_map.py`](../../tests/test_repo_map.py), and [`../../tests/test_open_source_hygiene.py`](../../tests/test_open_source_hygiene.py).

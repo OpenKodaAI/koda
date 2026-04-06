@@ -24,6 +24,14 @@ export const sidebarCollapsedStorageCodec = createStorageCodec(
   false,
 );
 
+export const THEME_PREFERENCE_STORAGE_KEY = "ui:theme-preference" as const;
+
+export const themePreferenceStorageCodec = createStorageCodec(
+  THEME_PREFERENCE_STORAGE_KEY,
+  z.enum(["system", "light", "dark"]),
+  "system",
+);
+
 export const appTourStorageCodec = createStorageCodec(
   APP_TOUR_STORAGE_KEY,
   z.object({

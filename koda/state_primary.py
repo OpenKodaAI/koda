@@ -28,6 +28,15 @@ def _ensure_bridge_loop() -> asyncio.AbstractEventLoop:
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            # Clear any shared Postgres backends whose pools were created on
+            # transient asyncio.run() loops during bootstrap.  The bridge loop
+            # will lazily create fresh pools bound to THIS persistent loop.
+            try:
+                from koda.knowledge.v2 import common as _k2c
+
+                _k2c._SHARED_POSTGRES_BACKENDS.clear()
+            except Exception:
+                pass
             with _BRIDGE_LOCK:
                 _BRIDGE_LOOP = loop
             ready.set()

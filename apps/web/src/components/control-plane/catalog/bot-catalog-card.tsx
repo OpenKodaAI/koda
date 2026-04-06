@@ -111,11 +111,11 @@ export function BotCatalogCard({
     >
       {isMoving ? (
         <>
-          <div className="pointer-events-none absolute inset-0 rounded-[0.5rem] bg-[rgba(255,255,255,0.028)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
-            <span className="block h-full w-1/3 animate-[botMoveBar_1s_ease-in-out_infinite] rounded-full bg-[rgba(255,255,255,0.68)]" />
+          <div className="pointer-events-none absolute inset-0 rounded-[0.5rem] bg-[var(--surface-hover)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px overflow-hidden rounded-full bg-[var(--border-subtle)]">
+            <span className="block h-full w-1/3 animate-[botMoveBar_1s_ease-in-out_infinite] rounded-full bg-[var(--button-primary-bg)]" />
           </div>
-          <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-[0.5rem] border border-[rgba(255,255,255,0.07)] bg-[rgba(15,15,16,0.9)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)]">
+          <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-[0.5rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)]">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
             {tl("Movendo")}
           </span>
@@ -138,10 +138,7 @@ export function BotCatalogCard({
           <span
             aria-hidden="true"
             className="agent-board-card__status-indicator"
-            style={{
-              backgroundColor: statusColor,
-              boxShadow: `0 0 0 4px color-mix(in srgb, ${statusColor} 14%, transparent)`,
-            }}
+            style={{ backgroundColor: statusColor }}
           />
           <span className="sr-only">
             {tl("Status")}: {readableStatus}
@@ -154,7 +151,7 @@ export function BotCatalogCard({
               <h3 className="min-w-0">
                 <Link
                   href={`/control-plane/bots/${bot.id}`}
-                  className="block min-w-0 truncate whitespace-nowrap text-[1rem] font-semibold leading-tight tracking-[-0.03em] text-[var(--text-primary)] transition-opacity duration-200 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(255,255,255,0.14)] focus-visible:ring-offset-0 group-hover:opacity-100"
+                  className="block min-w-0 truncate whitespace-nowrap text-[1rem] font-semibold leading-tight tracking-[-0.03em] text-[var(--text-primary)] transition-opacity duration-200 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0 group-hover:opacity-100"
                   title={bot.display_name}
                 >
                   <span className="block">
@@ -163,7 +160,7 @@ export function BotCatalogCard({
                 </Link>
               </h3>
               <p
-                className="truncate whitespace-nowrap text-[0.92rem] leading-6 text-[rgba(255,255,255,0.5)]"
+                className="truncate whitespace-nowrap text-[0.92rem] leading-6 text-[var(--text-secondary)]"
                 title={defaultModel}
               >
                 {defaultModel}
@@ -198,7 +195,7 @@ export function BotCatalogCard({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 4 }}
                     transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-                    className="agent-board-card__menu"
+                    className="app-floating-surface agent-board-card__menu"
                     role="menu"
                     onPointerDown={(event) => event.stopPropagation()}
                   >

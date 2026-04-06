@@ -85,10 +85,23 @@ describe("control-plane-editor helpers", () => {
       memoryPolicyJson: JSON.stringify({ profile: { max_items_per_turn: 4 } }),
       knowledgePolicyJson: JSON.stringify({ retrieval_mode: "grounded" }),
       autonomyPolicyJson: JSON.stringify({ default_approval_mode: "guarded" }),
+      executionPolicyJson: JSON.stringify({
+        version: 1,
+        rules: [
+          {
+            name: "allow-read",
+            priority: 10,
+            match: { tool_id: "web_search" },
+            decision: "allow",
+          },
+        ],
+      }),
       resourceAccessPolicyJson: JSON.stringify({ allowed_global_secret_keys: ["OPENAI_API_KEY"] }),
       voicePolicyJson: JSON.stringify({ mode: "tts" }),
       imageAnalysisPolicyJson: JSON.stringify({ fallback_behavior: "describe" }),
       memoryExtractionSchemaJson: JSON.stringify({ template: "{query} {response} {max_items}" }),
+      skillPolicyJson: JSON.stringify({ enabled: true }),
+      customSkillsJson: JSON.stringify([{ id: "s1", name: "test-skill" }]),
     });
 
     expect(payload.mission_profile).toEqual({ mission: "Resolver tickets" });
@@ -98,11 +111,43 @@ describe("control-plane-editor helpers", () => {
     expect(payload.autonomy_policy).toEqual({
       default_approval_mode: "guarded",
     });
+    expect(payload.execution_policy).toEqual({
+      version: 1,
+      rules: [
+        {
+          name: "allow-read",
+          priority: 10,
+          match: { tool_id: "web_search" },
+          decision: "allow",
+        },
+      ],
+    });
     expect(payload.resource_access_policy).toEqual({
       allowed_global_secret_keys: ["OPENAI_API_KEY"],
     });
     expect(payload.memory_extraction_schema).toEqual({
       template: "{query} {response} {max_items}",
     });
+  });
+
+  it("omits execution policy when the editor leaves it unset", () => {
+    const payload = buildAgentSpecPayload({
+      missionProfileJson: "{}",
+      interactionStyleJson: "{}",
+      operatingInstructionsJson: "{}",
+      hardRulesJson: "{}",
+      responsePolicyJson: "{}",
+      modelPolicyJson: "{}",
+      toolPolicyJson: "{}",
+      memoryPolicyJson: "{}",
+      knowledgePolicyJson: "{}",
+      autonomyPolicyJson: "{}",
+      resourceAccessPolicyJson: "{}",
+      voicePolicyJson: "{}",
+      imageAnalysisPolicyJson: "{}",
+      memoryExtractionSchemaJson: "{}",
+    });
+
+    expect(payload).not.toHaveProperty("execution_policy");
   });
 });

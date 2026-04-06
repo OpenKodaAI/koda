@@ -6,7 +6,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 import { getTierQueryOptions } from "@/lib/query/options";
-import type { CostInsightsResponse, DLQEntry, ExecutionSummary, SessionSummary } from "@/lib/types";
+import type { CostInsightsResponse, DLQEntry, ExecutionSummary } from "@/lib/types";
 
 export function usePrefetchRouteData() {
   const queryClient = useContext(QueryClientContext);
@@ -75,20 +75,6 @@ export function usePrefetchRouteData() {
               fetchControlPlaneDashboardJson<DLQEntry[]>("/dlq", {
                 params: { limit: 100 },
                 fallbackError: "Unable to prefetch DLQ.",
-              }),
-          }),
-        );
-      }
-
-      if (href === "/sessions") {
-        prefetchers.push(
-          queryClient.prefetchQuery({
-            ...getTierQueryOptions("live"),
-            queryKey: queryKeys.dashboard.sessions({ limit: 200 }),
-            queryFn: () =>
-              fetchControlPlaneDashboardJson<SessionSummary[]>("/sessions", {
-                params: { limit: 200 },
-                fallbackError: "Unable to prefetch sessions.",
               }),
           }),
         );

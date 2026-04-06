@@ -18,6 +18,7 @@ Use this index when you want to install, operate, evaluate, or contribute to Kod
 
 - [Architecture overview](architecture/overview.md)
 - [Runtime architecture](architecture/runtime.md)
+- [Security readiness](security/README.md)
 - [Object storage migration](install/object-storage-migration.md)
 - [`docs/openapi/control-plane.json`](openapi/control-plane.json)
 

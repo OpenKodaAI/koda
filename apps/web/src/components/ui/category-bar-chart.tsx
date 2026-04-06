@@ -66,15 +66,12 @@ export function CategoryBarChart({
   return (
     <Card
       className={cn(
-        "flex h-full w-full flex-col gap-0 rounded-[18px] border-[rgba(255,255,255,0.06)] bg-[rgba(8,8,9,0.88)] p-5 shadow-none",
+        "flex h-full w-full flex-col gap-0 rounded-[18px] border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-5 shadow-none",
         className
       )}
-      style={{
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 44px rgba(0,0,0,0.2)",
-      }}
       {...props}
     >
-      <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[rgba(255,255,255,0.06)] p-0 pb-4">
+      <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[var(--border-subtle)] p-0 pb-4">
         <CardTitle className="text-base font-medium text-[var(--text-secondary)]">{heading}</CardTitle>
         {controls ? <div className="shrink-0">{controls}</div> : null}
       </CardHeader>
@@ -82,7 +79,7 @@ export function CategoryBarChart({
       <CardContent className="flex flex-col gap-4 p-0 pt-4">
         <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgba(255,255,255,0.35)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
               {totalLabel}
             </p>
             <div className="mt-1 text-[1.85rem] font-semibold leading-none tracking-[-0.05em] text-[var(--text-primary)]">
@@ -93,7 +90,7 @@ export function CategoryBarChart({
         </div>
 
         {startLabel || endLabel ? (
-          <div className="flex items-baseline justify-between gap-3 text-xs text-[rgba(255,255,255,0.42)]">
+          <div className="flex items-baseline justify-between gap-3 text-xs text-[var(--text-tertiary)]">
             <span className="truncate">{startLabel}</span>
             <span className="truncate text-right">{endLabel}</span>
           </div>
@@ -124,23 +121,25 @@ export function CategoryBarChart({
                       <div
                         className={cn(
                           "h-full rounded-sm transition-all",
-                          active ? "ring-1 ring-white/20" : ""
+                          active ? "ring-1 ring-[color-mix(in_srgb,var(--text-primary)_18%,transparent)]" : ""
                         )}
                         style={{
                           background: `linear-gradient(135deg, ${item.color} 0%, color-mix(in srgb, ${item.color} 75%, white 12%) 100%)`,
-                          boxShadow: active ? `0 10px 24px color-mix(in srgb, ${item.color} 28%, transparent)` : "none",
                         }}
                       />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent sideOffset={6} className="border-[rgba(255,255,255,0.08)] bg-[rgba(17,18,20,0.84)] text-white">
-                    <p className="text-xs text-[rgba(255,255,255,0.72)]">
+                  <TooltipContent
+                    sideOffset={6}
+                    className="border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]"
+                  >
+                    <p className="text-xs text-[var(--text-secondary)]">
                       {item.label} ·{" "}
-                      <span className="font-medium tracking-[-0.01em] text-white">
+                      <span className="font-medium tracking-[-0.01em] text-[var(--text-primary)]">
                         {item.share.toFixed(1)}%
                       </span>
                     </p>
-                    <p className="mt-1 text-xs text-[rgba(255,255,255,0.6)]">
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                       {item.meta ?? tl("Participação no recorte")}
                     </p>
                   </TooltipContent>
@@ -152,8 +151,8 @@ export function CategoryBarChart({
 
         {footer ? (
           <>
-            <Separator className="bg-[rgba(255,255,255,0.06)]" />
-            <p className="text-xs leading-5 text-[rgba(255,255,255,0.48)]">{footer}</p>
+            <Separator className="bg-[var(--border-subtle)]" />
+            <p className="text-xs leading-5 text-[var(--text-tertiary)]">{footer}</p>
           </>
         ) : null}
       </CardContent>

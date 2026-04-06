@@ -2,7 +2,9 @@
 
 import React, {
   createContext,
+  useCallback,
   useContext,
+  useMemo,
   useReducer,
   useEffect,
   type ReactNode,
@@ -23,10 +25,13 @@ import type {
   ControlPlaneBot,
   ControlPlaneCompiledPrompt,
   ControlPlaneCoreCapabilities,
+  ControlPlaneCoreIntegrations,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
+  ControlPlaneExecutionPolicyPayload,
   ControlPlaneSystemSettings,
   ControlPlaneCoreTools,
+  ScopePromptDocuments,
   ControlPlaneWorkspaceTree,
 } from "@/lib/control-plane";
 
@@ -63,10 +68,14 @@ export type EditorState = {
   memoryPolicyJson: string;
   knowledgePolicyJson: string;
   autonomyPolicyJson: string;
+  executionPolicyJson: string;
+  executionPolicyPayload: ControlPlaneExecutionPolicyPayload | null;
   resourceAccessPolicyJson: string;
   voicePolicyJson: string;
   imageAnalysisPolicyJson: string;
   memoryExtractionSchemaJson: string;
+  skillPolicyJson: string;
+  customSkillsJson: string;
   // Sections
   sectionsJson: string;
   // Collections
@@ -89,6 +98,7 @@ export type EditorState = {
   runbooksJson: string;
   candidateActionId: string;
   runbookActionId: string;
+  executionPolicyDirty: boolean;
   // Dirty tracking
   dirty: Record<string, boolean>;
 };
@@ -113,7 +123,12 @@ type EditorAction =
   | { type: "setCompiledPrompt"; value: string }
   | { type: "setCompiledPromptPayload"; value: ControlPlaneCompiledPrompt | null }
   | { type: "setValidationJson"; value: string }
-  | { type: "hydrateBot"; bot: ControlPlaneBot; compiledPromptPayload?: ControlPlaneCompiledPrompt | null };
+  | {
+      type: "hydrateBot";
+      bot: ControlPlaneBot;
+      compiledPromptPayload?: ControlPlaneCompiledPrompt | null;
+      executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null;
+    };
 
 // ---------------------------------------------------------------------------
 // Dirty-section mapping
@@ -146,6 +161,7 @@ const AGENT_SPEC_FIELDS = new Set<string>([
   "memoryPolicyJson",
   "knowledgePolicyJson",
   "autonomyPolicyJson",
+  "executionPolicyJson",
   "resourceAccessPolicyJson",
   "voicePolicyJson",
   "imageAnalysisPolicyJson",
@@ -196,6 +212,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         ...state,
         [action.key]: action.value,
         dirty: { ...state.dirty, agentSpec: true },
+        ...(action.key === "executionPolicyJson" ? { executionPolicyDirty: true } : {}),
       };
     }
 
@@ -246,7 +263,11 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
     }
 
     case "hydrateBot": {
-      const nextState = buildInitialState(action.bot, action.compiledPromptPayload);
+      const nextState = buildInitialState(
+        action.bot,
+        action.compiledPromptPayload,
+        action.executionPolicyPayload,
+      );
       return {
         ...nextState,
         secretKey: state.secretKey,
@@ -299,10 +320,14 @@ function normalizeCompiledPromptPayload(
 function buildInitialState(
   bot: ControlPlaneBot,
   compiledPromptPayload?: ControlPlaneCompiledPrompt | null,
+  executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null,
 ): EditorState {
   const rt = bot.runtime_endpoint as Record<string, unknown>;
   const spec = bot.agent_spec as Record<string, unknown>;
   const normalizedCompiledPromptPayload = normalizeCompiledPromptPayload(bot, compiledPromptPayload);
+  const normalizedExecutionPolicyPayload = executionPolicyPayload ?? null;
+  const effectiveExecutionPolicy =
+    normalizedExecutionPolicyPayload?.policy ?? (spec.execution_policy as Record<string, unknown> | undefined) ?? {};
 
   return {
     bot,
@@ -333,10 +358,14 @@ function buildInitialState(
     memoryPolicyJson: prettyJson(spec.memory_policy ?? {}),
     knowledgePolicyJson: prettyJson(spec.knowledge_policy ?? {}),
     autonomyPolicyJson: prettyJson(spec.autonomy_policy ?? {}),
+    executionPolicyJson: prettyJson(effectiveExecutionPolicy),
+    executionPolicyPayload: normalizedExecutionPolicyPayload,
     resourceAccessPolicyJson: prettyJson(spec.resource_access_policy ?? {}),
     voicePolicyJson: prettyJson(spec.voice_policy ?? {}),
     imageAnalysisPolicyJson: prettyJson(spec.image_analysis_policy ?? {}),
     memoryExtractionSchemaJson: prettyJson(spec.memory_extraction_schema ?? {}),
+    skillPolicyJson: prettyJson(spec.skill_policy ?? {}),
+    customSkillsJson: prettyJson(spec.custom_skills ?? []),
     // Sections
     sectionsJson: prettyJson(bot.sections),
     // Collections
@@ -359,6 +388,7 @@ function buildInitialState(
     runbooksJson: prettyJson(bot.runbooks ?? []),
     candidateActionId: "",
     runbookActionId: "",
+    executionPolicyDirty: false,
     // Dirty
     dirty: {
       meta: false,
@@ -374,6 +404,14 @@ function buildInitialState(
 // Context
 // ---------------------------------------------------------------------------
 
+export type InheritedSpecs = {
+  workspaceDocuments: ScopePromptDocuments;
+  workspaceSystemPrompt: string;
+  squadDocuments: ScopePromptDocuments;
+  squadSystemPrompt: string;
+  loading: boolean;
+};
+
 type BotEditorContextValue = {
   state: EditorState;
   developerMode: boolean;
@@ -383,9 +421,11 @@ type BotEditorContextValue = {
     providers: ControlPlaneCoreProviders;
     policies: ControlPlaneCorePolicies;
     capabilities: ControlPlaneCoreCapabilities;
+    integrations?: ControlPlaneCoreIntegrations;
   };
   workspaces: ControlPlaneWorkspaceTree;
   systemSettings: ControlPlaneSystemSettings;
+  inherited: InheritedSpecs;
   dispatch: React.Dispatch<EditorAction>;
   updateField: (field: keyof EditorState, value: unknown) => void;
   updateDocument: (key: string, value: string) => void;
@@ -396,6 +436,7 @@ type BotEditorContextValue = {
   setCompiledPrompt: (value: string) => void;
   setCompiledPromptPayload: (value: ControlPlaneCompiledPrompt | null) => void;
   setValidationJson: (value: string) => void;
+  executionPolicyPayload: ControlPlaneExecutionPolicyPayload | null;
   refreshCompiledPrompt: () => Promise<ControlPlaneCompiledPrompt>;
   discardDraft: () => void;
   persistDraft: (options?: PersistDraftOptions) => Promise<{ persisted: string[] }>;
@@ -422,6 +463,7 @@ async function requestJson<T = unknown>(path: string, init: RequestInit = {}): P
 export function BotEditorProvider({
   bot,
   compiledPromptPayload,
+  executionPolicyPayload,
   core,
   workspaces,
   systemSettings,
@@ -429,11 +471,13 @@ export function BotEditorProvider({
 }: {
   bot: ControlPlaneBot;
   compiledPromptPayload?: ControlPlaneCompiledPrompt | null;
+  executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null;
   core: {
     tools: ControlPlaneCoreTools;
     providers: ControlPlaneCoreProviders;
     policies: ControlPlaneCorePolicies;
     capabilities: ControlPlaneCoreCapabilities;
+    integrations?: ControlPlaneCoreIntegrations;
   };
   workspaces: ControlPlaneWorkspaceTree;
   systemSettings: ControlPlaneSystemSettings;
@@ -441,62 +485,181 @@ export function BotEditorProvider({
 }) {
   const [state, dispatch] = useReducer(
     reducer,
-    { bot, compiledPromptPayload },
-    ({ bot: initialBot, compiledPromptPayload: initialCompiledPromptPayload }) =>
-      buildInitialState(initialBot, initialCompiledPromptPayload),
+    { bot, compiledPromptPayload, executionPolicyPayload },
+    ({
+      bot: initialBot,
+      compiledPromptPayload: initialCompiledPromptPayload,
+      executionPolicyPayload: initialExecutionPolicyPayload,
+    }) =>
+      buildInitialState(
+        initialBot,
+        initialCompiledPromptPayload,
+        initialExecutionPolicyPayload,
+      ),
   );
   const [developerMode, setDeveloperMode] = useLocalStorage<boolean>(
     "ui:bot-editor:developer-mode",
     false,
   );
 
+  // Inherited workspace / squad specs
+  const [inherited, setInherited] = React.useState<InheritedSpecs>({
+    workspaceDocuments: {},
+    workspaceSystemPrompt: "",
+    squadDocuments: {},
+    squadSystemPrompt: "",
+    loading: false,
+  });
+
   useEffect(() => {
-    dispatch({ type: "hydrateBot", bot, compiledPromptPayload });
-  }, [bot, compiledPromptPayload]);
+    dispatch({ type: "hydrateBot", bot, compiledPromptPayload, executionPolicyPayload });
+  }, [bot, compiledPromptPayload, executionPolicyPayload]);
 
-  const updateField = (field: keyof EditorState, value: unknown) =>
-    dispatch({ type: "updateField", field, value });
+  // Fetch workspace and squad specs when the bot's organization changes
+  useEffect(() => {
+    const workspaceId = bot.organization?.workspace_id;
+    const squadId = bot.organization?.squad_id;
+    let cancelled = false;
 
-  const updateDocument = (key: string, value: string) =>
-    dispatch({ type: "updateDocument", key, value });
+    const fetchSpecs = async () => {
+      if (!workspaceId) {
+        if (!cancelled) {
+          setInherited({
+            workspaceDocuments: {},
+            workspaceSystemPrompt: "",
+            squadDocuments: {},
+            squadSystemPrompt: "",
+            loading: false,
+          });
+        }
+        return;
+      }
 
-  const updateAgentSpecField = (key: string, value: string) =>
-    dispatch({ type: "updateAgentSpecField", key, value });
+      if (!cancelled) {
+        setInherited((prev) => ({ ...prev, loading: true }));
+      }
 
-  const updateSectionJson = (value: string) =>
-    dispatch({ type: "updateSectionJson", value });
+      let workspaceDocuments: ScopePromptDocuments = {};
+      let workspaceSystemPrompt = "";
+      let squadDocuments: ScopePromptDocuments = {};
+      let squadSystemPrompt = "";
 
-  const updateCollectionJson = (kind: string, value: string) =>
-    dispatch({ type: "updateCollectionJson", kind, value });
+      try {
+        const wsResult = await requestJson<{
+          documents: ScopePromptDocuments;
+        }>(`/api/control-plane/workspaces/${workspaceId}/spec`);
+        workspaceDocuments = wsResult.documents ?? {};
+        workspaceSystemPrompt = String(wsResult.documents?.system_prompt_md || "");
+      } catch {
+        // Workspace prompt not available.
+      }
 
-  const resetDirty = (section: string) =>
-    dispatch({ type: "resetDirty", section });
+      if (squadId) {
+        try {
+          const sqResult = await requestJson<{
+            documents: ScopePromptDocuments;
+          }>(
+            `/api/control-plane/workspaces/${workspaceId}/squads/${squadId}/spec`,
+          );
+          squadDocuments = sqResult.documents ?? {};
+          squadSystemPrompt = String(sqResult.documents?.system_prompt_md || "");
+        } catch {
+          // Squad prompt not available.
+        }
+      }
 
-  const setCompiledPrompt = (value: string) =>
-    dispatch({ type: "setCompiledPrompt", value });
+      if (!cancelled) {
+        setInherited({
+          workspaceDocuments,
+          workspaceSystemPrompt,
+          squadDocuments,
+          squadSystemPrompt,
+          loading: false,
+        });
+      }
+    };
 
-  const setCompiledPromptPayload = (value: ControlPlaneCompiledPrompt | null) =>
-    dispatch({ type: "setCompiledPromptPayload", value });
+    void fetchSpecs();
 
-  const setValidationJson = (value: string) =>
-    dispatch({ type: "setValidationJson", value });
+    return () => {
+      cancelled = true;
+    };
+  }, [bot.organization?.workspace_id, bot.organization?.squad_id]);
 
-  const discardDraft = () =>
-    dispatch({
-      type: "hydrateBot",
-      bot: state.bot,
-      compiledPromptPayload: state.compiledPromptPayload,
-    });
+  const updateField = useCallback(
+    (field: keyof EditorState, value: unknown) =>
+      dispatch({ type: "updateField", field, value }),
+    [dispatch],
+  );
 
-  const refreshCompiledPrompt = async () => {
+  const updateDocument = useCallback(
+    (key: string, value: string) =>
+      dispatch({ type: "updateDocument", key, value }),
+    [dispatch],
+  );
+
+  const updateAgentSpecField = useCallback(
+    (key: string, value: string) =>
+      dispatch({ type: "updateAgentSpecField", key, value }),
+    [dispatch],
+  );
+
+  const updateSectionJson = useCallback(
+    (value: string) =>
+      dispatch({ type: "updateSectionJson", value }),
+    [dispatch],
+  );
+
+  const updateCollectionJson = useCallback(
+    (kind: string, value: string) =>
+      dispatch({ type: "updateCollectionJson", kind, value }),
+    [dispatch],
+  );
+
+  const resetDirty = useCallback(
+    (section: string) =>
+      dispatch({ type: "resetDirty", section }),
+    [dispatch],
+  );
+
+  const setCompiledPrompt = useCallback(
+    (value: string) =>
+      dispatch({ type: "setCompiledPrompt", value }),
+    [dispatch],
+  );
+
+  const setCompiledPromptPayload = useCallback(
+    (value: ControlPlaneCompiledPrompt | null) =>
+      dispatch({ type: "setCompiledPromptPayload", value }),
+    [dispatch],
+  );
+
+  const setValidationJson = useCallback(
+    (value: string) =>
+      dispatch({ type: "setValidationJson", value }),
+    [dispatch],
+  );
+
+  const discardDraft = useCallback(
+    () =>
+      dispatch({
+        type: "hydrateBot",
+        bot: state.bot,
+        compiledPromptPayload: state.compiledPromptPayload,
+        executionPolicyPayload: state.executionPolicyPayload,
+      }),
+    [dispatch, state.bot, state.compiledPromptPayload, state.executionPolicyPayload],
+  );
+
+  const refreshCompiledPrompt = useCallback(async () => {
     const payload = await requestJson<ControlPlaneCompiledPrompt>(
       `/api/control-plane/agents/${state.bot.id}/compiled-prompt`,
     );
     dispatch({ type: "setCompiledPromptPayload", value: payload });
     return payload;
-  };
+  }, [dispatch, state.bot.id]);
 
-  const persistDraft = async (options: PersistDraftOptions = {}) => {
+  const persistDraft = useCallback(async (options: PersistDraftOptions = {}) => {
     const includeMeta = options.includeMeta ?? state.dirty.meta;
     const includeAgentSpec =
       options.includeAgentSpec ?? (state.dirty.agentSpec || state.dirty.documents);
@@ -550,6 +713,9 @@ export function BotEditorProvider({
           voicePolicyJson: state.voicePolicyJson,
           imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,
           memoryExtractionSchemaJson: state.memoryExtractionSchemaJson,
+          executionPolicyJson: state.executionPolicyDirty
+            ? state.executionPolicyJson
+            : undefined,
         }),
         documents: { ...state.documents },
       };
@@ -625,6 +791,7 @@ export function BotEditorProvider({
     if (persisted.length > 0) {
       const freshBot = await requestJson(`/api/control-plane/agents/${botId}`);
       let nextCompiledPromptPayload = state.compiledPromptPayload;
+      let nextExecutionPolicyPayload = state.executionPolicyPayload;
       if (includeAgentSpec) {
         try {
           nextCompiledPromptPayload = await requestJson<ControlPlaneCompiledPrompt>(
@@ -633,24 +800,55 @@ export function BotEditorProvider({
         } catch {
           nextCompiledPromptPayload = state.compiledPromptPayload;
         }
+        try {
+          nextExecutionPolicyPayload = await requestJson<ControlPlaneExecutionPolicyPayload>(
+            `/api/control-plane/agents/${botId}/execution-policy`,
+          );
+        } catch {
+          nextExecutionPolicyPayload = state.executionPolicyPayload;
+        }
       }
       dispatch({
         type: "hydrateBot",
         bot: freshBot as ControlPlaneBot,
         compiledPromptPayload: nextCompiledPromptPayload,
+        executionPolicyPayload: nextExecutionPolicyPayload,
       });
     }
 
     return { persisted };
-  };
+  }, [state, core.providers, dispatch]);
 
-  const value: BotEditorContextValue = {
+  const value = useMemo<BotEditorContextValue>(() => ({
     state,
     developerMode,
     setDeveloperMode,
     core,
     workspaces,
     systemSettings,
+    inherited,
+    dispatch,
+    updateField,
+    updateDocument,
+    updateAgentSpecField,
+    updateSectionJson,
+    updateCollectionJson,
+    resetDirty,
+    setCompiledPrompt,
+    setCompiledPromptPayload,
+    setValidationJson,
+    executionPolicyPayload: state.executionPolicyPayload,
+    refreshCompiledPrompt,
+    discardDraft,
+    persistDraft,
+  }), [
+    state,
+    developerMode,
+    setDeveloperMode,
+    core,
+    workspaces,
+    systemSettings,
+    inherited,
     dispatch,
     updateField,
     updateDocument,
@@ -664,7 +862,7 @@ export function BotEditorProvider({
     refreshCompiledPrompt,
     discardDraft,
     persistDraft,
-  };
+  ]);
 
   return React.createElement(BotEditorContext.Provider, { value }, children);
 }

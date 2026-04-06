@@ -4,7 +4,7 @@ import asyncio
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import koda.config as config_module
@@ -351,6 +351,40 @@ def emit_execution_trace(
             details=details,
         )
     )
+
+
+async def cleanup_expired_audit_events() -> int:
+    """Delete audit events older than ``AUDIT_RETENTION_DAYS``.
+
+    Returns the number of deleted rows, or ``0`` when the backend does not
+    support retention cleanup.
+    """
+    backend = _primary_audit_backend()
+    if backend is None:
+        log.warning("audit_cleanup_skipped: no primary backend available")
+        return 0
+
+    retention_days: int = config_module.AUDIT_RETENTION_DAYS
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    cutoff_iso = cutoff.isoformat()
+
+    cleanup_fn = getattr(backend, "delete_audit_events_before", None)
+    if cleanup_fn is None:
+        log.warning("audit_cleanup_skipped: backend does not implement delete_audit_events_before")
+        return 0
+
+    try:
+        deleted: int = await cleanup_fn(cutoff_iso)
+        log.info(
+            "audit_cleanup_completed",
+            retention_days=retention_days,
+            cutoff=cutoff_iso,
+            deleted=deleted,
+        )
+        return deleted
+    except Exception:
+        log.warning("audit_cleanup_failed", exc_info=True)
+        return 0
 
 
 def get_audit_log(

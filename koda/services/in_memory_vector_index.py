@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import heapq
+import logging
 import math
 from typing import Any, cast
+
+logger = logging.getLogger(__name__)
+
+_MAX_COLLECTION_SIZE = 50_000
 
 
 def _coerce_embedding(value: Any) -> list[float]:
@@ -75,6 +81,18 @@ class InMemoryVectorCollection:
                 "document": str(document or ""),
                 "metadata": dict(metadata or {}),
             }
+        if len(self._rows) > _MAX_COLLECTION_SIZE:
+            overflow = len(self._rows) - _MAX_COLLECTION_SIZE
+            logger.warning(
+                "InMemoryVectorCollection '%s' exceeded size limit (%d > %d); evicting %d oldest entries",
+                self.name,
+                len(self._rows) + overflow,  # size before eviction (already added)
+                _MAX_COLLECTION_SIZE,
+                overflow,
+            )
+            keys_to_remove = list(self._rows.keys())[:overflow]
+            for key in keys_to_remove:
+                del self._rows[key]
 
     def delete(self, *, ids: list[str] | None = None, where: dict[str, Any] | None = None) -> None:
         if ids:
@@ -104,7 +122,8 @@ class InMemoryVectorCollection:
         documents_payload: list[list[str]] = []
         for query_embedding in query_embeddings:
             query_vector = _coerce_embedding(query_embedding)
-            scored = sorted(
+            scored = heapq.nsmallest(
+                max(0, n_results),
                 (
                     (
                         _cosine_distance(query_vector, cast(list[float], row["embedding"])),
@@ -114,7 +133,7 @@ class InMemoryVectorCollection:
                     for row_id, row in candidates
                 ),
                 key=lambda item: (item[0], item[1]),
-            )[: max(0, n_results)]
+            )
             ids_payload.append([row_id for _, row_id, _ in scored])
             distances_payload.append([distance for distance, _, _ in scored])
             metadatas_payload.append([dict(row.get("metadata") or {}) for _, _, row in scored])

@@ -111,10 +111,13 @@ export function TabInfraestrutura() {
         memoryPolicyJson: state.memoryPolicyJson,
         knowledgePolicyJson: state.knowledgePolicyJson,
         autonomyPolicyJson: state.autonomyPolicyJson,
+        executionPolicyJson: state.executionPolicyJson,
         resourceAccessPolicyJson: state.resourceAccessPolicyJson,
         voicePolicyJson: state.voicePolicyJson,
         imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,
         memoryExtractionSchemaJson: state.memoryExtractionSchemaJson,
+        skillPolicyJson: state.skillPolicyJson,
+        customSkillsJson: state.customSkillsJson,
       });
 
       const specPromise = requestJson(

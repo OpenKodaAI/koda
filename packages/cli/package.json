@@ -1,0 +1,17 @@
+{
+  "name": "koda",
+  "version": "1.0.0",
+  "description": "Official Koda Docker-first installer and lifecycle CLI",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "koda": "./bin/koda.mjs"
+  },
+  "files": [
+    "bin",
+    "release"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

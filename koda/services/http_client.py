@@ -1,5 +1,6 @@
 """HTTP client with SSRF protection for search, fetch, and requests."""
 
+import asyncio
 import ipaddress
 import re
 import socket
@@ -29,6 +30,47 @@ _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 _USER_AGENT = "Koda/1.0"
 
 
+class _SessionHolder:
+    """Lazily creates and reuses a single :class:`aiohttp.ClientSession` with connection pooling.
+
+    The double-checked locking pattern is safe here because the code runs on a
+    single-threaded asyncio event loop — no preemptive interleaving between the
+    outer check and the lock acquisition.  Do **not** use from multiple OS threads.
+    """
+
+    def __init__(self) -> None:
+        self._session: aiohttp.ClientSession | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            async with self._lock:
+                if self._session is None or self._session.closed:
+                    self._session = aiohttp.ClientSession(
+                        timeout=_REQUEST_TIMEOUT,
+                        connector=aiohttp.TCPConnector(limit=20, ttl_dns_cache=300),
+                    )
+        return self._session
+
+    async def close(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+
+_holder = _SessionHolder()
+
+
+async def _get_session() -> aiohttp.ClientSession:
+    """Return the shared :class:`aiohttp.ClientSession`."""
+    return await _holder.get()
+
+
+async def close_session() -> None:
+    """Close the shared HTTP session.  Call during graceful shutdown."""
+    await _holder.close()
+
+
 @dataclass(slots=True)
 class UrlMetadata:
     """Safe metadata for a public URL after redirect resolution."""
@@ -48,7 +90,7 @@ def _is_private_ip(ip_str: str) -> bool:
     return any(addr in network for network in _SSRF_BLOCKED_RANGES)
 
 
-def _check_url_safety(url: str) -> str | None:
+def _check_url_safety(url: str, *, allow_private: bool = False) -> str | None:
     """Validate URL for SSRF. Returns error message or None if safe."""
     parsed = urlparse(url)
 
@@ -62,112 +104,122 @@ def _check_url_safety(url: str) -> str | None:
     # Resolve hostname to check IP
     try:
         infos = socket.getaddrinfo(hostname, None)
-        for info in infos:
-            ip_str = str(info[4][0])
-            if _is_private_ip(ip_str):
-                log.warning("ssrf_blocked", url=url, ip=ip_str)
-                return "Blocked: URL resolves to a private/reserved IP address."
+        if allow_private:
+            private_only = True
+            for info in infos:
+                ip_str = str(info[4][0])
+                if not _is_private_ip(ip_str):
+                    private_only = False
+                    break
+            if private_only:
+                return None
+        else:
+            for info in infos:
+                ip_str = str(info[4][0])
+                if _is_private_ip(ip_str):
+                    log.warning("ssrf_blocked", url=url, ip=ip_str)
+                    return "Blocked: URL resolves to a private/reserved IP address."
     except socket.gaierror:
         return f"Could not resolve hostname: {hostname}"
 
     return None
 
 
-async def fetch_url(url: str, *, max_size: int = _MAX_RESPONSE_SIZE) -> str:
+async def fetch_url(url: str, *, max_size: int = _MAX_RESPONSE_SIZE, allow_private: bool = False) -> str:
     """Fetch a URL and return its text content.
 
     Returns the response text or an error message prefixed with 'Error:'.
     """
-    safety_error = _check_url_safety(url)
+    safety_error = _check_url_safety(url, allow_private=allow_private)
     if safety_error:
         return f"Error: {safety_error}"
 
     try:
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
-            resp = await _safe_request(session, "GET", url)
-            if isinstance(resp, str):
-                return f"Error: {resp}"
-            try:
-                if resp.status >= 400:
-                    return f"Error: HTTP {resp.status}"
-                text = cast(str, await resp.text(encoding="utf-8", errors="replace"))
-                if len(text) > max_size:
-                    text = text[:max_size] + "\n... (truncated)"
-                return text
-            finally:
-                resp.release()
+        session = await _get_session()
+        resp = await _safe_request(session, "GET", url, allow_private=allow_private)
+        if isinstance(resp, str):
+            return f"Error: {resp}"
+        try:
+            if resp.status >= 400:
+                return f"Error: HTTP {resp.status}"
+            text = cast(str, await resp.text(encoding="utf-8", errors="replace"))
+            if len(text) > max_size:
+                text = text[:max_size] + "\n... (truncated)"
+            return text
+        finally:
+            resp.release()
     except TimeoutError:
         return "Error: Request timed out."
     except Exception as e:
         return f"Error: {e}"
 
 
-async def inspect_url(url: str) -> UrlMetadata | str:
+async def inspect_url(url: str, *, allow_private: bool = False) -> UrlMetadata | str:
     """Resolve redirects safely and return basic metadata without downloading the full body."""
-    safety_error = _check_url_safety(url)
+    safety_error = _check_url_safety(url, allow_private=allow_private)
     if safety_error:
         return f"Error: {safety_error}"
 
     try:
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
-            resp = await _safe_request(session, "GET", url)
-            if isinstance(resp, str):
-                return f"Error: {resp}"
+        session = await _get_session()
+        resp = await _safe_request(session, "GET", url, allow_private=allow_private)
+        if isinstance(resp, str):
+            return f"Error: {resp}"
+        try:
+            final_url = str(resp.url)
+            content_type = resp.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            content_length_raw = resp.headers.get("Content-Length")
             try:
-                final_url = str(resp.url)
-                content_type = resp.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                content_length_raw = resp.headers.get("Content-Length")
-                try:
-                    content_length = int(content_length_raw) if content_length_raw else None
-                except ValueError:
-                    content_length = None
-                return UrlMetadata(
-                    final_url=final_url,
-                    content_type=content_type,
-                    content_length=content_length,
-                    status=resp.status,
-                )
-            finally:
-                resp.release()
+                content_length = int(content_length_raw) if content_length_raw else None
+            except ValueError:
+                content_length = None
+            return UrlMetadata(
+                final_url=final_url,
+                content_type=content_type,
+                content_length=content_length,
+                status=resp.status,
+            )
+        finally:
+            resp.release()
     except TimeoutError:
         return "Error: Request timed out."
     except Exception as e:
         return f"Error: {e}"
 
 
-async def download_url_bytes(url: str, *, max_size: int) -> bytes | str:
+async def download_url_bytes(url: str, *, max_size: int, allow_private: bool = False) -> bytes | str:
     """Download a public URL as bytes with SSRF-safe redirect handling and explicit size caps."""
-    safety_error = _check_url_safety(url)
+    safety_error = _check_url_safety(url, allow_private=allow_private)
     if safety_error:
         return f"Error: {safety_error}"
 
     try:
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
-            resp = await _safe_request(session, "GET", url)
-            if isinstance(resp, str):
-                return f"Error: {resp}"
+        session = await _get_session()
+        resp = await _safe_request(session, "GET", url, allow_private=allow_private)
+        if isinstance(resp, str):
+            return f"Error: {resp}"
+        try:
+            if resp.status >= 400:
+                return f"Error: HTTP {resp.status}"
+
+            content_length_raw = resp.headers.get("Content-Length")
             try:
-                if resp.status >= 400:
-                    return f"Error: HTTP {resp.status}"
+                content_length = int(content_length_raw) if content_length_raw else None
+            except ValueError:
+                content_length = None
+            if content_length is not None and content_length > max_size:
+                return f"Error: Response too large ({content_length} bytes > {max_size} bytes)."
 
-                content_length_raw = resp.headers.get("Content-Length")
-                try:
-                    content_length = int(content_length_raw) if content_length_raw else None
-                except ValueError:
-                    content_length = None
-                if content_length is not None and content_length > max_size:
-                    return f"Error: Response too large ({content_length} bytes > {max_size} bytes)."
-
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.content.iter_chunked(64 * 1024):
-                    total += len(chunk)
-                    if total > max_size:
-                        return f"Error: Response exceeded size limit ({max_size} bytes)."
-                    chunks.append(chunk)
-                return b"".join(chunks)
-            finally:
-                resp.release()
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in resp.content.iter_chunked(64 * 1024):
+                total += len(chunk)
+                if total > max_size:
+                    return f"Error: Response exceeded size limit ({max_size} bytes)."
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            resp.release()
     except TimeoutError:
         return "Error: Request timed out."
     except Exception as e:
@@ -180,9 +232,10 @@ async def make_http_request(
     *,
     headers: dict[str, str] | None = None,
     body: str | None = None,
+    allow_private: bool = False,
 ) -> str:
     """Make an HTTP request and return status + response body."""
-    safety_error = _check_url_safety(url)
+    safety_error = _check_url_safety(url, allow_private=allow_private)
     if safety_error:
         return f"Error: {safety_error}"
 
@@ -191,22 +244,22 @@ async def make_http_request(
         return f"Error: Unsupported HTTP method: {method}"
 
     try:
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
-            req_headers = {"User-Agent": _USER_AGENT}
-            if headers:
-                req_headers.update(headers)
+        session = await _get_session()
+        req_headers = {"User-Agent": _USER_AGENT}
+        if headers:
+            req_headers.update(headers)
 
-            async with session.request(method, url, headers=req_headers, data=body, allow_redirects=False) as resp:
-                status_line = f"HTTP {resp.status} {resp.reason}"
-                resp_headers = "\n".join(f"  {k}: {v}" for k, v in list(resp.headers.items())[:20])
+        async with session.request(method, url, headers=req_headers, data=body, allow_redirects=False) as resp:
+            status_line = f"HTTP {resp.status} {resp.reason}"
+            resp_headers = "\n".join(f"  {k}: {v}" for k, v in list(resp.headers.items())[:20])
 
-                if method == "HEAD":
-                    return f"{status_line}\n{resp_headers}"
+            if method == "HEAD":
+                return f"{status_line}\n{resp_headers}"
 
-                text = cast(str, await resp.text(encoding="utf-8", errors="replace"))
-                if len(text) > _MAX_RESPONSE_SIZE:
-                    text = text[:_MAX_RESPONSE_SIZE] + "\n... (truncated)"
-                return f"{status_line}\n{resp_headers}\n\n{text}"
+            text = cast(str, await resp.text(encoding="utf-8", errors="replace"))
+            if len(text) > _MAX_RESPONSE_SIZE:
+                text = text[:_MAX_RESPONSE_SIZE] + "\n... (truncated)"
+            return f"{status_line}\n{resp_headers}\n\n{text}"
     except TimeoutError:
         return "Error: Request timed out."
     except Exception as e:
@@ -220,6 +273,7 @@ async def _safe_request(
     *,
     headers: dict[str, str] | None = None,
     max_redirects: int = 10,
+    allow_private: bool = False,
 ) -> aiohttp.ClientResponse | str:
     request_headers = {"User-Agent": _USER_AGENT}
     if headers:
@@ -228,7 +282,7 @@ async def _safe_request(
     current_url = url
     response: aiohttp.ClientResponse | None = None
     for _ in range(max_redirects + 1):
-        safety_error = _check_url_safety(current_url)
+        safety_error = _check_url_safety(current_url, allow_private=allow_private)
         if safety_error:
             return safety_error if current_url == url else f"Redirect blocked — {safety_error}"
 
@@ -249,10 +303,8 @@ async def search_web(query: str) -> str:
     url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
 
     try:
-        async with (
-            aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session,
-            session.get(url, headers={"User-Agent": _USER_AGENT}) as resp,
-        ):
+        session = await _get_session()
+        async with session.get(url, headers={"User-Agent": _USER_AGENT}) as resp:
             if resp.status >= 400:
                 return f"Error: Search returned HTTP {resp.status}"
             html = await resp.text(encoding="utf-8", errors="replace")

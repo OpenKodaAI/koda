@@ -163,24 +163,24 @@ function getVisualCategory(node: MemoryNode): NodeVisualCategory {
 
 function getNodeStroke(node: MemoryNode, visualCategory: NodeVisualCategory) {
   if (node.kind === "learning") {
-    return "rgba(206,214,226,0.34)";
+    return "var(--border-subtle)";
   }
 
-  if (isForgotten(node)) return "rgba(226,124,124,0.74)";
-  if (isExpiringSoon(node)) return "rgba(232,178,75,0.84)";
-  if (visualCategory === "memory-latest") return "rgba(99,208,149,0.8)";
-  return "rgba(134,160,205,0.72)";
+  if (isForgotten(node)) return "var(--tone-danger-dot)";
+  if (isExpiringSoon(node)) return "var(--tone-warning-dot)";
+  if (visualCategory === "memory-latest") return "var(--tone-success-dot)";
+  return "var(--tone-info-dot)";
 }
 
 function getNodeFill(node: MemoryNode, visualCategory: NodeVisualCategory) {
   if (node.kind === "learning") {
-    return "rgba(19,24,30,0.96)";
+    return "var(--surface-elevated)";
   }
 
-  if (isForgotten(node)) return "rgba(58,24,30,0.7)";
-  if (isExpiringSoon(node)) return "rgba(67,49,18,0.74)";
-  if (visualCategory === "memory-latest") return "rgba(18,39,31,0.74)";
-  return "rgba(14,22,30,0.78)";
+  if (isForgotten(node)) return "var(--tone-danger-bg)";
+  if (isExpiringSoon(node)) return "var(--tone-warning-bg)";
+  if (visualCategory === "memory-latest") return "var(--tone-success-bg)";
+  return "var(--tone-info-bg)";
 }
 
 function createCurvePath(
@@ -461,7 +461,7 @@ export function MemoryMapCanvas({
           target: node.id,
           relation: "structure",
           path: createCurvePath(root, node, 0.08),
-          stroke: "rgba(132,146,163,0.22)",
+          stroke: "var(--border-subtle)",
           strokeWidth: 1.1,
           opacity: 0.7,
           layer: 1,
@@ -506,12 +506,12 @@ export function MemoryMapCanvas({
         path: createCurvePath(source, target, isSimilarity ? 0.12 : 0.18),
         stroke:
           relation === "updates"
-            ? "rgba(135,94,255,0.92)"
+            ? "var(--tone-info-dot)"
             : relation === "extends"
-              ? "rgba(85,188,127,0.82)"
+              ? "var(--tone-success-dot)"
               : relation === "derives"
-                ? "rgba(114,140,224,0.82)"
-                : "rgba(152,163,178,0.28)",
+                ? "var(--tone-warning-dot)"
+                : "var(--text-tertiary)",
         strokeWidth:
           relation === "updates"
             ? 1.5
@@ -548,7 +548,7 @@ export function MemoryMapCanvas({
           target: target.id,
           relation: "mesh",
           path: createCurvePath(source, target, 0.06),
-          stroke: "rgba(92,106,122,0.14)",
+          stroke: "var(--border-subtle)",
           strokeWidth: 0.9,
           opacity: 0.75,
           layer: 0,
@@ -717,8 +717,14 @@ export function MemoryMapCanvas({
   const newMemoryCount = layout.nodes.filter((node) => isNewMemory(node)).length;
 
   return (
-    <div className="relative h-[480px] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[#0a1016] sm:h-[620px] lg:h-[740px] xl:h-[820px] 2xl:h-[900px]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_18%,rgba(91,119,173,0.08),transparent_28%),radial-gradient(circle_at_72%_68%,rgba(118,88,232,0.08),transparent_24%),linear-gradient(180deg,#0c1319_0%,#0a1117_100%)]" />
+    <div className="relative h-[480px] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] sm:h-[620px] lg:h-[740px] xl:h-[820px] 2xl:h-[900px]">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 25% 18%, color-mix(in srgb, var(--tone-info-dot) 8%, transparent), transparent 28%), radial-gradient(circle at 72% 68%, color-mix(in srgb, var(--tone-warning-dot) 8%, transparent), transparent 24%), linear-gradient(180deg, var(--surface-elevated) 0%, var(--surface-canvas) 100%)",
+        }}
+      />
 
       <div className="absolute left-4 top-4 z-30 flex items-center gap-2">
         <button
@@ -783,7 +789,7 @@ export function MemoryMapCanvas({
               <path
                 d="M 28 0 L 0 0 0 28"
                 fill="none"
-                stroke="rgba(181,191,206,0.045)"
+                stroke="var(--border-subtle)"
                 strokeWidth="1"
               />
             </pattern>
@@ -797,7 +803,7 @@ export function MemoryMapCanvas({
               <path
                 d="M 112 0 L 0 0 0 112"
                 fill="none"
-                stroke="rgba(181,191,206,0.055)"
+                stroke="var(--border-subtle)"
                 strokeWidth="1"
               />
             </pattern>
@@ -815,9 +821,9 @@ export function MemoryMapCanvas({
               </feMerge>
             </filter>
             {[
-              { id: "updates", color: "rgba(135,94,255,0.95)" },
-              { id: "extends", color: "rgba(85,188,127,0.92)" },
-              { id: "derives", color: "rgba(114,140,224,0.92)" },
+              { id: "updates", color: "var(--tone-info-dot)" },
+              { id: "extends", color: "var(--tone-success-dot)" },
+              { id: "derives", color: "var(--tone-warning-dot)" },
             ].map((marker) => (
               <marker
                 key={marker.id}
@@ -841,9 +847,7 @@ export function MemoryMapCanvas({
             fill={`url(#${markerPrefix}-grid-strong)`}
           />
 
-          <g
-            transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}
-          >
+          <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}>
             {layout.edges.map((edge) => {
               const source = layout.nodeMap.get(edge.source);
               const target = layout.nodeMap.get(edge.target);
@@ -947,22 +951,22 @@ export function MemoryMapCanvas({
                         r={node.radius * 2.7}
                         fill={
                           node.kind === "learning"
-                            ? "rgba(240,243,249,0.14)"
-                            : "rgba(212,225,244,0.11)"
+                            ? "color-mix(in srgb, var(--tone-info-bg) 48%, transparent)"
+                            : "color-mix(in srgb, var(--tone-success-bg) 42%, transparent)"
                         }
                         filter={`url(#${markerPrefix}-hub-glow)`}
                         opacity={0.58 + emphasis * 0.24}
                       />
                       <circle
                         r={node.radius * 1.22}
-                        fill="rgba(236,239,244,0.2)"
-                        stroke="rgba(255,255,255,0.22)"
+                        fill="var(--surface-panel-soft)"
+                        stroke="var(--border-subtle)"
                         strokeWidth="1.2"
                         vectorEffect="non-scaling-stroke"
                       />
                       <circle
                         r={node.radius * 0.74}
-                        fill="rgba(247,249,252,0.92)"
+                        fill="var(--surface-elevated)"
                         stroke={meta.color}
                         strokeWidth={isSelected ? 2.4 : 1.4}
                         vectorEffect="non-scaling-stroke"
@@ -984,8 +988,8 @@ export function MemoryMapCanvas({
                         width={node.width}
                         height={node.height}
                         rx={node.height / 2}
-                        fill="rgba(23,31,39,0.94)"
-                        stroke={isSelected ? "rgba(255,255,255,0.56)" : stroke}
+                        fill="var(--surface-elevated)"
+                        stroke={isSelected ? "var(--text-primary)" : stroke}
                         strokeWidth={isSelected ? 2 : 1.15}
                         vectorEffect="non-scaling-stroke"
                       />
@@ -1018,75 +1022,75 @@ export function MemoryMapCanvas({
           </g>
         </svg>
 
-        <aside className="pointer-events-auto absolute bottom-3 left-3 right-3 z-30 max-h-[44%] overflow-y-auto rounded-[calc(var(--radius-panel)-0.125rem)] border border-[rgba(196,205,218,0.16)] bg-[rgba(20,26,33,0.9)] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-[18px] sm:bottom-4 sm:left-4 sm:right-4 sm:max-h-[52%] sm:p-5 md:left-auto md:right-5 md:top-5 md:max-h-[calc(100%-2.5rem)] md:w-[284px]">
+    <aside className="pointer-events-auto absolute bottom-3 left-3 right-3 z-30 max-h-[44%] overflow-y-auto rounded-[calc(var(--radius-panel)-0.125rem)] border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.14)] backdrop-blur-[18px] sm:bottom-4 sm:left-4 sm:right-4 sm:max-h-[52%] sm:p-5 md:left-auto md:right-5 md:top-5 md:max-h-[calc(100%-2.5rem)] md:w-[284px]">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[1.02rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
               {t("memory.map.legend")}
             </h3>
             {graph.activeCluster ? (
-              <span className="rounded-full border border-[rgba(196,205,218,0.14)] bg-[rgba(255,255,255,0.03)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+              <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
                 {t("memory.map.isolatedCluster")}
               </span>
             ) : null}
           </div>
 
           <div className="mt-5 space-y-5 text-[var(--text-secondary)]">
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.statistics")}</p>
               <div className="space-y-2.5 text-[15px]">
                 <div className="flex items-center gap-3">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[rgba(132,160,210,0.92)]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--tone-info-dot)]" />
                   <span>{t("memory.map.memoryCount", { count: memoryCount })}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[rgba(236,240,247,0.92)]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--text-primary)]" />
                   <span>{t("memory.map.documentsCount", { count: documentCount })}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[rgba(156,166,180,0.72)]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--text-tertiary)]" />
                   <span>{t("memory.map.connectionsCount", { count: connectionCount })}</span>
                 </div>
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.nodes")}</p>
               <div className="space-y-3 text-[15px]">
                 <div className="flex items-center gap-3">
-                  <span className="h-4.5 w-4.5 rounded-[5px] border border-[rgba(206,214,226,0.36)] bg-[rgba(23,31,39,0.96)]" />
+                  <span className="h-4.5 w-4.5 rounded-[5px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
                   <span>{t("memory.map.document")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="h-4.5 w-4.5 rounded-full border border-[rgba(99,208,149,0.88)] bg-[rgba(18,39,31,0.84)]" />
+                  <span className="h-4.5 w-4.5 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)]" />
                   <span>{t("memory.map.memoryLatest")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="h-4.5 w-4.5 rounded-full border border-[rgba(134,160,205,0.76)] bg-[rgba(14,22,30,0.9)]" />
+                  <span className="h-4.5 w-4.5 rounded-full border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)]" />
                   <span>{t("memory.map.memoryOlder")}</span>
                 </div>
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.statusTitle")}</p>
               <div className="space-y-2.5 text-[15px]">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="h-4.5 w-4.5 rounded-full border border-[rgba(226,124,124,0.8)] bg-[rgba(58,24,30,0.72)]" />
+                  <span className="h-4.5 w-4.5 rounded-full border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)]" />
                     <span>{t("memory.map.forgotten")}</span>
                   </div>
                   <span className="text-[13px] text-[var(--text-tertiary)]">{forgottenCount}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="h-4.5 w-4.5 rounded-full border border-[rgba(232,178,75,0.88)] bg-[rgba(67,49,18,0.76)]" />
+                  <span className="h-4.5 w-4.5 rounded-full border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)]" />
                     <span>{t("memory.map.expiringSoon")}</span>
                   </div>
                   <span className="text-[13px] text-[var(--text-tertiary)]">{expiringSoonCount}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="h-4.5 w-4.5 rounded-full border border-[rgba(99,208,149,0.88)] bg-[rgba(18,39,31,0.84)]" />
+                  <span className="h-4.5 w-4.5 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)]" />
                     <span>{t("memory.map.newMemory")}</span>
                   </div>
                   <span className="text-[13px] text-[var(--text-tertiary)]">{newMemoryCount}</span>
@@ -1094,56 +1098,56 @@ export function MemoryMapCanvas({
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.connectionsTitle")}</p>
               <div className="space-y-3 text-[15px]">
                 <div className="flex items-center gap-3">
-                  <span className="block h-px w-8 bg-[rgba(168,178,190,0.72)]" />
+                  <span className="block h-px w-8 bg-[var(--text-tertiary)]" />
                   <span>{t("memory.map.docToMemory")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="block h-px w-8 border-t border-dashed border-[rgba(168,178,190,0.68)]" />
+                  <span className="block h-px w-8 border-t border-dashed border-[var(--text-tertiary)]" />
                   <span>{t("memory.map.docSimilarity")}</span>
                 </div>
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.relationsTitle")}</p>
               <div className="space-y-3 text-[15px]">
                 <div className="flex items-center gap-3">
-                  <span className="block h-px w-8 bg-[rgba(135,94,255,0.94)]" />
-                  <span className="text-[rgba(176,148,255,0.92)]">{t("memory.map.relationUpdates")}</span>
+                  <span className="block h-px w-8 bg-[var(--tone-info-dot)]" />
+                  <span className="text-[var(--tone-info-dot)]">{t("memory.map.relationUpdates")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="block h-px w-8 bg-[rgba(85,188,127,0.92)]" />
-                  <span className="text-[rgba(118,212,156,0.92)]">{t("memory.map.relationExtends")}</span>
+                  <span className="block h-px w-8 bg-[var(--tone-success-dot)]" />
+                  <span className="text-[var(--tone-success-dot)]">{t("memory.map.relationExtends")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="block h-px w-8 bg-[rgba(114,140,224,0.92)]" />
-                  <span className="text-[rgba(150,170,234,0.9)]">{t("memory.map.relationDerives")}</span>
+                  <span className="block h-px w-8 bg-[var(--tone-warning-dot)]" />
+                  <span className="text-[var(--tone-warning-dot)]">{t("memory.map.relationDerives")}</span>
                 </div>
               </div>
             </section>
 
-            <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+            <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
               <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.similarityTitle")}</p>
               <div className="space-y-2.5 text-[15px]">
                 <div className="flex items-center gap-3">
-                  <span className="h-4.5 w-4.5 rounded-full bg-[rgba(74,82,94,0.64)]" />
+                  <span className="h-4.5 w-4.5 rounded-full bg-[var(--text-tertiary)]" />
                   <span>{t("memory.map.weak")}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="h-4.5 w-4.5 rounded-full bg-[rgba(157,168,182,0.86)]" />
+                  <span className="h-4.5 w-4.5 rounded-full bg-[var(--text-primary)]" />
                   <span>{t("memory.map.strong")}</span>
                 </div>
               </div>
             </section>
 
             {selectedNode ? (
-              <section className="space-y-3 border-t border-[rgba(255,255,255,0.08)] pt-5">
+              <section className="space-y-3 border-t border-[var(--border-subtle)] pt-5">
                 <p className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.map.currentFocus")}</p>
-                <div className="rounded-[var(--radius-panel-sm)] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
+                <div className="rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3.5 py-3">
                   <div className="flex items-center gap-2">
                     <span
                       className="h-2.5 w-2.5 rounded-full"

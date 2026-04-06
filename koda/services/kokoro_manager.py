@@ -243,9 +243,13 @@ def kokoro_model_path() -> Path:
     return _KOKORO_MODEL_PATH
 
 
+def kokoro_managed_voices_storage_path() -> Path:
+    return _KOKORO_VOICES_BANK_PATH
+
+
 def kokoro_managed_voices_path() -> Path:
     _ensure_storage()
-    return _KOKORO_VOICES_BANK_PATH
+    return kokoro_managed_voices_storage_path()
 
 
 def kokoro_voice_languages() -> list[dict[str, str]]:
@@ -302,7 +306,10 @@ def list_kokoro_voices(language_id: str = "") -> list[dict[str, Any]]:
 
 
 def downloaded_kokoro_voice_ids() -> set[str]:
-    _ensure_storage()
+    try:
+        _ensure_storage()
+    except OSError:
+        return set()
     downloaded: set[str] = set()
     for path in _KOKORO_VOICES_DIR.rglob("*.pt"):
         voice_id = path.stem.strip().lower()

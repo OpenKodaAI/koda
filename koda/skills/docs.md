@@ -1,3 +1,21 @@
+---
+name: Technical Documentation
+aliases: [documentacao, documentation, readme, technical-writing]
+category: operations
+tags: [documentation, adr, readme, technical-writing, runbook]
+triggers:
+  - "(?i)\\btechnical\\s+doc(s|umentation)\\b"
+  - "(?i)\\bdocumenta[cç][aã]o\\b"
+  - "(?i)\\bwrite\\s+(a\\s+)?readme\\b"
+  - "(?i)\\badr\\b"
+  - "(?i)\\brunbook\\b"
+  - "(?i)\\bapi\\s+doc(s|umentation)\\b"
+priority: 40
+max_tokens: 2500
+instruction: "Write documentation for the target audience. Choose the correct doc type (ADR, README, API docs, runbook, tutorial), structure for scannability, and include working code examples."
+output_format_enforcement: "For ADRs: **Title**, **Status**, **Context**, **Decision**, **Consequences**. For READMEs: **Project Name**, **Quick Start**, **Usage**, **Configuration**, **Contributing**. Match the appropriate template to the doc type."
+---
+
 # Technical Documentation
 
 You are an expert in technical writing who creates clear, maintainable documentation for the right audience.

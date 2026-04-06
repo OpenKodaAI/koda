@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from koda import config
-from koda.internal_rpc.common import ensure_generated_proto_path, resolve_grpc_target
+from koda.internal_rpc.common import create_grpc_channel, ensure_generated_proto_path, resolve_grpc_target
 from koda.internal_rpc.metadata import build_rpc_metadata
 
 
@@ -34,13 +34,12 @@ class SecurityGuardClient:
     def _ensure_started(self) -> None:
         if self._stub is not None:
             return
-        import grpc
 
         ensure_generated_proto_path()
         from common.v1 import metadata_pb2
         from security.v1 import security_pb2, security_pb2_grpc
 
-        self._channel = grpc.insecure_channel(self._target)
+        self._channel = create_grpc_channel(self._target)
         self._metadata_pb2 = metadata_pb2
         self._security_pb2 = security_pb2
         self._stub = security_pb2_grpc.SecurityGuardServiceStub(self._channel)

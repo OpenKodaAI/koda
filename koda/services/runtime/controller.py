@@ -254,7 +254,7 @@ class RuntimeController:
             await asyncio.sleep(max(15, min(RUNTIME_OPERATOR_SESSION_TTL_SECONDS, 60)))
             try:
                 for session in self.store.list_expired_attach_sessions():
-                    await self.close_attach_session(token=str(session["token"]))
+                    await self.close_attach_session(session_id=int(session["id"]))
             except Exception:
                 log.exception("attach_reaper_failed")
 
@@ -903,10 +903,30 @@ class RuntimeController:
         lineage_root = parent_env.get("lineage_root_env_id")
         return int(lineage_root) if lineage_root else parent_env_id
 
-    async def register_queued_task(self, *, task_id: int, user_id: int, chat_id: int, query_text: str) -> None:
-        if not RUNTIME_ENVIRONMENTS_ENABLED:
-            return
-        self.store.upsert_runtime_queue_item(task_id=task_id, user_id=user_id, chat_id=chat_id, query_text=query_text)
+    async def register_queued_task(
+        self,
+        *,
+        task_id: int,
+        user_id: int,
+        chat_id: int,
+        query_text: str,
+        payload_json: str | None = None,
+        recovery_count: int = 0,
+        last_recovered_at: str | None = None,
+        source_kind: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        self.store.upsert_runtime_queue_item(
+            task_id=task_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=query_text,
+            payload_json=payload_json,
+            recovery_count=recovery_count,
+            last_recovered_at=last_recovered_at,
+            source_kind=source_kind,
+            last_error=last_error,
+        )
         self._ensure_pause_event(task_id)
         await self.events.publish(
             task_id=task_id,
@@ -914,7 +934,13 @@ class RuntimeController:
             attempt=1,
             phase="queued",
             event_type="task.created",
-            payload={"query_text": query_text[:400]},
+            payload={
+                "query_text": query_text[:400],
+                "source_kind": source_kind or "user",
+                "recovery_count": recovery_count,
+                "last_recovered_at": last_recovered_at,
+                "last_error": last_error,
+            },
         )
 
     async def classify_task(
@@ -2199,9 +2225,20 @@ class RuntimeController:
             return None
         return cast(dict[str, Any] | None, session)
 
-    async def close_attach_session(self, *, token: str) -> None:
-        session = self.store.touch_attach_session(token)
-        self.store.close_attach_session(token)
+    async def close_attach_session(
+        self,
+        *,
+        token: str | None = None,
+        session_id: int | None = None,
+    ) -> None:
+        if session_id is not None and hasattr(self.store, "touch_attach_session_by_id"):
+            session = self.store.touch_attach_session_by_id(session_id)
+            self.store.close_attach_session_by_id(session_id)
+        elif token is not None:
+            session = self.store.touch_attach_session(token)
+            self.store.close_attach_session(token)
+        else:
+            raise ValueError("token or session_id is required")
         if session is None:
             return
         task_id = int(session["task_id"])
@@ -2268,8 +2305,13 @@ class RuntimeController:
         return cast(list[dict[str, Any]], self.store.list_service_endpoints(task_id))
 
     def list_sessions(self, task_id: int) -> dict[str, Any]:
+        attach_sessions = []
+        for session in self.store.list_attach_sessions(task_id):
+            sanitized = dict(session)
+            sanitized["token"] = None
+            attach_sessions.append(sanitized)
         return {
-            "attach_sessions": self.store.list_attach_sessions(task_id),
+            "attach_sessions": attach_sessions,
             "browser_sessions": self.store.list_browser_sessions(task_id),
             "terminals": self.store.list_terminals(task_id),
         }
@@ -3365,7 +3407,7 @@ class RuntimeController:
         )
         for session in self.store.list_attach_sessions(task_id):
             if str(session.get("status")) == "active":
-                await self.close_attach_session(token=str(session["token"]))
+                await self.close_attach_session(session_id=int(session["id"]))
         release_task_ports = getattr(self.port_allocator, "release_task_ports", None)
         if callable(release_task_ports):
             release_task_ports(task_id)

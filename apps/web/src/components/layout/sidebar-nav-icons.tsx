@@ -61,15 +61,18 @@ export function RuntimeNavIcon(props: SidebarIconProps) {
 
 export function ControlPlaneNavIcon(props: SidebarIconProps) {
   return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-      {...props}
-    >
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" {...props}>
       <path
         d="M14.1874 3.53647C14.5628 2.46674 13.5339 1.43787 12.4642 1.81326L2.22247 5.40722C1.05947 5.81532 1.00461 7.43953 2.13734 7.92526L6.29334 9.70733L8.07541 13.8633C8.56107 14.9961 10.1853 14.9412 10.5934 13.7782L14.1874 3.53647Z"
-        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.29346 9.70719L9.21429 6.78636"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinecap="round"
       />
     </svg>
   );

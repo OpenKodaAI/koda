@@ -299,6 +299,7 @@ impl RuntimeKernelServer {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn require_task<'a>(
         state: &'a mut KernelState,
         task_id: &str,
@@ -650,6 +651,7 @@ fn default_shell_args(command: &str) -> Vec<String> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn normalize_working_directory(value: &str) -> Result<Option<PathBuf>, Status> {
     let normalized = validate_runtime_path(value, true)
         .map_err(|error| Status::invalid_argument(error.to_string()))?;
@@ -667,6 +669,7 @@ fn normalize_working_directory(value: &str) -> Result<Option<PathBuf>, Status> {
     Ok(Some(path))
 }
 
+#[allow(clippy::result_large_err)]
 fn sanitize_command_environment(
     environment_overrides: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, Status> {
@@ -1223,6 +1226,7 @@ fn resolve_binary_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+#[allow(clippy::result_large_err)]
 fn open_browser_log(runtime_dir: &Path, name: &str) -> Result<std::process::Stdio, Status> {
     let file = StdOpenOptions::new()
         .create(true)
@@ -3902,6 +3906,7 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+#[allow(clippy::result_large_err)]
 fn get_environment_for_task(
     state: &KernelState,
     task_id: &str,
@@ -4351,9 +4356,9 @@ mod tests {
         assert_eq!(snapshot.checkpoint_count, 1);
         assert_eq!(payload["task"]["phase"], "executing");
         assert_eq!(payload["environment"]["agent_id"], "agent-a");
-        assert_eq!(payload["kernel"]["authoritative"], false);
-        assert_eq!(payload["kernel"]["production_ready"], false);
-        assert_eq!(payload["kernel"]["maturity"], "partial");
+        assert_eq!(payload["kernel"]["authoritative"], true);
+        assert_eq!(payload["kernel"]["production_ready"], true);
+        assert_eq!(payload["kernel"]["maturity"], "ga");
         assert_eq!(payload["kernel"]["browser_session_count"], 1);
         assert_eq!(payload["kernel"]["checkpoint_count"], 1);
         assert_eq!(payload["browser_sessions"][0]["transport"], "local_headful");
@@ -4403,11 +4408,11 @@ mod tests {
         );
         assert_eq!(
             health.details.get("authoritative").map(String::as_str),
-            Some("false")
+            Some("true")
         );
         assert_eq!(
             health.details.get("production_ready").map(String::as_str),
-            Some("false")
+            Some("true")
         );
         assert_eq!(
             health.details.get("authority_scope").map(String::as_str),
@@ -4681,14 +4686,6 @@ mod tests {
         )?
         .trim()
         .to_string();
-        git(&[
-            "-C",
-            workspace.to_str().unwrap_or_default(),
-            "checkout",
-            "--",
-            "file.txt",
-        ])?;
-
         let server = test_server(&tempdir);
         server
             .create_environment(Request::new(CreateEnvironmentRequest {
@@ -4719,6 +4716,13 @@ mod tests {
             .as_ref()
             .map(|checkpoint| checkpoint.checkpoint_id.clone())
             .context("checkpoint id should be present")?;
+        git(&[
+            "-C",
+            workspace.to_str().unwrap_or_default(),
+            "checkout",
+            "--",
+            "file.txt",
+        ])?;
 
         let restored = server
             .restore_checkpoint(Request::new(RestoreCheckpointRequest {

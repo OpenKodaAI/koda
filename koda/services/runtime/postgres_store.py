@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -44,6 +45,10 @@ def _redacted_text(value: str | None) -> str | None:
     return str(redact_value(value))
 
 
+def _attach_token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
 class PostgresRuntimeStore:
     """Data access layer for runtime state backed by the primary Postgres store."""
 
@@ -74,29 +79,127 @@ class PostgresRuntimeStore:
         query_text: str,
         queue_name: str = "user",
         status: str = "queued",
+        payload_json: str | None = None,
+        recovery_count: int | None = None,
+        last_recovered_at: str | None = None,
+        source_kind: str | None = None,
+        last_error: str | None = None,
     ) -> None:
         now = _now()
         self._execute(
             """
             INSERT INTO runtime_queue_items (
-                agent_id, task_id, user_id, chat_id, queue_name, status, query_text, queued_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                agent_id, task_id, user_id, chat_id, queue_name, status, query_text, payload_json,
+                recovery_count, last_recovered_at, source_kind, last_error, queued_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_id, task_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 query_text = EXCLUDED.query_text,
+                payload_json = EXCLUDED.payload_json,
+                recovery_count = EXCLUDED.recovery_count,
+                last_recovered_at = EXCLUDED.last_recovered_at,
+                source_kind = EXCLUDED.source_kind,
+                last_error = EXCLUDED.last_error,
                 updated_at = EXCLUDED.updated_at
             """,
-            (self._agent_scope, task_id, user_id, chat_id, queue_name, status, query_text, now, now),
+            (
+                self._agent_scope,
+                task_id,
+                user_id,
+                chat_id,
+                queue_name,
+                status,
+                query_text,
+                payload_json or "{}",
+                int(recovery_count or 0),
+                last_recovered_at,
+                source_kind or queue_name,
+                last_error,
+                now,
+                now,
+            ),
         )
 
-    def update_runtime_queue_item(self, task_id: int, *, status: str, queue_position: int | None = None) -> None:
+    def update_runtime_queue_item(
+        self,
+        task_id: int,
+        *,
+        status: str,
+        queue_position: int | None = None,
+        payload_json: str | None = None,
+        recovery_count: int | None = None,
+        last_recovered_at: str | None = None,
+        source_kind: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
         sets = ["status = ?", "updated_at = ?"]
         values: list[Any] = [status, _now()]
         if queue_position is not None:
             sets.append("queue_position = ?")
             values.append(queue_position)
+        if payload_json is not None:
+            sets.append("payload_json = ?")
+            values.append(payload_json)
+        if recovery_count is not None:
+            sets.append("recovery_count = ?")
+            values.append(int(recovery_count))
+        if last_recovered_at is not None:
+            sets.append("last_recovered_at = ?")
+            values.append(last_recovered_at)
+        if source_kind is not None:
+            sets.append("source_kind = ?")
+            values.append(source_kind)
+        if last_error is not None:
+            sets.append("last_error = ?")
+            values.append(last_error)
         values.extend([self._agent_scope, task_id])
         self._execute(f"UPDATE runtime_queue_items SET {', '.join(sets)} WHERE agent_id = ? AND task_id = ?", values)
+
+    def bulk_update_runtime_queue_items(self, updates: list[dict[str, Any]]) -> None:
+        if not updates:
+            return
+        values_sql: list[str] = []
+        params: list[Any] = [_now()]
+        for item in updates:
+            values_sql.append("(?, ?, ?, ?, ?, ?, ?, ?)")
+            params.extend(
+                [
+                    self._agent_scope,
+                    int(item["task_id"]),
+                    str(item.get("status") or "queued"),
+                    item.get("queue_position"),
+                    item.get("payload_json"),
+                    int(item["recovery_count"]) if item.get("recovery_count") is not None else None,
+                    item.get("last_recovered_at"),
+                    item.get("last_error"),
+                ]
+            )
+        self._execute(
+            f"""
+            UPDATE runtime_queue_items AS target
+            SET status = source.status,
+                updated_at = ?,
+                queue_position = source.queue_position,
+                payload_json = COALESCE(source.payload_json, target.payload_json),
+                recovery_count = COALESCE(source.recovery_count, target.recovery_count),
+                last_recovered_at = COALESCE(source.last_recovered_at, target.last_recovered_at),
+                last_error = COALESCE(source.last_error, target.last_error)
+            FROM (
+                VALUES {", ".join(values_sql)}
+            ) AS source(
+                agent_id,
+                task_id,
+                status,
+                queue_position,
+                payload_json,
+                recovery_count,
+                last_recovered_at,
+                last_error
+            )
+            WHERE target.agent_id = source.agent_id AND target.task_id = source.task_id
+            """,
+            params,
+        )
 
     def create_environment(
         self,
@@ -1099,7 +1202,7 @@ class PostgresRuntimeStore:
                 env_id,
                 attach_kind,
                 terminal_id,
-                token,
+                _attach_token_hash(token),
                 can_write,
                 actor,
                 "active",
@@ -1112,9 +1215,10 @@ class PostgresRuntimeStore:
 
     def touch_attach_session(self, token: str) -> dict[str, Any] | None:
         now = _now()
+        token_hash = _attach_token_hash(token)
         self._execute(
             "UPDATE runtime_attach_sessions SET last_seen_at = ? WHERE agent_id = ? AND token = ?",
-            (now, self._agent_scope, token),
+            (now, self._agent_scope, token_hash),
         )
         return self._fetch_one(
             """
@@ -1122,15 +1226,39 @@ class PostgresRuntimeStore:
                    created_at, last_seen_at, ended_at
             FROM runtime_attach_sessions WHERE agent_id = ? AND token = ?
             """,
-            (self._agent_scope, token),
+            (self._agent_scope, token_hash),
         )
 
     def close_attach_session(self, token: str) -> None:
         now = _now()
+        token_hash = _attach_token_hash(token)
         self._execute(
             "UPDATE runtime_attach_sessions SET status = 'closed', ended_at = ?, last_seen_at = ? "
             "WHERE agent_id = ? AND token = ?",
-            (now, now, self._agent_scope, token),
+            (now, now, self._agent_scope, token_hash),
+        )
+
+    def touch_attach_session_by_id(self, session_id: int) -> dict[str, Any] | None:
+        now = _now()
+        self._execute(
+            "UPDATE runtime_attach_sessions SET last_seen_at = ? WHERE agent_id = ? AND id = ?",
+            (now, self._agent_scope, session_id),
+        )
+        return self._fetch_one(
+            """
+            SELECT id, task_id, env_id, attach_kind, terminal_id, token, can_write, actor, status, expires_at,
+                   created_at, last_seen_at, ended_at
+            FROM runtime_attach_sessions WHERE agent_id = ? AND id = ?
+            """,
+            (self._agent_scope, session_id),
+        )
+
+    def close_attach_session_by_id(self, session_id: int) -> None:
+        now = _now()
+        self._execute(
+            "UPDATE runtime_attach_sessions SET status = 'closed', ended_at = ?, last_seen_at = ? "
+            "WHERE agent_id = ? AND id = ?",
+            (now, now, self._agent_scope, session_id),
         )
 
     def list_attach_sessions(self, task_id: int) -> list[dict[str, Any]]:
@@ -1146,7 +1274,8 @@ class PostgresRuntimeStore:
     def list_runtime_queues(self) -> list[dict[str, Any]]:
         return self._fetch_all(
             """
-            SELECT task_id, user_id, chat_id, queue_name, status, queue_position, query_text, queued_at, updated_at
+            SELECT task_id, user_id, chat_id, queue_name, status, queue_position, query_text, payload_json,
+                   recovery_count, last_recovered_at, source_kind, last_error, queued_at, updated_at
             FROM runtime_queue_items
             WHERE agent_id = ?
             ORDER BY queued_at ASC

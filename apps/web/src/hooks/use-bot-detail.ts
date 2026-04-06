@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   BotStats,
   CronJob,
@@ -8,27 +9,12 @@ import type {
   SessionSummary,
   Task,
 } from "@/lib/types";
-import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
+import { queryKeys } from "@/lib/query/keys";
 
-interface BotDetailState {
-  stats: BotStats | null;
-  tasks: Task[];
-  sessions: SessionSummary[];
-  cronJobs: CronJob[];
-  loading: boolean;
-  error: string | null;
-}
-
-const INITIAL_STATE: BotDetailState = {
-  stats: null,
-  tasks: [],
-  sessions: [],
-  cronJobs: [],
-  loading: true,
-  error: null,
-};
+type BotDetailTab = "overview" | "tasks" | "sessions" | "cron";
 
 function executionToTask(execution: ExecutionSummary): Task {
   return {
@@ -50,89 +36,106 @@ function executionToTask(execution: ExecutionSummary): Task {
   };
 }
 
-export function useBotDetail(botId: string | null, refreshInterval: number = 15000) {
+export function useBotDetail(
+  botId: string | null,
+  activeTab: BotDetailTab = "overview",
+) {
   const { tl } = useAppI18n();
-  const fetcher = useCallback(async (signal: AbortSignal) => {
-    if (!botId) {
-      return {
-        stats: null,
-        tasks: [],
-        sessions: [],
-        cronJobs: [],
-        loadError: null,
-      };
-    }
+  const queryClient = useQueryClient();
 
-    const [statsRes, tasksRes, sessionsRes, cronRes] = await Promise.all([
-      fetchControlPlaneDashboardJsonAllowError<BotStats>(`/agents/${botId}/stats`, {
-        signal,
-        fallbackError: tl("Não foi possível carregar os dados do bot."),
-      }),
-      fetchControlPlaneDashboardJsonAllowError<ExecutionSummary[]>(
+  const statsQuery = useControlPlaneQuery<BotStats | null>({
+    tier: "live",
+    queryKey: ["dashboard", "bots", botId ?? "", "stats-modal"] as const,
+    enabled: Boolean(botId),
+    refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
+      const res = await fetchControlPlaneDashboardJsonAllowError<BotStats>(
+        `/agents/${botId}/stats`,
+        { signal, fallbackError: tl("Não foi possível carregar os dados do bot.") },
+      );
+      return res.ok ? res.data : null;
+    },
+  });
+
+  const schedulesQuery = useControlPlaneQuery<CronJob[]>({
+    tier: "detail",
+    queryKey: queryKeys.dashboard.botSchedules(botId ?? ""),
+    enabled: Boolean(botId),
+    refetchInterval: 30_000,
+    queryFn: async ({ signal }) => {
+      const res = await fetchControlPlaneDashboardJsonAllowError<CronJob[]>(
+        `/agents/${botId}/schedules`,
+        { signal, fallbackError: tl("Não foi possível carregar os agendamentos do bot.") },
+      );
+      return res.ok && Array.isArray(res.data) ? res.data : [];
+    },
+  });
+
+  const tasksQuery = useControlPlaneQuery<Task[]>({
+    tier: "live",
+    queryKey: queryKeys.dashboard.executions({ botIds: [botId ?? ""], limit: 50 }),
+    enabled: Boolean(botId) && activeTab === "tasks",
+    refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
+      const res = await fetchControlPlaneDashboardJsonAllowError<ExecutionSummary[]>(
         `/agents/${botId}/executions`,
         {
           signal,
           params: { limit: 50 },
           fallbackError: tl("Não foi possível carregar as execuções do bot."),
         },
-      ),
-      fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
+      );
+      return res.ok && Array.isArray(res.data)
+        ? res.data.map(executionToTask)
+        : [];
+    },
+  });
+
+  const sessionsQuery = useControlPlaneQuery<SessionSummary[]>({
+    tier: "live",
+    queryKey: queryKeys.dashboard.sessions({ botId: botId ?? "", limit: 50 }),
+    enabled: Boolean(botId) && activeTab === "sessions",
+    refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
+      const res = await fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
         `/agents/${botId}/sessions`,
         {
           signal,
           params: { limit: 50 },
           fallbackError: tl("Não foi possível carregar as sessões do bot."),
         },
-      ),
-      fetchControlPlaneDashboardJsonAllowError<CronJob[]>(
-        `/agents/${botId}/schedules`,
-        {
-          signal,
-          fallbackError: tl("Não foi possível carregar os agendamentos do bot."),
-        },
-      ),
-    ]);
-
-    return {
-      stats: statsRes.ok ? statsRes.data : null,
-      tasks:
-        tasksRes.ok && Array.isArray(tasksRes.data)
-          ? tasksRes.data.map(executionToTask)
-          : [],
-      sessions:
-        sessionsRes.ok && Array.isArray(sessionsRes.data)
-          ? sessionsRes.data
-          : [],
-      cronJobs:
-        cronRes.ok && Array.isArray(cronRes.data)
-          ? cronRes.data
-          : [],
-      loadError:
-        statsRes.error ??
-        tasksRes.error ??
-        sessionsRes.error ??
-        cronRes.error,
-    };
-  }, [botId, tl]);
-
-  const resource = useAsyncResource<
-    Omit<BotDetailState, "loading" | "error"> & { loadError: string | null }
-  >({
-    enabled: Boolean(botId),
-    initialData: null,
-    pollIntervalMs: botId ? refreshInterval : null,
-    fetcher,
+      );
+      return res.ok && Array.isArray(res.data) ? res.data : [];
+    },
   });
 
+  const refresh = useCallback(() => {
+    if (!botId) return;
+    void queryClient.invalidateQueries({
+      queryKey: ["dashboard", "bots", botId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.dashboard.executions({ botIds: [botId], limit: 50 }),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.dashboard.sessions({ botId, limit: 50 }),
+    });
+  }, [botId, queryClient]);
+
+  const loading =
+    statsQuery.isLoading || (schedulesQuery.isLoading && !schedulesQuery.data);
+  const error =
+    statsQuery.error?.message ?? schedulesQuery.error?.message ?? null;
+
   return {
-    stats: resource.data?.stats ?? INITIAL_STATE.stats,
-    tasks: resource.data?.tasks ?? INITIAL_STATE.tasks,
-    sessions: resource.data?.sessions ?? INITIAL_STATE.sessions,
-    cronJobs: resource.data?.cronJobs ?? INITIAL_STATE.cronJobs,
-    loading: resource.initialLoading,
-    refreshing: resource.refreshing,
-    error: resource.error ?? resource.data?.loadError ?? null,
-    refresh: resource.refresh,
-    lastUpdated: resource.lastUpdated,
+    stats: statsQuery.data ?? null,
+    tasks: tasksQuery.data ?? [],
+    sessions: sessionsQuery.data ?? [],
+    cronJobs: schedulesQuery.data ?? [],
+    loading,
+    refreshing: statsQuery.isFetching && !statsQuery.isLoading,
+    error,
+    refresh,
+    lastUpdated: statsQuery.dataUpdatedAt || null,
   };
 }

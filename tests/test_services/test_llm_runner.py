@@ -1,10 +1,11 @@
 """Tests for provider-neutral LLM runner helpers."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from koda.services.llm_runner import get_provider_health_snapshot, run_llm
+from koda.services.llm_runner import get_provider_fallback_chain, get_provider_health_snapshot, run_llm
 from koda.services.provider_runtime import ProviderCapabilities
 
 
@@ -129,3 +130,29 @@ class TestProviderHealthSnapshot:
         assert snapshot["codex"]["status"] == "degraded"
         assert snapshot["codex"]["can_execute"] is True
         assert snapshot["codex"]["supports_native_resume"] is False
+
+
+class TestProviderFallbackChain:
+    def test_filters_out_ineligible_provider_from_snapshot_env(self, monkeypatch):
+        monkeypatch.setenv(
+            "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON",
+            json.dumps(
+                {
+                    "claude": {"eligible": False, "reason": "unverified"},
+                    "codex": {"eligible": True, "reason": ""},
+                }
+            ),
+        )
+
+        chain = get_provider_fallback_chain("claude")
+
+        assert "claude" not in chain
+        assert "codex" in chain
+
+    def test_keeps_default_chain_when_snapshot_env_is_absent(self, monkeypatch):
+        monkeypatch.delenv("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", raising=False)
+
+        chain = get_provider_fallback_chain("claude")
+
+        assert chain
+        assert chain[0] == "claude"

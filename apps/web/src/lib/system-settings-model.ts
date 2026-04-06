@@ -9,7 +9,9 @@ import { translateLiteral } from "@/lib/i18n";
 
 // --- Section-based navigation ---
 
-export type SettingsSectionId = "general" | "models" | "integrations" | "intelligence";
+export type SettingsSectionId = "general" | "models" | "integrations" | "intelligence" | "variables";
+
+export const DEFAULT_SETTINGS_SECTION_ID: SettingsSectionId = "general";
 
 export const SETTINGS_SECTIONS: Array<{
   id: SettingsSectionId;
@@ -31,8 +33,8 @@ export const SETTINGS_SECTIONS: Array<{
   },
   {
     id: "integrations",
-    labelKey: "settings.sections.integrations.label",
-    descriptionKey: "settings.sections.integrations.description",
+    labelKey: "settings.sections.providers.label",
+    descriptionKey: "settings.sections.providers.description",
     icon: "Plug",
   },
   {
@@ -40,6 +42,12 @@ export const SETTINGS_SECTIONS: Array<{
     labelKey: "settings.sections.intelligence.label",
     descriptionKey: "settings.sections.intelligence.description",
     icon: "Brain",
+  },
+  {
+    id: "variables",
+    labelKey: "settings.sections.variables.label",
+    descriptionKey: "settings.sections.variables.description",
+    icon: "Key",
   },
 ];
 
@@ -51,8 +59,9 @@ export const SECTION_VALUE_KEYS: Record<
 > = {
   general: ["account"],
   models: ["models", "provider_connections"],
-  integrations: ["resources", "integration_credentials"],
-  intelligence: ["memory_and_knowledge", "variables"],
+  integrations: ["resources"],
+  intelligence: ["memory_and_knowledge"],
+  variables: ["variables"],
 };
 
 /** Maps old step IDs to new section IDs for localStorage migration */
@@ -60,10 +69,19 @@ export const STEP_TO_SECTION: Record<string, SettingsSectionId> = {
   account: "general",
   models: "models",
   integrations: "integrations",
+  mcp: "integrations",
   memory: "intelligence",
-  variables: "intelligence",
+  variables: "variables",
   review: "general",
 };
+
+const SETTINGS_SECTION_ID_SET = new Set<SettingsSectionId>(
+  SETTINGS_SECTIONS.map((section) => section.id),
+);
+
+export function isSettingsSectionId(value: string): value is SettingsSectionId {
+  return SETTINGS_SECTION_ID_SET.has(value as SettingsSectionId);
+}
 
 export const AGENT_ONLY_INTEGRATIONS = new Set([
   "browser_enabled",

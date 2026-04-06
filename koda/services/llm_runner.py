@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -74,12 +75,49 @@ _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 
-def get_provider_fallback_chain(primary_provider: str) -> list[str]:
+def get_provider_runtime_eligibility(
+    payload: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return the provider runtime eligibility map from payload or snapshot env."""
+    if isinstance(payload, dict):
+        return {
+            str(provider_id).strip().lower(): dict(value)
+            for provider_id, value in payload.items()
+            if isinstance(value, dict)
+        }
+    raw = (
+        os.environ.get("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", "")
+        or os.environ.get("PROVIDER_RUNTIME_ELIGIBILITY_JSON", "")
+    ).strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(provider_id).strip().lower(): dict(value)
+        for provider_id, value in parsed.items()
+        if isinstance(value, dict)
+    }
+
+
+def get_provider_fallback_chain(
+    primary_provider: str,
+    *,
+    eligibility: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
     """Return the provider execution order for one task."""
     primary = normalize_provider(primary_provider)
+    eligibility_map = get_provider_runtime_eligibility(eligibility)
     ordered: list[str] = []
     for provider in [primary, *PROVIDER_FALLBACK_ORDER]:
         if provider in AVAILABLE_PROVIDERS and provider not in ordered:
+            provider_eligibility = eligibility_map.get(provider)
+            if provider_eligibility is not None and not bool(provider_eligibility.get("eligible", False)):
+                continue
             ordered.append(provider)
     return ordered
 

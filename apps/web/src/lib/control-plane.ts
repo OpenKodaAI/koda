@@ -25,6 +25,21 @@ export type ControlPlaneBotOrganization = {
   squad_color?: string | null;
 };
 
+/* -------------------------------------------------------------------------- */
+/*  Workspace / Squad spec types — hierarchical prompt governance              */
+/* -------------------------------------------------------------------------- */
+
+export type WorkspaceSpec = Record<string, never>;
+export type SquadSpec = Record<string, never>;
+
+export interface ScopePromptDocuments {
+  system_prompt_md?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Workspace / Squad entity types                                             */
+/* -------------------------------------------------------------------------- */
+
 export type ControlPlaneWorkspaceSquad = {
   id: string;
   workspace_id: string;
@@ -32,6 +47,8 @@ export type ControlPlaneWorkspaceSquad = {
   description: string;
   color: string;
   bot_count: number;
+  spec?: SquadSpec;
+  documents?: ScopePromptDocuments;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +59,8 @@ export type ControlPlaneWorkspace = {
   description: string;
   color: string;
   bot_count: number;
+  spec?: WorkspaceSpec;
+  documents?: ScopePromptDocuments;
   squads: ControlPlaneWorkspaceSquad[];
   virtual_buckets: {
     no_squad: {
@@ -174,6 +193,8 @@ export type GeneralSystemSettingsProviderConnection = {
   api_key_preview?: string;
   base_url?: string;
   connection_status: "not_configured" | "configured" | "verified" | "error" | string;
+  connection_managed?: boolean;
+  show_in_settings?: boolean;
 };
 
 export type ElevenLabsVoiceOption = {
@@ -287,6 +308,72 @@ export type ProviderLoginSession = {
 export type ControlPlaneMemoryPolicy = Record<string, unknown>;
 export type ControlPlaneKnowledgePolicy = Record<string, unknown>;
 export type ControlPlaneAutonomyPolicy = Record<string, unknown>;
+export type ControlPlaneExecutionPolicy = {
+  version?: number;
+  source?: string;
+  defaults?: Record<string, unknown>;
+  rules?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+export type ControlPlaneExecutionPolicyCatalogAction = {
+  action_id?: string;
+  tool_id?: string;
+  integration_id?: string;
+  title?: string;
+  description?: string;
+  transport?: string;
+  access_level?: string;
+  risk_class?: string;
+  effect_tags?: string[];
+  resource_method?: string;
+  server_key?: string;
+  default_decision?: string;
+  default_reason_code?: string;
+  preview_required_default?: boolean;
+  approval_scope_default?: string;
+  [key: string]: unknown;
+};
+export type ControlPlaneExecutionPolicyCatalog = {
+  version: number;
+  decision_values: string[];
+  effect_tags: string[];
+  selector_keys: string[];
+  tool_ids?: string[];
+  actions?: ControlPlaneExecutionPolicyCatalogAction[];
+  approval_scope_templates?: Array<Record<string, unknown>>;
+  selector_groups?: Array<Record<string, unknown>>;
+  core_tools?: Array<Record<string, unknown>>;
+  core_integrations?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+export type ControlPlaneExecutionPolicyPayload = {
+  agent_id: string;
+  policy: ControlPlaneExecutionPolicy;
+  source: string;
+  catalog: ControlPlaneExecutionPolicyCatalog;
+  legacy: {
+    tool_policy: Record<string, unknown>;
+    autonomy_policy: Record<string, unknown>;
+    resource_access_policy: Record<string, unknown>;
+  };
+};
+export type ControlPlaneExecutionPolicyEvaluation = {
+  agent_id: string;
+  policy: ControlPlaneExecutionPolicy;
+  catalog: ControlPlaneExecutionPolicyCatalog;
+  action: Record<string, unknown>;
+  evaluation: {
+    decision?: string;
+    reason_code?: string;
+    rule_id?: string | null;
+    matched_selector?: Record<string, unknown> | null;
+    audit_payload?: Record<string, unknown>;
+    approval_scope?: Record<string, unknown> | null;
+    preview_text?: string | null;
+    policy?: ControlPlaneExecutionPolicy;
+    [key: string]: unknown;
+  };
+};
 
 export type GeneralSystemSettings = {
   version: number;
@@ -298,6 +385,7 @@ export type GeneralSystemSettings = {
       default_work_dir: string;
       project_dirs: string[];
       scheduler_default_timezone: string;
+      time_format?: string;
       rate_limit_per_minute?: number | null;
     };
     models: {
@@ -341,19 +429,11 @@ export type GeneralSystemSettings = {
       autonomy_policy: ControlPlaneAutonomyPolicy;
     };
     variables: GeneralSystemSettingsVariable[];
-    integration_credentials: Record<
-      string,
-      {
-        title: string;
-        description: string;
-        fields: GeneralSystemSettingsCredentialField[];
-      }
-    >;
     provider_connections: Record<string, GeneralSystemSettingsProviderConnection>;
   };
   source_badges: Record<string, GeneralSystemSettingsValueSource>;
   catalogs: {
-    providers: Array<Record<string, unknown>>;
+    providers: GeneralSystemSettingsCatalogProvider[];
     model_functions: Array<{
       id: string;
       title: string;
@@ -534,10 +614,345 @@ export type ControlPlaneRuntimeAccess = {
 
 export type ControlPlaneServerRuntimeAccess = ControlPlaneRuntimeAccess;
 
+/* -------------------------------------------------------------------------- */
+/*  MCP types                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type McpToolPolicy = "auto" | "always_allow" | "always_ask" | "blocked";
+
+export type McpToolPolicyEntry = {
+  tool_name: string;
+  policy: McpToolPolicy;
+};
+
+export type McpDiscoveredTool = {
+  name: string;
+  description: string;
+  annotations?: {
+    title?: string;
+    read_only_hint?: boolean;
+    destructive_hint?: boolean;
+    idempotent_hint?: boolean;
+    [key: string]: unknown;
+  };
+  input_schema?: Record<string, unknown>;
+};
+
+export type McpEnvSchemaField = {
+  key: string;
+  label: string;
+  required: boolean;
+  input_type?: string;
+};
+
+export type McpServerCatalogEntry = {
+  server_key: string;
+  display_name: string;
+  description: string;
+  transport_type: "stdio" | "http_sse";
+  transport_kind?: string;
+  command?: string[];
+  command_json?: string | null;
+  url?: string | null;
+  remote_url?: string | null;
+  category: string;
+  enabled: boolean;
+  env_schema_json?: string | null;
+  env_schema?: McpEnvSchemaField[];
+  headers_schema?: McpEnvSchemaField[];
+  headers_schema_json?: string | null;
+  tool_discovery_mode?: string | null;
+  official_support_level?: string | null;
+  auth_strategy?: string | null;
+  oauth_enabled?: boolean;
+  oauth_mode?: string | null;
+  oauth_metadata_url?: string | null;
+  vendor_notes?: string | null;
+  default_policy?: McpToolPolicy | null;
+  auth_capabilities?: Record<string, unknown> | null;
+  documentation_url?: string | null;
+  logo_key?: string | null;
+  metadata?: Record<string, unknown>;
+  metadata_json?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type McpAgentConnection = {
+  server_key: string;
+  agent_id?: string;
+  enabled: boolean;
+  transport_override?: string | null;
+  command_override?: string[] | null;
+  command_override_json?: string | null;
+  url_override?: string | null;
+  cached_tools_json?: string;
+  cached_tools_at?: string | null;
+  last_connected_at?: string | null;
+  last_error?: string;
+  env_values?: Record<string, string>;
+  auth_method?: "manual" | "oauth";
+  metadata?: Record<string, unknown>;
+  tool_count?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type McpOAuthStatus = {
+  connected: boolean;
+  expires_at: string | null;
+  provider_account_id?: string | null;
+  account_label: string | null;
+  last_error: string | null;
+  auth_method: "manual" | "oauth";
+};
+
+export type ControlPlaneConnectionCatalogEntry = {
+  connection_key: string;
+  kind: "core" | "mcp";
+  integration_key: string;
+  display_name: string;
+  description: string;
+  category: string;
+  transport_kind?: string | null;
+  auth_capabilities?: Record<string, unknown> | null;
+  auth_strategy_default?: string | null;
+  official_support_level?: string | null;
+  oauth_mode?: string | null;
+  remote_url?: string | null;
+  vendor_notes?: string | null;
+  default_policy?: McpToolPolicy | null;
+  env_schema?: McpEnvSchemaField[];
+  headers_schema?: McpEnvSchemaField[];
+  documentation_url?: string | null;
+  logo_key?: string | null;
+  metadata?: Record<string, unknown> | null;
+  enabled?: boolean;
+};
+
+export type ControlPlaneAgentConnection = {
+  connection_key: string;
+  kind: "core" | "mcp";
+  integration_key: string;
+  status: string;
+  transport_kind?: string | null;
+  auth_strategy?: string | null;
+  auth_method?: string | null;
+  official_support_level?: string | null;
+  source_origin?: "agent_binding" | "imported_default" | "local_session" | "system_default" | string | null;
+  account_label?: string | null;
+  provider_account_id?: string | null;
+  expires_at?: string | null;
+  last_verified_at?: string | null;
+  last_error?: string | null;
+  tool_count?: number;
+  connected: boolean;
+  metadata?: Record<string, unknown> | null;
+  enabled?: boolean;
+  agent_id?: string;
+  fields?: Array<Record<string, unknown>>;
+  server_key?: string;
+  command_override?: string[] | null;
+  command_override_json?: string | null;
+  transport_override?: string | null;
+  url_override?: string | null;
+  env_values?: Record<string, string>;
+  cached_tools_json?: string | null;
+  cached_tools_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ControlPlaneConnectionTools = {
+  connection_key: string;
+  kind: "core" | "mcp";
+  integration_key: string;
+  tools: McpDiscoveredTool[];
+  policies: Record<string, McpToolPolicy>;
+  summary: {
+    total: number;
+    read_only: number;
+    write: number;
+    destructive: number;
+  };
+  last_discovered_at: string | null;
+  diff: {
+    added: string[];
+    removed: string[];
+    changed: string[];
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Core integration type                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type ControlPlaneCoreIntegration = {
+  id: string;
+  integration_id?: string;
+  title: string;
+  description?: string;
+  enabled?: boolean;
+  configured?: boolean;
+  category?: string;
+  transport?: string;
+  auth_modes?: string[];
+  auth_mode?: string;
+  connection_status?: string;
+  health_probe?: string;
+  supports_persistence?: boolean;
+  connection?: ControlPlaneCoreIntegrationConnection;
+  [key: string]: unknown;
+};
+
+export type ControlPlaneCoreIntegrations = {
+  items: ControlPlaneCoreIntegration[];
+  governance: Record<string, unknown>;
+};
+
+export type ControlPlaneCoreIntegrationConnection = {
+  connection_key?: string;
+  kind?: "core";
+  integration_key?: string;
+  integration_id: string;
+  title: string;
+  description?: string;
+  transport?: string;
+  auth_modes?: string[];
+  auth_mode?: string;
+  auth_method?: string;
+  auth_strategy?: string;
+  source_origin?: "agent_binding" | "imported_default" | "local_session" | "system_default" | string | null;
+  configured: boolean;
+  verified: boolean;
+  account_label?: string;
+  provider_account_id?: string | null;
+  expires_at?: string | null;
+  last_verified_at?: string;
+  last_error?: string;
+  checked_via?: string;
+  auth_expired?: boolean;
+  metadata?: Record<string, unknown>;
+  fields?: Array<Record<string, unknown>>;
+  health_probe?: string;
+  supports_persistence?: boolean;
+  connection_status?: string;
+  status?: string;
+  connected?: boolean;
+  enabled?: boolean;
+  tool_count?: number;
+};
+
+export type GeneralSystemSettingsCatalogProvider = {
+  id: string;
+  title: string;
+  vendor?: string;
+  category?: string;
+  enabled_by_default?: boolean;
+  command_present?: boolean;
+  available_models?: Array<Record<string, unknown>>;
+  default_model?: string;
+  supported_auth_modes?: string[];
+  supports_api_key?: boolean;
+  supports_subscription_login?: boolean;
+  supports_local_connection?: boolean;
+  login_flow_kind?: string;
+  requires_project_id?: boolean;
+  connection_managed?: boolean;
+  show_in_settings?: boolean;
+  connection_status?: string;
+  functional_models?: Array<Record<string, unknown>>;
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Onboarding status type                                                     */
+/* -------------------------------------------------------------------------- */
+
+export type ControlPlaneOnboardingStatus = {
+  has_owner?: boolean;
+  bootstrap_required?: boolean;
+  auth_mode?: string;
+  session_required?: boolean;
+  recovery_available?: boolean;
+  control_plane: {
+    ready: boolean;
+    [key: string]: unknown;
+  };
+  storage: {
+    database: {
+      ready: boolean;
+      reason?: string;
+      [key: string]: unknown;
+    };
+    object_storage: {
+      ready: boolean;
+      reason?: string;
+      [key: string]: unknown;
+    };
+  };
+  providers: Array<{
+    provider_id: string;
+    title: string;
+    supported_auth_modes: string[];
+    configured: boolean;
+    verified: boolean;
+    connection_status: Record<string, unknown>;
+    [key: string]: unknown;
+  }>;
+  agents: Array<{
+    agent_id: string;
+    display_name?: string;
+    telegram_token_configured: boolean;
+    [key: string]: unknown;
+  }>;
+  system: {
+    owner_name: string;
+    owner_email: string;
+    owner_github: string;
+    default_provider: string;
+    allowed_user_ids: Array<string | number>;
+    [key: string]: unknown;
+  };
+  steps: {
+    provider_configured: boolean;
+    access_configured: boolean;
+    agent_ready: boolean;
+    storage_ready: boolean;
+    onboarding_complete: boolean;
+    [key: string]: unknown;
+  };
+  openapi_url?: string;
+  setup_url?: string;
+};
+
+export type ControlPlaneAuthStatus = {
+  authenticated: boolean;
+  has_owner: boolean;
+  bootstrap_required: boolean;
+  auth_mode: string;
+  session_required: boolean;
+  recovery_available: boolean;
+  session_subject?: string | null;
+  operator?: {
+    id?: string | null;
+    username?: string | null;
+    email?: string | null;
+    display_name?: string | null;
+  } | null;
+};
+
 const PREVIEW_ONLY_KEYS = new Set([
   "preview",
   "api_key_preview",
   "output_preview",
+]);
+
+const STRIP_KEYS = new Set([
+  "encrypted_value",
+  "access_token_encrypted",
+  "refresh_token_encrypted",
+  "client_secret_encrypted",
+  "env_values_json",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -568,6 +983,10 @@ function sanitizeControlPlaneNode(value: unknown): unknown {
     ) {
       result[key] = null;
       continue;
+    }
+
+    if (STRIP_KEYS.has(key)) {
+      continue; // completely omit from result
     }
 
     if (PREVIEW_ONLY_KEYS.has(key)) {
@@ -603,11 +1022,11 @@ type ControlPlaneFetchOptions = {
 };
 
 function buildUrl(pathname: string) {
+  // Strip query params from the base URL so only the request path is sent downstream.
+  const cleanBase = CONTROL_PLANE_BASE_URL.split("?")[0];
   return new URL(
     pathname,
-    CONTROL_PLANE_BASE_URL.endsWith("/")
-      ? CONTROL_PLANE_BASE_URL
-      : `${CONTROL_PLANE_BASE_URL}/`,
+    cleanBase.endsWith("/") ? cleanBase : `${cleanBase}/`,
   );
 }
 
@@ -619,10 +1038,6 @@ export async function controlPlaneFetch(
   const headers = new Headers(init.headers);
 
   const operatorToken = await getWebOperatorTokenFromCookie();
-  if (!operatorToken) {
-    throw new ControlPlaneRequestError("Operator session is required", 401);
-  }
-
   if (operatorToken) {
     headers.set("Authorization", `Bearer ${operatorToken}`);
   }
@@ -694,8 +1109,7 @@ export async function getControlPlaneBot(botId: string) {
     `/api/control-plane/agents/${botId}`,
     {},
     {
-      tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tier: "live",
     },
   );
 }
@@ -704,6 +1118,50 @@ export async function getControlPlaneCompiledPrompt(botId: string) {
   return controlPlaneFetchJson<ControlPlaneCompiledPrompt>(
     `/api/control-plane/agents/${botId}/compiled-prompt`,
     {},
+    {
+      tier: "detail",
+      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+    },
+  );
+}
+
+export async function getControlPlaneExecutionPolicy(botId: string) {
+  return controlPlaneFetchJson<ControlPlaneExecutionPolicyPayload>(
+    `/api/control-plane/agents/${botId}/execution-policy`,
+    {},
+    {
+      tier: "detail",
+      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+    },
+  );
+}
+
+export async function getControlPlaneExecutionPolicyCatalog(botId: string) {
+  return controlPlaneFetchJson<{
+    agent_id: string;
+    catalog: ControlPlaneExecutionPolicyCatalog;
+    policy: ControlPlaneExecutionPolicy;
+  }>(`/api/control-plane/agents/${botId}/policy-catalog`, {}, {
+    tier: "detail",
+    tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+  });
+}
+
+export async function evaluateControlPlaneExecutionPolicy(
+  botId: string,
+  payload: {
+    policy?: ControlPlaneExecutionPolicy;
+    action?: Record<string, unknown>;
+    envelope?: Record<string, unknown>;
+    [key: string]: unknown;
+  },
+) {
+  return controlPlaneFetchJson<ControlPlaneExecutionPolicyEvaluation>(
+    `/api/control-plane/agents/${botId}/execution-policy/evaluate`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
     {
       tier: "detail",
       tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
@@ -830,6 +1288,203 @@ export async function getControlPlaneCoreCapabilities() {
     {
       tier: "catalog",
       tags: [CONTROL_PLANE_CACHE_TAGS.core],
+    },
+  );
+}
+
+export async function getControlPlaneOnboardingStatus() {
+  return controlPlaneFetchJson<ControlPlaneOnboardingStatus>(
+    "/api/control-plane/onboarding/status",
+    {},
+    { tier: "live" },
+  );
+}
+
+export async function getControlPlaneAuthStatus() {
+  return controlPlaneFetchJson<ControlPlaneAuthStatus>(
+    "/api/control-plane/auth/status",
+    {},
+    { tier: "live" },
+  );
+}
+
+export async function getControlPlaneConnectionCatalog() {
+  return controlPlaneFetchJson<{ items: ControlPlaneConnectionCatalogEntry[] }>(
+    "/api/control-plane/connections/catalog",
+    {},
+    {
+      tier: "catalog",
+      tags: [CONTROL_PLANE_CACHE_TAGS.core],
+    },
+  );
+}
+
+export async function getControlPlaneConnectionDefaults() {
+  return controlPlaneFetchJson<{ items: ControlPlaneAgentConnection[] }>(
+    "/api/control-plane/connections/defaults",
+    {},
+    {
+      tier: "detail",
+      tags: [CONTROL_PLANE_CACHE_TAGS.core],
+    },
+  );
+}
+
+function deriveCoreConnectionStatus(connection?: ControlPlaneAgentConnection | null) {
+  return String(connection?.status || "not_configured");
+}
+
+function toCoreIntegrationConnection(
+  integration: ControlPlaneConnectionCatalogEntry,
+  connection?: ControlPlaneAgentConnection | null,
+): ControlPlaneCoreIntegrationConnection {
+  const authModes = Array.isArray(integration.auth_capabilities?.modes)
+    ? integration.auth_capabilities?.modes.map((item) => String(item))
+    : [];
+  const status = deriveCoreConnectionStatus(connection);
+  const metadata =
+    connection?.metadata && typeof connection.metadata === "object" ? connection.metadata : {};
+
+  return {
+    connection_key: connection?.connection_key || integration.connection_key,
+    kind: "core",
+    integration_key: integration.integration_key,
+    integration_id: integration.integration_key,
+    title: integration.display_name,
+    description: integration.description,
+    transport: integration.transport_kind || undefined,
+    auth_modes: authModes,
+    auth_mode: String(connection?.auth_method || connection?.auth_strategy || integration.auth_strategy_default || authModes[0] || "none"),
+    auth_method: connection?.auth_method || connection?.auth_strategy || integration.auth_strategy_default || undefined,
+    auth_strategy: connection?.auth_strategy || integration.auth_strategy_default || undefined,
+    source_origin: connection?.source_origin || "system_default",
+    configured: Boolean(connection?.connected),
+    verified: status === "verified",
+    account_label: connection?.account_label || "",
+    provider_account_id: connection?.provider_account_id || null,
+    expires_at: connection?.expires_at || null,
+    last_verified_at: connection?.last_verified_at || "",
+    last_error: connection?.last_error || "",
+    checked_via:
+      typeof metadata.checked_via === "string"
+        ? metadata.checked_via
+        : "",
+    auth_expired:
+      typeof metadata.auth_expired === "boolean"
+        ? metadata.auth_expired
+        : false,
+    metadata,
+    fields: Array.isArray(connection?.fields) ? connection?.fields : [],
+    health_probe:
+      typeof metadata.health_probe === "string"
+        ? metadata.health_probe
+        : "",
+    supports_persistence: Boolean(metadata.supports_persistence ?? true),
+    connection_status: status,
+    status,
+    connected: Boolean(connection?.connected),
+    enabled: Boolean(connection?.enabled ?? connection?.connected),
+    tool_count: connection?.tool_count ?? 0,
+  };
+}
+
+export async function getControlPlaneCoreIntegrations() {
+  const [catalog, defaults] = await Promise.all([
+    getControlPlaneConnectionCatalog(),
+    getControlPlaneConnectionDefaults(),
+  ]);
+  const defaultMap = new Map(
+    (defaults.items || [])
+      .filter((item) => item.kind === "core")
+      .map((item) => [item.integration_key, item] as const),
+  );
+
+  const items = (catalog.items || [])
+    .filter((item) => item.kind === "core")
+    .map((item) => {
+      const connection = defaultMap.get(item.integration_key) || null;
+      const authModes = Array.isArray(item.auth_capabilities?.modes)
+        ? item.auth_capabilities?.modes.map((mode) => String(mode))
+        : [];
+      return {
+        id: item.integration_key,
+        integration_id: item.integration_key,
+        title: item.display_name,
+        description: item.description,
+        enabled: Boolean(connection?.enabled ?? connection?.connected),
+        configured: Boolean(connection?.connected),
+        category: item.category,
+        transport: item.transport_kind || undefined,
+        auth_modes: authModes,
+        auth_mode: String(connection?.auth_method || connection?.auth_strategy || item.auth_strategy_default || authModes[0] || "none"),
+        connection_status: deriveCoreConnectionStatus(connection),
+        health_probe:
+          typeof connection?.metadata?.health_probe === "string"
+            ? connection.metadata.health_probe
+            : "",
+        supports_persistence: Boolean(connection?.metadata?.supports_persistence ?? true),
+        connection: toCoreIntegrationConnection(item, connection),
+      } satisfies ControlPlaneCoreIntegration;
+    });
+
+  return {
+    items,
+    governance: {
+      ownership: "core",
+      source_of_truth: "connections_catalog_and_defaults",
+    },
+  } satisfies ControlPlaneCoreIntegrations;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Workspace / Squad spec API                                                 */
+/* -------------------------------------------------------------------------- */
+
+export async function getWorkspaceSpec(workspaceId: string) {
+  return controlPlaneFetchJson<{ spec: WorkspaceSpec; documents: ScopePromptDocuments }>(
+    `/api/control-plane/workspaces/${workspaceId}/spec`,
+    {},
+    {
+      tier: "detail",
+      tags: [CONTROL_PLANE_CACHE_TAGS.workspaces],
+    },
+  );
+}
+
+export async function updateWorkspaceSpec(
+  workspaceId: string,
+  payload: { spec: WorkspaceSpec; documents?: ScopePromptDocuments },
+) {
+  return controlPlaneFetchJson<{ spec: WorkspaceSpec; documents: ScopePromptDocuments }>(
+    `/api/control-plane/workspaces/${workspaceId}/spec`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function getSquadSpec(workspaceId: string, squadId: string) {
+  return controlPlaneFetchJson<{ spec: SquadSpec; documents: ScopePromptDocuments }>(
+    `/api/control-plane/workspaces/${workspaceId}/squads/${squadId}/spec`,
+    {},
+    {
+      tier: "detail",
+      tags: [CONTROL_PLANE_CACHE_TAGS.workspaces],
+    },
+  );
+}
+
+export async function updateSquadSpec(
+  workspaceId: string,
+  squadId: string,
+  payload: { spec: SquadSpec; documents?: ScopePromptDocuments },
+) {
+  return controlPlaneFetchJson<{ spec: SquadSpec; documents: ScopePromptDocuments }>(
+    `/api/control-plane/workspaces/${workspaceId}/squads/${squadId}/spec`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
     },
   );
 }

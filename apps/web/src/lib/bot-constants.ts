@@ -26,7 +26,15 @@ export function getBotDisplayMap() {
 }
 
 export function getBotDisplay(botId: string) {
-  return buildBotDisplayMap()[botId] ?? null;
+  const map = buildBotDisplayMap();
+  const direct = map[botId];
+  if (direct) return direct;
+
+  const upper = map[botId.toUpperCase()];
+  if (upper) return upper;
+
+  const lower = botId.toLowerCase();
+  return botCatalog.find((bot) => bot.id.toLowerCase() === lower) ?? null;
 }
 
 export function getBotColor(botId: string): string {

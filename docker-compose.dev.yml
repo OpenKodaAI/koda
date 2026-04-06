@@ -1,0 +1,62 @@
+services:
+  app:
+    read_only: false
+    working_dir: /workspace
+    command: ["python", "scripts/dev/run_control_plane_dev.py"]
+    healthcheck:
+      start_period: 90s
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: "/workspace"
+      NODE_ENV: "development"
+      WATCHFILES_FORCE_POLLING: "${WATCHFILES_FORCE_POLLING:-true}"
+      CONTROL_PLANE_AUTH_MODE: "development"
+      CONTROL_PLANE_POLL_INTERVAL_SECONDS: "${CONTROL_PLANE_POLL_INTERVAL_SECONDS:-1.0}"
+      CONTROL_PLANE_STARTUP_GRACE_SECONDS: "${CONTROL_PLANE_STARTUP_GRACE_SECONDS:-0.5}"
+      CONTROL_PLANE_RESTART_GRACE_SECONDS: "${CONTROL_PLANE_RESTART_GRACE_SECONDS:-3.0}"
+    volumes:
+      - .:/workspace
+      - tmp-images:/workspace/tmp_images
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    deploy:
+      resources:
+        limits:
+          cpus: "${KODA_DEV_WEB_CPUS:-2.0}"
+          memory: "${KODA_DEV_WEB_MEMORY_LIMIT:-3G}"
+    read_only: false
+    working_dir: /workspace
+    command: ["sh", "/workspace/scripts/dev/run_web_dev.sh"]
+    healthcheck:
+      start_period: 240s
+      interval: 10s
+      timeout: 5s
+      retries: 24
+    environment:
+      NODE_ENV: "development"
+      CONTROL_PLANE_AUTH_MODE: "development"
+      NODE_OPTIONS: "${KODA_DEV_WEB_NODE_OPTIONS:---max-old-space-size=2048}"
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "${WATCHPACK_POLLING:-true}"
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
+      KODA_DEV_PNPM_STORE_DIR: "/root/.local/share/pnpm/store"
+      npm_config_store_dir: "/root/.local/share/pnpm/store"
+    volumes:
+      - .:/workspace
+      - web-root-node-modules:/workspace/node_modules
+      - web-app-node-modules:/workspace/apps/web/node_modules
+      - web-pnpm-store:/root/.local/share/pnpm/store
+      - web-next-cache:/workspace/apps/web/.next
+
+volumes:
+  web-root-node-modules:
+  web-app-node-modules:
+  web-pnpm-store:
+  web-next-cache:

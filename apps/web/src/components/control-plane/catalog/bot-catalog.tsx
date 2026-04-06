@@ -6,31 +6,33 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { CheckCheck, LoaderCircle, Pencil, Trash2, Users } from "lucide-react";
+import { createPortal } from "react-dom";
+import { CheckCheck, ChevronDown, FileText, FolderPlus, LoaderCircle, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { BotCatalogCard } from "./bot-catalog-card";
 import { BotCreateWizard } from "./bot-create-wizard";
+import { WorkspaceSpecEditor, WorkspaceSpecIndicator } from "./workspace-spec-editor";
+import { SquadSpecEditor, SquadSpecIndicator } from "./squad-spec-editor";
 import { AnimatedColorPicker } from "@/components/control-plane/shared/animated-color-picker";
-import {
-  PageEmptyState,
-} from "@/components/ui/page-primitives";
 import { ActionButton } from "@/components/ui/action-button";
 import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
 import { FormInput } from "@/components/control-plane/shared/form-field";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
-import { agentBoardAssets } from "@/lib/agent-board-assets";
+import { hexToRgb } from "@/lib/control-plane-editor";
+import { cn } from "@/lib/utils";
 import type {
   ControlPlaneBotSummary,
   ControlPlaneBotOrganization,
   ControlPlaneCoreProviders,
+  GeneralSystemSettings,
   ControlPlaneWorkspace,
   ControlPlaneWorkspaceSquad,
   ControlPlaneWorkspaceTree,
@@ -54,6 +56,391 @@ function formatMetricLabel(
   plural: string,
 ) {
   return tl(count === 1 ? singular : plural);
+}
+
+function clampChannel(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function mixHex(color: string, target: string, amount: number) {
+  const sourceRgb = hexToRgb(color);
+  const targetRgb = hexToRgb(target);
+
+  if (!sourceRgb || !targetRgb) {
+    return color;
+  }
+
+  const ratio = Math.max(0, Math.min(1, amount));
+  const r = clampChannel(sourceRgb.r * (1 - ratio) + targetRgb.r * ratio);
+  const g = clampChannel(sourceRgb.g * (1 - ratio) + targetRgb.g * ratio);
+  const b = clampChannel(sourceRgb.b * (1 - ratio) + targetRgb.b * ratio);
+
+  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function getRelativeLuminance(color: string) {
+  const rgb = hexToRgb(color);
+
+  if (!rgb) {
+    return 0;
+  }
+
+  const channels = [rgb.r, rgb.g, rgb.b].map((value) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function getLaneHeaderPalette(color: string) {
+  const luminance = getRelativeLuminance(color);
+  const isLight = luminance > 0.58;
+
+  return {
+    background: color,
+    foreground: isLight ? "#101010" : "#FFFDF9",
+    border: isLight ? mixHex(color, "#101010", 0.16) : mixHex(color, "#FFFDF9", 0.18),
+    actionHover: isLight ? mixHex(color, "#101010", 0.08) : mixHex(color, "#FFFDF9", 0.12),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  WorkspaceSelectorDropdown                                         */
+/* ------------------------------------------------------------------ */
+
+function WorkspaceSelectorDropdown({
+  workspaceTabs,
+  activeSection,
+  onSelect,
+  searchQuery,
+  tl,
+}: {
+  workspaceTabs: BoardSection[];
+  activeSection: BoardSection | null;
+  onSelect: (key: string) => void;
+  searchQuery: string;
+  tl: (value: string, options?: Record<string, unknown>) => string;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      if (!rootRef.current) return;
+      const rect = rootRef.current.getBoundingClientRect();
+      const pad = 12;
+      const w = Math.max(220, rect.width);
+      const left = Math.min(
+        Math.max(rect.left, pad),
+        window.innerWidth - pad - w,
+      );
+      setPanelPosition({ top: rect.bottom + 6, left, width: w });
+    };
+
+    const frame = requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        className={cn(
+          "agent-board-ws-selector__trigger",
+          open && "agent-board-ws-selector__trigger--open",
+        )}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={tl("Selecionar workspace")}
+      >
+        {activeSection && (
+          <span
+            className="agent-board-ws-selector__dot"
+            aria-hidden="true"
+            style={{ backgroundColor: activeSection.color }}
+          />
+        )}
+        <span className="min-w-0 truncate">
+          {activeSection?.title ?? tl("Workspace")}
+        </span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)] transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+
+      {typeof document !== "undefined"
+        ? createPortal(
+            <AnimatePresence initial={false}>
+              {open ? (
+                <motion.div
+                  ref={panelRef}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                  className="app-floating-panel agent-board-ws-selector__menu"
+                  role="listbox"
+                  aria-label={tl("Workspaces")}
+                  style={{
+                    position: "fixed",
+                    zIndex: 80,
+                    top: panelPosition?.top ?? 0,
+                    left: panelPosition?.left ?? 0,
+                    width: panelPosition?.width,
+                    visibility: panelPosition ? "visible" : "hidden",
+                  }}
+                >
+                  {workspaceTabs.map((section) => {
+                    const isActive = section.key === activeSection?.key;
+                    const countLabel = searchQuery
+                      ? `${section.visibleBots}/${section.totalBots}`
+                      : formatBotCountLabel(tl, section.totalBots);
+
+                    return (
+                      <button
+                        key={section.key}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        className={cn(
+                          "agent-board-ws-selector__item",
+                          isActive && "agent-board-ws-selector__item--active",
+                        )}
+                        onClick={() => {
+                          onSelect(section.key);
+                          setOpen(false);
+                        }}
+                      >
+                        <span
+                          className="agent-board-ws-selector__dot"
+                          aria-hidden="true"
+                          style={{ backgroundColor: section.color }}
+                        />
+                        <span className="min-w-0 truncate">{section.title}</span>
+                        <span className="agent-board-ws-selector__item-count">
+                          {countLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </motion.div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  CreatePopover                                                     */
+/* ------------------------------------------------------------------ */
+
+function CreatePopover({
+  onCreateBot,
+  onCreateWorkspace,
+  onCreateSquad,
+  hasActiveWorkspace,
+  tl,
+}: {
+  onCreateBot: () => void;
+  onCreateWorkspace: () => void;
+  onCreateSquad: () => void;
+  hasActiveWorkspace: boolean;
+  tl: (value: string, options?: Record<string, unknown>) => string;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      if (!rootRef.current) return;
+      const rect = rootRef.current.getBoundingClientRect();
+      const pad = 12;
+      const w = 208;
+      const left = Math.min(
+        Math.max(rect.right - w, pad),
+        window.innerWidth - pad - w,
+      );
+      setPanelPosition({ top: rect.bottom + 6, left, width: w });
+    };
+
+    const frame = requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <ActionButton
+        type="button"
+        size="icon"
+        className={cn(
+          "agent-board-toolbar-icon",
+          open && "agent-board-ws-selector__trigger--open",
+        )}
+        aria-label={tl("Criar")}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Plus className="h-4 w-4" />
+      </ActionButton>
+
+      {typeof document !== "undefined"
+        ? createPortal(
+            <AnimatePresence initial={false}>
+              {open ? (
+                <motion.div
+                  ref={panelRef}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+                  className="app-floating-panel agent-board-create-popover__menu"
+                  role="menu"
+                  aria-label={tl("Criar")}
+                  style={{
+                    position: "fixed",
+                    zIndex: 80,
+                    top: panelPosition?.top ?? 0,
+                    left: panelPosition?.left ?? 0,
+                    width: panelPosition?.width,
+                    visibility: panelPosition ? "visible" : "hidden",
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-board-create-popover__item"
+                    onClick={() => {
+                      onCreateBot();
+                      setOpen(false);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <span>{tl("Agente")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-board-create-popover__item"
+                    onClick={() => {
+                      onCreateWorkspace();
+                      setOpen(false);
+                    }}
+                  >
+                    <FolderPlus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <span>{tl("Workspace")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-board-create-popover__item"
+                    disabled={!hasActiveWorkspace}
+                    onClick={() => {
+                      if (hasActiveWorkspace) {
+                        onCreateSquad();
+                        setOpen(false);
+                      }
+                    }}
+                  >
+                    <Users className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <span>{tl("Squad")}</span>
+                  </button>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
 }
 
 type OrganizationFormState = {
@@ -299,12 +686,14 @@ function canStartLaneRailPan(target: EventTarget | null): boolean {
 interface BotCatalogProps {
   bots: ControlPlaneBotSummary[];
   coreProviders: ControlPlaneCoreProviders;
+  generalSettings?: GeneralSystemSettings | null;
   workspaces: ControlPlaneWorkspaceTree;
 }
 
 export function BotCatalog({
   bots,
   coreProviders,
+  generalSettings,
   workspaces,
 }: BotCatalogProps) {
   const router = useRouter();
@@ -327,6 +716,15 @@ export function BotCatalog({
   const [moveFeedback, setMoveFeedback] = useState<BatchMoveFeedback | null>(
     null,
   );
+  const [workspaceSpecTarget, setWorkspaceSpecTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [squadSpecTarget, setSquadSpecTarget] = useState<{
+    workspaceId: string;
+    squadId: string;
+    squadName: string;
+  } | null>(null);
   const laneRailRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const laneRailPanRef = useRef<LaneRailPanState | null>(null);
   const [laneRailDraggingKey, setLaneRailDraggingKey] = useState<string | null>(
@@ -1195,7 +1593,7 @@ export function BotCatalog({
   return (
     <section className="agent-board flex min-h-0 flex-col gap-3 lg:h-full lg:gap-4" {...tourRoute("control-plane.catalog", tourVariant)}>
       <div className="agent-board-toolbar shrink-0">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="agent-board-search min-w-0 flex-1" {...tourAnchor("catalog.search")}>
             <input
               type="text"
@@ -1206,81 +1604,29 @@ export function BotCatalog({
             />
           </label>
 
-          <div className="flex items-center gap-2 self-start xl:self-auto" {...tourAnchor("catalog.primary-actions")}>
-            <ActionButton
-              type="button"
-              size="icon"
-              className="agent-board-toolbar-icon"
-              aria-label={tl("Novo workspace")}
-              title={tl("Novo workspace")}
-              onClick={() => openWorkspaceForm("create")}
-              {...tourAnchor("catalog.new-workspace")}
-            >
-              <Image
-                src={agentBoardAssets.workspaceFolder}
-                alt=""
-                width={16}
-                height={16}
-                className="agent-board-toolbar-icon__image"
+          <div className="flex items-center gap-2 self-start sm:self-auto" {...tourAnchor("catalog.primary-actions")}>
+            {workspaceTabs.length > 0 && (
+              <WorkspaceSelectorDropdown
+                workspaceTabs={workspaceTabs}
+                activeSection={activeSection}
+                onSelect={setActiveSectionKey}
+                searchQuery={searchQuery}
+                tl={tl}
               />
-            </ActionButton>
-            <ActionButton
-              type="button"
-              size="icon"
-              className="agent-board-toolbar-icon"
-              aria-label={tl("Criar bot")}
-              title={tl("Criar bot")}
-              onClick={() => setWizardOpen(true)}
-              {...tourAnchor("catalog.create-bot")}
-            >
-              <Image
-                src={agentBoardAssets.actionSpark}
-                alt=""
-                width={16}
-                height={16}
-                className="agent-board-toolbar-icon__image"
-              />
-            </ActionButton>
+            )}
+            <CreatePopover
+              onCreateBot={() => setWizardOpen(true)}
+              onCreateWorkspace={() => openWorkspaceForm("create")}
+              onCreateSquad={() => {
+                if (activeSection?.workspace) {
+                  openSquadForm(activeSection.workspace, "create");
+                }
+              }}
+              hasActiveWorkspace={Boolean(activeSection && !activeSection.isVirtual)}
+              tl={tl}
+            />
           </div>
         </div>
-
-        {workspaceTabs.length > 0 ? (
-          <div className="agent-board-workspaces" {...tourAnchor("catalog.workspaces")}>
-            <div className="agent-board-workspaces__rail" role="tablist" aria-label={tl("Workspaces")} {...tourAnchor("catalog.tabs")}>
-              {workspaceTabs.map((section) => {
-                const isActive = section.key === activeSection?.key;
-                const countLabel = searchQuery
-                  ? `${section.visibleBots}/${section.totalBots}`
-                  : formatBotCountLabel(tl, section.totalBots);
-
-                return (
-                  <button
-                    key={section.key}
-                    id={`workspace-tab-${section.key}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    aria-controls={`workspace-panel-${section.key}`}
-                    className={`agent-board-workspace-tab ${isActive ? "is-active" : ""}`}
-                    onClick={() => setActiveSectionKey(section.key)}
-                    title={section.title}
-                  >
-                    <span
-                      className="agent-board-workspace-tab__dot"
-                      aria-hidden="true"
-                      style={{
-                        backgroundColor: section.color,
-                        boxShadow: `0 0 0 5px color-mix(in srgb, ${section.color} 14%, transparent)`,
-                      }}
-                    />
-                    <span className="min-w-0 truncate">{section.title}</span>
-                    <span className="agent-board-workspace-tab__count">{countLabel}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <AnimatePresence initial={false}>
@@ -1320,7 +1666,7 @@ export function BotCatalog({
                         })
                       : tl("{{count}} agente(s) sincronizado(s)", { count: moveFeedback.total })}
                 </p>
-                <p className="text-xs text-[rgba(255,255,255,0.52)]">
+                <p className="text-xs text-[var(--text-tertiary)]">
                   {moveFeedback
                     .phase === "moving"
                     ? tl("{{done}} de {{total}} atualizados em background. Você pode continuar navegando normalmente.", {
@@ -1347,7 +1693,7 @@ export function BotCatalog({
         <div className="agent-board-shell min-h-0 flex-1 overflow-visible lg:overflow-hidden" {...tourAnchor("catalog.board")}>
           <section
             id={`workspace-panel-${activeSection.key}`}
-            aria-labelledby={`workspace-tab-${activeSection.key}`}
+            aria-label={activeSection.title}
             className={`agent-board-section relative flex h-full min-h-0 flex-col overflow-hidden rounded-[0.5rem] border px-5 py-3.5 sm:px-6 sm:py-4 ${
               activeSection.isVirtual
                 ? "agent-board-section--virtual"
@@ -1358,16 +1704,16 @@ export function BotCatalog({
               className="pointer-events-none absolute inset-x-0 top-0 h-px opacity-70"
               style={{
                 background:
-                  "linear-gradient(90deg, transparent, rgba(255,255,255,0.16), transparent)",
+                  "linear-gradient(90deg, transparent, var(--border-strong), transparent)",
               }}
             />
             <div className="flex shrink-0 flex-col gap-2 pb-2 xl:flex-row xl:items-center xl:justify-between" {...tourAnchor("catalog.board-header")}>
               <div className="min-w-0 flex flex-wrap items-center gap-2.5 xl:flex-1">
                 <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-                  <h2 className="text-[1.18rem] font-medium tracking-[-0.038em] text-[rgba(255,255,255,0.92)]">
+                  <h2 className="text-[1.18rem] font-medium tracking-[-0.038em] text-[var(--text-primary)]">
                     {activeSection.title}
                   </h2>
-                  <span className="inline-flex items-center rounded-[0.45rem] border border-[rgba(255,255,255,0.07)] bg-[rgba(255,255,255,0.02)] px-2 py-0.75 text-[11px] text-[rgba(255,255,255,0.54)]">
+                  <span className="inline-flex items-center rounded-[0.45rem] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2 py-0.75 text-[11px] text-[var(--text-tertiary)]">
                     {searchQuery
                       ? `${activeSection.visibleBots}/${activeSection.totalBots}`
                       : formatBotCountLabel(tl, activeSection.totalBots)}
@@ -1407,6 +1753,11 @@ export function BotCatalog({
 
               {!activeSection.isVirtual && activeSection.workspace ? (
                 <div className="flex flex-wrap items-center gap-2" {...tourAnchor("catalog.workspace-actions")}>
+                  <WorkspaceSpecIndicator
+                    hasPrompt={Boolean(
+                      activeSection.workspace.documents?.system_prompt_md?.trim(),
+                    )}
+                  />
                   <ActionButton
                     type="button"
                     size="sm"
@@ -1417,6 +1768,19 @@ export function BotCatalog({
                   >
                     <Users className="h-3.5 w-3.5" />
                     {tl("Nova squad")}
+                  </ActionButton>
+                  <ActionButton
+                    type="button"
+                    size="icon"
+                    aria-label={tl("Configurar system prompt do espaco de trabalho {{workspace}}", { workspace: activeSection.workspace.name })}
+                    onClick={() =>
+                      setWorkspaceSpecTarget({
+                        id: activeSection.workspace!.id,
+                        name: activeSection.workspace!.name,
+                      })
+                    }
+                  >
+                    <FileText className="h-3.5 w-3.5" />
                   </ActionButton>
                   <ActionButton
                     type="button"
@@ -1482,17 +1846,10 @@ export function BotCatalog({
                         lane.bots.map(renderBotCard)
                       ) : (
                         <div className="agent-board-unassigned-empty">
-                          <Image
-                            src={agentBoardAssets.sendMark}
-                            alt=""
-                            width={18}
-                            height={18}
-                            className="mb-3 opacity-80 invert"
-                          />
-                          <p className="max-w-[22rem] text-sm leading-6 text-[rgba(255,255,255,0.48)]">
+                          <p className="agent-board-empty__title">
                             {searchQuery
-                              ? tl("Nenhum agente corresponde a esta busca nesta area.")
-                              : tl("Arraste agentes aqui para deixá-los fora de um workspace.")}
+                              ? tl("Nenhum agente corresponde a esta busca.")
+                              : tl("Sem agentes fora de workspace.")}
                           </p>
                         </div>
                       )}
@@ -1540,6 +1897,9 @@ export function BotCatalog({
                   >
                   {activeSection.lanes.map((lane) => {
                     const isDropTarget = dropTargetKey === lane.key;
+                    const laneHeaderPalette = lane.squad
+                      ? getLaneHeaderPalette(lane.color)
+                      : null;
                     const laneWidth =
                       activeSection.lanes.length === 1
                         ? "100%"
@@ -1597,27 +1957,51 @@ export function BotCatalog({
                               lane.squad ? "" : "agent-board-lane__header--plain"
                             }`}
                             style={
-                              {
-                                "--lane-accent": lane.color,
-                              } as CSSProperties
+                              laneHeaderPalette
+                                ? ({
+                                    "--lane-accent": lane.color,
+                                    "--lane-header-bg": laneHeaderPalette.background,
+                                    "--lane-header-fg": laneHeaderPalette.foreground,
+                                    "--lane-header-border": laneHeaderPalette.border,
+                                    "--lane-header-action-hover": laneHeaderPalette.actionHover,
+                                  } as CSSProperties)
+                                : ({
+                                    "--lane-accent": lane.color,
+                                  } as CSSProperties)
                             }
                           >
                             <div className="agent-board-lane__heading">
                               <h3 className="agent-board-lane__title">
                                 {lane.title}
                               </h3>
-                              <span className="agent-board-lane__count">
-                                {searchQuery
-                                  ? `${lane.bots.length}/${lane.totalBots}`
-                                  : lane.totalBots}
-                              </span>
                             </div>
 
                             {lane.squad && activeSection.workspace ? (
-                              <div className="flex flex-wrap items-center gap-2">
+                              <div className="agent-board-lane__actions">
+                                <SquadSpecIndicator
+                                  hasPrompt={Boolean(
+                                    lane.squad.documents?.system_prompt_md?.trim(),
+                                  )}
+                                />
                                 <ActionButton
                                   type="button"
                                   size="icon"
+                                  className="agent-board-lane__action"
+                                  aria-label={tl("Configurar system prompt do time {{squad}}", { squad: lane.squad.name })}
+                                  onClick={() =>
+                                    setSquadSpecTarget({
+                                      workspaceId: activeSection.workspace!.id,
+                                      squadId: lane.squad!.id,
+                                      squadName: lane.squad!.name,
+                                    })
+                                  }
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                </ActionButton>
+                                <ActionButton
+                                  type="button"
+                                  size="icon"
+                                  className="agent-board-lane__action"
                                   aria-label={tl("Editar squad {{squad}}", { squad: lane.squad.name })}
                                   onClick={() =>
                                     openSquadForm(
@@ -1632,6 +2016,7 @@ export function BotCatalog({
                                 <ActionButton
                                   type="button"
                                   size="icon"
+                                  className="agent-board-lane__action agent-board-lane__action--danger"
                                   aria-label={tl("Remover squad {{squad}}", { squad: lane.squad.name })}
                                   onClick={() =>
                                     setDeleteTarget({
@@ -1665,7 +2050,10 @@ export function BotCatalog({
                               {lane.bots.map(renderBotCard)}
                             </div>
                           ) : lane.isPlaceholder && activeSection.workspace ? (
-                              <div className="agent-board-slot flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] border border-dashed border-[rgba(255,255,255,0.07)] px-6 py-8 text-center" {...tourAnchor("catalog.placeholder-lane")}>
+                              <div className="agent-board-slot flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] px-6 py-8 text-center" {...tourAnchor("catalog.placeholder-lane")}>
+                              <p className="agent-board-empty__title">
+                                {tl("Sem squads ainda")}
+                              </p>
                               <ActionButton
                                 type="button"
                                 className="agent-board-slot__action"
@@ -1673,29 +2061,16 @@ export function BotCatalog({
                                   openSquadForm(activeSection.workspace!, "create")
                                 }
                               >
-                                <Image
-                                  src={agentBoardAssets.plus}
-                                  alt=""
-                                  width={16}
-                                  height={16}
-                                  className="agent-board-slot__action-icon"
-                                />
+                                <Plus className="h-4 w-4" />
                                 {tl("Adicionar squad")}
                               </ActionButton>
                             </div>
                           ) : (
-                            <div className="agent-board-empty flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] border border-dashed border-[rgba(255,255,255,0.08)] px-6 py-8 text-center" {...tourAnchor("catalog.empty-lane")}>
-                              <Image
-                                src={agentBoardAssets.plus}
-                                alt=""
-                                width={32}
-                                height={32}
-                                className="mb-4 opacity-80 invert"
-                              />
-                              <p className="max-w-[22rem] text-sm leading-6 text-[rgba(255,255,255,0.48)]">
+                            <div className="agent-board-empty flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] px-6 py-8 text-center" {...tourAnchor("catalog.empty-lane")}>
+                              <p className="agent-board-empty__title">
                                 {searchQuery
-                                  ? tl("Nenhum agente corresponde a esta busca nesta area.")
-                                  : tl("Arraste agentes para ca para reorganizar a composicao deste time.")}
+                                  ? tl("Nenhum agente corresponde a esta busca.")
+                                  : tl("Sem agentes neste squad.")}
                               </p>
                             </div>
                           )}
@@ -1710,29 +2085,25 @@ export function BotCatalog({
         </div>
       ) : (
         <div className="min-h-[220px] px-6 py-10" {...tourAnchor("catalog.empty")}>
-          <PageEmptyState
-            title={tl("Nenhum agente encontrado")}
-            description={tl("Tente outra busca para voltar a visualizar a distribuicao dos workspaces e squads.")}
-          />
+          <div className="agent-board-global-empty">
+            <p className="agent-board-empty__title">
+              {tl("Nenhum agente encontrado.")}
+            </p>
+          </div>
         </div>
       )}
 
-      <AnimatePresence>
-        {organizationForm ? (
-          <motion.div
-            className="agent-board-dialog-backdrop z-50 flex items-center justify-center px-4 py-8 overflow-auto"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+      {organizationForm ? (
+        <>
+          <div
+            className="app-overlay-backdrop z-[70]"
+            onClick={() => setOrganizationForm(null)}
+            aria-hidden="true"
+          />
+          <div className="app-modal-frame z-[80] flex items-center justify-center overflow-auto px-4 py-8">
+          <div
+            className="app-modal-panel agent-board-dialog w-full max-w-lg p-5 sm:p-6"
           >
-            <motion.div
-              className="agent-board-dialog w-full max-w-lg p-5 sm:p-6"
-              initial={{ opacity: 0, y: 10, scale: 0.985 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.985 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            >
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-2">
                 <p className="eyebrow">
@@ -1830,15 +2201,16 @@ export function BotCatalog({
                     : tl("Salvar")}
               </ActionButton>
             </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+          </div>
+          </div>
+        </>
+      ) : null}
 
       <BotCreateWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         coreProviders={coreProviders}
+        generalSettings={generalSettings}
         workspaces={workspaceTree}
         initialWorkspaceId=""
         initialSquadId=""
@@ -1865,6 +2237,25 @@ export function BotCatalog({
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDeleteTarget()}
       />
+
+      {workspaceSpecTarget ? (
+        <WorkspaceSpecEditor
+          workspaceId={workspaceSpecTarget.id}
+          workspaceName={workspaceSpecTarget.name}
+          open
+          onClose={() => setWorkspaceSpecTarget(null)}
+        />
+      ) : null}
+
+      {squadSpecTarget ? (
+        <SquadSpecEditor
+          workspaceId={squadSpecTarget.workspaceId}
+          squadId={squadSpecTarget.squadId}
+          squadName={squadSpecTarget.squadName}
+          open
+          onClose={() => setSquadSpecTarget(null)}
+        />
+      ) : null}
     </section>
   );
 }

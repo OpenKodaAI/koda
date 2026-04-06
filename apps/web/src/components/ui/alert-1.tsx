@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button-1";
 import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
-  "flex w-full items-start gap-2.5 border shadow-[0_18px_44px_rgba(0,0,0,0.26)] backdrop-blur-xl transition-[transform,opacity,border-color,background-color,color] group-[.toaster]:w-full",
+  "flex w-full items-start gap-2.5 border transition-[transform,opacity,border-color,background-color,color] group-[.toaster]:w-full",
   {
     variants: {
       variant: {
@@ -43,121 +43,121 @@ const alertVariants = cva(
         variant: "secondary",
         appearance: "solid",
         className:
-          "border-white/8 bg-[rgba(24,24,25,0.96)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]",
       },
       {
         variant: "primary",
         appearance: "solid",
         className:
-          "border-[rgba(120,164,255,0.4)] bg-[rgba(56,92,160,0.94)] text-white",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
       },
       {
         variant: "destructive",
         appearance: "solid",
         className:
-          "border-[rgba(225,138,152,0.42)] bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)]",
       },
       {
         variant: "success",
         appearance: "solid",
         className:
-          "border-[rgba(119,197,144,0.42)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)]",
       },
       {
         variant: "info",
         appearance: "solid",
         className:
-          "border-[rgba(120,166,255,0.42)] bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
       },
       {
         variant: "warning",
         appearance: "solid",
         className:
-          "border-[rgba(228,180,84,0.42)] bg-[var(--tone-warning-bg-strong)] text-[var(--tone-warning-text)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg-strong)] text-[var(--tone-warning-text)]",
       },
       {
         variant: "mono",
         appearance: "solid",
         className:
-          "border-white/10 bg-[rgba(16,16,17,0.96)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "outline",
         className:
-          "border-white/10 bg-[rgba(19,19,20,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-close]]:text-[var(--text-secondary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] [&_[data-slot=alert-close]]:text-[var(--text-secondary)]",
       },
       {
         variant: "primary",
         appearance: "outline",
         className:
-          "border-[rgba(120,164,255,0.24)] bg-[rgba(16,22,36,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[#8ab2ff]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
       },
       {
         variant: "destructive",
         appearance: "outline",
         className:
-          "border-[rgba(225,138,152,0.24)] bg-[rgba(35,20,24,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
       },
       {
         variant: "success",
         appearance: "outline",
         className:
-          "border-[rgba(119,197,144,0.24)] bg-[rgba(18,30,23,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
       },
       {
         variant: "info",
         appearance: "outline",
         className:
-          "border-[rgba(120,166,255,0.24)] bg-[rgba(18,22,32,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
       },
       {
         variant: "warning",
         appearance: "outline",
         className:
-          "border-[rgba(228,180,84,0.24)] bg-[rgba(33,27,18,0.88)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
       },
       {
         variant: "mono",
         appearance: "outline",
         className:
-          "border-white/10 bg-[rgba(19,19,20,0.88)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "light",
         className:
-          "border-white/8 bg-[rgba(255,255,255,0.045)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)]",
       },
       {
         variant: "primary",
         appearance: "light",
         className:
-          "border-[rgba(120,164,255,0.16)] bg-[rgba(69,95,155,0.16)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[#8ab2ff]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
       },
       {
         variant: "destructive",
         appearance: "light",
         className:
-          "border-[rgba(225,138,152,0.14)] bg-[rgba(122,54,67,0.14)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
       },
       {
         variant: "success",
         appearance: "light",
         className:
-          "border-[rgba(119,197,144,0.14)] bg-[rgba(50,92,67,0.16)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
       },
       {
         variant: "info",
         appearance: "light",
         className:
-          "border-[rgba(120,166,255,0.14)] bg-[rgba(47,85,142,0.16)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
       },
       {
         variant: "warning",
         appearance: "light",
         className:
-          "border-[rgba(228,180,84,0.14)] bg-[rgba(123,91,36,0.16)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
       },
       {
         variant: "mono",
@@ -232,9 +232,9 @@ function Alert({
           onClick={onClose}
           aria-label="Dismiss"
           data-slot="alert-close"
-          className="group size-6 shrink-0 self-start rounded-full text-[var(--text-quaternary)] hover:bg-white/6 hover:text-[var(--text-primary)]"
+          className="group size-6 shrink-0 self-start rounded-full text-[var(--icon-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)]"
         >
-          <X className="size-3.5 opacity-70 group-hover:opacity-100" />
+          <X className="size-3.5" />
         </Button>
       ) : null}
     </div>

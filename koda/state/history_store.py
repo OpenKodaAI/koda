@@ -859,6 +859,59 @@ def get_task(task_id: int) -> tuple[Any, ...] | None:
         return cast(tuple[Any, ...] | None, row)
 
 
+def list_pending_tasks_for_recovery(limit: int | None = None) -> list[dict[str, Any]]:
+    """Return queued/running/retrying tasks that should be considered for queue recovery."""
+    query = (
+        "SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts, "
+        "error_message, created_at, started_at, completed_at, session_id, provider_session_id, "
+        "source_task_id, source_action "
+        "FROM tasks WHERE agent_id = ? AND status IN ('queued', 'running', 'retrying') ORDER BY created_at ASC"
+    )
+    params: list[Any] = [_current_agent_scope()]
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    backend = _primary_backend()
+    if backend is not None:
+        rows = run_coro_sync(primary_fetch_all(query, tuple(params), agent_id=AGENT_ID))
+        return [dict(row) for row in rows]
+    with _history_backend_removed() as conn:
+        legacy_query = (
+            "SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts, "
+            "error_message, created_at, started_at, completed_at, session_id, provider_session_id, "
+            "source_task_id, source_action "
+            "FROM tasks WHERE status IN ('queued', 'running', 'retrying') ORDER BY created_at ASC"
+        )
+        legacy_params: list[Any] = []
+        if limit is not None:
+            legacy_query += " LIMIT ?"
+            legacy_params.append(limit)
+        rows = conn.execute(legacy_query, tuple(legacy_params)).fetchall()
+    return [
+        {
+            "id": row[0],
+            "user_id": row[1],
+            "chat_id": row[2],
+            "status": row[3],
+            "query_text": row[4],
+            "provider": row[5],
+            "model": row[6],
+            "work_dir": row[7],
+            "attempt": row[8],
+            "max_attempts": row[9],
+            "error_message": row[10],
+            "created_at": row[11],
+            "started_at": row[12],
+            "completed_at": row[13],
+            "session_id": row[14],
+            "provider_session_id": row[15],
+            "source_task_id": row[16],
+            "source_action": row[17],
+        }
+        for row in rows
+    ]
+
+
 def mark_stale_tasks_failed() -> int:
     backend = _primary_backend()
     if backend is not None:
@@ -1062,10 +1115,20 @@ def dlq_get_dict(dlq_id: int) -> dict[str, Any] | None:
         return None
 
 
-def dlq_mark_retried(dlq_id: int) -> bool:
+def dlq_mark_retried(dlq_id: int, *, metadata_json: str | None = None) -> bool:
     try:
         backend = _primary_backend()
         if backend is not None:
+            if metadata_json is not None:
+                updated = run_coro_sync(
+                    primary_execute(
+                        "UPDATE dead_letter_queue "
+                        "SET retry_eligible = FALSE, retried_at = ?, metadata_json = ? WHERE id = ?",
+                        (_now_iso(), metadata_json, dlq_id),
+                        agent_id=AGENT_ID,
+                    )
+                )
+                return bool(updated)
             updated = run_coro_sync(
                 primary_execute(
                     "UPDATE dead_letter_queue SET retry_eligible = FALSE, retried_at = ? WHERE id = ?",
@@ -1075,6 +1138,12 @@ def dlq_mark_retried(dlq_id: int) -> bool:
             )
             return bool(updated)
         with _history_backend_removed() as conn:
+            if metadata_json is not None:
+                cursor = conn.execute(
+                    "UPDATE dead_letter_queue SET retry_eligible = 0, retried_at = ?, metadata_json = ? WHERE id = ?",
+                    (_now_iso(), metadata_json, dlq_id),
+                )
+                return int(getattr(cursor, "rowcount", 0) or 0) > 0
             cursor = conn.execute(
                 "UPDATE dead_letter_queue SET retry_eligible = 0, retried_at = ? WHERE id = ?",
                 (_now_iso(), dlq_id),

@@ -118,12 +118,12 @@ export const ScreenTimeCard = ({
                     variants={barVariants}
                     initial="hidden"
                     animate="visible"
-                    className={cn("min-w-0 flex-1 origin-bottom rounded-lg")}
+                    className={cn(
+                      "min-w-0 flex-1 origin-bottom rounded-lg border",
+                      isHighlighted ? "border-[var(--border-strong)]" : "border-[var(--border-subtle)]",
+                    )}
                     style={{
                       ...getBarStyle(height),
-                      boxShadow: isHighlighted
-                        ? "inset 0 0 0 1px rgba(255,255,255,0.12), 0 8px 14px rgba(0,0,0,0.18)"
-                        : "inset 0 0 0 1px rgba(255,255,255,0.06)",
                       height: `${Math.max(height * 100, 8)}%`,
                     }}
                   />
@@ -156,12 +156,12 @@ export const ScreenTimeCard = ({
                 initial={{ opacity: 0, x: 18 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.08 + 0.18 }}
-                className="flex items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.022)] px-3 py-2.5"
+                className="flex items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3 py-2.5"
                 style={
                   app.color
                     ? {
-                        background: `linear-gradient(180deg, color-mix(in srgb, ${app.color} 24%, #26282d) 0%, color-mix(in srgb, ${app.color} 14%, #16171a) 100%)`,
-                        borderColor: `color-mix(in srgb, ${app.color} 54%, #292b31)`,
+                        background: `linear-gradient(180deg, color-mix(in srgb, ${app.color} 16%, var(--surface-panel-soft) 84%) 0%, color-mix(in srgb, ${app.color} 8%, var(--surface-elevated) 92%) 100%)`,
+                        borderColor: `color-mix(in srgb, ${app.color} 42%, var(--border-subtle) 58%)`,
                       }
                     : undefined
                 }

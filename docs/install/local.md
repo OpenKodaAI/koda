@@ -4,9 +4,18 @@
 
 - Docker
 - Docker Compose
-- a local clone of this repository
+- Node.js with npm if you want the packaged CLI path
+- a local clone of this repository only when contributing from source
 
 ## Quickstart
+
+```bash
+npm install -g koda
+koda install
+```
+
+If you are working from the repository itself, the source wrapper installs the same npm CLI and
+then stages the product bundle into a separate `.koda-release/` directory:
 
 ```bash
 git clone <your-fork-or-repo-url> ./koda
@@ -16,11 +25,12 @@ cd ./koda
 
 The installer will:
 
-1. verify Docker and Docker Compose
-2. create a minimal `.env` if one does not exist
-3. start the quickstart stack with `docker compose up -d --build`
-4. run the doctor checks
-5. print both the dashboard URL and the bootstrap URL
+1. verify Docker and the Koda npm CLI prerequisites
+2. stage the release bundle in its own product directory
+3. create a minimal `.env` if one does not exist
+4. start the quickstart stack with the release compose file
+5. run the doctor checks
+6. print the dashboard setup URL plus a short-lived setup code
 
 ## What Starts
 
@@ -39,7 +49,7 @@ This is the same platform topology used by the default VPS path.
 Default local ports:
 
 - `3000` for the Koda dashboard UI
-- `8090` for the control plane and setup surface
+- `8090` for the control plane API, health surface, and `/setup` compatibility bridge
 - `5432` for Postgres inside the compose network
 - `8333` for bundled S3-compatible storage inside the compose network
 
@@ -47,12 +57,10 @@ Persistent volumes are managed by Docker Compose and are intended to survive con
 
 ## First Boot
 
-When the installer finishes, open the bootstrap URL it prints:
+When the installer finishes, open the dashboard setup URL it prints:
 
+- `http://127.0.0.1:3000/control-plane`
 - `http://127.0.0.1:3000`
-- `http://127.0.0.1:8090/setup`
-
-![Koda control plane interface](../assets/screenshots/setup.png)
 
 At that point the infrastructure is already ready for use:
 
@@ -63,15 +71,25 @@ At that point the infrastructure is already ready for use:
 - the control plane is reachable
 - health checks are in place
 
-Use the control plane UI to complete product configuration:
+Use the dashboard control plane to complete product configuration:
 
 1. review platform health and bootstrap status
 2. configure owner and access policy
-3. connect and verify a provider
-4. create or publish the first agent
-5. continue ongoing configuration in the control plane
+3. connect and verify the providers you want to use
+4. connect and verify the integrations you want to expose globally
+5. optionally connect the first Telegram agent
+6. continue ongoing configuration in the control plane
 
-When the dashboard asks for the operator session, paste the control-plane token once and let the browser store it as an HTTP-only session cookie. The token is never placed in the URL or local storage.
+After provider and integration setup, each bot still needs its own grants. In practice the operator flow is:
+
+- configure the provider or integration in the control plane
+- run `verify` and inspect the resulting `connection_status` / `checked_via`
+- open the bot editor and grant only the required tools and `resource_access_policy.integration_grants`
+
+The quickstart now provisions `WEB_OPERATOR_SESSION_SECRET` automatically so operator sessions
+survive web restarts instead of depending on ephemeral in-memory state.
+Daily operator access should start from the printed setup code, local owner account, and HTTP-only
+browser session. `CONTROL_PLANE_API_TOKEN` remains recovery-only.
 
 The quickstart path does not require per-agent env configuration, provider credentials in `.env`, or manual Telegram runtime wiring before first boot.
 
@@ -101,6 +119,7 @@ python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --das
 ## Troubleshooting
 
 - If the dashboard is not reachable, verify that `docker compose ps` shows `web` healthy.
-- If `/setup` is not reachable, verify that `docker compose ps` shows `app` healthy.
+- If `http://127.0.0.1:3000/control-plane` is not reachable, verify that `docker compose ps` shows `web` healthy.
+- If `http://127.0.0.1:8090/health` is not reachable, verify that `docker compose ps` shows `app` healthy.
 - If object storage checks fail, verify that `seaweedfs` and `seaweedfs-init` both completed successfully.
 - If bootstrap still fails, rerun the doctor command and inspect the reported failing check name.

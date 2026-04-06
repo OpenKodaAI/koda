@@ -77,6 +77,7 @@ export function TabPersonalidade() {
         memoryPolicyJson: state.memoryPolicyJson,
         knowledgePolicyJson: state.knowledgePolicyJson,
         autonomyPolicyJson: state.autonomyPolicyJson,
+        executionPolicyJson: state.executionPolicyJson,
         resourceAccessPolicyJson: state.resourceAccessPolicyJson,
         voicePolicyJson: state.voicePolicyJson,
         imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,

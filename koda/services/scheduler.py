@@ -21,6 +21,7 @@ def create_reminder_job(
     *,
     user_id: int,
     chat_id: int,
+    trigger_type: str = "one_shot",
     schedule_expr: str,
     text: str,
     timezone_name: str | None = None,
@@ -35,6 +36,7 @@ def create_reminder_job(
         scheduled_jobs_service.create_reminder_job(
             user_id=user_id,
             chat_id=chat_id,
+            trigger_type=trigger_type,
             schedule_expr=schedule_expr,
             text=text,
             timezone_name=timezone_name,

@@ -38,6 +38,14 @@ async def test_gh_runs_command(mock_update, mock_context):
 
 
 @pytest.mark.asyncio
+async def test_gh_unknown_subcommand_is_denied(mock_update, mock_context):
+    mock_context.args = ["api", "--method", "POST", "/repos/org/repo"]
+    with patch("koda.handlers.devops.GH_ENABLED", True):
+        await cmd_gh(mock_update, mock_context)
+    assert "not allowed" in mock_update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
 async def test_glab_disabled(mock_update, mock_context):
     mock_context.args = ["mr", "list"]
     with patch("koda.handlers.devops.GLAB_ENABLED", False):

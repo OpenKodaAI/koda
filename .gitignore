@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 .claude/
+.pnpm-store/
 .pnpm-debug.log*
 node_modules/
 apps/web/.next/
@@ -61,3 +62,11 @@ oauth*.json
 **/token*.json
 *.pem
 *.key
+*.crt
+*.cert
+*.pfx
+*.p12
+*.jks
+*.keystore
+.koda-release/
+dist/release/

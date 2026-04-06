@@ -7,30 +7,15 @@ use std::sync::OnceLock;
 const SAFE_EXACT_KEYS: &[&str] = &[
     "PATH",
     "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TERM",
     "LANG",
     "LC_ALL",
+    "LC_CTYPE",
     "TMPDIR",
     "TMP",
     "TEMP",
-    "PWD",
-    "SSH_AUTH_SOCK",
-    "DISPLAY",
-    "XAUTHORITY",
-    "COLORTERM",
-    "TERM_PROGRAM",
-    "TERM_PROGRAM_VERSION",
-    "CI",
-    "NO_COLOR",
-    "FORCE_COLOR",
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
-    "CURL_CA_BUNDLE",
-    "NODE_EXTRA_CA_CERTS",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "ALL_PROXY",
@@ -39,15 +24,9 @@ const SAFE_EXACT_KEYS: &[&str] = &[
     "https_proxy",
     "all_proxy",
     "no_proxy",
-    "CODEX_HOME",
-    "CLAUDE_CONFIG_DIR",
-    "CLAUDE_HOME",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_CACHE_HOME",
 ];
 
-const SAFE_PREFIXES: &[&str] = &["XDG_", "GIT_", "SSH_"];
+const SAFE_PREFIXES: &[&str] = &[];
 const STRIP_PREFIXES: &[&str] = &[
     "BOT_",
     "JIRA_",
@@ -61,6 +40,9 @@ const STRIP_PREFIXES: &[&str] = &[
     "RUNBOOK_",
     "ELEVENLABS_",
     "AWS_",
+    "GH_",
+    "GITHUB_",
+    "GITLAB_",
     "CLAUDE_",
     "CODEX_",
     "GEMINI_",
@@ -299,7 +281,7 @@ mod tests {
         redact_secret_like, redact_text, redact_value, sanitize_env, validate_logical_object_key,
         validate_runtime_path, validate_scoped_object_key, validate_shell_command,
     };
-    use serde_json::{Map, Value};
+    use serde_json::{json, Map, Value};
 
     #[test]
     fn redacts_middle_of_long_secret() {

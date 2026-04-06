@@ -138,7 +138,7 @@ def mock_update():
 def mock_context():
     """Create a mock context with user_data."""
     context = MagicMock()
-    context.user_data = {"_approve_all": True}
+    context.user_data = {}
     context.args = []
     context.bot = AsyncMock()
     context.bot.send_message = AsyncMock()
@@ -154,8 +154,7 @@ def mock_context():
 
 @pytest.fixture
 def approved_context(mock_context):
-    """Create a mock context with _approve_all=True for testing WRITE handlers."""
-    mock_context.user_data["_approve_all"] = True
+    """Create a mock context suitable for approved write-handler tests."""
     return mock_context
 
 
@@ -167,6 +166,20 @@ def _auto_approve_execution():
     token = _execution_approved.set(True)
     yield
     _execution_approved.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def _reset_approval_runtime_state():
+    """Keep approval/pending-op globals isolated across tests."""
+    from koda.utils.approval import _APPROVAL_GRANTS, _PENDING_AGENT_CMD_OPS, _PENDING_OPS
+
+    _PENDING_OPS.clear()
+    _PENDING_AGENT_CMD_OPS.clear()
+    _APPROVAL_GRANTS.clear()
+    yield
+    _PENDING_OPS.clear()
+    _PENDING_AGENT_CMD_OPS.clear()
+    _APPROVAL_GRANTS.clear()
 
 
 @pytest.fixture

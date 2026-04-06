@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from koda.agent_contract import normalize_string_list
+from koda.agent_contract import normalize_integration_grants, normalize_string_list
 from koda.services.runtime_access_service import RuntimeAccessService
 
 from .agent_spec import _safe_json_object, normalize_knowledge_policy
@@ -64,7 +64,10 @@ class ControlPlaneRuntimeAccessBroker:
         runtime_secret = self._resolve_runtime_secret(snapshot)
         sections = _safe_json_object(snapshot.get("sections"))
         knowledge_section = _safe_json_object(sections.get("knowledge"))
+        access_section = _safe_json_object(sections.get("access"))
         knowledge_policy = normalize_knowledge_policy(_safe_json_object(knowledge_section.get("policy")))
+        resource_access_policy = _safe_json_object(access_section.get("resource_access_policy"))
+        integration_grants = normalize_integration_grants(resource_access_policy.get("integration_grants"))
         try:
             workspace_id = str(agent_row["workspace_id"]).strip()
         except Exception:
@@ -81,6 +84,7 @@ class ControlPlaneRuntimeAccessBroker:
             "workspace_scope": list(workspace_scope),
             "source_scope": list(source_scope),
             "sensitive_allowed": bool(runtime_secret and include_sensitive),
+            "integration_grants": integration_grants,
         }
 
         runtime_request_token = None

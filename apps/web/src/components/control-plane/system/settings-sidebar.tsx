@@ -2,14 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { User, Cpu, Plug, Brain } from "lucide-react";
+import { User, Cpu, Plug, Brain, Key } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import { SETTINGS_SECTIONS, STEP_TO_SECTION, type SettingsSectionId } from "@/lib/system-settings-model";
 import { SettingsWarningIndicator } from "@/components/control-plane/system/settings-warning-indicator";
 
 const SECTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  User, Cpu, Plug, Brain,
+  User, Cpu, Plug, Brain, Key,
 };
 
 export function SettingsSidebar() {
@@ -40,13 +40,21 @@ export function SettingsSidebar() {
               key={section.id}
               href={`/control-plane/system/${section.id}`}
               className={[
-                "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+                "group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
                 isActive
                   ? "bg-[var(--surface-tint-strong)] text-[var(--text-primary)] font-medium"
                   : "text-[var(--text-secondary)] hover:bg-[var(--surface-tint)] hover:text-[var(--text-primary)]",
               ].join(" ")}
             >
-              {Icon && <Icon className="h-4 w-4 shrink-0 opacity-60" />}
+              {Icon && (
+                <Icon
+                  className={
+                    isActive
+                      ? "h-4 w-4 shrink-0 text-[var(--icon-primary)]"
+                      : "h-4 w-4 shrink-0 text-[var(--icon-secondary)] transition-colors group-hover:text-[var(--icon-primary)]"
+                  }
+                />
+              )}
               <span className="truncate">{t(section.labelKey)}</span>
               {hasDirty && (
                 <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-[var(--interactive-active-border)]" />

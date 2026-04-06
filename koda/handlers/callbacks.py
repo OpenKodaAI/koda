@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import time
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -44,8 +45,10 @@ from koda.utils.approval import (
     APPROVAL_TIMEOUT,
     _cleanup_stale_agent_cmd_ops,
     _cleanup_stale_ops,
+    _issue_agent_approval_grants,
     dispatch_approved_operation,
     resolve_agent_cmd_approval,
+    rotate_session_approval_state,
 )
 from koda.utils.command_helpers import (
     available_provider_models,
@@ -57,6 +60,17 @@ from koda.utils.formatting import escape_html
 from koda.utils.messaging import split_message
 
 log = get_logger(__name__)
+
+
+def _optional_chat_id(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _FUNCTION_DEFINITIONS = {str(item["id"]): dict(item) for item in resolve_model_function_catalog()}
 
 
@@ -383,12 +397,15 @@ async def callback_settings_newsession(update: Update, context: BotContext) -> N
         return
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-    context.user_data["session_id"] = None
-    context.user_data["provider_sessions"] = {}
-    context.user_data["_supervised_session_id"] = None
-    context.user_data["_supervised_provider"] = None
+    _previous_session_id, new_session_id = await rotate_session_approval_state(
+        user_data=context.user_data,
+        user_id=update.effective_user.id,
+        chat_id=update.effective_chat.id if getattr(update, "effective_chat", None) else None,
+        agent_id=config.AGENT_ID or "default",
+    )
     await query.edit_message_text(
-        "Sessao limpa. A proxima mensagem inicia uma conversa nova.",
+        f"Sessao rotacionada para <code>{escape_html(new_session_id)}</code>.",
+        parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")]]
         ),
@@ -631,13 +648,9 @@ async def callback_dbenv(update: Update, context: BotContext) -> None:
         return
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-
-    from koda.config import POSTGRES_AVAILABLE_ENVS
-
-    env = (query.data or "").removeprefix("dbenv:")
-    if env in POSTGRES_AVAILABLE_ENVS:
-        context.user_data["postgres_env"] = env
-        await query.edit_message_text(f"Database env: <code>{env}</code>", parse_mode=ParseMode.HTML)
+    await query.edit_message_text(
+        "Native database environment switching was removed. Configure a database MCP server instead."
+    )
 
 
 async def callback_supervised(update: Update, context: BotContext) -> None:
@@ -995,7 +1008,7 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
 
 
 async def callback_approval(update: Update, context: BotContext) -> None:
-    """Handle approval keyboard button presses (approve:one/all/deny:<op_id>)."""
+    """Handle approval keyboard button presses (approve:one/scope/deny:<op_id>)."""
     from koda.services.audit import emit_security
 
     query = update.callback_query
@@ -1061,8 +1074,22 @@ async def callback_approval(update: Update, context: BotContext) -> None:
             await query.edit_message_text("Negado.")
         return
 
-    if action == "all":
-        context.user_data["_approve_all"] = True
+    if action not in {"one", "scope"}:
+        with contextlib.suppress(Exception):
+            await query.edit_message_text("Operacao invalida.")
+        return
+
+    grants = _issue_agent_approval_grants(
+        user_id=update.effective_user.id,
+        agent_id=str(pending.get("agent_id") or "default"),
+        session_id=str(pending.get("session_id") or "").strip() or None,
+        chat_id=_optional_chat_id(pending.get("chat_id")),
+        requests=list(pending.get("requests") or []),
+        decision="approved_scope" if action == "scope" else "approved",
+        issued_by_op_id=op_id,
+    )
+    pending["grants"] = grants
+    pending["decision"] = "approved_scope" if action == "scope" else "approved"
 
     log.info(
         "approval_granted",
@@ -1080,12 +1107,12 @@ async def callback_approval(update: Update, context: BotContext) -> None:
         mode=action,
     )
     with contextlib.suppress(Exception):
-        await query.edit_message_text("Aprovado.")
+        await query.edit_message_text("Aprovado (escopo)." if action == "scope" else "Aprovado uma vez.")
     await dispatch_approved_operation(op_id)
 
 
 async def callback_agent_cmd_approval(update: Update, context: BotContext) -> None:
-    """Handle agent-cmd approval keyboard button presses (acmd:ok/all/no:<op_id>)."""
+    """Handle agent-cmd approval keyboard button presses (acmd:ok/scope/no:<op_id>)."""
     from koda.services.audit import emit_security
 
     query = update.callback_query
@@ -1129,22 +1156,44 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
             await query.edit_message_text("Negado.")
         return
 
-    if action == "all":
-        context.user_data["_approve_all_agent_tools"] = True
-        resolve_agent_cmd_approval(op_id, "approved_all")
+    session_id = str(pending.get("session_id") or "").strip() or None
+    chat_id = _optional_chat_id(pending.get("chat_id"))
+
+    if action == "scope":
+        grants = _issue_agent_approval_grants(
+            user_id=update.effective_user.id,
+            agent_id=str(pending.get("agent_id") or "default"),
+            session_id=session_id,
+            chat_id=chat_id,
+            requests=list(pending.get("requests") or []),
+            decision="approved_scope",
+            issued_by_op_id=op_id,
+        )
+        pending["grants"] = grants
+        resolve_agent_cmd_approval(op_id, "approved_scope", grants=grants)
         log.info(
             "agent_cmd_approval_granted",
             op_id=op_id,
             user_id=update.effective_user.id,
-            mode="all",
+            mode="scope",
         )
-        emit_security("security.approval_granted", user_id=update.effective_user.id, op_id=op_id, mode="all")
+        emit_security("security.approval_granted", user_id=update.effective_user.id, op_id=op_id, mode="scope")
         with contextlib.suppress(Exception):
-            await query.edit_message_text("Aprovado (todos).")
+            await query.edit_message_text("Aprovado (escopo).")
         return
 
     # action == "ok"
-    resolve_agent_cmd_approval(op_id, "approved")
+    grants = _issue_agent_approval_grants(
+        user_id=update.effective_user.id,
+        agent_id=str(pending.get("agent_id") or "default"),
+        session_id=session_id,
+        chat_id=chat_id,
+        requests=list(pending.get("requests") or []),
+        decision="approved",
+        issued_by_op_id=op_id,
+    )
+    pending["grants"] = grants
+    resolve_agent_cmd_approval(op_id, "approved", grants=grants)
     log.info(
         "agent_cmd_approval_granted",
         op_id=op_id,

@@ -22,7 +22,7 @@ export function DetailRow({
   return (
     <div
       className={cn(
-        "rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3.5 transition-[border-color,background-color] duration-200 sm:px-4 sm:py-4",
+        "app-detail-row rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3.5 transition-[border-color,background-color] duration-200 sm:px-4 sm:py-4",
         className
       )}
     >

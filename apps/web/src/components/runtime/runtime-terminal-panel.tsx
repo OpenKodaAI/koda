@@ -6,7 +6,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { AlertTriangle, MonitorSmartphone, Search, TerminalSquare, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { humanizeRuntimeAttachError } from "@/lib/runtime-errors";
@@ -38,30 +38,88 @@ interface RuntimeTerminalPanelProps {
   fetchResource: RuntimeFetchResource;
 }
 
-const TERMINAL_THEME = {
-  background: "#0a0a0b",
-  foreground: "#d4d4d8",
-  cursor: "#69c48a",
-  cursorAccent: "#0a0a0b",
-  selectionBackground: "rgba(105, 196, 138, 0.15)",
-  selectionForeground: "#d4d4d8",
-  black: "#1e1e20",
-  red: "#f87171",
-  green: "#69c48a",
-  yellow: "#fbbf24",
-  blue: "#60a5fa",
-  magenta: "#c084fc",
-  cyan: "#22d3ee",
-  white: "#d4d4d8",
-  brightBlack: "#52525b",
-  brightRed: "#fca5a5",
-  brightGreen: "#86efac",
-  brightYellow: "#fde68a",
-  brightBlue: "#93c5fd",
-  brightMagenta: "#d8b4fe",
-  brightCyan: "#67e8f9",
-  brightWhite: "#fafafa",
-};
+function readCssVar(
+  getPropertyValue: (propertyName: string) => string,
+  propertyName: string,
+  fallback: string
+) {
+  const value = getPropertyValue(propertyName).trim();
+  return value || fallback;
+}
+
+export function buildRuntimeTerminalTheme(
+  getPropertyValue: (propertyName: string) => string
+): ITheme {
+  return {
+    background: readCssVar(getPropertyValue, "--terminal-background", "#0a0a0b"),
+    foreground: readCssVar(getPropertyValue, "--terminal-foreground", "#f5f3eb"),
+    cursor: readCssVar(getPropertyValue, "--terminal-cursor", "#ff4a00"),
+    cursorAccent: readCssVar(getPropertyValue, "--terminal-cursor-accent", "#0a0a0b"),
+    selectionBackground: readCssVar(
+      getPropertyValue,
+      "--terminal-selection-background",
+      "rgba(255, 74, 0, 0.15)"
+    ),
+    selectionForeground: readCssVar(
+      getPropertyValue,
+      "--terminal-selection-foreground",
+      "#f5f3eb"
+    ),
+    scrollbarSliderBackground: readCssVar(
+      getPropertyValue,
+      "--terminal-scrollbar",
+      "rgba(255, 255, 255, 0.06)"
+    ),
+    scrollbarSliderHoverBackground: readCssVar(
+      getPropertyValue,
+      "--terminal-scrollbar-hover",
+      "rgba(255, 255, 255, 0.12)"
+    ),
+    scrollbarSliderActiveBackground: readCssVar(
+      getPropertyValue,
+      "--terminal-scrollbar-active",
+      "rgba(255, 255, 255, 0.18)"
+    ),
+    black: readCssVar(getPropertyValue, "--terminal-black", "#1e1e20"),
+    red: readCssVar(getPropertyValue, "--terminal-red", "#f87171"),
+    green: readCssVar(getPropertyValue, "--terminal-green", "#69c48a"),
+    yellow: readCssVar(getPropertyValue, "--terminal-yellow", "#fbbf24"),
+    blue: readCssVar(getPropertyValue, "--terminal-blue", "#60a5fa"),
+    magenta: readCssVar(getPropertyValue, "--terminal-magenta", "#c084fc"),
+    cyan: readCssVar(getPropertyValue, "--terminal-cyan", "#22d3ee"),
+    white: readCssVar(getPropertyValue, "--terminal-white", "#d4d4d8"),
+    brightBlack: readCssVar(getPropertyValue, "--terminal-bright-black", "#52525b"),
+    brightRed: readCssVar(getPropertyValue, "--terminal-bright-red", "#fca5a5"),
+    brightGreen: readCssVar(getPropertyValue, "--terminal-bright-green", "#86efac"),
+    brightYellow: readCssVar(getPropertyValue, "--terminal-bright-yellow", "#fde68a"),
+    brightBlue: readCssVar(getPropertyValue, "--terminal-bright-blue", "#93c5fd"),
+    brightMagenta: readCssVar(getPropertyValue, "--terminal-bright-magenta", "#d8b4fe"),
+    brightCyan: readCssVar(getPropertyValue, "--terminal-bright-cyan", "#67e8f9"),
+    brightWhite: readCssVar(getPropertyValue, "--terminal-bright-white", "#fafafa"),
+  };
+}
+
+export function getRuntimeTerminalTheme(): ITheme {
+  if (typeof document === "undefined") {
+    return buildRuntimeTerminalTheme(() => "");
+  }
+
+  return buildRuntimeTerminalTheme((propertyName) =>
+    getComputedStyle(document.documentElement).getPropertyValue(propertyName)
+  );
+}
+
+function applyRuntimeTerminalTheme(terminal: Terminal) {
+  const theme = getRuntimeTerminalTheme();
+  const options = terminal.options as { theme?: ITheme } | undefined;
+  if (options) {
+    options.theme = theme;
+  }
+
+  if (typeof terminal.refresh === "function") {
+    terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+  }
+}
 
 function pickPreferredTerminal(items: RuntimeTerminal[]) {
   const interactive = items.filter((item) => Boolean(item.interactive));
@@ -189,10 +247,17 @@ export function RuntimeTerminalPanel({
       letterSpacing: 0,
       scrollback: 5000,
       allowProposedApi: true,
-      theme: TERMINAL_THEME,
+      theme: getRuntimeTerminalTheme(),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => fitAddon.fit())
+        : null;
+    const syncTheme = () => {
+      applyRuntimeTerminalTheme(terminal);
+    };
 
     if (containerRef.current) {
       terminal.open(containerRef.current);
@@ -230,25 +295,43 @@ export function RuntimeTerminalPanel({
       terminal.writeln(t("runtime.terminal.waitingAttach"));
     }
 
+    syncTheme();
+
+    if (containerRef.current && observer) {
+      observer.observe(containerRef.current);
+    }
+
     const disposable = terminal.onData((data) => {
       if (allowWriteRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(data);
       }
     });
 
-    const observer =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => fitAddon.fit())
-        : null;
+    let themeObserver: MutationObserver | null = null;
+    let mediaQuery: MediaQueryList | null = null;
+    const mediaListener = () => syncTheme();
 
-    if (containerRef.current && observer) {
-      observer.observe(containerRef.current);
+    if (typeof MutationObserver !== "undefined") {
+      themeObserver = new MutationObserver(syncTheme);
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme"],
+      });
+    }
+
+    mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") ?? null;
+    if (mediaQuery) {
+      mediaQuery.addEventListener("change", mediaListener);
     }
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
     return () => {
+      themeObserver?.disconnect();
+      if (mediaQuery) {
+        mediaQuery.removeEventListener("change", mediaListener);
+      }
       observer?.disconnect();
       disposable.dispose();
       socketRef.current?.close();

@@ -1,6 +1,7 @@
 """File operations with path traversal protection."""
 
 import os
+import re
 from pathlib import Path
 
 from koda.logging_config import get_logger
@@ -127,3 +128,40 @@ def safe_read(path_str: str, work_dir: str, max_size: int = 100_000) -> str:
         return target.read_text(errors="replace")
     except Exception as e:
         return f"Error reading file: {e}"
+
+
+_SECRET_PATTERN = re.compile(
+    r"^(?:[\w]+_)?(?:secret|password|token|api_key|private_key|access_key)\s*[:=]",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+_JSON_SECRET_KEYS = frozenset({"private_key", "client_secret", "access_token", "refresh_token", "api_key"})
+
+
+def validate_file_content_safety(path: str) -> str | None:
+    """Return an error message if file content looks like secrets/credentials, else None."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError:
+        return None  # Can't read — let the caller handle
+
+    try:
+        text = head.decode("utf-8", errors="ignore").lower()
+    except Exception:
+        return None
+
+    # PEM-format key/certificate detection
+    if text.lstrip().startswith("-----begin"):
+        return "File appears to contain a PEM-encoded key or certificate."
+
+    # .env-style secret patterns (at least 2 matches = likely credentials file)
+    if len(_SECRET_PATTERN.findall(text)) >= 2:
+        return "File appears to contain credentials or secrets."
+
+    # JSON credential patterns
+    for key in _JSON_SECRET_KEYS:
+        if f'"{key}"' in text:
+            return "File appears to contain JSON credentials."
+
+    return None

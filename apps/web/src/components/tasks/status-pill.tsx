@@ -30,7 +30,7 @@ export function StatusPill({ status }: StatusPillProps) {
   return (
     <span
       className={cn(
-        "status-pill inline-flex min-h-[28px] items-center gap-2 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold tracking-[0.01em] shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_18px_rgba(0,0,0,0.12)]",
+        "status-pill inline-flex min-h-[28px] items-center gap-2 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold tracking-[0.01em]",
         animation
       )}
       style={getSemanticStyle(semanticTone)}

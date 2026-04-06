@@ -305,7 +305,12 @@ class TestCmdRemind:
         mock_job_queue = MagicMock()
         mock_context.job_queue = mock_job_queue
 
-        await cmd_remind(mock_update, mock_context)
+        with patch(
+            "koda.services.scheduler.schedule_reminder",
+            new_callable=AsyncMock,
+            return_value="Reminder set as job #12 in validation mode.",
+        ):
+            await cmd_remind(mock_update, mock_context)
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "Reminder set" in call_text
 

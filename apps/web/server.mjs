@@ -59,7 +59,27 @@ async function handleRelayConnection(client, request) {
     return;
   }
 
+  // Validate session token from query parameter (timing-safe comparison)
+  const clientToken = url.searchParams.get('token');
+  if (descriptor.tokenHash && clientToken) {
+    const crypto = await import('node:crypto');
+    const hash = crypto.createHash('sha256').update(clientToken).digest('hex');
+    const hashBuf = Buffer.from(hash, 'hex');
+    const expectedBuf = Buffer.from(descriptor.tokenHash, 'hex');
+    if (hashBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(hashBuf, expectedBuf)) {
+      closeSocket(client, 4401, "unauthorized");
+      return;
+    }
+  } else if (descriptor.tokenHash && !clientToken) {
+    closeSocket(client, 4401, "unauthorized");
+    return;
+  }
+
   const upstream = new WebSocket(String(descriptor.upstreamUrl), {
+    headers:
+      descriptor.upstreamHeaders && typeof descriptor.upstreamHeaders === "object"
+        ? descriptor.upstreamHeaders
+        : undefined,
     perMessageDeflate: false,
   });
 

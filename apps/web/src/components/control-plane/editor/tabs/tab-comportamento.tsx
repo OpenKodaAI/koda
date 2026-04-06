@@ -8,6 +8,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
 import { JsonEditorField } from "@/components/control-plane/shared/json-editor-field";
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
+import { InheritedPromptPreview } from "@/components/control-plane/shared/inherited-context";
 import { LocalizedTree } from "@/components/shared/localized-tree";
 import { buildAgentSpecPayload } from "@/lib/control-plane-editor";
 
@@ -48,6 +49,7 @@ const DOCUMENT_FIELDS = [
 export function TabComportamento() {
   const {
     state,
+    inherited,
     updateDocument,
     updateAgentSpecField,
     resetDirty,
@@ -58,6 +60,8 @@ export function TabComportamento() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const botId = state.bot.id;
+  const workspacePrompt = inherited.workspaceSystemPrompt;
+  const squadPrompt = inherited.squadSystemPrompt;
 
   async function handleSave() {
     setBusyKey("save");
@@ -82,6 +86,7 @@ export function TabComportamento() {
         memoryPolicyJson: state.memoryPolicyJson,
         knowledgePolicyJson: state.knowledgePolicyJson,
         autonomyPolicyJson: state.autonomyPolicyJson,
+        executionPolicyJson: state.executionPolicyJson,
         resourceAccessPolicyJson: state.resourceAccessPolicyJson,
         voicePolicyJson: state.voicePolicyJson,
         imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,
@@ -150,6 +155,31 @@ export function TabComportamento() {
         onChange={(v) => updateDocument("rules_md", v)}
         minHeight="180px"
       />
+
+      {(workspacePrompt || squadPrompt) && (
+        <section className="flex flex-col gap-4 rounded-[28px] border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.015))] px-5 py-5">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+              {tl("Contexto herdado")}
+            </span>
+            <p className="text-sm leading-6 text-[var(--text-tertiary)]">
+              {tl("O prompt final do agente agrega automaticamente as definicoes do espaco de trabalho e do time antes das instrucoes locais do bot.")}
+            </p>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <InheritedPromptPreview
+              source="workspace"
+              label={tl("System prompt do espaco de trabalho")}
+              value={workspacePrompt}
+            />
+            <InheritedPromptPreview
+              source="squad"
+              label={tl("System prompt do time")}
+              value={squadPrompt}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Advanced policies */}
       <SectionCollapsible title="Politicas avancadas">

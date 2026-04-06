@@ -35,11 +35,47 @@ Run the standard validation commands before opening a pull request:
 - `pnpm lint:web`
 - `pnpm test:web`
 - `pnpm build:web`
+- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py`
 
 If your change touches the repository guidance layer, also run:
 
 - `python3 scripts/generate_repo_map.py --check`
-- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py`
+- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py`
+
+If your change touches the Rust workspace, also run:
+
+- `cargo fmt --check --manifest-path rust/Cargo.toml`
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
+- `cargo test --manifest-path rust/Cargo.toml --workspace`
+
+## GitHub CI
+
+GitHub Actions now uses two primary workflows:
+
+- `pr-quality` for required pull-request checks on `main`
+- `security` for dependency audits, SAST, CodeQL, and container scanning on pull requests, `main`, and a weekly schedule
+
+The required PR check names are:
+
+- `pr-quality / python-quality`
+- `pr-quality / python-tests-3.11`
+- `pr-quality / python-tests-3.12`
+- `pr-quality / web-quality`
+- `pr-quality / repo-hygiene`
+- `pr-quality / rust-quality`
+- `pr-quality / docker-smoke`
+- `security / dependency-audit`
+- `security / sast`
+- `security / container-scan`
+
+The `security` workflow also publishes SARIF findings for CodeQL, Gitleaks, and Trivy into the GitHub Security tab when permissions allow it, and uploads CI artifacts for `pytest`, coverage XML, `vitest`, and container scan reports.
+
+When a CI failure happens:
+
+- read `pytest.xml` and `coverage.xml` artifacts for Python regressions
+- read the `vitest.junit.xml` artifact for web test failures
+- read the uploaded SARIF or Security tab findings for dependency, secret, static-analysis, or container issues
+- read the `docker-smoke` artifact logs when the stack fails to boot in CI
 
 ## Pull Request Expectations
 

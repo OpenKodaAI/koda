@@ -1,10 +1,12 @@
 """Tests for the agent loop in queue_manager."""
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from koda.knowledge.policy import default_execution_policy
+from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.services.queue_manager import (
     QueryContext,
     QueueItem,
@@ -76,6 +78,71 @@ def _make_context():
     return context
 
 
+def _resolved_agent_cmd_approval(decision: str = "approved_scope"):
+    async def _request(*_args, **kwargs):
+        from koda.utils.approval import _PENDING_AGENT_CMD_OPS
+
+        op_id = f"op-{decision}"
+        request = list(kwargs.get("requests") or [])[0]
+        envelope = request["envelope"]
+        approval_scope = request.get("approval_scope")
+        grant_kind = "approve_scope" if decision == "approved_scope" else "approve_once"
+        max_uses = int(getattr(approval_scope, "max_uses", 1) if grant_kind == "approve_scope" else 1)
+        grant = {
+            "grant_id": f"grant-{decision}",
+            "user_id": 111,
+            "agent_id": str(kwargs.get("agent_id") or "default"),
+            "session_id": str(kwargs.get("session_id") or "sess-1"),
+            "chat_id": int(kwargs.get("chat_id") or 111),
+            "kind": grant_kind,
+            "remaining_uses": max_uses,
+            "max_uses": max_uses,
+            "exact_fingerprint": f"{envelope.resource_scope_fingerprint}:{envelope.params_fingerprint}",
+            "scope_fingerprint": envelope.resource_scope_fingerprint,
+        }
+        event = asyncio.Event()
+        event.set()
+        _PENDING_AGENT_CMD_OPS[op_id] = {
+            "user_id": 111,
+            "timestamp": time.time(),
+            "event": event,
+            "decision": decision,
+            "description": "approved in test",
+            "agent_id": str(kwargs.get("agent_id") or "default"),
+            "requests": list(kwargs.get("requests") or []),
+            "grants": [grant],
+            "preview_text": str(kwargs.get("preview_text") or ""),
+        }
+        return op_id
+
+    return _request
+
+
+SCHEDULER_WRITE_POLICY = {
+    "integration_grants": {
+        "scheduler": {
+            "allow_actions": ["job_*", "cron_*"],
+        }
+    }
+}
+
+SCHEDULER_EXECUTION_POLICY = {
+    "version": 1,
+    "rules": [
+        {
+            "id": "allow-cron-add",
+            "decision": "allow",
+            "selectors": {"tool_id": ["cron_add"]},
+        },
+        {
+            "id": "allow-job-create",
+            "decision": "allow",
+            "selectors": {"tool_id": ["job_create"]},
+        },
+    ],
+}
+
+
 @pytest.fixture(autouse=True)
 def _mock_provider_session_store():
     with (
@@ -114,7 +181,7 @@ class TestAgentLoop:
             result='Let me check. <agent_cmd tool="cron_list">{}</agent_cmd>',
         )
 
-        # Mock _run_streaming for the resume call
+        # Mock the provider resume call.
         resume_result = _make_result(
             result="You have no cron jobs.",
             cost_usd=0.02,
@@ -123,7 +190,7 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
@@ -166,7 +233,7 @@ class TestAgentLoop:
         )
 
         with (
-            patch("koda.services.queue_manager._run_streaming", side_effect=_mock_streaming),
+            patch("koda.services.queue_manager._run_with_provider_fallback", side_effect=_mock_streaming),
             patch("koda.services.tool_dispatcher._handle_web_search", new_callable=AsyncMock) as mock_search,
             patch("koda.services.queue_manager.MAX_AGENT_TOOL_ITERATIONS", 3),
         ):
@@ -203,7 +270,7 @@ class TestAgentLoop:
         )
 
         with (
-            patch("koda.services.queue_manager._run_streaming", side_effect=_mock_streaming),
+            patch("koda.services.queue_manager._run_with_provider_fallback", side_effect=_mock_streaming),
             patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_handler,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
@@ -273,7 +340,7 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
@@ -306,7 +373,7 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
@@ -337,7 +404,7 @@ class TestAgentLoop:
         resume_result = _make_result(result="Need more evidence before writing.", cost_usd=0.01)
 
         with patch(
-            "koda.services.queue_manager._run_streaming",
+            "koda.services.queue_manager._run_with_provider_fallback",
             new_callable=AsyncMock,
             return_value=resume_result,
         ):
@@ -351,7 +418,6 @@ class TestAgentLoop:
         ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
         item = _make_item()
         context = _make_context()
-        context.user_data["_approve_all_agent_tools"] = True
         initial = _make_result(
             result=(
                 "<action_plan>"
@@ -370,9 +436,18 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
+            ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch(
+                "koda.utils.approval.request_agent_cmd_approval",
+                new_callable=AsyncMock,
+                side_effect=_resolved_agent_cmd_approval("approved_scope"),
             ),
             patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_list,
             patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
@@ -419,7 +494,7 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
@@ -450,7 +525,7 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
@@ -478,7 +553,6 @@ class TestAgentLoop:
         ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
         item = _make_item()
         context = _make_context()
-        context.user_data["_approve_all_agent_tools"] = True
         initial = _make_result(
             result=(
                 "<action_plan>"
@@ -499,9 +573,18 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
+            ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch(
+                "koda.utils.approval.request_agent_cmd_approval",
+                new_callable=AsyncMock,
+                side_effect=_resolved_agent_cmd_approval("approved_scope"),
             ),
             patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_list,
             patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_create,
@@ -526,7 +609,6 @@ class TestAgentLoop:
         ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
         item = _make_item()
         context = _make_context()
-        context.user_data["_approve_all_agent_tools"] = True
         initial = _make_result(
             result=(
                 "<action_plan>"
@@ -545,9 +627,18 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
+            ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch(
+                "koda.utils.approval.request_agent_cmd_approval",
+                new_callable=AsyncMock,
+                side_effect=_resolved_agent_cmd_approval("approved_scope"),
             ),
             patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
         ):
@@ -576,7 +667,6 @@ class TestAgentLoop:
         )
         item = _make_item(query_text="Implement the code change safely")
         context = _make_context()
-        context.user_data["_approve_all_agent_tools"] = True
         initial = _make_result(
             result=(
                 "<action_plan>"
@@ -601,10 +691,14 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 side_effect=[resume_after_write, verification_turn, final_verified],
             ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
             patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_list,
         ):
@@ -656,10 +750,14 @@ class TestAgentLoop:
 
         with (
             patch(
-                "koda.services.queue_manager._run_streaming",
+                "koda.services.queue_manager._run_with_provider_fallback",
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
             patch(
                 "koda.utils.approval.request_agent_cmd_approval",

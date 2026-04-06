@@ -1,50 +1,63 @@
-import { cookies } from "next/headers";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
+import { ControlPlaneSetup } from "@/components/control-plane/control-plane-setup";
 import { CatalogLayout } from "@/components/control-plane/catalog/catalog-layout";
 import {
+  getControlPlaneAuthStatus,
+  ControlPlaneRequestError,
   getControlPlaneBots,
   getControlPlaneCoreProviders,
+  getControlPlaneOnboardingStatus,
+  getGeneralSystemSettings,
   getControlPlaneWorkspaces,
 } from "@/lib/control-plane";
-import { LOCALE_COOKIE_KEY, translateForLanguage } from "@/lib/i18n";
 
 export default async function ControlPlanePage() {
-  const cookieStore = await cookies();
-  const language = cookieStore.get(LOCALE_COOKIE_KEY)?.value;
+  let authStatus;
+  let onboardingStatus;
+
+  try {
+    [authStatus, onboardingStatus] = await Promise.all([
+      getControlPlaneAuthStatus(),
+      getControlPlaneOnboardingStatus(),
+    ]);
+  } catch (error) {
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      return <ControlPlaneUnavailable />;
+    }
+    return <ControlPlaneUnavailable />;
+  }
+
+  if (!authStatus.authenticated || !onboardingStatus.steps.onboarding_complete) {
+    return <ControlPlaneSetup initialStatus={onboardingStatus} authStatus={authStatus} />;
+  }
+
   let payload:
     | {
         bots: Awaited<ReturnType<typeof getControlPlaneBots>>;
         coreProviders: Awaited<ReturnType<typeof getControlPlaneCoreProviders>>;
         workspaces: Awaited<ReturnType<typeof getControlPlaneWorkspaces>>;
+        generalSettings: Awaited<ReturnType<typeof getGeneralSystemSettings>> | null;
       }
     | null = null;
 
   try {
-    const [bots, coreProviders, workspaces] = await Promise.all([
+    const [bots, coreProviders, workspaces, generalSettings] = await Promise.all([
       getControlPlaneBots(),
       getControlPlaneCoreProviders(),
       getControlPlaneWorkspaces(),
+      getGeneralSystemSettings().catch(() => null),
     ]);
 
-    payload = { bots, coreProviders, workspaces };
+    payload = { bots, coreProviders, workspaces, generalSettings };
   } catch (error) {
-    const description =
-      error instanceof Error
-        ? error.message
-        : translateForLanguage(language, "controlPlane.unavailable.pageTitle", {
-            defaultValue: "Could not load the bot list.",
-          });
-    return <ControlPlaneUnavailable description={description} />;
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      return <ControlPlaneUnavailable />;
+    }
+    return <ControlPlaneUnavailable />;
   }
 
   if (!payload) {
-    return (
-      <ControlPlaneUnavailable
-        description={translateForLanguage(language, "controlPlane.unavailable.pageTitle", {
-          defaultValue: "Could not load the bot list.",
-        })}
-      />
-    );
+    return <ControlPlaneUnavailable />;
   }
 
   return (
@@ -52,6 +65,7 @@ export default async function ControlPlanePage() {
       bots={payload.bots}
       coreProviders={payload.coreProviders}
       workspaces={payload.workspaces}
+      generalSettings={payload.generalSettings}
     />
   );
 }

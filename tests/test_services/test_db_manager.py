@@ -257,6 +257,23 @@ class TestSchema:
         assert "BASE TABLE" in result
 
     @pytest.mark.asyncio
+    async def test_schema_forwards_custom_timeout(self, dbm):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_pool = MagicMock()
+        mock_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)
+            )
+        )
+        _setup_pool(dbm, mock_pool)
+
+        result = await dbm.get_schema(timeout=17)
+        assert "No tables found" in result
+        assert mock_conn.fetch.await_args.kwargs["timeout"] == 17
+
+    @pytest.mark.asyncio
     async def test_schema_shows_columns(self, dbm):
         rows = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO", "column_default": None},
@@ -342,6 +359,26 @@ class TestExplain:
         result = await dbm.explain("SELECT * FROM users")
         assert "EXPLAIN:" in result
         assert "Seq Scan" in result
+
+    @pytest.mark.asyncio
+    async def test_explain_forwards_custom_timeout(self, dbm):
+        mock_row = MagicMock()
+        mock_row.__getitem__ = MagicMock(return_value="Seq Scan on users")
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[mock_row])
+
+        mock_pool = MagicMock()
+        mock_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False)
+            )
+        )
+        _setup_pool(dbm, mock_pool)
+
+        result = await dbm.explain("SELECT * FROM users", timeout=11)
+        assert "EXPLAIN:" in result
+        assert mock_conn.fetch.await_args.kwargs["timeout"] == 11
 
     @pytest.mark.asyncio
     async def test_explain_blocks_writable_cte(self, dbm):
@@ -431,12 +468,12 @@ class TestSSL:
         with pytest.raises(ValueError, match="Unsupported ssl_mode"):
             DBManager._build_ssl_context(config)
 
-    def test_ssl_require_no_verify(self):
+    def test_ssl_require_verifies_peer_by_default(self):
         config = _make_config(ssl_mode="require")
         ctx = DBManager._build_ssl_context(config)
         assert ctx is not None
-        assert ctx.check_hostname is False
-        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is True
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
 
     def test_ssl_verify_ca_loads_ca(self):
         config = _make_config(ssl_mode="verify-ca", ssl_ca_cert="/tmp/ca.pem")
@@ -501,13 +538,13 @@ class TestSSHTunnel:
             assert ssh_listener is mock_listener
             mock_read.assert_called_once_with("/keys/id_rsa")
             mock_import.assert_called_once_with("fake-key-data")
-            mock_connect.assert_awaited_once_with(
-                host="bastion.example.com",
-                port=22,
-                username="deploy",
-                known_hosts=None,
-                client_keys=[mock_key],
-            )
+            mock_connect.assert_awaited_once()
+            connect_kwargs = mock_connect.await_args.kwargs
+            assert connect_kwargs["host"] == "bastion.example.com"
+            assert connect_kwargs["port"] == 22
+            assert connect_kwargs["username"] == "deploy"
+            assert connect_kwargs["client_keys"] == [mock_key]
+            assert "known_hosts" not in connect_kwargs
             mock_conn.forward_local_port.assert_awaited_once_with("127.0.0.1", 0, "db.internal", 5432)
 
 
@@ -754,3 +791,58 @@ class TestMultiEnv:
             assert dbm.is_env_available("dev")
             assert dbm.is_env_available("prod")
             assert _mock_asyncpg.create_pool.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# SSH key format validation (SEC-9)
+# ---------------------------------------------------------------------------
+
+
+class TestReadSSHKeyValidation:
+    def test_valid_rsa_key(self, tmp_path):
+        key_file = tmp_path / "id_rsa"
+        key_file.write_text("-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ...\n-----END RSA PRIVATE KEY-----\n")
+        result = DBManager._read_ssh_key(str(key_file))
+        assert "BEGIN RSA PRIVATE KEY" in result
+
+    def test_valid_ec_key(self, tmp_path):
+        key_file = tmp_path / "id_ec"
+        key_file.write_text("-----BEGIN EC PRIVATE KEY-----\nMHQCAQEE...\n-----END EC PRIVATE KEY-----\n")
+        result = DBManager._read_ssh_key(str(key_file))
+        assert "BEGIN EC PRIVATE KEY" in result
+
+    def test_valid_openssh_key(self, tmp_path):
+        key_file = tmp_path / "id_ed25519"
+        key_file.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNza...\n-----END OPENSSH PRIVATE KEY-----\n")
+        result = DBManager._read_ssh_key(str(key_file))
+        assert "BEGIN OPENSSH PRIVATE KEY" in result
+
+    def test_valid_encrypted_key(self, tmp_path):
+        key_file = tmp_path / "id_enc"
+        key_file.write_text("-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFH...\n-----END ENCRYPTED PRIVATE KEY-----\n")
+        result = DBManager._read_ssh_key(str(key_file))
+        assert "BEGIN ENCRYPTED PRIVATE KEY" in result
+
+    def test_valid_generic_private_key(self, tmp_path):
+        key_file = tmp_path / "id_generic"
+        key_file.write_text("-----BEGIN PRIVATE KEY-----\nMIIEvgI...\n-----END PRIVATE KEY-----\n")
+        result = DBManager._read_ssh_key(str(key_file))
+        assert "BEGIN PRIVATE KEY" in result
+
+    def test_public_key_rejected(self, tmp_path):
+        key_file = tmp_path / "id_rsa.pub"
+        key_file.write_text("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQ... user@host\n")
+        with pytest.raises(ValueError, match="does not appear to contain a valid private key"):
+            DBManager._read_ssh_key(str(key_file))
+
+    def test_random_text_rejected(self, tmp_path):
+        key_file = tmp_path / "not_a_key"
+        key_file.write_text("this is not a key file at all\njust some random text\n")
+        with pytest.raises(ValueError, match="does not appear to contain a valid private key"):
+            DBManager._read_ssh_key(str(key_file))
+
+    def test_empty_file_rejected(self, tmp_path):
+        key_file = tmp_path / "empty"
+        key_file.write_text("")
+        with pytest.raises(ValueError, match="does not appear to contain a valid private key"):
+            DBManager._read_ssh_key(str(key_file))

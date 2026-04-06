@@ -7,7 +7,9 @@ import json
 import math
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from koda.memory.types import MemoryStatus
 from koda.state.agent_scope import normalize_agent_scope
@@ -18,6 +20,7 @@ from koda.state_primary import (
     require_primary_state_backend,
     run_coro_sync,
 )
+from koda.utils.url_detector import extract_urls
 
 _DEFAULT_MEMORY_LIMIT = 160
 _MAX_MEMORY_LIMIT = 1200
@@ -25,6 +28,68 @@ _SEMANTIC_THRESHOLD = 0.56
 _CURATION_EVENT_TYPE = "dashboard.memory_curation"
 _ALLOWED_CURATION_ACTIONS = frozenset({"approve", "merge", "discard", "expire", "archive", "restore"})
 _ALLOWED_CURATION_TARGETS = frozenset({"memory", "cluster"})
+_EXECUTION_ARTIFACT_KINDS = frozenset(
+    {
+        "image",
+        "audio",
+        "video",
+        "pdf",
+        "docx",
+        "spreadsheet",
+        "text",
+        "html",
+        "json",
+        "yaml",
+        "xml",
+        "csv",
+        "tsv",
+        "url",
+        "code",
+        "file",
+    }
+)
+_EXECUTION_ARTIFACT_KIND_ALIASES = {
+    "document": "docx",
+    "documents": "docx",
+    "sheet": "spreadsheet",
+    "spreadsheet_file": "spreadsheet",
+    "xlsx": "spreadsheet",
+    "xls": "spreadsheet",
+    "markdown": "text",
+    "md": "text",
+    "link": "url",
+}
+_CODE_ARTIFACT_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".css",
+        ".go",
+        ".html",
+        ".java",
+        ".js",
+        ".jsx",
+        ".json",
+        ".kt",
+        ".lua",
+        ".mjs",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".ts",
+        ".tsx",
+        ".vue",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+)
 
 
 def _now() -> datetime:
@@ -144,6 +209,347 @@ def _task_activity_iso(row: dict[str, Any]) -> str | None:
     return _iso(row.get("completed_at")) or _iso(row.get("started_at")) or _iso(row.get("created_at"))
 
 
+def _public_agent_id(agent_id: str | None) -> str:
+    return normalize_agent_scope(agent_id, fallback=agent_id)
+
+
+def _latest_execution_trace_event(audit_events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next(
+        (item for item in reversed(audit_events) if str(item.get("event_type") or "") == "task.execution_trace"),
+        None,
+    )
+
+
+def _trace_request_text(trace_event: dict[str, Any] | None) -> str | None:
+    envelope = _parse_trace_envelope(trace_event)
+    request = _json_object((envelope or {}).get("request"))
+    return _iso(request.get("query_text"))
+
+
+def _trace_response_text(trace_event: dict[str, Any] | None) -> str | None:
+    envelope = _parse_trace_envelope(trace_event)
+    assistant = _json_object((envelope or {}).get("assistant"))
+    return _iso(assistant.get("response_text"))
+
+
+def _session_cursor_key(activity_at: str | None, entry_id: str) -> tuple[float, str]:
+    return (_timestamp(activity_at), str(entry_id))
+
+
+def _encode_session_cursor(activity_at: str | None, entry_id: str) -> str:
+    return f"{_iso(activity_at) or ''}|{entry_id}"
+
+
+def _decode_session_cursor(cursor: str | None) -> tuple[float, str] | None:
+    text = str(cursor or "").strip()
+    if not text:
+        return None
+    timestamp, separator, entry_id = text.partition("|")
+    if not separator or not entry_id:
+        return None
+    return _session_cursor_key(timestamp or None, entry_id)
+
+
+def _normalize_execution_artifact_kind(
+    kind: Any,
+    *,
+    mime_type: Any = None,
+    path: Any = None,
+    url: Any = None,
+) -> str:
+    normalized = _EXECUTION_ARTIFACT_KIND_ALIASES.get(str(kind or "").strip().lower(), str(kind or "").strip().lower())
+    if normalized in _EXECUTION_ARTIFACT_KINDS:
+        return normalized
+
+    mime = str(mime_type or "").strip().lower()
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("audio/"):
+        return "audio"
+    if mime.startswith("video/"):
+        return "video"
+    if mime == "application/pdf":
+        return "pdf"
+    if mime in {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    }:
+        return "docx"
+    if mime in {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    }:
+        return "spreadsheet"
+    if mime == "text/html":
+        return "html"
+    if mime == "application/json":
+        return "json"
+    if mime in {"application/x-yaml", "text/yaml", "text/x-yaml"}:
+        return "yaml"
+    if mime in {"application/xml", "text/xml"}:
+        return "xml"
+    if mime == "text/csv":
+        return "csv"
+    if mime == "text/tab-separated-values":
+        return "tsv"
+    if mime.startswith("text/"):
+        return "text"
+
+    candidate_path = str(path or "").strip()
+    candidate_url = str(url or "").strip()
+    suffix_source = candidate_path or urlparse(candidate_url).path
+    suffix = Path(suffix_source).suffix.lower()
+    if suffix in _CODE_ARTIFACT_SUFFIXES:
+        return "code"
+    return {
+        ".png": "image",
+        ".jpg": "image",
+        ".jpeg": "image",
+        ".gif": "image",
+        ".webp": "image",
+        ".svg": "image",
+        ".mp4": "video",
+        ".mov": "video",
+        ".webm": "video",
+        ".mp3": "audio",
+        ".wav": "audio",
+        ".pdf": "pdf",
+        ".docx": "docx",
+        ".doc": "docx",
+        ".xlsx": "spreadsheet",
+        ".xls": "spreadsheet",
+        ".csv": "csv",
+        ".tsv": "tsv",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".xml": "xml",
+        ".json": "json",
+        ".txt": "text",
+        ".md": "text",
+    }.get(suffix, "url" if candidate_url and not candidate_path else "file")
+
+
+def _read_artifact_filename(path_or_url: str | None) -> str | None:
+    value = str(path_or_url or "").strip()
+    if not value:
+        return None
+    if value.startswith(("http://", "https://")):
+        parsed = urlparse(value)
+        return Path(parsed.path).name or parsed.hostname or None
+    return Path(value).name or None
+
+
+def _normalize_artifact_urls(text: str | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in extract_urls(text or ""):
+        url = raw.rstrip(".,;:!?)")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        normalized.append(url)
+    return normalized
+
+
+def _append_execution_artifact(
+    artifacts: list[dict[str, Any]],
+    seen_keys: set[str],
+    artifact: dict[str, Any],
+) -> None:
+    dedupe_candidates = [
+        f"url:{artifact.get('url')}" if artifact.get("url") else None,
+        f"path:{artifact.get('path')}" if artifact.get("path") else None,
+        f"id:{artifact.get('id')}" if artifact.get("id") else None,
+    ]
+    dedupe_key = next((candidate for candidate in dedupe_candidates if candidate), None)
+    if dedupe_key and dedupe_key in seen_keys:
+        return
+    if dedupe_key:
+        seen_keys.add(dedupe_key)
+    artifacts.append(artifact)
+
+
+def _build_execution_artifacts(raw_artifacts: Any, response_text: str | None, task_id: int) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    raw_payload = raw_artifacts if isinstance(raw_artifacts, dict) else {}
+
+    for dossier_index, dossier in enumerate(_json_list(raw_payload.get("artifact_dossiers"))):
+        dossier_record = _json_object(dossier)
+        dossier_label = _iso(dossier_record.get("subject_label")) or f"Artifact bundle {dossier_index + 1}"
+        dossier_summary = _clip_text(dossier_record.get("summary"), 280)
+        for artifact_index, raw_artifact in enumerate(_json_list(dossier_record.get("artifacts"))):
+            artifact_record = _json_object(raw_artifact)
+            ref = _json_object(artifact_record.get("ref"))
+            ref_metadata = _json_object(ref.get("metadata"))
+            artifact_metadata = _json_object(artifact_record.get("metadata"))
+            path = _iso(ref.get("path"))
+            url = _iso(ref.get("url"))
+            visual_paths = [
+                candidate for item in _json_list(artifact_record.get("visual_paths")) if (candidate := _iso(item))
+            ]
+            preview_image_url = next(
+                (candidate for candidate in visual_paths if candidate.startswith(("http://", "https://"))),
+                None,
+            )
+            preview_image_path = next(
+                (candidate for candidate in visual_paths if not candidate.startswith(("http://", "https://"))),
+                None,
+            )
+            kind = _normalize_execution_artifact_kind(
+                ref.get("kind"),
+                mime_type=ref.get("mime_type"),
+                path=path or preview_image_path,
+                url=url,
+            )
+            label = _iso(ref.get("label")) or _read_artifact_filename(path or url) or dossier_label
+            text_content = _clip_text(artifact_record.get("text_content"), 2000)
+            summary = _clip_text(artifact_record.get("summary"), 320) or dossier_summary
+            description = summary or _clip_text(text_content, 240)
+            if kind == "json" and artifact_metadata:
+                content: Any = artifact_metadata
+            elif text_content:
+                content = text_content
+            elif artifact_metadata or ref_metadata:
+                content = {
+                    "metadata": artifact_metadata or ref_metadata,
+                    "path": path,
+                    "url": url,
+                }
+            else:
+                content = summary or label
+            _append_execution_artifact(
+                artifacts,
+                seen_keys,
+                {
+                    "id": _iso(ref.get("artifact_id")) or f"artifact-{task_id}-{dossier_index}-{artifact_index}",
+                    "label": label,
+                    "kind": kind,
+                    "content": content,
+                    "description": description,
+                    "summary": summary,
+                    "url": url,
+                    "path": path,
+                    "mime_type": _iso(ref.get("mime_type")),
+                    "size_bytes": _safe_int(ref.get("size_bytes")) or None,
+                    "source_type": _iso(ref.get("source_type")) or "artifact_dossier",
+                    "status": _iso(artifact_record.get("status")),
+                    "text_content": text_content,
+                    "metadata": artifact_metadata or ref_metadata,
+                    "visual_paths": visual_paths[:4],
+                    "preview_image_url": preview_image_url
+                    or (url if kind == "image" and url and url.startswith(("http://", "https://")) else None),
+                    "preview_image_path": preview_image_path or (path if kind == "image" else None),
+                    "domain": urlparse(url).hostname if url else None,
+                    "site_name": _iso(ref_metadata.get("site_name")) or _iso(artifact_metadata.get("site_name")),
+                    "unavailable": str(artifact_record.get("status") or "") in {"unresolved", "unsupported"},
+                },
+            )
+
+    for native_index, raw_native in enumerate(_json_list(raw_payload.get("native_items"))):
+        native_item = _json_object(raw_native)
+        if str(native_item.get("type") or "") != "file_change":
+            continue
+        path = _iso(native_item.get("path")) or _iso(native_item.get("file_path"))
+        if not path:
+            continue
+        kind = _normalize_execution_artifact_kind(
+            native_item.get("artifact_kind"),
+            mime_type=native_item.get("mime_type"),
+            path=path,
+        )
+        change_kind = _iso(native_item.get("kind")) or _iso(native_item.get("change_type"))
+        label = _read_artifact_filename(path) or f"File {native_index + 1}"
+        _append_execution_artifact(
+            artifacts,
+            seen_keys,
+            {
+                "id": f"native-file-{task_id}-{native_index}",
+                "label": label,
+                "kind": kind,
+                "content": native_item,
+                "description": _clip_text(
+                    f"{(change_kind or 'updated').replace('_', ' ')} file",
+                    160,
+                ),
+                "summary": _clip_text(native_item.get("title") or change_kind or "Generated file", 220),
+                "url": None,
+                "path": path,
+                "mime_type": _iso(native_item.get("mime_type")),
+                "size_bytes": _safe_int(native_item.get("size_bytes")) or None,
+                "source_type": "file_change",
+                "status": "complete",
+                "text_content": None,
+                "metadata": native_item,
+                "visual_paths": [],
+                "preview_image_url": None,
+                "preview_image_path": path if kind == "image" else None,
+                "domain": None,
+                "site_name": None,
+                "unavailable": False,
+            },
+        )
+
+    for url_index, url in enumerate(_normalize_artifact_urls(response_text)):
+        _append_execution_artifact(
+            artifacts,
+            seen_keys,
+            {
+                "id": f"response-link-{task_id}-{url_index}",
+                "label": _read_artifact_filename(url) or urlparse(url).hostname or "Link",
+                "kind": "url",
+                "content": url,
+                "description": _clip_text(response_text, 240),
+                "summary": "Link referenced in the assistant response",
+                "url": url,
+                "path": None,
+                "mime_type": None,
+                "size_bytes": None,
+                "source_type": "assistant_response",
+                "status": "complete",
+                "text_content": _clip_text(response_text, 1200),
+                "metadata": {},
+                "visual_paths": [],
+                "preview_image_url": None,
+                "preview_image_path": None,
+                "domain": urlparse(url).hostname,
+                "site_name": None,
+                "unavailable": False,
+            },
+        )
+
+    if artifacts:
+        return artifacts
+
+    if response_text:
+        return [
+            {
+                "id": f"response-{task_id}",
+                "label": "Response",
+                "kind": "text",
+                "content": response_text,
+                "description": _clip_text(response_text, 240),
+                "summary": _clip_text(response_text, 320),
+                "url": None,
+                "path": None,
+                "mime_type": None,
+                "size_bytes": None,
+                "source_type": "assistant_response",
+                "status": "complete",
+                "text_content": _clip_text(response_text, 1200),
+                "metadata": {},
+                "visual_paths": [],
+                "preview_image_url": None,
+                "preview_image_path": None,
+                "domain": None,
+                "site_name": None,
+                "unavailable": False,
+            }
+        ]
+
+    return []
+
+
 def _sanitize_details(entry: dict[str, Any]) -> dict[str, Any]:
     details = _json_object(entry.get("details_json"))
     if details:
@@ -211,7 +617,8 @@ def _task_row_to_summary(
     warning_count = len([item for item in (runtime.get("warnings") or []) if isinstance(item, str)])
     return {
         "task_id": _safe_int(task.get("id")),
-        "agent_id": agent_id,
+        "agent_id": _public_agent_id(agent_id),
+        "bot_id": _public_agent_id(agent_id),
         "status": str(task.get("status") or "queued"),
         "query_text": _iso(task.get("query_text")),
         "model": _iso(task.get("model")),
@@ -467,14 +874,32 @@ class DashboardStore:
         summaries: list[dict[str, Any]] = []
         for task in tasks:
             events = audit_by_task.get(_safe_int(task.get("id")), [])
-            trace_event = next(
-                (item for item in reversed(events) if str(item.get("event_type") or "") == "task.execution_trace"), None
-            )
+            trace_event = _latest_execution_trace_event(events)
             summaries.append(_task_row_to_summary(scope, task, trace_event=trace_event, audit_events=events))
         return summaries
 
+    def _task_rows_for_session(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
+        scope = _normalize_scope(agent_id)
+        return _fetch_all(
+            scope,
+            """
+            SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts,
+                   cost_usd, error_message, created_at, started_at, completed_at, session_id, provider_session_id
+            FROM tasks
+            WHERE agent_id = ? AND session_id = ?
+            ORDER BY COALESCE(completed_at, started_at, created_at) ASC, id ASC
+            """,
+            (scope, session_id),
+        )
+
     def _query_rows_for_session(
-        self, agent_id: str, session_id: str, *, limit: int | None = None
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        descending: bool = False,
     ) -> list[dict[str, Any]]:
         sql = [
             (
@@ -482,12 +907,14 @@ class DashboardStore:
                 "cost_usd, provider, model, session_id, work_dir, error"
             ),
             "FROM query_history WHERE agent_id = ? AND session_id = ?",
-            "ORDER BY timestamp ASC, id ASC",
+            f"ORDER BY timestamp {'DESC' if descending else 'ASC'}, id {'DESC' if descending else 'ASC'}",
         ]
         params: list[Any] = [agent_id, session_id]
         if limit is not None:
             sql.append("LIMIT ?")
             params.append(limit)
+            sql.append("OFFSET ?")
+            params.append(max(0, int(offset)))
         return _fetch_all(agent_id, " ".join(sql), tuple(params))
 
     def _find_best_query_match(self, agent_id: str, task: dict[str, Any]) -> dict[str, Any] | None:
@@ -513,30 +940,23 @@ class DashboardStore:
             return best
         return min(queries, key=lambda row: abs(_timestamp(row.get("timestamp")) - task_ts))
 
-    def get_execution(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+    def _build_execution_detail(
+        self,
+        agent_id: str,
+        task: dict[str, Any],
+        *,
+        audit_events: list[dict[str, Any]] | None = None,
+        matched_query: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         scope = _normalize_scope(agent_id)
-        task = _fetch_one(
-            scope,
-            """
-            SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts,
-                   cost_usd, error_message, created_at, started_at, completed_at, session_id, provider_session_id
-            FROM tasks
-            WHERE agent_id = ? AND id = ?
-            """,
-            (scope, task_id),
-        )
-        if task is None:
-            return None
-        audit_events = self._audit_events_for_tasks(scope, [task_id]).get(task_id, [])
-        trace_event = next(
-            (item for item in reversed(audit_events) if str(item.get("event_type") or "") == "task.execution_trace"),
-            None,
-        )
+        task_id = _safe_int(task.get("id"))
+        events = list(audit_events or [])
+        trace_event = _latest_execution_trace_event(events)
         envelope = _parse_trace_envelope(trace_event)
         runtime = _json_object((envelope or {}).get("runtime"))
         request = _json_object((envelope or {}).get("request"))
         assistant = _json_object((envelope or {}).get("assistant"))
-        matched_query = self._find_best_query_match(scope, task)
+        resolved_query = matched_query or self._find_best_query_match(scope, task)
         tools = []
         if isinstance((envelope or {}).get("tools"), list):
             for index, step in enumerate(cast(list[Any], (envelope or {}).get("tools") or [])):
@@ -560,7 +980,7 @@ class DashboardStore:
         if not tools:
             tools = [
                 _tool_trace_from_audit(item)
-                for item in audit_events
+                for item in events
                 if str(item.get("event_type") or "") == "task.tool_executed"
             ]
         timeline: list[dict[str, Any]] = [
@@ -584,7 +1004,7 @@ class DashboardStore:
                     summary="Task entered execution.",
                 )
             )
-        for event in audit_events:
+        for event in events:
             event_type = str(event.get("event_type") or "")
             details = _sanitize_details(event)
             if event_type == "task.tool_executed":
@@ -615,13 +1035,13 @@ class DashboardStore:
                         details=details,
                     )
                 )
-        response_text = _iso(assistant.get("response_text")) or _iso((matched_query or {}).get("response_text"))
+        response_text = _iso(assistant.get("response_text")) or _iso((resolved_query or {}).get("response_text"))
         response_source = (
             "trace"
             if _iso(assistant.get("response_text"))
-            else ("queries" if _iso((matched_query or {}).get("response_text")) else "missing")
+            else ("queries" if _iso((resolved_query or {}).get("response_text")) else "missing")
         )
-        trace_source = "trace" if envelope else ("legacy" if audit_events else "missing")
+        trace_source = "trace" if envelope else ("legacy" if events else "missing")
         tools_source = (
             "trace"
             if envelope and isinstance((envelope or {}).get("tools"), list)
@@ -637,25 +1057,12 @@ class DashboardStore:
             ]
             if runtime.get("stop_reason"):
                 reasoning_summary.append(f"Stop reason: {runtime.get('stop_reason')}")
-        artifacts: list[dict[str, Any]] = []
         raw_artifacts = (envelope or {}).get("raw_artifacts")
-        if isinstance(raw_artifacts, dict):
-            for key, value in raw_artifacts.items():
-                artifacts.append(
-                    {
-                        "id": str(key),
-                        "label": str(key),
-                        "kind": "json" if isinstance(value, (dict, list)) else "text",
-                        "content": value,
-                    }
-                )
-        elif response_text:
-            artifacts.append(
-                {"id": f"response-{task_id}", "label": "Response", "kind": "text", "content": response_text}
-            )
+        artifacts = _build_execution_artifacts(raw_artifacts, response_text, _safe_int(task.get("id")))
         return {
             "task_id": _safe_int(task.get("id")),
-            "agent_id": scope,
+            "agent_id": _public_agent_id(scope),
+            "bot_id": _public_agent_id(scope),
             "status": str(task.get("status") or "queued"),
             "query_text": _iso(request.get("query_text")) or _iso(task.get("query_text")),
             "response_text": response_text,
@@ -686,6 +1093,23 @@ class DashboardStore:
             "redactions": runtime.get("redactions") if isinstance(runtime.get("redactions"), dict) else None,
         }
 
+    def get_execution(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        scope = _normalize_scope(agent_id)
+        task = _fetch_one(
+            scope,
+            """
+            SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts,
+                   cost_usd, error_message, created_at, started_at, completed_at, session_id, provider_session_id
+            FROM tasks
+            WHERE agent_id = ? AND id = ?
+            """,
+            (scope, task_id),
+        )
+        if task is None:
+            return None
+        audit_events = self._audit_events_for_tasks(scope, [task_id]).get(task_id, [])
+        return self._build_execution_detail(scope, task, audit_events=audit_events)
+
     def list_sessions(
         self,
         agent_id: str,
@@ -695,6 +1119,15 @@ class DashboardStore:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         scope = _normalize_scope(agent_id)
+        session_rows = _fetch_all(
+            scope,
+            """
+            SELECT session_id, name, user_id, created_at, last_used
+            FROM sessions
+            WHERE agent_id = ? AND session_id IS NOT NULL
+            """,
+            (scope,),
+        )
         query_aggregates = _fetch_all(
             scope,
             """
@@ -738,13 +1171,23 @@ class DashboardStore:
             scope,
             """
             SELECT DISTINCT ON (session_id)
-                   session_id, status, COALESCE(completed_at, started_at, created_at) AS activity_at
+                   id AS task_id,
+                   session_id,
+                   user_id,
+                   status,
+                   query_text,
+                   COALESCE(completed_at, started_at, created_at) AS activity_at
             FROM tasks
             WHERE agent_id = ? AND session_id IS NOT NULL
             ORDER BY session_id, COALESCE(completed_at, started_at, created_at) DESC, id DESC
             """,
             (scope,),
         )
+        latest_task_events = self._audit_events_for_tasks(
+            scope,
+            [_safe_int(row.get("task_id")) for row in latest_tasks if row.get("task_id") is not None],
+        )
+        session_by_id = {str(row.get("session_id") or ""): row for row in session_rows}
         query_by_session = {str(row.get("session_id") or ""): row for row in query_aggregates}
         latest_query_by_session = {str(row.get("session_id") or ""): row for row in latest_queries}
         task_by_session = {str(row.get("session_id") or ""): row for row in task_aggregates}
@@ -753,6 +1196,7 @@ class DashboardStore:
             {
                 key
                 for key in [
+                    *session_by_id.keys(),
                     *query_by_session.keys(),
                     *latest_query_by_session.keys(),
                     *task_by_session.keys(),
@@ -769,18 +1213,43 @@ class DashboardStore:
         items: list[dict[str, Any]] = []
         search_term = " ".join((search or "").lower().split())
         for session_id in session_ids:
+            session_row = session_by_id.get(session_id, {})
             query_agg = query_by_session.get(session_id, {})
             latest_query = latest_query_by_session.get(session_id, {})
             task_agg = task_by_session.get(session_id, {})
             latest_task = latest_task_by_session.get(session_id, {})
+            latest_task_trace = _latest_execution_trace_event(
+                latest_task_events.get(_safe_int(latest_task.get("task_id")), [])
+            )
+            latest_task_query_preview = _clip_text(
+                latest_task.get("query_text") or _trace_request_text(latest_task_trace),
+                120,
+            )
+            latest_task_response_preview = _clip_text(_trace_response_text(latest_task_trace), 120)
+            latest_message_preview = _clip_text(
+                latest_query.get("response_text")
+                or latest_query.get("query_text")
+                or latest_task_response_preview
+                or latest_task_query_preview,
+                132,
+            )
+            if not latest_message_preview:
+                continue
             item = {
-                "agent_id": scope,
+                "agent_id": _public_agent_id(scope),
+                "bot_id": _public_agent_id(scope),
                 "session_id": session_id,
-                "name": None,
-                "user_id": latest_query.get("user_id"),
-                "created_at": _iso(latest_query.get("timestamp")) or _iso(task_agg.get("last_execution_at")),
-                "last_used": _iso(query_agg.get("last_query_at")) or _iso(task_agg.get("last_execution_at")),
-                "last_activity_at": _iso(query_agg.get("last_query_at")) or _iso(task_agg.get("last_execution_at")),
+                "name": _iso(session_row.get("name")),
+                "user_id": session_row.get("user_id") or latest_query.get("user_id") or latest_task.get("user_id"),
+                "created_at": _iso(session_row.get("created_at"))
+                or _iso(latest_query.get("timestamp"))
+                or _iso(task_agg.get("last_execution_at")),
+                "last_used": _iso(session_row.get("last_used"))
+                or _iso(query_agg.get("last_query_at"))
+                or _iso(task_agg.get("last_execution_at")),
+                "last_activity_at": _iso(session_row.get("last_used"))
+                or _iso(query_agg.get("last_query_at"))
+                or _iso(task_agg.get("last_execution_at")),
                 "query_count": _safe_int(query_agg.get("query_count")),
                 "execution_count": _safe_int(task_agg.get("execution_count")),
                 "total_cost_usd": _safe_float(task_agg.get("total_cost_usd"))
@@ -788,17 +1257,17 @@ class DashboardStore:
                 "running_count": _safe_int(task_agg.get("running_count")),
                 "failed_count": _safe_int(task_agg.get("failed_count")),
                 "latest_status": _iso(latest_task.get("status")),
-                "latest_query_preview": _clip_text(latest_query.get("query_text"), 120),
-                "latest_response_preview": _clip_text(latest_query.get("response_text"), 120),
-                "latest_message_preview": _clip_text(
-                    latest_query.get("response_text") or latest_query.get("query_text"), 132
-                ),
+                "latest_query_preview": _clip_text(latest_query.get("query_text"), 120) or latest_task_query_preview,
+                "latest_response_preview": _clip_text(latest_query.get("response_text"), 120)
+                or latest_task_response_preview,
+                "latest_message_preview": latest_message_preview,
             }
             if search_term:
                 haystack = " ".join(
                     part.lower()
                     for part in [
                         session_id,
+                        str(item.get("name") or ""),
                         str(item.get("latest_query_preview") or ""),
                         str(item.get("latest_response_preview") or ""),
                         str(item.get("latest_message_preview") or ""),
@@ -810,7 +1279,14 @@ class DashboardStore:
             items.append(item)
         return items[offset : offset + limit]
 
-    def get_session(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
+    def get_session(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+    ) -> dict[str, Any] | None:
         scope = _normalize_scope(agent_id)
         summary = next(
             (item for item in self.list_sessions(scope, limit=5000) if item["session_id"] == session_id), None
@@ -818,55 +1294,207 @@ class DashboardStore:
         if summary is None:
             return None
         query_rows = self._query_rows_for_session(scope, session_id)
-        executions = self.list_executions(scope, session_id=session_id, limit=500, offset=0)
-        unmatched = list(executions)
-        messages: list[dict[str, Any]] = []
+        task_rows = self._task_rows_for_session(scope, session_id)
+        audit_by_task = self._audit_events_for_tasks(scope, [_safe_int(row.get("id")) for row in task_rows])
+        task_rows_by_id = {_safe_int(row.get("id")): row for row in task_rows}
+        execution_summaries = [
+            _task_row_to_summary(
+                scope,
+                task,
+                trace_event=_latest_execution_trace_event(audit_by_task.get(_safe_int(task.get("id")), [])),
+                audit_events=audit_by_task.get(_safe_int(task.get("id")), []),
+            )
+            for task in task_rows
+        ]
+        execution_detail_cache: dict[int, dict[str, Any]] = {}
+
+        def resolve_execution_detail(task_id: int) -> dict[str, Any] | None:
+            if task_id in execution_detail_cache:
+                return execution_detail_cache[task_id]
+            task_row = task_rows_by_id.get(task_id)
+            if task_row is None:
+                return None
+            detail = self._build_execution_detail(
+                scope,
+                task_row,
+                audit_events=audit_by_task.get(task_id, []),
+            )
+            execution_detail_cache[task_id] = detail
+            return detail
+
+        transcript_entries: list[dict[str, Any]] = []
+        unmatched_executions = list(execution_summaries)
+
         for row in query_rows:
             match_index = _find_execution_match(
-                unmatched,
+                unmatched_executions,
                 query_text=_iso(row.get("query_text")),
                 timestamp=_iso(row.get("timestamp")),
             )
-            linked = unmatched.pop(match_index) if match_index >= 0 else None
-            if _clip_text(row.get("query_text"), 10_000):
-                messages.append(
+            linked_execution = unmatched_executions.pop(match_index) if match_index >= 0 else None
+            linked_detail = (
+                resolve_execution_detail(_safe_int(linked_execution.get("task_id")))
+                if linked_execution is not None
+                else None
+            )
+            query_text = _iso(row.get("query_text")) or _iso((linked_detail or {}).get("query_text"))
+            response_text = _iso(row.get("response_text")) or _iso((linked_detail or {}).get("response_text"))
+            user_timestamp = _iso(row.get("timestamp")) or _iso((linked_detail or {}).get("created_at"))
+            assistant_timestamp = (
+                _iso(row.get("timestamp"))
+                or _iso((linked_detail or {}).get("completed_at"))
+                or _iso((linked_detail or {}).get("started_at"))
+                or user_timestamp
+            )
+            entry_messages: list[dict[str, Any]] = []
+            if _clip_text(query_text, 10_000):
+                entry_messages.append(
                     {
                         "id": f"query-{row.get('id')}-user",
                         "role": "user",
-                        "text": str(row.get("query_text") or ""),
-                        "timestamp": _iso(row.get("timestamp")),
+                        "text": str(query_text or ""),
+                        "timestamp": user_timestamp,
                         "model": None,
                         "cost_usd": None,
                         "query_id": _safe_int(row.get("id")),
                         "session_id": session_id,
                         "error": False,
-                        "linked_execution": linked,
+                        "linked_execution": linked_execution,
                     }
                 )
-            if _clip_text(row.get("response_text"), 10_000):
-                messages.append(
+            if _clip_text(response_text, 10_000):
+                entry_messages.append(
                     {
                         "id": f"query-{row.get('id')}-assistant",
                         "role": "assistant",
-                        "text": str(row.get("response_text") or ""),
-                        "timestamp": _iso(row.get("timestamp")),
-                        "model": _iso(row.get("model")),
-                        "cost_usd": _safe_float(row.get("cost_usd")),
+                        "text": str(response_text or ""),
+                        "timestamp": assistant_timestamp,
+                        "model": _iso(row.get("model")) or _iso((linked_detail or {}).get("model")),
+                        "cost_usd": _safe_float(row.get("cost_usd"))
+                        or _safe_float((linked_detail or {}).get("cost_usd")),
                         "query_id": _safe_int(row.get("id")),
                         "session_id": session_id,
                         "error": bool(row.get("error")),
-                        "linked_execution": linked,
+                        "linked_execution": linked_execution,
                     }
                 )
+            if entry_messages:
+                transcript_entries.append(
+                    {
+                        "entry_id": f"query-{_safe_int(row.get('id'))}",
+                        "activity_at": assistant_timestamp or user_timestamp,
+                        "messages": entry_messages,
+                    }
+                )
+
+        recoverable_execution_ids: set[int] = set()
+        for execution in sorted(
+            unmatched_executions,
+            key=lambda item: _session_cursor_key(
+                _task_activity_iso(item),
+                f"execution-{_safe_int(item.get('task_id'))}",
+            ),
+        ):
+            task_id = _safe_int(execution.get("task_id"))
+            execution_detail = resolve_execution_detail(task_id)
+            query_text = _iso((execution_detail or {}).get("query_text")) or _iso(execution.get("query_text"))
+            response_text = _iso((execution_detail or {}).get("response_text"))
+            user_timestamp = _iso((execution_detail or {}).get("created_at")) or _task_activity_iso(execution)
+            assistant_timestamp = (
+                _iso((execution_detail or {}).get("completed_at"))
+                or _iso((execution_detail or {}).get("started_at"))
+                or user_timestamp
+            )
+            execution_entry_messages: list[dict[str, Any]] = []
+            synthetic_query_id = -task_id if task_id > 0 else -1
+            if _clip_text(query_text, 10_000):
+                execution_entry_messages.append(
+                    {
+                        "id": f"execution-{task_id}-user",
+                        "role": "user",
+                        "text": str(query_text or ""),
+                        "timestamp": user_timestamp,
+                        "model": None,
+                        "cost_usd": None,
+                        "query_id": synthetic_query_id,
+                        "session_id": session_id,
+                        "error": False,
+                        "linked_execution": execution,
+                    }
+                )
+            if _clip_text(response_text, 10_000):
+                execution_entry_messages.append(
+                    {
+                        "id": f"execution-{task_id}-assistant",
+                        "role": "assistant",
+                        "text": str(response_text or ""),
+                        "timestamp": assistant_timestamp,
+                        "model": _iso((execution_detail or {}).get("model")) or _iso(execution.get("model")),
+                        "cost_usd": _safe_float((execution_detail or {}).get("cost_usd"))
+                        or _safe_float(execution.get("cost_usd")),
+                        "query_id": synthetic_query_id,
+                        "session_id": session_id,
+                        "error": str(execution.get("status") or "") == "failed",
+                        "linked_execution": execution,
+                    }
+                )
+            if execution_entry_messages:
+                recoverable_execution_ids.add(task_id)
+                transcript_entries.append(
+                    {
+                        "entry_id": f"execution-{task_id}",
+                        "activity_at": assistant_timestamp or user_timestamp,
+                        "messages": execution_entry_messages,
+                    }
+                )
+
+        transcript_entries.sort(
+            key=lambda entry: _session_cursor_key(entry.get("activity_at"), str(entry.get("entry_id") or "")),
+        )
+        decoded_cursor = _decode_session_cursor(before)
+        visible_entries = transcript_entries
+        if decoded_cursor is not None:
+            visible_entries = [
+                entry
+                for entry in transcript_entries
+                if _session_cursor_key(entry.get("activity_at"), str(entry.get("entry_id") or "")) < decoded_cursor
+            ]
+
+        if limit is None:
+            page_entries = visible_entries
+        else:
+            page_entries = visible_entries[-max(1, int(limit)) :]
+
+        has_more = len(visible_entries) > len(page_entries)
+        next_cursor = (
+            _encode_session_cursor(page_entries[0].get("activity_at"), str(page_entries[0].get("entry_id") or ""))
+            if has_more and page_entries
+            else None
+        )
+        messages = [
+            message for entry in page_entries for message in cast(list[dict[str, Any]], entry.get("messages") or [])
+        ]
         return {
             "summary": summary,
             "messages": messages,
-            "orphan_executions": unmatched,
+            "orphan_executions": [
+                execution
+                for execution in unmatched_executions
+                if _safe_int(execution.get("task_id")) not in recoverable_execution_ids
+            ],
+            "page": {
+                "limit": len(page_entries) if limit is None else max(1, int(limit)),
+                "returned": len(page_entries),
+                "next_cursor": next_cursor,
+                "has_more": has_more,
+            },
             "totals": {
-                "messages": len(messages),
-                "executions": len(executions),
-                "tools": sum(_safe_int(item.get("tool_count")) for item in executions),
-                "cost_usd": sum(_safe_float(item.get("cost_usd")) for item in executions)
+                "messages": sum(
+                    len(cast(list[dict[str, Any]], entry.get("messages") or [])) for entry in transcript_entries
+                ),
+                "executions": len(execution_summaries),
+                "tools": sum(_safe_int(item.get("tool_count")) for item in execution_summaries),
+                "cost_usd": sum(_safe_float(item.get("cost_usd")) for item in execution_summaries)
                 or _safe_float(summary.get("total_cost_usd")),
             },
         }
@@ -932,10 +1560,14 @@ class DashboardStore:
         rows = _fetch_all(
             scope,
             """
-            SELECT id, user_id, chat_id, schedule_expr, payload_json, status, work_dir, created_at
+            SELECT id, user_id, chat_id, agent_id, job_type, trigger_type, schedule_expr, timezone,
+                   payload_json, status, work_dir, provider_preference, model_preference,
+                   next_run_at, last_run_at, last_success_at, last_failure_at, config_version,
+                   verification_policy_json, notification_policy_json, dry_run_required,
+                   created_at, updated_at
             FROM scheduled_jobs
-            WHERE COALESCE(agent_id, ?) = ? AND job_type = 'shell_command' AND status != 'archived'
-            ORDER BY created_at DESC, id DESC
+            WHERE COALESCE(agent_id, ?) = ? AND status != 'archived'
+            ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
             """,
             (scope, scope),
         )
@@ -945,14 +1577,32 @@ class DashboardStore:
             items.append(
                 {
                     "id": _safe_int(row.get("id")),
+                    "bot_id": str(row.get("agent_id") or "") or scope,
                     "user_id": _safe_int(row.get("user_id")),
                     "chat_id": _safe_int(row.get("chat_id")),
+                    "job_type": str(row.get("job_type") or ""),
+                    "trigger_type": str(row.get("trigger_type") or ""),
+                    "schedule_expr": str(row.get("schedule_expr") or ""),
                     "cron_expression": str(row.get("schedule_expr") or ""),
-                    "command": str(payload.get("command") or ""),
+                    "timezone": str(row.get("timezone") or ""),
+                    "payload": payload,
+                    "command": str(payload.get("query") or payload.get("text") or payload.get("command") or ""),
                     "description": str(payload.get("description") or ""),
                     "created_at": _iso(row.get("created_at")),
+                    "updated_at": _iso(row.get("updated_at")),
                     "enabled": 1 if str(row.get("status") or "") == "active" else 0,
+                    "status": str(row.get("status") or ""),
                     "work_dir": _iso(row.get("work_dir")),
+                    "provider_preference": _iso(row.get("provider_preference")),
+                    "model_preference": _iso(row.get("model_preference")),
+                    "next_run_at": _iso(row.get("next_run_at")),
+                    "last_run_at": _iso(row.get("last_run_at")),
+                    "last_success_at": _iso(row.get("last_success_at")),
+                    "last_failure_at": _iso(row.get("last_failure_at")),
+                    "config_version": _safe_int(row.get("config_version")) or 1,
+                    "verification_policy": _json_object(row.get("verification_policy_json")),
+                    "notification_policy": _json_object(row.get("notification_policy_json")),
+                    "dry_run_required": bool(row.get("dry_run_required")),
                 }
             )
         return items

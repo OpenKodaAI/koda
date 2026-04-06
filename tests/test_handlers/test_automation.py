@@ -54,15 +54,15 @@ async def test_http_no_args(mock_update, mock_context):
 
 
 @pytest.mark.asyncio
-async def test_http_makes_request(mock_update, mock_context):
+async def test_http_post_requests_approval_before_request(mock_update, mock_context):
     mock_context.args = ["POST", "https://api.example.com", '{"key":"val"}']
     with (
         patch("koda.handlers.automation.make_http_request", new_callable=AsyncMock) as mock_req,
         patch("koda.handlers.automation.send_long_message", new_callable=AsyncMock),
     ):
-        mock_req.return_value = "HTTP 200 OK"
         await cmd_http(mock_update, mock_context)
-        mock_req.assert_called_once_with("POST", "https://api.example.com", body='{"key":"val"}')
+        mock_req.assert_not_called()
+    assert "Confirmacao necessaria" in mock_update.message.reply_text.call_args[0][0]
 
 
 @pytest.mark.asyncio

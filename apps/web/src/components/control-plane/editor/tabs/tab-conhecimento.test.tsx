@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BotEditorProvider } from "@/hooks/use-bot-editor";
 import { ToastProvider } from "@/hooks/use-toast";
@@ -83,9 +82,9 @@ function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
         digest_enabled: false,
         observed_pattern_requires_review: true,
         max_recall: 8,
-        recall_threshold: 0.35,
+        recall_threshold: 0.65,
         recall_timeout: 2,
-        max_context_tokens: 1600,
+        max_context_tokens: 4000,
         max_extraction_items: 6,
         procedural_max_recall: 4,
         similarity_dedup_threshold: 0.82,
@@ -138,7 +137,7 @@ const core = {
   tools: { items: [], governance: {} } satisfies ControlPlaneCoreTools,
   providers: {
     providers: {
-      claude: { title: "Anthropic", category: "general", enabled: true, available_models: [] },
+      claude: { title: "Anthropic", category: "general", enabled: true, available_models: ["claude-sonnet-4-6"] },
     },
     enabled_providers: ["claude"],
   } as unknown as ControlPlaneCoreProviders,
@@ -185,23 +184,17 @@ function renderTab() {
 }
 
 describe("TabConhecimento", () => {
-  it("shows a guided knowledge setup and keeps raw JSON hidden by default", async () => {
-    const user = userEvent.setup();
-
+  it("shows the simplified knowledge setup with toggle, model selector, and extraction prompt", () => {
     renderTab();
 
-    expect(screen.getByText("Memória e grounding")).toBeInTheDocument();
-    expect(screen.getByText(/3 itens publicados/i)).toBeInTheDocument();
+    expect(screen.getByText("Conhecimento")).toBeInTheDocument();
+    expect(screen.getByText("Conhecimento ativo")).toBeInTheDocument();
+    expect(screen.getByText("Modelo de extracao")).toBeInTheDocument();
+    expect(screen.getByText("Prompt de extracao")).toBeInTheDocument();
 
-    expect(screen.queryByRole("button", { name: /Salvar coleção/i })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /Memória persistente/i }));
-
-    expect(screen.getByText("Memórias por vez")).toBeInTheDocument();
-    expect(screen.getByText("Como o agente aprende e o que vale guardar")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /Editar ativos em JSON/i }));
-
-    expect(screen.getByRole("button", { name: /Salvar coleção/i })).toBeInTheDocument();
+    /* Developer-mode JSON editors should not be present */
+    expect(screen.queryByText(/Knowledge Policy JSON/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Memory Policy JSON/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Governanca/i)).not.toBeInTheDocument();
   });
 });

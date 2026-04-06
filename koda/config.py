@@ -69,6 +69,19 @@ def _resolve_path_value(path_value: str | Path, *, relative_to: Path) -> Path:
     return path
 
 
+def _resolve_writable_dir(path_value: str | Path, *, relative_to: Path, fallback_leaf: str) -> Path:
+    """Resolve a scratch directory and fall back to a temp-owned path when needed."""
+    path = _resolve_path_value(path_value, relative_to=relative_to)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except OSError:
+        fallback_root = Path(tempfile.gettempdir()) / "koda-runtime" / (_bid or "default")
+        fallback = _resolve_path_value(fallback_leaf, relative_to=fallback_root)
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
 def _bool_env(key: str, default: bool) -> bool:
     return (_env(key, "true" if default else "false") or "").strip().lower() == "true"
 
@@ -110,11 +123,17 @@ RUNTIME_EPHEMERAL_ROOT: Path = Path(
 ALLOWED_USER_IDS: set[int] = {
     int(uid.strip()) for uid in (_env("ALLOWED_USER_IDS", "") or "").split(",") if uid.strip()
 }
+ADMIN_USER_IDS: set[int] = {
+    int(uid.strip())
+    for uid in _env("ADMIN_USER_IDS", ",".join(str(uid) for uid in sorted(ALLOWED_USER_IDS))).split(",")
+    if uid.strip()
+}
 KNOWLEDGE_ADMIN_USER_IDS: set[int] = {
     int(uid.strip())
     for uid in _env("KNOWLEDGE_ADMIN_USER_IDS", ",".join(str(uid) for uid in sorted(ALLOWED_USER_IDS))).split(",")
     if uid.strip()
 }
+AUDIT_RETENTION_DAYS: int = int(_env("AUDIT_RETENTION_DAYS", "90"))
 
 # --- Claude CLI ---
 CLAUDE_ENABLED: bool = _env("CLAUDE_ENABLED", "true").lower() == "true"
@@ -149,17 +168,16 @@ CODEX_SKIP_GIT_REPO_CHECK: bool = _env("CODEX_SKIP_GIT_REPO_CHECK", "true").lowe
 CODEX_AVAILABLE_MODELS: list[str] = _env_csv(
     "CODEX_AVAILABLE_MODELS",
     (
-        "gpt-5.4,gpt-5.4-pro,gpt-5.4-mini,gpt-5.4-nano,"
-        "gpt-5.2,gpt-5.2-pro,gpt-5.1,"
-        "o3,o3-pro,o3-mini,o4-mini,"
-        "gpt-4o,gpt-4o-mini,gpt-4.1-mini,gpt-4.1-nano,"
-        "gpt-5.3-codex"
+        "gpt-5.4,gpt-5.4-mini,"
+        "gpt-5.3-codex,gpt-5.3-codex-spark,"
+        "gpt-5.2-codex,gpt-5.2,"
+        "gpt-5.1-codex-max,gpt-5.1-codex-mini"
     ),
 )
 CODEX_TIER_MODELS: dict[str, str] = {
-    "small": _env("CODEX_MODEL_SMALL", "gpt-5.4-mini"),
+    "small": _env("CODEX_MODEL_SMALL", "gpt-4o-mini"),
     "medium": _env("CODEX_MODEL_MEDIUM", "gpt-5.4"),
-    "large": _env("CODEX_MODEL_LARGE", "gpt-5.3-codex"),
+    "large": _env("CODEX_MODEL_LARGE", "gpt-5.4"),
 }
 CODEX_DEFAULT_MODEL: str = _env("CODEX_DEFAULT_MODEL", CODEX_TIER_MODELS["medium"])
 
@@ -265,14 +283,72 @@ AVAILABLE_AGENT_MODES: list[str] = ["autonomous", "supervised"]
 # --- Shell ---
 SHELL_TIMEOUT: int = int(_env("SHELL_TIMEOUT", "30"))
 SHELL_ENABLED: bool = _env("SHELL_ENABLED", "true").lower() == "true"
+SHELL_BG_MAX_PROCESSES: int = int(_env("SHELL_BG_MAX_PROCESSES", "5"))
+SHELL_BG_OUTPUT_MAX: int = int(_env("SHELL_BG_OUTPUT_MAX", "8000"))
+
+# --- File Operations ---
+FILEOPS_ENABLED: bool = _env("FILEOPS_ENABLED", "true").lower() == "true"
+FILEOPS_MAX_READ_SIZE: int = int(_env("FILEOPS_MAX_READ_SIZE", "1048576"))  # 1MB
+FILEOPS_BLOCKED_EXTENSIONS: frozenset[str] = frozenset(
+    {".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".credentials"}
+)
 BLOCKED_SHELL_PATTERN: re.Pattern = re.compile(
+    # Destructive filesystem operations
     r"rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|chmod\s+777\s+/"
-    r"|curl.*\|.*sh|wget.*\|.*sh|>\s*/dev/sd"
+    # Pipe-to-shell patterns (download & execute)
+    r"|curl.*\|.*(?:ba)?sh|wget.*\|.*(?:ba)?sh|>\s*/dev/sd"
+    # Two-step download-then-execute bypasses
+    r"|curl\s+.*(?:-o|>)\s*/tmp/.*&&.*(?:ba)?sh\s"
+    r"|wget\s+.*-O\s*/tmp/.*&&.*(?:ba)?sh\s"
+    # Shell wrappers around download commands
+    r"|(?:ba)?sh\s+-c\s+.*(?:curl|wget)\b"
+    # Python one-liner escapes
+    r"|python[23]?\s+-c\s+.*(?:urllib|requests|subprocess|os\.system)"
+    # Environment variable exfiltration
     r"|(?:^|\s)env(?:\s|$)|(?:^|\s)printenv(?:\s|$)|(?:^|\s)set(?:\s|$)"
     r"|/proc/self/environ|/proc/\d+/environ"
     r"|(?:^|\s)export\s+-p"
-    r"|(?:^|\s)compgen\s+-e|(?:^|\s)declare\s+-[xp]",
+    r"|(?:^|\s)compgen\s+-e|(?:^|\s)declare\s+-[xp]"
+    # Privilege escalation
+    r"|(?:^|\s|;|&&|\|\|)sudo\b"
+    # Dangerous system commands
+    r"|(?:^|\s|;|&&|\|\|)(?:iptables|ip6tables)\b"
+    r"|(?:^|\s|;|&&|\|\|)(?:mount|umount)\b"
+    r"|(?:^|\s|;|&&|\|\|)fdisk\b"
+    r"|(?:^|\s|;|&&|\|\|)(?:systemctl|service)\s"
+    # Shared memory and device access
+    r"|/dev/shm"
+    # Reverse shell patterns
+    r"|(?:^|\s|;|&&|\|\|)(?:nc|ncat|netcat)\s.*-[elp]"
+    r"|/dev/tcp/"
+    r"|(?:^|\s)socat\s",
     re.I,
+)
+
+# Token-level blocked commands (checked after regex, defense-in-depth)
+BLOCKED_COMMAND_TOKENS: frozenset[str] = frozenset(
+    {
+        "sudo",
+        "su",
+        "iptables",
+        "ip6tables",
+        "mount",
+        "umount",
+        "fdisk",
+        "mkfs",
+        "shutdown",
+        "reboot",
+        "systemctl",
+        "service",
+        "nc",
+        "ncat",
+        "netcat",
+        "socat",
+        "chroot",
+        "nsenter",
+        "unshare",
+        "crontab",
+    }
 )
 ALLOWED_GIT_CMDS: set[str] = {
     "status",
@@ -311,6 +387,9 @@ SENSITIVE_DIRS: frozenset[str] = frozenset(
         "/private/var/lib",
     }
 )
+
+# --- Git ---
+GIT_ENABLED: bool = _env("GIT_ENABLED", "true").lower() == "true"
 
 # --- DevOps CLI ---
 GH_ENABLED: bool = _env("GH_ENABLED", "true").lower() == "true"
@@ -442,6 +521,8 @@ AWS_ENABLED: bool = _env("AWS_ENABLED", "false").lower() == "true"
 AWS_PROFILE_DEV: str = _env("AWS_PROFILE_DEV", "")
 AWS_PROFILE_PROD: str = _env("AWS_PROFILE_PROD", "")
 AWS_DEFAULT_REGION: str = _env("AWS_DEFAULT_REGION", "")
+AWS_ACCESS_KEY_ID: str = _env("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY: str = _env("AWS_SECRET_ACCESS_KEY", "")
 
 # --- Package managers ---
 PIP_ENABLED: bool = _env("PIP_ENABLED", "true").lower() == "true"
@@ -451,12 +532,32 @@ BLOCKED_PIP_PATTERN: re.Pattern | None = re.compile(_blocked_pip, re.I) if _bloc
 _blocked_npm = _env("BLOCKED_NPM_PATTERN")
 BLOCKED_NPM_PATTERN: re.Pattern | None = re.compile(_blocked_npm, re.I) if _blocked_npm else None
 
+# --- Inter-agent communication ---
+INTER_AGENT_ENABLED: bool = _env("INTER_AGENT_ENABLED", "false").lower() == "true"
+INTER_AGENT_MAX_DELEGATION_DEPTH: int = int(_env("INTER_AGENT_MAX_DELEGATION_DEPTH", "3"))
+INTER_AGENT_MESSAGE_TIMEOUT: int = int(_env("INTER_AGENT_MESSAGE_TIMEOUT", "60"))
+
+# --- MCP Bridge ---
+MCP_ENABLED: bool = _env("MCP_ENABLED", "false").lower() in ("1", "true", "yes")
+MCP_OAUTH_ENABLED: bool = _env("MCP_OAUTH_ENABLED", "true").lower() in ("1", "true", "yes")
+MCP_OAUTH_CALLBACK_BASE_URL: str = _env("MCP_OAUTH_CALLBACK_BASE_URL", "")
+
+# --- MongoDB ---
+MONGO_ENABLED: bool = _env("MONGO_ENABLED", "false").lower() == "true"
+
 # --- PostgreSQL ---
-POSTGRES_ENABLED: bool = _env("POSTGRES_ENABLED", "false").lower() == "true"
-POSTGRES_URL: str = _env("POSTGRES_URL", "")
+POSTGRES_ENABLED: bool = STATE_BACKEND == "postgres" or _env("POSTGRES_ENABLED", "false").lower() == "true"
+POSTGRES_URL: str = _env("POSTGRES_URL", "") or _env("KNOWLEDGE_V2_POSTGRES_DSN", "")
 POSTGRES_QUERY_TIMEOUT: int = int(_env("POSTGRES_QUERY_TIMEOUT", "30"))
 POSTGRES_MAX_ROWS: int = int(_env("POSTGRES_MAX_ROWS", "100"))
 POSTGRES_MAX_ROWS_CAP: int = int(_env("POSTGRES_MAX_ROWS_CAP", "10000"))
+DB_POOL_MAX_SIZE: int = int(_env("DB_POOL_MAX_SIZE", "5"))
+
+# --- PostgreSQL Write ---
+POSTGRES_WRITE_ENABLED: bool = _env("POSTGRES_WRITE_ENABLED", "false").lower() == "true"
+POSTGRES_WRITE_ENVS: list[str] = [e.strip().lower() for e in _env("POSTGRES_WRITE_ENVS", "dev").split(",") if e.strip()]
+POSTGRES_WRITE_MAX_AFFECTED_ROWS: int = int(_env("POSTGRES_WRITE_MAX_AFFECTED_ROWS", "100"))
+POSTGRES_WRITE_REQUIRE_WHERE: bool = _env("POSTGRES_WRITE_REQUIRE_WHERE", "true").lower() == "true"
 
 # --- PostgreSQL SSL ---
 POSTGRES_SSL_MODE: str = _env("POSTGRES_SSL_MODE", "disable")
@@ -471,6 +572,10 @@ POSTGRES_SSH_PORT: int = int(_env("POSTGRES_SSH_PORT", "22"))
 POSTGRES_SSH_USER: str = _env("POSTGRES_SSH_USER", "")
 POSTGRES_SSH_KEY_FILE: str = _env("POSTGRES_SSH_KEY_FILE", "")
 POSTGRES_SSH_PASSWORD: str = _env("POSTGRES_SSH_PASSWORD", "")
+
+# --- SQLite ---
+SQLITE_ENABLED: bool = _env("SQLITE_ENABLED", "false").lower() == "true"
+SQLITE_ALLOWED_PATHS: list[str] = [p.strip() for p in _env("SQLITE_ALLOWED_PATHS", "").split(",") if p.strip()]
 
 
 # --- PostgreSQL Per-Environment Config ---
@@ -537,6 +642,13 @@ POSTGRES_AVAILABLE_ENVS: list[str] = [k for k, v in [("dev", POSTGRES_ENV_DEV), 
     ["default"] if POSTGRES_ENV_DEFAULT else []
 )
 
+# --- Redis ---
+REDIS_ENABLED: bool = _env("REDIS_ENABLED", "false").lower() == "true"
+
+# --- MySQL ---
+MYSQL_ENABLED: bool = _env("MYSQL_ENABLED", "false").lower() == "true"
+MYSQL_AVAILABLE_ENVS: list[str] = [e.strip() for e in _env("MYSQL_AVAILABLE_ENVS", "default").split(",") if e.strip()]
+
 POSTGRES_ENV_CONFIGS: dict[str, PostgresEnvConfig] = {}
 if POSTGRES_ENV_DEV:
     POSTGRES_ENV_CONFIGS["dev"] = POSTGRES_ENV_DEV
@@ -545,8 +657,25 @@ if POSTGRES_ENV_PROD:
 if POSTGRES_ENV_DEFAULT:
     POSTGRES_ENV_CONFIGS["default"] = POSTGRES_ENV_DEFAULT
 
+# --- Workflows ---
+WORKFLOW_ENABLED: bool = _env("WORKFLOW_ENABLED", "false").lower() == "true"
+WORKFLOW_MAX_STEPS: int = int(_env("WORKFLOW_MAX_STEPS", "50"))
+WORKFLOW_MAX_PARALLEL: int = int(_env("WORKFLOW_MAX_PARALLEL", "5"))
+
+# --- Webhooks ---
+WEBHOOK_ENABLED: bool = _env("WEBHOOK_ENABLED", "false").lower() == "true"
+WEBHOOK_MAX_REGISTRATIONS: int = int(_env("WEBHOOK_MAX_REGISTRATIONS", "10"))
+WEBHOOK_TIMEOUT_MAX: int = int(_env("WEBHOOK_TIMEOUT_MAX", "300"))
+
+# --- Channel integrations ---
+CHANNEL_WEBHOOK_BASE_URL: str = _env("CHANNEL_WEBHOOK_BASE_URL", "")
+CHANNEL_ADAPTERS_ENABLED: bool = _env("CHANNEL_ADAPTERS_ENABLED", "true").lower() == "true"
+CHANNEL_POLLING_INTERVAL: int = int(_env("CHANNEL_POLLING_INTERVAL", "2"))
+
 # --- Browser ---
 BROWSER_ENABLED: bool = _env("BROWSER_ENABLED", "false").lower() == "true"
+BROWSER_NETWORK_INTERCEPTION_ENABLED: bool = _env("BROWSER_NETWORK_INTERCEPTION_ENABLED", "false").lower() == "true"
+BROWSER_NETWORK_CAPTURE_LIMIT: int = int(_env("BROWSER_NETWORK_CAPTURE_LIMIT", "500"))
 
 # --- Link Analysis ---
 LINK_ANALYSIS_ENABLED: bool = _env("LINK_ANALYSIS_ENABLED", "true").lower() == "true"
@@ -586,29 +715,32 @@ ELEVENLABS_TIMEOUT: int = int(_env("ELEVENLABS_TIMEOUT", "30"))
 RATE_LIMIT_PER_MINUTE: int = int(_env("RATE_LIMIT_PER_MINUTE", "10"))
 
 # --- Paths (scratch only; canonical state lives in Postgres/object storage) ---
-IMAGE_TEMP_DIR: Path = _resolve_path_value(
+IMAGE_TEMP_DIR: Path = _resolve_writable_dir(
     _env(
         "IMAGE_TEMP_DIR",
         str(RUNTIME_EPHEMERAL_ROOT / "image-scratch"),
     )
     or str(RUNTIME_EPHEMERAL_ROOT / "image-scratch"),
     relative_to=RUNTIME_EPHEMERAL_ROOT,
+    fallback_leaf="image-scratch",
 )
-ARTIFACT_CACHE_DIR: Path = _resolve_path_value(
+ARTIFACT_CACHE_DIR: Path = _resolve_writable_dir(
     _env(
         "ARTIFACT_CACHE_DIR",
         str(RUNTIME_EPHEMERAL_ROOT / "artifact-scratch"),
     )
     or str(RUNTIME_EPHEMERAL_ROOT / "artifact-scratch"),
     relative_to=RUNTIME_EPHEMERAL_ROOT,
+    fallback_leaf="artifact-scratch",
 )
-RUNTIME_ROOT_DIR: Path = _resolve_path_value(
+RUNTIME_ROOT_DIR: Path = _resolve_writable_dir(
     _env(
         "RUNTIME_ROOT_DIR",
         str(RUNTIME_EPHEMERAL_ROOT),
     )
     or str(RUNTIME_EPHEMERAL_ROOT),
     relative_to=RUNTIME_EPHEMERAL_ROOT,
+    fallback_leaf="runtime",
 )
 ARTIFACT_EXTRACTION_TIMEOUT: int = int(_env("ARTIFACT_EXTRACTION_TIMEOUT", "180"))
 ARTIFACT_EXTRACTION_VERSION: str = _env("ARTIFACT_EXTRACTION_VERSION", "1")
@@ -1150,12 +1282,24 @@ if AGENT_COMPILED_PROMPT_TEXT:
 
 # --- Agent Tool Loop ---
 MAX_AGENT_TOOL_ITERATIONS: int = int(_env("MAX_AGENT_TOOL_ITERATIONS", "8"))
+TOOL_RATE_LIMIT_PER_MINUTE: int = int(_env("TOOL_RATE_LIMIT_PER_MINUTE", "30"))
 AGENT_TOOL_TIMEOUT: int = int(_env("AGENT_TOOL_TIMEOUT", "60"))
 BROWSER_TOOL_TIMEOUT: int = int(_env("BROWSER_TOOL_TIMEOUT", "90"))
+BROWSER_MAX_TABS: int = int(_env("BROWSER_MAX_TABS", "5"))
 AGENT_ALLOWED_TOOLS: set[str] = {item for item in _env_csv("AGENT_ALLOWED_TOOLS") if item}
 AGENT_TOOL_POLICY: dict = _env_json_object("AGENT_TOOL_POLICY_JSON")
 AGENT_MODEL_POLICY: dict = _env_json_object("AGENT_MODEL_POLICY_JSON")
 AGENT_AUTONOMY_POLICY: dict = _env_json_object("AGENT_AUTONOMY_POLICY_JSON")
+AGENT_EXECUTION_POLICY: dict = _env_json_object("AGENT_EXECUTION_POLICY_JSON")
+AGENT_RESOURCE_ACCESS_POLICY: dict = _env_json_object("AGENT_RESOURCE_ACCESS_POLICY_JSON")
+
+# --- Approval policies DSL ---
+APPROVAL_POLICIES_ENABLED: bool = _env("APPROVAL_POLICIES_ENABLED", "false").lower() == "true"
+APPROVAL_POLICIES_PATH: str = _env("APPROVAL_POLICIES_PATH", "") or ""
+APPROVAL_POLICIES_HOT_RELOAD: bool = _env("APPROVAL_POLICIES_HOT_RELOAD", "true").lower() == "true"
+
+# --- Structured data output ---
+STRUCTURED_DATA_OUTPUT_ENABLED: bool = _env("STRUCTURED_DATA_OUTPUT_ENABLED", "false").lower() == "true"
 
 # --- Unified scheduler ---
 SCHEDULER_ENABLED: bool = _env("SCHEDULER_ENABLED", "true").lower() == "true"
@@ -1184,6 +1328,8 @@ MAX_CONCURRENT_TASKS_PER_USER: int = int(_env("MAX_CONCURRENT_TASKS_PER_USER", "
 TASK_MAX_RETRY_ATTEMPTS: int = int(_env("TASK_MAX_RETRY_ATTEMPTS", "3"))
 TASK_RETRY_BASE_DELAY: float = float(_env("TASK_RETRY_BASE_DELAY", "2.0"))
 TASK_RETRY_MAX_DELAY: float = float(_env("TASK_RETRY_MAX_DELAY", "30.0"))
+MAX_QUEUED_TASKS_PER_USER: int = int(_env("MAX_QUEUED_TASKS_PER_USER", "25"))
+QUEUE_MAX_RECOVERY_ATTEMPTS: int = int(_env("QUEUE_MAX_RECOVERY_ATTEMPTS", "3"))
 MAX_STANDARD_TASKS_GLOBAL: int = int(_env("MAX_STANDARD_TASKS_GLOBAL", "3"))
 MAX_HEAVY_TASKS_GLOBAL: int = int(_env("MAX_HEAVY_TASKS_GLOBAL", "1"))
 MAX_BROWSER_TASKS_GLOBAL: int = int(_env("MAX_BROWSER_TASKS_GLOBAL", "1"))
@@ -1201,7 +1347,7 @@ POD_NAMESPACE: str = os.environ.get("POD_NAMESPACE", "")
 MAX_CONCURRENT_TASKS_GLOBAL: int = int(_env("MAX_CONCURRENT_TASKS_GLOBAL", "10"))
 
 # --- Runtime environments / control plane ---
-RUNTIME_ENVIRONMENTS_ENABLED: bool = _env("RUNTIME_ENVIRONMENTS_ENABLED", "true").lower() == "true"
+RUNTIME_ENVIRONMENTS_ENABLED: bool = _env("RUNTIME_ENVIRONMENTS_ENABLED", "false").lower() == "true"
 RUNTIME_EVENT_STREAM_ENABLED: bool = _env("RUNTIME_EVENT_STREAM_ENABLED", "true").lower() == "true"
 RUNTIME_PTY_ENABLED: bool = _env("RUNTIME_PTY_ENABLED", "true").lower() == "true"
 RUNTIME_BROWSER_LIVE_ENABLED: bool = _env("RUNTIME_BROWSER_LIVE_ENABLED", "true").lower() == "true"
@@ -1218,8 +1364,11 @@ RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_CLEANUP_SWEEP_IN
 RUNTIME_LOCAL_UI_BIND: str = _env("RUNTIME_LOCAL_UI_BIND", _env("HEALTH_BIND", "127.0.0.1"))
 RUNTIME_LOCAL_UI_TOKEN: str = _env("RUNTIME_LOCAL_UI_TOKEN", "")
 RUNTIME_SUPERVISED_ATTACH_ENABLED: bool = _env("RUNTIME_SUPERVISED_ATTACH_ENABLED", "true").lower() == "true"
+
 RUNTIME_OPERATOR_SESSION_TTL_SECONDS: int = int(_env("RUNTIME_OPERATOR_SESSION_TTL_SECONDS", "1800"))
 RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS: int = int(_env("RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS", "900"))
+BROWSER_ALLOW_PRIVATE_NETWORK: bool = _bool_env("BROWSER_ALLOW_PRIVATE_NETWORK", False)
+SKILLS_V2_ENABLED: bool = _bool_env("SKILLS_V2_ENABLED", True)
 RUNTIME_BROWSER_TRANSPORT: str = _env("RUNTIME_BROWSER_TRANSPORT", "novnc")
 RUNTIME_BROWSER_DISPLAY_BASE: int = int(_env("RUNTIME_BROWSER_DISPLAY_BASE", "90"))
 RUNTIME_BROWSER_VNC_BASE_PORT: int = int(_env("RUNTIME_BROWSER_VNC_BASE_PORT", "5900"))
@@ -1248,3 +1397,28 @@ SECURITY_GRPC_TARGET: str = (_env("SECURITY_GRPC_TARGET", "127.0.0.1:50065") or 
 # Browser features are required both for explicit browser commands and for runtime
 # live-preview flows exposed through the control plane.
 BROWSER_FEATURES_ENABLED: bool = BROWSER_ENABLED or RUNTIME_BROWSER_LIVE_ENABLED
+
+# Browser session persistence — save/restore cookies and localStorage across sessions.
+BROWSER_SESSION_PERSISTENCE_ENABLED: bool = _env("BROWSER_SESSION_PERSISTENCE_ENABLED", "false").lower() == "true"
+BROWSER_SESSION_DIR: str = _env("BROWSER_SESSION_DIR", "")
+BROWSER_SESSION_MAX_AGE: int = int(_env("BROWSER_SESSION_MAX_AGE", "86400"))
+
+# --- Observability dashboard ---
+DASHBOARD_ENABLED: bool = _env("DASHBOARD_ENABLED", "false").lower() == "true"
+
+# --- Snapshots ---
+SNAPSHOT_ENABLED: bool = _env("SNAPSHOT_ENABLED", "false").lower() == "true"
+SNAPSHOT_MAX_SIZE_MB: int = int(_env("SNAPSHOT_MAX_SIZE_MB", "100"))
+SNAPSHOT_RETENTION_HOURS: int = int(_env("SNAPSHOT_RETENTION_HOURS", "168"))
+
+# --- Plugin system ---
+PLUGIN_SYSTEM_ENABLED: bool = _env("PLUGIN_SYSTEM_ENABLED", "false").lower() == "true"
+PLUGIN_DIRS: list[str] = [p.strip() for p in _env("PLUGIN_DIRS", "").split(",") if p.strip()]
+PLUGIN_SANDBOX_ENABLED: bool = _env("PLUGIN_SANDBOX_ENABLED", "true").lower() == "true"
+PLUGIN_MAX_EXECUTION_TIMEOUT: int = int(_env("PLUGIN_MAX_EXECUTION_TIMEOUT", "30"))
+
+# --- gRPC TLS ---
+GRPC_TLS_ENABLED: bool = _env("GRPC_TLS_ENABLED", "false").lower() == "true"
+GRPC_TLS_CA_CERT: str = (_env("GRPC_TLS_CA_CERT") or "").strip()
+GRPC_TLS_CLIENT_CERT: str = (_env("GRPC_TLS_CLIENT_CERT") or "").strip()
+GRPC_TLS_CLIENT_KEY: str = (_env("GRPC_TLS_CLIENT_KEY") or "").strip()

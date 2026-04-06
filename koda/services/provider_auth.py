@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import fcntl
 import json
 import os
 import pty
@@ -9,7 +11,10 @@ import re
 import select
 import shlex
 import shutil
+import struct
 import subprocess
+import tempfile
+import termios
 import threading
 import time
 from contextlib import suppress
@@ -31,6 +36,9 @@ PROVIDER_API_KEY_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "ollama": "OLLAMA_API_KEY",
+}
+PROVIDER_AUTH_TOKEN_ENV_KEYS: dict[str, str] = {
+    "claude": "ANTHROPIC_AUTH_TOKEN",
 }
 PROVIDER_AUTH_MODE_ENV_KEYS: dict[ProviderId, str] = {
     "claude": "CLAUDE_AUTH_MODE",
@@ -62,7 +70,8 @@ PROVIDER_TITLES: dict[ProviderId, str] = {
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _URL_RE = re.compile(r"https://[^\s)]+")
-_CODE_RE = re.compile(r"\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b")
+_URL_CONTINUATION_RE = re.compile(r"^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$")
+_CODE_RE = re.compile(r"\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+\b")
 
 
 @dataclass(slots=True)
@@ -74,6 +83,8 @@ class ProviderVerificationResult:
     plan_label: str = ""
     last_error: str = ""
     checked_via: str = "static"
+    auth_expired: bool = False
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -89,6 +100,7 @@ class ProviderLoginSessionState:
     instructions: str = ""
     output_preview: str = ""
     last_error: str = ""
+    code_verifier: str = ""
 
 
 @dataclass(slots=True)
@@ -164,9 +176,15 @@ class _ProviderLoginProcess:
                 os.close(fd)
 
     def write(self, text: str) -> None:
-        if self.interactive_fd is None:
-            return
-        os.write(self.interactive_fd, text.encode("utf-8"))
+        if self.interactive_fd is not None:
+            with suppress(OSError):
+                os.write(self.interactive_fd, text.replace("\n", "\r").encode("utf-8"))
+        elif self.process.stdin is not None:
+            try:
+                self.process.stdin.write(text)
+                self.process.stdin.flush()
+            except (OSError, BrokenPipeError):
+                pass
 
     def output_text(self) -> str:
         with self._lock:
@@ -214,11 +232,11 @@ def provider_supports_api_key(provider_id: str) -> bool:
 
 
 def provider_supports_subscription_login(provider_id: str) -> bool:
-    return provider_id.strip().lower() in {"claude", "codex", "gemini"}
+    return provider_id.strip().lower() in {"codex", "gemini"}
 
 
 def provider_supports_local_connection(provider_id: str) -> bool:
-    return provider_id.strip().lower() == "ollama"
+    return provider_id.strip().lower() in {"ollama", "claude"}
 
 
 def provider_requires_project_id(provider_id: str) -> bool:
@@ -262,7 +280,7 @@ def provider_command_present(provider_id: str, base_env: dict[str, str] | None =
             and Path(whisper_model).expanduser().exists()
         )
     if provider_id.strip().lower() == "ollama":
-        env = {**os.environ, **dict(base_env or {})}
+        env = _provider_command_env(base_env)
         base_url_key = PROVIDER_BASE_URL_ENV_KEYS["ollama"]
         return bool(str(env.get(base_url_key) or provider_default_base_url("ollama", "local")).strip())
     try:
@@ -272,8 +290,18 @@ def provider_command_present(provider_id: str, base_env: dict[str, str] | None =
     return True
 
 
+def _provider_command_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for key in ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP"):
+        value = os.environ.get(key)
+        if value is not None:
+            env[key] = value
+    env.update({str(key): str(value) for key, value in dict(base_env or {}).items()})
+    return env
+
+
 def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None = None) -> tuple[str, ...]:
-    env = {**os.environ, **dict(base_env or {})}
+    env = _provider_command_env(base_env)
     normalized = provider_id.strip().lower()
     if normalized not in MANAGED_PROVIDER_IDS:
         raise KeyError(provider_id)
@@ -354,7 +382,7 @@ def build_provider_process_env(
 ) -> dict[str, str]:
     from koda.services.provider_env import build_llm_subprocess_env
 
-    source = {**os.environ, **dict(base_env or {})}
+    source = _provider_command_env(base_env)
     env = build_llm_subprocess_env(source, provider=provider_id)
     if provider_id == "codex":
         configured_bin = str(source.get("CODEX_BIN") or "").strip()
@@ -397,6 +425,11 @@ def _resolve_work_dir(work_dir: str | None = None) -> str:
     return str(path)
 
 
+def _set_pty_window_size(fd: int, rows: int = 48, cols: int = 240) -> None:
+    with suppress(OSError):
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
 def start_login_process(
     provider_id: ProviderId,
     *,
@@ -411,12 +444,41 @@ def start_login_process(
         project_id=project_id,
         base_env=base_env,
     )
+    # PTY-spawned CLIs (Claude, Gemini) need TERM so they detect an
+    # interactive terminal and keep waiting for user input instead of
+    # printing the auth URL and exiting immediately.
+    if "TERM" not in env:
+        env["TERM"] = "xterm-256color"
 
     session_id = uuid4().hex
     cwd = _resolve_work_dir(work_dir)
 
-    if provider_id == "gemini":
+    if provider_id == "claude":
         master_fd, slave_fd = pty.openpty()
+        _set_pty_window_size(master_fd)
+        _set_pty_window_size(slave_fd)
+        process = subprocess.Popen(
+            command,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=cwd,
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+        handle = _ProviderLoginProcess(
+            provider_id=provider_id,
+            auth_mode="subscription_login",
+            command=command,
+            process=process,
+            interactive_fd=master_fd,
+            work_dir=cwd,
+        )
+    elif provider_id == "gemini":
+        master_fd, slave_fd = pty.openpty()
+        _set_pty_window_size(master_fd)
+        _set_pty_window_size(slave_fd)
         process = subprocess.Popen(
             command,
             stdin=slave_fd,
@@ -441,7 +503,7 @@ def start_login_process(
             subprocess.Popen[Any],
             subprocess.Popen(
                 command,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -459,13 +521,20 @@ def start_login_process(
         )
 
     handle.start()
-    time.sleep(0.15)
+    deadline = time.monotonic() + (2.5 if provider_id in {"claude", "codex", "gemini"} else 0.15)
     state = parse_login_session_state(session_id, handle)
+    while time.monotonic() < deadline:
+        if state.auth_url or state.user_code or state.status == "error":
+            break
+        time.sleep(0.05)
+        state = parse_login_session_state(session_id, handle)
     return handle, state
 
 
 def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) -> ProviderLoginSessionState:
     text = handle.normalized_output().strip()
+    compact_text = " ".join(text.split())
+    compact_lower = compact_text.lower()
     returncode = handle.process.poll()
     running = returncode is None
     auth_url = ""
@@ -476,12 +545,34 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
     status = "pending"
 
     if handle.provider_id == "claude":
-        if "visit:" in text.lower():
-            auth_url = _last_url(text)
-        instructions = "Abra o link do Claude Code e conclua o login no navegador."
+        auth_url = _last_url(text)
+        code_match = _CODE_RE.search(text)
+        if code_match:
+            user_code = code_match.group(0)
+        # Rewrite callback URL to use the control-plane OAuth relay so
+        # the browser callback reaches the CLI subprocess inside Docker.
         if auth_url:
+            auth_url, internal_callback = _rewrite_auth_callback_for_relay(auth_url, session_id)
+            if internal_callback:
+                _OAUTH_RELAY_TARGETS[session_id] = internal_callback
+        instructions = "Abra o link do Claude Code e conclua o login no navegador."
+        if user_code:
+            instructions += " Se a Anthropic exibir um Authentication Code, cole-o no campo abaixo."
+        if auth_url and (
+            "visit" in text.lower()
+            or "browser" in text.lower()
+            or "paste code here if prompted" in compact_lower
+            or bool(user_code)
+        ):
             status = "awaiting_browser"
-            message = "Autorização aguardando confirmação no Claude."
+            message = "Autorize no navegador para concluir o login da Anthropic."
+        if "oauth error:" in compact_lower or "invalid code" in compact_lower:
+            status = "awaiting_browser"
+            last_error = "O Claude Code rejeitou o Authentication Code. Copie o código completo e tente novamente."
+            message = last_error
+        elif "press enter to retry" in compact_lower:
+            status = "awaiting_browser"
+            message = "O Claude Code pediu uma nova tentativa. Gere outro código no navegador e envie novamente."
     elif handle.provider_id == "codex":
         auth_url = _last_url(text)
         code_match = _CODE_RE.search(text)
@@ -503,8 +594,12 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
 
     if not running:
         if returncode == 0:
-            status = "completed"
-            message = message or "Fluxo oficial de login concluído."
+            if handle.provider_id in {"claude", "codex", "gemini"} and (auth_url or user_code):
+                status = "awaiting_browser"
+                message = message or "Autorize no navegador para concluir o login."
+            else:
+                status = "completed"
+                message = message or "Fluxo oficial de login concluído."
         else:
             status = "error"
             last_error = _friendly_provider_error(
@@ -577,17 +672,21 @@ def verify_provider_api_key(
             verified=False,
             last_error="API key ausente.",
             checked_via="api_key",
+            details={},
         )
 
     try:
         if provider_id == "claude":
+            # Support both API key (x-api-key) and OAuth token (Bearer).
+            is_oauth_token = secret.startswith("sk-ant-oat")
+            headers: dict[str, str] = {"anthropic-version": "2023-06-01", "User-Agent": "koda/control-plane"}
+            if is_oauth_token:
+                headers["Authorization"] = f"Bearer {secret}"
+            else:
+                headers["x-api-key"] = secret
             request = urllib_request.Request(
                 "https://api.anthropic.com/v1/models",
-                headers={
-                    "x-api-key": secret,
-                    "anthropic-version": "2023-06-01",
-                    "User-Agent": "koda/control-plane",
-                },
+                headers=headers,
             )
             with urllib_request.urlopen(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
@@ -598,6 +697,7 @@ def verify_provider_api_key(
                 account_label="Anthropic Console",
                 plan_label="API key",
                 checked_via="api_key",
+                details={"provider": "claude"},
             )
 
         if provider_id == "codex":
@@ -617,6 +717,7 @@ def verify_provider_api_key(
                 account_label="OpenAI Platform",
                 plan_label="API key",
                 checked_via="api_key",
+                details={"provider": "codex"},
             )
 
         if provider_id == "elevenlabs":
@@ -636,6 +737,7 @@ def verify_provider_api_key(
                 account_label="ElevenLabs",
                 plan_label="API key",
                 checked_via="api_key",
+                details={"provider": "elevenlabs"},
             )
 
         if provider_id == "ollama":
@@ -655,6 +757,7 @@ def verify_provider_api_key(
                 account_label="Ollama Cloud",
                 plan_label="API key",
                 checked_via="api_key",
+                details={"provider": "ollama"},
             )
 
         query = urllib_parse.urlencode({"key": secret})
@@ -674,6 +777,7 @@ def verify_provider_api_key(
             account_label=account_label,
             plan_label="Gemini API key",
             checked_via="api_key",
+            details={"project_id": project_id},
         )
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
@@ -683,6 +787,8 @@ def verify_provider_api_key(
             verified=False,
             last_error=_short_http_error(exc.code, body),
             checked_via="api_key",
+            auth_expired=exc.code in {401, 403} or _looks_like_auth_expired(body),
+            details={"http_status": exc.code},
         )
     except Exception as exc:
         return ProviderVerificationResult(
@@ -691,6 +797,65 @@ def verify_provider_api_key(
             verified=False,
             last_error=str(exc),
             checked_via="api_key",
+            auth_expired=_looks_like_auth_expired(str(exc)),
+            details={},
+        )
+
+
+def _verify_claude_local_cli(
+    *,
+    base_env: dict[str, str] | None = None,
+    work_dir: str | None = None,
+) -> ProviderVerificationResult:
+    """Check whether the ``claude`` CLI on the local machine is already authenticated."""
+    try:
+        cmd = (*resolve_provider_command("claude", base_env=base_env), "auth", "status", "--json")
+    except (KeyError, FileNotFoundError):
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="local",
+            verified=False,
+            last_error="Claude Code CLI não encontrado. Instale com: npm install -g @anthropic-ai/claude-code",
+            checked_via="local_cli",
+        )
+    env = build_provider_process_env(
+        "claude",
+        auth_mode="local",
+        base_env=base_env,
+    )
+    env["TERM"] = "xterm-256color"
+    cwd = _resolve_work_dir(work_dir)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=8, env=env, cwd=cwd, check=False)
+        stdout_text = strip_ansi(proc.stdout or "").strip()
+        payload: dict[str, Any] | None = None
+        with suppress(json.JSONDecodeError):
+            parsed = json.loads(stdout_text or "{}")
+            if isinstance(parsed, dict):
+                payload = parsed
+        if payload and payload.get("loggedIn"):
+            return ProviderVerificationResult(
+                provider_id="claude",
+                auth_mode="local",
+                verified=True,
+                account_label=str(payload.get("email") or payload.get("orgName") or "Claude CLI"),
+                plan_label=str(payload.get("subscriptionType") or payload.get("authMethod") or "Local CLI"),
+                checked_via="local_cli",
+            )
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="local",
+            verified=False,
+            last_error="Claude Code CLI não autenticado. Execute 'claude auth login' no terminal primeiro.",
+            checked_via="local_cli",
+        )
+    except Exception as exc:
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="local",
+            verified=False,
+            last_error=f"Erro ao verificar Claude CLI: {exc}",
+            checked_via="local_cli",
         )
 
 
@@ -698,7 +863,11 @@ def verify_provider_local_connection(
     provider_id: ProviderId,
     *,
     base_url: str = "",
+    base_env: dict[str, str] | None = None,
+    work_dir: str | None = None,
 ) -> ProviderVerificationResult:
+    if provider_id == "claude":
+        return _verify_claude_local_cli(base_env=base_env, work_dir=work_dir)
     if provider_id != "ollama":
         return ProviderVerificationResult(
             provider_id=provider_id,
@@ -706,6 +875,7 @@ def verify_provider_local_connection(
             verified=False,
             last_error="Este provider não suporta conexão local direta.",
             checked_via="local_probe",
+            details={},
         )
 
     resolved_base_url = base_url.strip() or provider_default_base_url("ollama", "local")
@@ -723,6 +893,7 @@ def verify_provider_local_connection(
             account_label=resolved_base_url,
             plan_label="Servidor Ollama",
             checked_via="local_probe",
+            details={"base_url": resolved_base_url},
         )
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
@@ -732,6 +903,8 @@ def verify_provider_local_connection(
             verified=False,
             last_error=_short_http_error(exc.code, body),
             checked_via="local_probe",
+            auth_expired=exc.code in {401, 403} or _looks_like_auth_expired(body),
+            details={"http_status": exc.code, "base_url": resolved_base_url},
         )
     except Exception as exc:
         return ProviderVerificationResult(
@@ -740,6 +913,8 @@ def verify_provider_local_connection(
             verified=False,
             last_error=str(exc),
             checked_via="local_probe",
+            auth_expired=_looks_like_auth_expired(str(exc)),
+            details={"base_url": resolved_base_url},
         )
 
 
@@ -757,6 +932,7 @@ def verify_provider_subscription_login(
             verified=False,
             last_error=f"{PROVIDER_TITLES[provider_id]} não suporta login por assinatura neste fluxo.",
             checked_via="runtime",
+            details={},
         )
     env = build_provider_process_env(
         provider_id,
@@ -777,6 +953,36 @@ def verify_provider_subscription_login(
                 cwd=cwd,
                 check=False,
             )
+            stdout_text = strip_ansi(proc.stdout or "").strip()
+            stderr_text = strip_ansi(proc.stderr or "").strip()
+            payload: dict[str, Any] | None = None
+            with suppress(json.JSONDecodeError):
+                parsed = json.loads(stdout_text or "{}")
+                if isinstance(parsed, dict):
+                    payload = parsed
+            if payload is not None:
+                if not payload.get("loggedIn"):
+                    return ProviderVerificationResult(
+                        provider_id=provider_id,
+                        auth_mode="subscription_login",
+                        verified=False,
+                        last_error=(
+                            "Claude CLI ainda nao autenticado. "
+                            "Conclua a autorizacao no navegador e envie o Authentication Code se solicitado."
+                        ),
+                        checked_via="auth_status",
+                        auth_expired=False,
+                        details={"stdout": stdout_text},
+                    )
+                return ProviderVerificationResult(
+                    provider_id=provider_id,
+                    auth_mode="subscription_login",
+                    verified=True,
+                    account_label=str(payload.get("email") or payload.get("orgName") or "Claude"),
+                    plan_label=str(payload.get("subscriptionType") or payload.get("authMethod") or "Claude"),
+                    checked_via="auth_status",
+                    details={"stdout": stdout_text},
+                )
             if proc.returncode != 0:
                 return ProviderVerificationResult(
                     provider_id=provider_id,
@@ -784,12 +990,14 @@ def verify_provider_subscription_login(
                     verified=False,
                     last_error=_friendly_provider_error(
                         provider_id,
-                        strip_ansi(proc.stderr or proc.stdout),
+                        stderr_text or stdout_text,
                         fallback="Claude CLI nao autenticado.",
                     ),
                     checked_via="auth_status",
+                    auth_expired=_looks_like_auth_expired(stderr_text or stdout_text),
+                    details={"returncode": proc.returncode, "stdout": stdout_text, "stderr": stderr_text},
                 )
-            payload = json.loads(proc.stdout or "{}")
+            payload = json.loads(stdout_text or "{}")
             if not isinstance(payload, dict) or not payload.get("loggedIn"):
                 return ProviderVerificationResult(
                     provider_id=provider_id,
@@ -797,6 +1005,8 @@ def verify_provider_subscription_login(
                     verified=False,
                     last_error="Claude CLI nao autenticado.",
                     checked_via="auth_status",
+                    auth_expired=_looks_like_auth_expired(stdout_text),
+                    details={"stdout": stdout_text},
                 )
             return ProviderVerificationResult(
                 provider_id=provider_id,
@@ -805,6 +1015,7 @@ def verify_provider_subscription_login(
                 account_label=str(payload.get("email") or payload.get("orgName") or "Claude"),
                 plan_label=str(payload.get("subscriptionType") or payload.get("authMethod") or "Claude"),
                 checked_via="auth_status",
+                details={"stdout": stdout_text},
             )
 
         if provider_id == "codex":
@@ -827,6 +1038,8 @@ def verify_provider_subscription_login(
                     verified=False,
                     last_error=_friendly_provider_error(provider_id, text, fallback="Codex CLI nao autenticado."),
                     checked_via="login_status",
+                    auth_expired=_looks_like_auth_expired(text),
+                    details={"stdout": text},
                 )
             if "api key" in lower:
                 return ProviderVerificationResult(
@@ -835,6 +1048,8 @@ def verify_provider_subscription_login(
                     verified=False,
                     last_error="O Codex esta autenticado via API key, nao via ChatGPT.",
                     checked_via="login_status",
+                    auth_expired=False,
+                    details={"stdout": text},
                 )
             plan = "ChatGPT"
             if "chatgpt" in text:
@@ -846,6 +1061,7 @@ def verify_provider_subscription_login(
                 account_label="OpenAI / ChatGPT",
                 plan_label=plan,
                 checked_via="login_status",
+                details={"stdout": text},
             )
 
         command = (
@@ -872,6 +1088,8 @@ def verify_provider_subscription_login(
                 verified=False,
                 last_error="Gemini CLI ainda nao concluiu a autenticacao com Google.",
                 checked_via="headless_probe",
+                auth_expired=False,
+                details={"stdout": text},
             )
         if proc.returncode != 0:
             return ProviderVerificationResult(
@@ -880,6 +1098,8 @@ def verify_provider_subscription_login(
                 verified=False,
                 last_error=_friendly_provider_error(provider_id, text, fallback="Gemini CLI nao autenticado."),
                 checked_via="headless_probe",
+                auth_expired=_looks_like_auth_expired(text),
+                details={"stdout": text},
             )
         payload = json.loads(text or "{}")
         if not isinstance(payload, dict) or payload.get("error"):
@@ -889,6 +1109,8 @@ def verify_provider_subscription_login(
                 verified=False,
                 last_error=str(payload.get("error") or "Gemini CLI nao autenticado."),
                 checked_via="headless_probe",
+                auth_expired=_looks_like_auth_expired(str(payload.get("error") or text)),
+                details={"stdout": text},
             )
         account_label = "Google account"
         if project_id.strip():
@@ -900,6 +1122,7 @@ def verify_provider_subscription_login(
             account_label=account_label,
             plan_label="Sign in with Google",
             checked_via="headless_probe",
+            details={"stdout": text},
         )
     except FileNotFoundError as exc:
         return ProviderVerificationResult(
@@ -908,6 +1131,7 @@ def verify_provider_subscription_login(
             verified=False,
             last_error=_friendly_provider_error(provider_id, f"{exc} not found on PATH"),
             checked_via="runtime",
+            details={},
         )
     except subprocess.TimeoutExpired:
         return ProviderVerificationResult(
@@ -916,6 +1140,7 @@ def verify_provider_subscription_login(
             verified=False,
             last_error=f"{PROVIDER_TITLES[provider_id]} auth verification timed out.",
             checked_via="runtime",
+            details={},
         )
     except Exception as exc:
         return ProviderVerificationResult(
@@ -924,12 +1149,112 @@ def verify_provider_subscription_login(
             verified=False,
             last_error=str(exc),
             checked_via="runtime",
+            auth_expired=_looks_like_auth_expired(str(exc)),
+            details={},
         )
 
 
 def _last_url(text: str) -> str:
-    matches = _URL_RE.findall(text)
-    return matches[-1] if matches else ""
+    lines = [raw_line.strip() for raw_line in text.splitlines()]
+    urls: list[str] = []
+    idx = 0
+
+    while idx < len(lines):
+        line = lines[idx]
+        if not line:
+            idx += 1
+            continue
+
+        match = _URL_RE.search(line)
+        if not match:
+            idx += 1
+            continue
+
+        current = match.group(0)
+        idx += 1
+
+        while idx < len(lines):
+            continuation = lines[idx]
+            if not continuation:
+                idx += 1
+                continue
+            if continuation.startswith("https://"):
+                break
+            if _URL_CONTINUATION_RE.fullmatch(continuation):
+                current += continuation
+                idx += 1
+                continue
+            break
+
+        urls.append(current)
+
+    return urls[-1] if urls else ""
+
+
+# ---------------------------------------------------------------------------
+# OAuth relay: rewrite CLI callback URLs so they go through the control plane
+# ---------------------------------------------------------------------------
+
+_OAUTH_RELAY_TARGETS: dict[str, str] = {}
+"""Maps session_id → internal callback URL (http://localhost:PORT/...)."""
+
+
+def _is_running_in_docker() -> bool:
+    """Return True if the process is running inside a Docker container."""
+    if os.environ.get("RUNNING_IN_DOCKER", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    return Path("/.dockerenv").exists()
+
+
+def get_oauth_relay_target(session_id: str) -> str | None:
+    """Return the internal callback URL for a relay session."""
+    return _OAUTH_RELAY_TARGETS.get(session_id)
+
+
+def clear_oauth_relay_target(session_id: str) -> None:
+    _OAUTH_RELAY_TARGETS.pop(session_id, None)
+
+
+def _rewrite_auth_callback_for_relay(auth_url: str, session_id: str) -> tuple[str, str]:
+    """Rewrite a CLI auth URL to route the callback through the control plane relay.
+
+    Returns (rewritten_url, internal_callback_url). If no rewrite is needed,
+    returns (original_url, "").
+    """
+    # The relay is only needed inside Docker where localhost from the container
+    # is not reachable by the host browser.  On macOS / bare-metal the CLI's
+    # localhost callback server is directly accessible, and rewriting
+    # redirect_uri breaks OAuth token exchange (redirect_uri mismatch).
+    if not _is_running_in_docker():
+        return auth_url, ""
+    try:
+        parsed = urllib_parse.urlparse(auth_url)
+        qs = urllib_parse.parse_qs(parsed.query, keep_blank_values=True)
+
+        # Look for a callback/redirect_uri parameter pointing to localhost
+        for param_name in ("callback", "redirect_uri", "redirect"):
+            values = qs.get(param_name, [])
+            if not values:
+                continue
+            callback_url = values[0]
+            if "localhost" not in callback_url and "127.0.0.1" not in callback_url:
+                continue
+
+            # Found a localhost callback — rewrite it
+            internal_callback = callback_url
+            cp_port = os.environ.get("CONTROL_PLANE_PORT", "8090")
+            relay_url = f"http://localhost:{cp_port}/api/control-plane/oauth-relay/{session_id}"
+
+            # Replace the callback parameter in the auth URL
+            qs[param_name] = [relay_url]
+            new_query = urllib_parse.urlencode(qs, doseq=True)
+            rewritten = urllib_parse.urlunparse(parsed._replace(query=new_query))
+            return rewritten, internal_callback
+
+    except Exception:
+        pass
+
+    return auth_url, ""
 
 
 def _truncate_output(text: str, limit: int = 1400) -> str:
@@ -945,6 +1270,273 @@ def _tail_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _looks_like_auth_expired(text: str) -> bool:
+    normalized = str(text or "").lower()
+    return any(token in normalized for token in ("invalid_grant", "expired", "unauthorized", "forbidden", "reauth"))
+
+
+def _base64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+# ---------------------------------------------------------------------------
+# Claude direct OAuth PKCE — bypass CLI subprocess entirely
+# ---------------------------------------------------------------------------
+
+_CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+_CLAUDE_OAUTH_AUTH_URL = "https://claude.com/cai/oauth/authorize"
+_CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+_CLAUDE_OAUTH_API_KEY_URL = "https://api.anthropic.com/api/oauth/claude_cli/create_api_key"
+_CLAUDE_OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
+_CLAUDE_OAUTH_SCOPES = (
+    "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+)
+
+
+def _generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE code_verifier and code_challenge (S256)."""
+    import hashlib
+    import secrets
+
+    verifier = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = _base64url_encode(digest)
+    return verifier, challenge
+
+
+def start_claude_direct_oauth(session_id: str) -> ProviderLoginSessionState:
+    """Start a Claude OAuth flow without the CLI subprocess.
+
+    Returns a session state with the auth URL and the code_verifier stored
+    for later exchange.
+    """
+    verifier, challenge = _generate_pkce_pair()
+    state_param = _base64url_encode(os.urandom(32))
+
+    params = urllib_parse.urlencode(
+        {
+            "code": "true",
+            "client_id": _CLAUDE_OAUTH_CLIENT_ID,
+            "response_type": "code",
+            "redirect_uri": _CLAUDE_OAUTH_REDIRECT_URI,
+            "scope": _CLAUDE_OAUTH_SCOPES,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": state_param,
+        }
+    )
+    auth_url = f"{_CLAUDE_OAUTH_AUTH_URL}?{params}"
+
+    return ProviderLoginSessionState(
+        session_id=session_id,
+        provider_id="claude",
+        auth_mode="subscription_login",
+        status="awaiting_browser",
+        command="direct_oauth",
+        auth_url=auth_url,
+        message="Autorize no navegador para concluir o login da Anthropic.",
+        instructions=("Abra o link, autorize no navegador. Cole o código completo (incluindo o '#') no campo abaixo."),
+        code_verifier=verifier,
+    )
+
+
+def exchange_claude_oauth_code(
+    raw_code: str,
+    code_verifier: str,
+) -> ProviderVerificationResult:
+    """Exchange an OAuth authorization code for a Claude API key.
+
+    *raw_code* is expected in the ``AUTH_CODE#STATE`` format used by
+    Anthropic's callback page.
+    """
+    # Split the code by '#' — Anthropic's page shows auth_code#state
+    parts = raw_code.strip().split("#", 1)
+    auth_code = parts[0]
+    state_param = parts[1] if len(parts) > 1 else ""
+    if not auth_code:
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="subscription_login",
+            verified=False,
+            last_error="Código de autenticação vazio. Cole o código completo da página da Anthropic.",
+            checked_via="direct_oauth",
+        )
+
+    # Step 1: exchange code for access token.
+    # Anthropic's token endpoint requires JSON with the ``state`` field.
+    token_body: dict[str, Any] = {
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": _CLAUDE_OAUTH_REDIRECT_URI,
+        "client_id": _CLAUDE_OAUTH_CLIENT_ID,
+        "code_verifier": code_verifier,
+    }
+    if state_param:
+        token_body["state"] = state_param
+    token_payload = json.dumps(token_body).encode("utf-8")
+
+    try:
+        token_req = urllib_request.Request(
+            _CLAUDE_OAUTH_TOKEN_URL,
+            data=token_payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "koda/control-plane",
+            },
+            method="POST",
+        )
+        with urllib_request.urlopen(token_req, timeout=15) as resp:
+            token_data = json.loads(resp.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="subscription_login",
+            verified=False,
+            last_error=f"Falha na troca do código OAuth: {exc.code} — {body[:200]}",
+            checked_via="direct_oauth",
+            details={"http_status": exc.code, "body": body[:500]},
+        )
+    except Exception as exc:
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="subscription_login",
+            verified=False,
+            last_error=f"Erro na troca OAuth: {exc}",
+            checked_via="direct_oauth",
+        )
+
+    access_token = str(token_data.get("access_token") or "").strip()
+    if not access_token:
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="subscription_login",
+            verified=False,
+            last_error="Anthropic não retornou access_token. Tente novamente.",
+            checked_via="direct_oauth",
+        )
+
+    # Step 2: try to mint a permanent API key.
+    # The endpoint expects null body with only Authorization: Bearer header.
+    api_key = ""
+    try:
+        api_key_req = urllib_request.Request(
+            _CLAUDE_OAUTH_API_KEY_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+            method="POST",
+        )
+        with urllib_request.urlopen(api_key_req, timeout=15) as resp:
+            api_key_data = json.loads(resp.read().decode("utf-8"))
+        api_key = str(api_key_data.get("raw_key") or "").strip()
+    except Exception:
+        pass  # Fall through to auth_token path below.
+
+    if api_key:
+        return ProviderVerificationResult(
+            provider_id="claude",
+            auth_mode="api_key",
+            verified=True,
+            account_label="Claude (Subscription)",
+            plan_label="Subscription",
+            checked_via="direct_oauth",
+            details={"api_key": api_key},
+        )
+
+    # API key creation failed (e.g. user lacks org:create_api_key scope).
+    # Fall back to using the OAuth access_token directly — the Claude CLI
+    # accepts it via ANTHROPIC_AUTH_TOKEN as a Bearer token.
+    return ProviderVerificationResult(
+        provider_id="claude",
+        auth_mode="subscription_login",
+        verified=True,
+        account_label="Claude (Subscription)",
+        plan_label="Subscription",
+        checked_via="direct_oauth",
+        details={"auth_token": access_token},
+    )
+
+
+def _mint_google_service_account_token(credentials_path: str) -> dict[str, Any]:
+    path = Path(credentials_path).expanduser()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    client_email = str(payload.get("client_email") or "").strip()
+    private_key = str(payload.get("private_key") or "").strip()
+    token_uri = str(payload.get("token_uri") or "https://oauth2.googleapis.com/token").strip()
+    project_id = str(payload.get("project_id") or "").strip()
+    if not client_email:
+        raise ValueError("service account JSON missing client_email")
+    if not private_key:
+        raise ValueError("service account JSON missing private_key")
+    if not project_id:
+        raise ValueError("service account JSON missing project_id")
+
+    header = {"alg": "RS256", "typ": "JWT"}
+    now = int(time.time())
+    assertion_payload = {
+        "iss": client_email,
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "aud": token_uri,
+        "iat": now,
+        "exp": now + 3600,
+    }
+    signing_input = ".".join(
+        (
+            _base64url_encode(json.dumps(header, separators=(",", ":"), ensure_ascii=True).encode("utf-8")),
+            _base64url_encode(json.dumps(assertion_payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")),
+        )
+    )
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as tmp_key:
+        tmp_key.write(private_key)
+        private_key_path = tmp_key.name
+
+    try:
+        proc = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                private_key_path,
+                "-binary",
+            ],
+            input=signing_input.encode("utf-8"),
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(strip_ansi((proc.stderr or b"").decode("utf-8", "replace")).strip() or "openssl failed")
+        assertion = ".".join((signing_input, _base64url_encode(proc.stdout or b"")))
+        body = urllib_parse.urlencode(
+            {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": assertion,
+            }
+        ).encode("utf-8")
+        request = urllib_request.Request(
+            token_uri,
+            data=body,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "koda/control-plane",
+            },
+            method="POST",
+        )
+        with urllib_request.urlopen(request, timeout=10) as response:
+            token_payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(token_payload, dict) or not token_payload.get("access_token"):
+            raise RuntimeError("service account token mint returned no access_token")
+        return {
+            "token_payload": token_payload,
+            "client_email": client_email,
+            "project_id": project_id,
+            "token_uri": token_uri,
+        }
+    finally:
+        with suppress(OSError):
+            os.unlink(private_key_path)
 
 
 def _friendly_provider_error(provider_id: ProviderId, text: str, *, fallback: str = "") -> str:

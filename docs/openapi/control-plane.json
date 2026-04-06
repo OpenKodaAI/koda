@@ -38,11 +38,11 @@
     },
     "/setup": {
       "get": {
-        "summary": "Setup UI",
+        "summary": "Dashboard setup compatibility bridge",
         "security": [],
         "responses": {
           "200": {
-            "description": "Minimal onboarding UI"
+            "description": "Compatibility page that points operators to the Next.js dashboard setup flow"
           }
         }
       }
@@ -88,6 +88,199 @@
         }
       }
     },
+    "/api/control-plane/auth/status": {
+      "get": {
+        "summary": "Operator auth status",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Current auth mode, owner bootstrap requirements, and active operator session details when authenticated."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/bootstrap/exchange": {
+      "post": {
+        "summary": "Exchange a short-lived setup code",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns a short-lived owner registration token."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/bootstrap/codes": {
+      "post": {
+        "summary": "Issue a short-lived setup code",
+        "responses": {
+          "201": {
+            "description": "Returns a setup code and expiry for local/VPS pairing."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/register-owner": {
+      "post": {
+        "summary": "Create the first local owner account",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creates the owner account and returns a fresh operator session."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/login": {
+      "post": {
+        "summary": "Create an operator session from local credentials",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns a fresh operator session."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/logout": {
+      "post": {
+        "summary": "Revoke the current operator session",
+        "responses": {
+          "200": {
+            "description": "The current operator session was revoked."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/legacy/exchange": {
+      "post": {
+        "summary": "Exchange the break-glass token for a browser session",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Compatibility path that returns a browser session for legacy installations."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/tokens": {
+      "get": {
+        "summary": "List operator API tokens",
+        "responses": {
+          "200": {
+            "description": "Lists API/CLI tokens issued by the current operator."
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an operator API token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creates a new API/CLI token for the current operator."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/tokens/{token_id}": {
+      "delete": {
+        "summary": "Revoke an operator API token",
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The operator API token was revoked."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/sessions": {
+      "get": {
+        "summary": "List operator sessions",
+        "responses": {
+          "200": {
+            "description": "Lists active and recent sessions for the current operator."
+          }
+        }
+      }
+    },
+    "/api/control-plane/auth/sessions/{session_id}": {
+      "delete": {
+        "summary": "Revoke an operator session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The selected operator session was revoked."
+          }
+        }
+      }
+    },
     "/api/control-plane/system-settings": {
       "get": {
         "summary": "Current global system settings",
@@ -116,6 +309,120 @@
         }
       }
     },
+    "/api/control-plane/system-settings/general": {
+      "get": {
+        "summary": "Current operator-facing general settings model",
+        "responses": {
+          "200": {
+            "description": "General settings payload used by the dashboard. Includes provider connections, connection-default toggles, and global settings. Per-bot integration grants remain part of each agent spec under resource_access_policy.integration_grants."
+          }
+        }
+      },
+      "put": {
+        "summary": "Update operator-facing general settings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+        }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated general settings payload. Global settings can enable integration surfaces, but canonical core connection state lives under the connection-default routes and per-bot authorization still lives in each agent spec."
+          }
+        }
+      }
+    },
+    "/api/control-plane/connections/catalog": {
+      "get": {
+        "summary": "Unified connection catalog",
+        "responses": {
+          "200": {
+            "description": "Catalog of connection-capable integrations and servers, including canonical connection keys, ownership, auth strategies, and official support metadata."
+          }
+        }
+      }
+    },
+    "/api/control-plane/connections/defaults": {
+      "get": {
+        "summary": "List canonical system-level connection defaults",
+        "responses": {
+          "200": {
+            "description": "System-level default connections keyed by connection_key. Core integrations use keys such as core:jira and core:aws."
+          }
+        }
+      }
+    },
+    "/api/control-plane/connections/defaults/{connection_key}": {
+      "get": {
+        "summary": "Default connection state",
+        "parameters": [
+          {
+            "name": "connection_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical default connection payload including status, auth_method, account metadata, field payloads, and connection capabilities."
+          }
+        }
+      },
+      "put": {
+        "summary": "Configure a canonical default connection",
+        "parameters": [
+          {
+            "name": "connection_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated default connection payload. This stores connection material at the system level but does not grant agent access by itself."
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a canonical default connection",
+        "parameters": [
+          {
+            "name": "connection_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected default connection payload with status reset to not_configured."
+          }
+        }
+      }
+    },
     "/api/control-plane/providers/{provider_id}/connection": {
       "get": {
         "summary": "Provider connection state",
@@ -131,7 +438,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Provider connection details"
+            "description": "Provider connection details including connection_status, checked_via, auth_expired, account labels, and verification metadata."
           }
         }
       }
@@ -211,7 +518,47 @@
         ],
         "responses": {
           "200": {
-            "description": "Verification result"
+            "description": "Verification result including verification.verified, checked_via, auth_expired, account labels, and the refreshed provider connection payload."
+          }
+        }
+      }
+    },
+    "/api/control-plane/connections/defaults/{connection_key}/verify": {
+      "post": {
+        "summary": "Verify a canonical default connection",
+        "parameters": [
+          {
+            "name": "connection_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification result including verification.verified, checked_via, auth_expired, details, and the refreshed default connection payload."
+          }
+        }
+      }
+    },
+    "/api/control-plane/integrations/{integration_id}/health": {
+      "get": {
+        "summary": "Integration health history",
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent health checks for the integration, including connection_status, status transitions such as verified or degraded, checked timestamps, and probe details."
           }
         }
       }

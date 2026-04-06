@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::fs;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::Server;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 const SERVICE_NAME: &str = "koda-security-service";
@@ -165,7 +165,18 @@ async fn serve_target(target: &str) -> Result<()> {
             .await?;
     } else {
         let addr = target.parse()?;
-        Server::builder().add_service(service).serve(addr).await?;
+        let mut server = Server::builder();
+        if let (Ok(cert), Ok(key)) = (
+            std::env::var("GRPC_TLS_SERVER_CERT"),
+            std::env::var("GRPC_TLS_SERVER_KEY"),
+        ) {
+            let cert_pem = std::fs::read_to_string(&cert)?;
+            let key_pem = std::fs::read_to_string(&key)?;
+            let identity = Identity::from_pem(cert_pem, key_pem);
+            let tls = ServerTlsConfig::new().identity(identity);
+            server = server.tls_config(tls)?;
+        }
+        server.add_service(service).serve(addr).await?;
     }
     Ok(())
 }

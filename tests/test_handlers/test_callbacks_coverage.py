@@ -110,7 +110,8 @@ class TestCallbackCoverage:
         mock_context.user_data["provider_sessions"] = {"codex": "sess-123"}
         update, query = _build_callback_update(mock_update, "settings:newsession")
         await callback_settings_newsession(update, mock_context)
-        assert mock_context.user_data["session_id"] is None
+        assert mock_context.user_data["session_id"].startswith("session-")
+        assert mock_context.user_data["session_id"] != "sess-123"
         assert mock_context.user_data["provider_sessions"] == {}
 
     @pytest.mark.asyncio
@@ -168,6 +169,8 @@ class TestCallbackCoverage:
 
         mock_context.user_data["provider"] = "codex"
         mock_context.user_data["model"] = "o3"
+        mock_context.user_data["manual_models_by_provider"]["codex"] = "o3"
+        mock_context.user_data["available_models_by_provider"] = {"codex": ["o3", "gpt-5.4"]}
         update, query = _build_callback_update(mock_update, "model:gpt-5.4")
         with patch("koda.handlers.callbacks.set_agent_general_model", side_effect=ValueError("boom")):
             await callback_model(update, mock_context)
@@ -176,9 +179,8 @@ class TestCallbackCoverage:
     @pytest.mark.asyncio
     async def test_callback_dbenv_and_voice_selection(self, mock_update, mock_context):
         update, query = _build_callback_update(mock_update, "dbenv:prod")
-        with patch("koda.config.POSTGRES_AVAILABLE_ENVS", ["prod", "dev"]):
-            await callback_dbenv(update, mock_context)
-        assert mock_context.user_data["postgres_env"] == "prod"
+        await callback_dbenv(update, mock_context)
+        assert "mcp" in query.edit_message_text.call_args.args[0].lower()
 
         update, query = _build_callback_update(mock_update, "voiceel:voice-123:Maria")
         with patch(

@@ -1,0 +1,200 @@
+name: pr-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    name: python-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            uv.lock
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Mypy type check
+        run: mypy koda/
+
+  python-tests:
+    name: python-tests-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            uv.lock
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Run tests with coverage
+        run: |
+          mkdir -p artifacts/python/${{ matrix.python-version }}
+          pytest \
+            --cov=koda \
+            --cov-report=term-missing \
+            --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.python-version }}/pytest.xml
+        env:
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+      - name: Upload pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: python-tests-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.python-version }}/
+          if-no-files-found: ignore
+
+  web-quality:
+    name: web-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v4.2.0
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint web
+        run: pnpm lint:web
+      - name: Test web with JUnit output
+        run: |
+          mkdir -p artifacts/web
+          pnpm test:web -- --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml
+      - name: Build web
+        run: pnpm build:web
+      - name: Upload web test artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: web-quality-artifacts
+          path: artifacts/web/
+          if-no-files-found: ignore
+
+  repo-hygiene:
+    name: repo-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            uv.lock
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Check repo-map drift
+        run: python3 scripts/generate_repo_map.py --check
+      - name: Validate AI docs and open source hygiene
+        run: pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
+
+  rust-quality:
+    name: rust-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt clippy
+      - name: Rust format check
+        run: cargo +stable fmt --check
+      - name: Rust clippy
+        run: cargo +stable clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo +stable test --workspace
+
+  docker-smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - python-quality
+      - python-tests
+      - web-quality
+      - repo-hygiene
+      - rust-quality
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Build primary Docker image
+        run: docker build -t koda:ci .
+      - name: Bring up stack and smoke test
+        run: |
+          cp .env.example .env
+          docker compose up -d --build
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8090/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8090/health
+          curl -fsS http://127.0.0.1:3000 >/dev/null
+          curl -fsS http://127.0.0.1:3000/control-plane >/dev/null
+          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
+      - name: Capture docker logs
+        if: failure()
+        run: |
+          mkdir -p artifacts/docker
+          docker compose ps > artifacts/docker/compose-ps.txt
+          docker compose logs --no-color > artifacts/docker/compose.log
+      - name: Upload docker smoke artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docker-smoke-artifacts
+          path: artifacts/docker/
+          if-no-files-found: ignore
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v

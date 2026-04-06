@@ -36,7 +36,7 @@ function MetricTile({ label, value, context, delta, emphasize = false }: MetricT
   return (
     <div className="min-w-0 px-5 py-4 sm:px-6">
       <div className="min-w-0">
-        <p className="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgba(255,255,255,0.34)]">
+        <p className="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
           {label}
         </p>
 
@@ -55,20 +55,20 @@ function MetricTile({ label, value, context, delta, emphasize = false }: MetricT
               className="mb-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium"
               style={{
                 borderColor: isPositive
-                  ? "rgba(255,120,78,0.24)"
+                  ? "color-mix(in srgb, var(--tone-warning-border) 58%, transparent)"
                   : isNegative
-                    ? "rgba(96,203,128,0.24)"
-                    : "rgba(255,255,255,0.1)",
+                    ? "color-mix(in srgb, var(--tone-success-border) 58%, transparent)"
+                    : "var(--border-subtle)",
                 color: isPositive
-                  ? "#ffab8e"
+                  ? "var(--tone-warning-text)"
                   : isNegative
-                    ? "#9be7b3"
-                    : "rgba(255,255,255,0.56)",
+                    ? "var(--tone-success-text)"
+                    : "var(--text-secondary)",
                 background: isPositive
-                  ? "rgba(255,120,78,0.06)"
+                  ? "color-mix(in srgb, var(--tone-warning-bg) 72%, transparent)"
                   : isNegative
-                    ? "rgba(96,203,128,0.06)"
-                    : "rgba(255,255,255,0.03)",
+                    ? "color-mix(in srgb, var(--tone-success-bg) 72%, transparent)"
+                    : "var(--surface-panel-soft)",
               }}
             >
               {isPositive ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
@@ -80,7 +80,7 @@ function MetricTile({ label, value, context, delta, emphasize = false }: MetricT
         </div>
       </div>
 
-      <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[rgba(255,255,255,0.5)]">{context}</p>
+      <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[var(--text-tertiary)]">{context}</p>
     </div>
   );
 }
@@ -135,21 +135,22 @@ export function CostKpiRail({ overview, comparison, peakBucket, className }: Cos
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[rgba(255,255,255,0.06)] bg-[#0d0d0e]",
+        "overflow-hidden rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]",
         className
       )}
       style={{
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 46px rgba(0,0,0,0.18)",
+        boxShadow:
+          "inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent), 0 18px 46px rgba(0,0,0,0.12)",
       }}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-[rgba(255,255,255,0.06)] px-5 py-3 sm:px-6">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-5 py-3 sm:px-6">
         <p className="eyebrow">{t("costs.page.operationalRail", { defaultValue: "Operational rail" })}</p>
-        <p className="text-[11px] text-[rgba(255,255,255,0.46)]">
+        <p className="text-[11px] text-[var(--text-tertiary)]">
           {t("costs.page.operationalRailHint", { defaultValue: "4 signals from the current cut" })}
         </p>
       </div>
 
-      <div className="grid divide-y divide-[rgba(255,255,255,0.06)] md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
+      <div className="grid divide-y divide-[var(--border-subtle)] md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
         {metrics.map((metric, index) => (
           <motion.div
             key={metric.label}

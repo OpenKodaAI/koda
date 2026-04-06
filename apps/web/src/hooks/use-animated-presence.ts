@@ -11,7 +11,7 @@ export function useAnimatedPresence<T>(
   value: T,
   options: UseAnimatedPresenceOptions = {}
 ) {
-  const { duration = 300 } = options;
+  const { duration = 180 } = options;
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(isOpen);
   const [renderedValue, setRenderedValue] = useState(value);
@@ -30,16 +30,12 @@ export function useAnimatedPresence<T>(
 
   useEffect(() => {
     let frameId: number | undefined;
-    let nestedFrameId: number | undefined;
     let timeoutId: number | undefined;
 
     if (isOpen) {
       if (!shouldRender) {
         frameId = window.requestAnimationFrame(() => {
           setShouldRender(true);
-          nestedFrameId = window.requestAnimationFrame(() => {
-            setIsVisible(true);
-          });
         });
       } else {
         frameId = window.requestAnimationFrame(() => {
@@ -58,9 +54,6 @@ export function useAnimatedPresence<T>(
     return () => {
       if (frameId != null) {
         window.cancelAnimationFrame(frameId);
-      }
-      if (nestedFrameId != null) {
-        window.cancelAnimationFrame(nestedFrameId);
       }
       if (timeoutId != null) {
         window.clearTimeout(timeoutId);

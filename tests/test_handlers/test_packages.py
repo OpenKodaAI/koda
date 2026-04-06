@@ -39,6 +39,14 @@ async def test_pip_runs_command(mock_update, mock_context):
 
 
 @pytest.mark.asyncio
+async def test_pip_unknown_subcommand_is_denied(mock_update, mock_context):
+    mock_context.args = ["frobnicate"]
+    with patch("koda.handlers.packages.PIP_ENABLED", True):
+        await cmd_pip(mock_update, mock_context)
+    assert "not allowed" in mock_update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
 async def test_pip_blocked_pattern(mock_update, mock_context):
     import re
 
@@ -88,3 +96,11 @@ async def test_npm_runs_command(mock_update, mock_context):
         await cmd_npm(mock_update, mock_context)
         mock_run.assert_called_once()
         assert "npm list" in mock_run.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_npm_unknown_subcommand_is_denied(mock_update, mock_context):
+    mock_context.args = ["frobnicate"]
+    with patch("koda.handlers.packages.NPM_ENABLED", True):
+        await cmd_npm(mock_update, mock_context)
+    assert "not allowed" in mock_update.message.reply_text.call_args[0][0].lower()

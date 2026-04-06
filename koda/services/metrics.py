@@ -128,6 +128,19 @@ TOOL_EXECUTIONS = Counter(
     ["agent_id", "tool_name", "status"],
 )
 
+INTEGRATION_GRANT_DECISIONS = Counter(
+    "koda_integration_grant_decisions_total",
+    "Integration grant evaluation decisions",
+    ["agent_id", "integration_id", "action_id", "grant_decision", "auth_mode", "sensitive_access_used"],
+)
+
+INTEGRATION_EXECUTION_LATENCY = Histogram(
+    "koda_integration_execution_seconds",
+    "Integration execution latency",
+    ["agent_id", "integration_id", "action_id", "result_class"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
+)
+
 # --- Cache metrics ---
 CACHE_HITS = Counter(
     "koda_cache_hits_total",

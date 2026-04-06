@@ -77,7 +77,7 @@ export function BotDetailContent({ botId }: BotDetailContentProps) {
   const [selectedTask, setSelectedTask] = useState<(Task & { botId?: string }) | null>(
     null
   );
-  const { stats, tasks, sessions, cronJobs, loading, error, refresh } = useBotDetail(botId);
+  const { stats, tasks, sessions, cronJobs, loading, error, refresh } = useBotDetail(botId, activeTab);
 
   const botDisplay = botDisplayMap[botId] ?? {
     id: botId,

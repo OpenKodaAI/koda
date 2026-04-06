@@ -11,7 +11,8 @@ import {
 } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAppTour } from "@/hooks/use-app-tour";
-import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useQueryClient } from "@tanstack/react-query";
+import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
 import { SessionChatComposer } from "@/components/sessions/session-chat-composer";
@@ -26,9 +27,11 @@ import {
   fetchControlPlaneDashboardJsonAllowError,
   mutateControlPlaneDashboardJson,
 } from "@/lib/control-plane-dashboard";
+import { queryKeys } from "@/lib/query/keys";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import type {
   SessionDetail,
+  SessionMessage,
   SessionSendRequest,
   SessionSendResponse,
   SessionSummary,
@@ -36,6 +39,8 @@ import type {
 import { cn } from "@/lib/utils";
 
 const SESSION_FETCH_LIMIT = 200;
+const SESSION_THREAD_PAGE_SIZE = 24;
+const MIN_VISIBLE_FRAGMENT_EXECUTIONS = 3;
 const NEW_SESSION_PLACEHOLDER_ID = "__new_session__";
 
 function normalizeSelectedBotId(
@@ -43,7 +48,39 @@ function normalizeSelectedBotId(
   availableBotIds: string[],
 ) {
   if (!candidate) return undefined;
-  return availableBotIds.includes(candidate) ? candidate : undefined;
+  const match = availableBotIds.find((botId) => botId.toLowerCase() === candidate.toLowerCase());
+  return match ?? undefined;
+}
+
+function mergeSessionHistoryPages(
+  latestDetail: SessionDetail | null,
+  olderDetails: SessionDetail[],
+) {
+  const orderedPages = [...olderDetails].reverse();
+  if (latestDetail) {
+    orderedPages.push(latestDetail);
+  }
+
+  const seen = new Set<string>();
+  const messages: SessionMessage[] = [];
+  for (const page of orderedPages) {
+    for (const message of page.messages) {
+      if (seen.has(message.id)) continue;
+      seen.add(message.id);
+      messages.push(message);
+    }
+  }
+  return messages;
+}
+
+function shouldSurfaceSessionInRail(session: SessionSummary) {
+  if (session.query_count > 0) return true;
+  if (session.running_count > 0) return true;
+  if (session.failed_count > 0) return true;
+  if (session.execution_count >= MIN_VISIBLE_FRAGMENT_EXECUTIONS) return true;
+  if (session.latest_response_preview?.trim()) return true;
+  if (session.name?.trim()) return true;
+  return false;
 }
 
 function SessionsPageContent() {
@@ -72,6 +109,9 @@ function SessionsPageContent() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingSessionMessage[]>([]);
+  const [olderDetailPages, setOlderDetailPages] = useState<SessionDetail[]>([]);
+  const [loadingOlderDetailPages, setLoadingOlderDetailPages] = useState(false);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [pendingRequest, setPendingRequest] = useState<{
     requestId: string;
     text: string;
@@ -80,6 +120,7 @@ function SessionsPageContent() {
     startedAt: number;
   } | null>(null);
 
+  const queryClient = useQueryClient();
   const deferredSearch = useDeferredValue(search.trim());
   const debouncedSearch = useDebouncedValue(deferredSearch, 220);
 
@@ -142,15 +183,22 @@ function SessionsPageContent() {
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [activeBotId, pathname, router, search, searchParams, selectedSessionId]);
 
-  const sessionsResource = useAsyncResource<{
+  const sessionsQueryKey = queryKeys.dashboard.sessions({
+    search: debouncedSearch,
+    limit: SESSION_FETCH_LIMIT,
+  });
+
+  const sessionsQuery = useControlPlaneQuery<{
     items: SessionSummary[];
     unavailable: boolean;
   }>({
+    tier: "live",
+    queryKey: sessionsQueryKey,
     enabled: availableBotIds.length > 0,
-    pollIntervalMs: availableBotIds.length > 0 ? 8_000 : null,
-    fetcher: async (signal) => {
+    refetchInterval: 15_000,
+    queryFn: async ({ signal }) => {
       const response = await fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
-        activeBotId ? `/agents/${activeBotId}/sessions` : "/sessions",
+        "/sessions",
         {
           signal,
           params: {
@@ -162,23 +210,66 @@ function SessionsPageContent() {
       );
       return {
         items: Array.isArray(response.data) ? response.data : [],
-        unavailable: activeBotId ? !response.ok : false,
+        unavailable: false,
       };
     },
   });
 
-  const sessions = useMemo(() => sessionsResource.data?.items ?? [], [sessionsResource.data]);
-  const sessionsUnavailable = sessionsResource.data?.unavailable ?? false;
+  const sessions = useMemo(() => sessionsQuery.data?.items ?? [], [sessionsQuery.data]);
+  const sessionsUnavailable = sessionsQuery.data?.unavailable ?? false;
+  const visibleSessions = useMemo(() => {
+    if (search.trim()) {
+      return sessions;
+    }
+
+    const meaningful = sessions.filter(shouldSurfaceSessionInRail);
+
+    if (selectedSessionId) {
+      const selected = sessions.find((session) => session.session_id === selectedSessionId);
+      const remainder = meaningful.filter(
+        (session) => session.session_id !== selectedSessionId,
+      );
+
+      if (selected && !shouldSurfaceSessionInRail(selected)) {
+        return [selected, ...remainder.slice(0, 2)];
+      }
+    }
+
+    if (meaningful.length > 0) {
+      return meaningful.slice(0, 3);
+    }
+
+    return sessions.slice(0, Math.min(3, sessions.length));
+  }, [search, selectedSessionId, sessions]);
   const selectedSessionSummary = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
     [selectedSessionId, sessions]
   );
-  const detailBotId = selectedSessionSummary?.bot_id ?? activeBotId;
+  const selectedSessionBotId = useMemo(
+    () => normalizeSelectedBotId(selectedSessionSummary?.bot_id, availableBotIds),
+    [availableBotIds, selectedSessionSummary?.bot_id],
+  );
+  const detailBotId = selectedSessionBotId ?? activeBotId;
 
-  const detailResource = useAsyncResource<SessionDetail>({
+  const detailQueryBaseKey = useMemo(
+    () =>
+      queryKeys.dashboard.sessionDetail(
+        detailBotId ?? "",
+        selectedSessionId ?? "",
+      ),
+    [detailBotId, selectedSessionId],
+  );
+  const detailQueryKey = useMemo(
+    () => [...detailQueryBaseKey, "latest", SESSION_THREAD_PAGE_SIZE] as const,
+    [detailQueryBaseKey],
+  );
+
+  const detailQuery = useControlPlaneQuery<SessionDetail>({
+    tier: "realtime",
+    queryKey: detailQueryKey,
     enabled: Boolean(detailBotId && selectedSessionId),
-    pollIntervalMs: detailBotId && selectedSessionId ? 8_000 : null,
-    fetcher: async (signal) => {
+    refetchInterval: pendingRequest ? 2_000 : 15_000,
+    queryFn: async ({ signal }) => {
       if (!detailBotId || !selectedSessionId) {
         throw new Error(t("sessions.noSelection"));
       }
@@ -186,16 +277,45 @@ function SessionsPageContent() {
         `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
         {
           signal,
+          params: {
+            limit: SESSION_THREAD_PAGE_SIZE,
+          },
           fallbackError: t("sessions.loadError"),
-        }
+        },
       );
     },
   });
 
   const activeDetail =
-    detailResource.data?.summary.session_id === selectedSessionId ? detailResource.data : null;
+    detailQuery.data?.summary.session_id === selectedSessionId ? detailQuery.data : null;
+  const loadedHistoryMessages = useMemo(
+    () => mergeSessionHistoryPages(activeDetail, olderDetailPages),
+    [activeDetail, olderDetailPages],
+  );
   const selectedSummary = activeDetail?.summary ?? selectedSessionSummary;
-  const effectiveBotId = selectedSummary?.bot_id ?? activeBotId;
+  const effectiveBotId =
+    normalizeSelectedBotId(selectedSummary?.bot_id, availableBotIds) ?? activeBotId;
+  const oldestLoadedPage = olderDetailPages[olderDetailPages.length - 1] ?? activeDetail;
+  const hasOlderMessages = oldestLoadedPage?.page?.has_more ?? false;
+  const nextHistoryCursor = oldestLoadedPage?.page?.next_cursor ?? null;
+
+  useEffect(() => {
+    setOlderDetailPages([]);
+    setLoadingOlderDetailPages(false);
+  }, [detailBotId, selectedSessionId]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setLoadingSessionId(null);
+      return;
+    }
+
+    if (activeDetail?.summary.session_id === selectedSessionId || detailQuery.error) {
+      setLoadingSessionId((current) =>
+        current === selectedSessionId ? null : current,
+      );
+    }
+  }, [activeDetail?.summary.session_id, detailQuery.error, selectedSessionId]);
 
   useEffect(() => {
     if (!pendingRequest || !activeDetail) return;
@@ -212,55 +332,34 @@ function SessionsPageContent() {
       current.filter((message) => message.requestId !== pendingRequest.requestId)
     );
     setPendingRequest(null);
-    void sessionsResource.refresh({ background: true, preserveError: true });
-  }, [activeDetail, pendingRequest, sessionsResource]);
+    void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+  }, [activeDetail, pendingRequest, queryClient, sessionsQueryKey]);
 
   useEffect(() => {
-    if (!pendingRequest || !detailBotId || !selectedSessionId) return;
-    let disposed = false;
-
-    const poll = async () => {
-      const response = await detailResource.refresh({ background: true, preserveError: true });
-      if (disposed || !response) return;
-      void sessionsResource.refresh({ background: true, preserveError: true });
-    };
-
-    void poll();
-    const interval = window.setInterval(() => {
-      void poll();
-    }, 1600);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(interval);
-    };
-  }, [detailBotId, detailResource, pendingRequest, selectedSessionId, sessionsResource]);
-
-  useEffect(() => {
-    if (sessionsResource.initialLoading) return;
+    if (sessionsQuery.isLoading) return;
     if (isNewChatMode) return;
     if (!selectedSessionId) {
-      if (isDesktop && sessions.length > 0) {
-        setSelectedSessionId(sessions[0]?.session_id ?? null);
+      if (isDesktop && visibleSessions.length > 0) {
+        setSelectedSessionId(visibleSessions[0]?.session_id ?? null);
       }
       return;
     }
-    if (sessions.some((session) => session.session_id === selectedSessionId)) {
+    if (visibleSessions.some((session) => session.session_id === selectedSessionId)) {
       return;
     }
     if (pendingRequest?.sessionId === selectedSessionId) {
       return;
     }
-    if (isDesktop && sessions.length > 0) {
-      setSelectedSessionId(sessions[0]?.session_id ?? null);
+    if (isDesktop && visibleSessions.length > 0) {
+      setSelectedSessionId(visibleSessions[0]?.session_id ?? null);
     }
   }, [
     isDesktop,
     isNewChatMode,
     pendingRequest?.sessionId,
     selectedSessionId,
-    sessions,
-    sessionsResource.initialLoading,
+    visibleSessions,
+    sessionsQuery.isLoading,
   ]);
 
   const visiblePendingMessages = useMemo(() => {
@@ -273,16 +372,55 @@ function SessionsPageContent() {
     setComposerError(null);
     setPendingRequest(null);
     setPendingMessages([]);
-    detailResource.setData(null);
-  }, [detailResource]);
+    setOlderDetailPages([]);
+    setLoadingOlderDetailPages(false);
+    queryClient.removeQueries({ queryKey: detailQueryBaseKey });
+  }, [detailQueryBaseKey, queryClient]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!detailBotId || !selectedSessionId || !activeDetail || loadingOlderDetailPages) {
+      return;
+    }
+    if (!hasOlderMessages || !nextHistoryCursor) {
+      return;
+    }
+
+    setLoadingOlderDetailPages(true);
+    try {
+      const page = await fetchControlPlaneDashboardJson<SessionDetail>(
+        `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
+        {
+          params: {
+            limit: SESSION_THREAD_PAGE_SIZE,
+            before: nextHistoryCursor,
+          },
+          fallbackError: t("sessions.loadError"),
+        },
+      );
+      setOlderDetailPages((current) => [...current, page]);
+    } finally {
+      setLoadingOlderDetailPages(false);
+    }
+  }, [
+    activeDetail,
+    detailBotId,
+    hasOlderMessages,
+    loadingOlderDetailPages,
+    nextHistoryCursor,
+    selectedSessionId,
+    t,
+  ]);
 
   const handleBotChange = useCallback(
     (botId: string | undefined) => {
       const hasSelectedSession = Boolean(selectedSessionId);
       const canPreserveSelection =
-        hasSelectedSession && (!botId || selectedSummary?.bot_id === botId);
+        hasSelectedSession &&
+        (!botId ||
+          normalizeSelectedBotId(selectedSummary?.bot_id, availableBotIds) ===
+            normalizeSelectedBotId(botId, availableBotIds));
 
-      setActiveBotId(botId);
+      setActiveBotId(normalizeSelectedBotId(botId, availableBotIds));
       setMobileContextOpen(false);
       setComposerError(null);
 
@@ -299,11 +437,17 @@ function SessionsPageContent() {
       setSelectedSessionId(null);
       resetThreadState();
     },
-    [resetThreadState, selectedSessionId, selectedSummary?.bot_id]
+    [availableBotIds, resetThreadState, selectedSessionId, selectedSummary?.bot_id]
   );
 
   const handleSelectSession = useCallback(
     (session: SessionSummary) => {
+      if (session.session_id !== selectedSessionId) {
+        setLoadingSessionId(session.session_id);
+      }
+      setActiveBotId(
+        normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id
+      );
       setSelectedSessionId(session.session_id);
       setIsNewChatMode(false);
       setComposerError(null);
@@ -315,10 +459,15 @@ function SessionsPageContent() {
         setMobileRailOpen(false);
       }
     },
-    [isDesktop]
+    [availableBotIds, isDesktop, selectedSessionId]
   );
 
   const handleNewChat = useCallback(() => {
+    setActiveBotId((current) => {
+      const candidate = selectedSummary?.bot_id ?? current;
+      return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
+    });
+    setLoadingSessionId(null);
     setSelectedSessionId(null);
     setIsNewChatMode(true);
     setMobileContextOpen(false);
@@ -326,7 +475,7 @@ function SessionsPageContent() {
     if (!isDesktop) {
       setMobileRailOpen(false);
     }
-  }, [isDesktop, resetThreadState]);
+  }, [availableBotIds, isDesktop, resetThreadState, selectedSummary?.bot_id]);
 
   const sendMessage = useCallback(
     async (
@@ -337,7 +486,8 @@ function SessionsPageContent() {
       }
     ) => {
       const trimmedText = text.trim();
-      if (!trimmedText || !activeBotId || composerSubmitting) return;
+      const sendBotId = effectiveBotId;
+      if (!trimmedText || !sendBotId || composerSubmitting) return;
 
       const requestId = options?.requestId ?? globalThis.crypto?.randomUUID?.() ?? `session-send-${Date.now()}`;
       const draftSessionId = options?.sessionId ?? selectedSessionId ?? null;
@@ -384,7 +534,7 @@ function SessionsPageContent() {
 
       try {
         const response = await mutateControlPlaneDashboardJson<SessionSendResponse>(
-          `/agents/${activeBotId}/sessions/messages`,
+          `/agents/${sendBotId}/sessions/messages`,
           {
             fallbackError: t("sessions.sendUnavailable"),
             body: {
@@ -405,16 +555,16 @@ function SessionsPageContent() {
           requestId,
           text: trimmedText,
           sessionId: resolvedSessionId,
-          botId: activeBotId,
+          botId: sendBotId,
           startedAt: Date.now(),
         });
         setSelectedSessionId(resolvedSessionId);
         setIsNewChatMode(false);
         setDraft("");
         if (!draftSessionId) {
-          detailResource.setData(null);
+          queryClient.removeQueries({ queryKey: detailQueryKey });
         }
-        void sessionsResource.refresh({ background: true, preserveError: true });
+        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim()
@@ -432,7 +582,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [activeBotId, composerSubmitting, detailResource, selectedSessionId, sessionsResource, t]
+    [effectiveBotId, composerSubmitting, detailQueryKey, queryClient, selectedSessionId, sessionsQueryKey, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -455,6 +605,12 @@ function SessionsPageContent() {
     [pendingMessages, sendMessage]
   );
 
+  const sessionTransitioning = Boolean(
+    selectedSessionId &&
+      loadingSessionId === selectedSessionId &&
+      activeDetail?.summary.session_id !== selectedSessionId
+  );
+
   const mobileRailPresence = useAnimatedPresence(!isDesktop && mobileRailOpen, null, {
     duration: 220,
   });
@@ -467,13 +623,21 @@ function SessionsPageContent() {
   useEscapeToClose(mobileRailPresence.shouldRender, () => setMobileRailOpen(false));
   useEscapeToClose(mobileContextPresence.shouldRender, () => setMobileContextOpen(false));
 
-  const composerDisabled = !activeBotId;
-  const composerPlaceholder = composerDisabled
+  const composerDisabled = !effectiveBotId || sessionTransitioning;
+  const composerPlaceholder = sessionTransitioning
+    ? t("sessions.thread.loadingConversation", {
+        defaultValue: "Loading conversation...",
+      })
+    : composerDisabled
     ? t("sessions.composer.selectBotToStart", {
         defaultValue: "Select a specific bot here to start a chat.",
       })
     : t("sessions.composer.enabledPlaceholder");
-  const composerHelper = composerDisabled
+  const composerHelper = sessionTransitioning
+    ? t("sessions.thread.loadingConversation", {
+        defaultValue: "Loading conversation...",
+      })
+    : composerDisabled
     ? t("sessions.thread.noBotDescription", {
         defaultValue: "Choose a specific bot in the composer to start a new chat.",
       })
@@ -490,27 +654,32 @@ function SessionsPageContent() {
           });
 
   const tourVariant =
-    sessionsResource.error || sessionsUnavailable
+    sessionsQuery.error?.message || sessionsUnavailable
       ? "unavailable"
-      : sessionsResource.initialLoading && sessions.length === 0
+      : sessionsQuery.isLoading && sessions.length === 0
         ? "loading"
         : sessions.length === 0
           ? "empty"
           : "default";
 
   return (
-    <div className="animate-in flex h-full min-h-0 overflow-hidden bg-[#090a0e] text-[var(--text-primary)]" {...tourRoute("sessions", tourVariant)}>
+    <div
+      className="animate-in flex h-full min-h-0 overflow-hidden bg-[var(--surface-canvas)] text-[var(--text-primary)]"
+      {...tourRoute("sessions", tourVariant)}
+    >
       <div className="hidden h-full min-h-0 w-[22rem] shrink-0 lg:block xl:w-[23rem]" {...tourAnchor("sessions.conversation-rail")}>
         <SessionConversationRail
           search={search}
           onSearchChange={setSearch}
-          sessions={sessions}
+          sessions={visibleSessions}
           selectedSessionId={selectedSessionId}
-          loading={sessionsResource.initialLoading}
-          error={sessionsResource.error}
+          loading={sessionsQuery.isLoading}
+          refreshing={sessionsQuery.isFetching && !sessionsQuery.isLoading}
+          loadingSessionId={loadingSessionId}
+          error={sessionsQuery.error?.message}
           unavailable={sessionsUnavailable}
           onRefresh={() => {
-            void sessionsResource.refresh({ background: true, preserveError: true });
+            void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
           }}
           onSelectSession={handleSelectSession}
           onNewChat={handleNewChat}
@@ -525,14 +694,20 @@ function SessionsPageContent() {
             : "grid-cols-1"
         )}
       >
-        <div {...tourAnchor("sessions.thread")}>
+        <div className="min-h-0 min-w-0" {...tourAnchor("sessions.thread")}>
           <SessionThreadView
             botId={effectiveBotId}
+            hasSelectedSession={Boolean(selectedSessionId)}
             detail={activeDetail}
             summary={selectedSummary}
+            historyMessages={loadedHistoryMessages}
             pendingMessages={visiblePendingMessages}
-            loading={Boolean(selectedSessionId && detailResource.initialLoading && !activeDetail)}
-            error={detailResource.error}
+            loading={Boolean(selectedSessionId && detailQuery.isLoading && !activeDetail)}
+            transitioning={sessionTransitioning}
+            loadingOlderHistory={loadingOlderDetailPages}
+            hasOlderHistory={hasOlderMessages}
+            onLoadOlderHistory={loadOlderMessages}
+            error={detailQuery.error?.message ?? null}
             showRailToggle={!isDesktop}
             onOpenRail={() => setMobileRailOpen(true)}
             showContextToggle={Boolean(selectedSummary)}
@@ -541,8 +716,9 @@ function SessionsPageContent() {
             footer={
               <div {...tourAnchor("sessions.composer")}>
                 <SessionChatComposer
-                  botId={activeBotId}
+                  botId={effectiveBotId}
                   onBotChange={handleBotChange}
+                  lockedBot={Boolean(selectedSessionId && effectiveBotId)}
                   value={draft}
                   onChange={(value) => {
                     setDraft(value);
@@ -580,7 +756,7 @@ function SessionsPageContent() {
           />
           <div
             className={cn(
-              "fixed inset-y-0 left-0 z-[49] w-[min(24rem,calc(100vw-1rem))] overflow-hidden border-r border-[rgba(255,255,255,0.06)] bg-[#0d0e12] shadow-[0_28px_90px_rgba(0,0,0,0.42)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] lg:hidden",
+              "fixed inset-y-0 left-0 z-[49] w-[min(24rem,calc(100vw-1rem))] overflow-hidden border-r border-[var(--border-subtle)] bg-[var(--surface-canvas)] shadow-[0_28px_90px_rgba(0,0,0,0.18)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] lg:hidden",
               mobileRailPresence.isVisible
                 ? "translate-x-0 opacity-100"
                 : "pointer-events-none -translate-x-4 opacity-0"
@@ -592,13 +768,15 @@ function SessionsPageContent() {
             <SessionConversationRail
               search={search}
               onSearchChange={setSearch}
-              sessions={sessions}
+              sessions={visibleSessions}
               selectedSessionId={selectedSessionId}
-              loading={sessionsResource.initialLoading}
-              error={sessionsResource.error}
+              loading={sessionsQuery.isLoading}
+              refreshing={sessionsQuery.isFetching && !sessionsQuery.isLoading}
+              loadingSessionId={loadingSessionId}
+              error={sessionsQuery.error?.message}
               unavailable={sessionsUnavailable}
               onRefresh={() => {
-                void sessionsResource.refresh({ background: true, preserveError: true });
+                void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
               }}
               onSelectSession={handleSelectSession}
               onNewChat={handleNewChat}
@@ -620,7 +798,7 @@ function SessionsPageContent() {
           />
           <div
             className={cn(
-              "fixed inset-y-0 right-0 z-[49] w-[min(23rem,calc(100vw-1rem))] overflow-hidden border-l border-[rgba(255,255,255,0.06)] bg-[#0d0e12] shadow-[0_28px_90px_rgba(0,0,0,0.42)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] xl:hidden",
+              "fixed inset-y-0 right-0 z-[49] w-[min(23rem,calc(100vw-1rem))] overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--surface-canvas)] shadow-[0_28px_90px_rgba(0,0,0,0.18)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] xl:hidden",
               mobileContextPresence.isVisible
                 ? "translate-x-0 opacity-100"
                 : "pointer-events-none translate-x-4 opacity-0"
@@ -641,8 +819,8 @@ export default function SessionsPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-full min-h-0 overflow-hidden bg-[#090a0e]">
-          <div className="hidden h-full w-[22rem] shrink-0 border-r border-[rgba(255,255,255,0.06)] bg-[#0d0e12] lg:block">
+        <div className="flex h-full min-h-0 overflow-hidden bg-[var(--surface-canvas)]">
+          <div className="hidden h-full w-[22rem] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:block">
             <div className="space-y-3 px-4 py-4">
               <div className="skeleton h-4 w-28 rounded-xl" />
               <div className="skeleton h-12 w-full rounded-[1rem]" />
@@ -654,7 +832,7 @@ export default function SessionsPage() {
             </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="border-b border-[rgba(255,255,255,0.06)] px-4 py-4 sm:px-6">
+            <div className="border-b border-[var(--border-subtle)] px-4 py-4 sm:px-6">
               <div className="flex items-center gap-3">
                 <div className="skeleton-circle h-11 w-11" />
                 <div className="space-y-2">
@@ -676,8 +854,8 @@ export default function SessionsPage() {
                 ))}
               </div>
             </div>
-            <div className="border-t border-[rgba(255,255,255,0.06)] px-4 py-4 sm:px-6">
-              <div className="mx-auto max-w-[52rem] rounded-[1.5rem] border border-[rgba(255,255,255,0.08)] p-4">
+            <div className="border-t border-[var(--border-subtle)] px-4 py-4 sm:px-6">
+              <div className="mx-auto max-w-[52rem] rounded-[1.5rem] border border-[var(--border-subtle)] p-4">
                 <div className="skeleton h-[54px] w-full rounded-[1rem]" />
               </div>
             </div>

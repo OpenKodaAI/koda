@@ -2051,7 +2051,7 @@ def approve_knowledge_candidate(candidate_id: int, *, reviewer: str) -> int | No
     if supersedes_runbook_id is not None:
         deprecate_approved_runbook(supersedes_runbook_id, reviewer=reviewer)
 
-    from koda.knowledge.policy import sanitize_policy_overrides
+    from koda.knowledge.task_policy_defaults import sanitize_policy_overrides
 
     try:
         policy_overrides = sanitize_policy_overrides(dict(proposed.get("policy_overrides") or {}))

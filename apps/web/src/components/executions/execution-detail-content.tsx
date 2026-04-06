@@ -411,7 +411,7 @@ export function ExecutionDetailContent({
           <div
             key={`${line}-${index}`}
             className={cn(
-              "border border-[var(--border-subtle)] bg-[var(--field-bg)] text-sm leading-6 text-[var(--text-secondary)] shadow-[inset_0_1px_0_rgba(231,235,240,0.012)]",
+              "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm leading-6 text-[var(--text-secondary)] shadow-none",
               isExpanded ? "rounded-lg px-4 py-3.5" : "rounded-lg px-3.5 py-3"
             )}
           >
@@ -592,7 +592,7 @@ function WarningsPanel({
           <div
             key={`${warning}-${index}`}
             className={cn(
-              "border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.02)] text-sm leading-6",
+              "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm leading-6",
               isExpanded ? "rounded-lg px-4 py-3.5" : isPanel ? "rounded-lg px-4 py-3" : "rounded-lg px-4 py-3"
             )}
             style={getSemanticStyle("warning")}
@@ -678,7 +678,7 @@ function ToolCard({
   return (
     <div
       className={cn(
-        "border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] shadow-none",
+        "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] shadow-none",
         isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
       )}
     >
@@ -875,7 +875,7 @@ function ArtifactShell({
   return (
     <div
       className={cn(
-        "border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] shadow-none",
+        "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] shadow-none",
         isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
       )}
     >
@@ -935,7 +935,7 @@ function CodePanel({
   return (
     <div
       className={cn(
-        "border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] shadow-none",
+        "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] shadow-none",
         isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
       )}
     >
@@ -975,7 +975,7 @@ function CodePanel({
       ) : (
         <pre
           className={cn(
-            "overflow-x-auto whitespace-pre-wrap break-words border border-[rgba(255,255,255,0.06)] bg-[rgba(10,10,10,0.84)] font-sans leading-7 text-[var(--text-secondary)]",
+            "overflow-x-auto whitespace-pre-wrap break-words border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] font-sans leading-7 text-[var(--text-secondary)]",
             isExpanded
               ? "rounded-lg p-[18px] text-[13px]"
               : isPanel

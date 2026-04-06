@@ -87,6 +87,30 @@ struct StoredArtifact {
     payload: Vec<u8>,
 }
 
+struct MetadataJsonContext<'a> {
+    source_path: &'a str,
+    descriptor: &'a ArtifactDescriptor,
+    size_bytes: u64,
+    upload_outcome: &'a str,
+    source_metadata_json: &'a str,
+    purpose: &'a str,
+    storage_backing: &'a str,
+    object_store_bucket: &'a str,
+    object_store_key: &'a str,
+}
+
+struct PersistUploadedRecordRequest<'a> {
+    agent_id: &'a str,
+    logical_filename: &'a str,
+    object_key: String,
+    mime_type: String,
+    source_metadata_json: String,
+    purpose: String,
+    staging_path: &'a Path,
+    content_hash: String,
+    size_bytes: u64,
+}
+
 fn mime_type_for(path: &Path) -> String {
     match path
         .extension()
@@ -148,10 +172,10 @@ fn proto_descriptor(record: &ArtifactRecordDescriptor) -> ArtifactDescriptor {
     }
 }
 
-fn normalize_agent_scope(agent_id: &str) -> Result<String, Status> {
+fn normalize_agent_scope(agent_id: &str) -> Result<String, &'static str> {
     let normalized = agent_id.trim().to_ascii_lowercase();
     if normalized.is_empty() {
-        return Err(Status::invalid_argument("agent_id is required"));
+        return Err("agent_id is required");
     }
     Ok(normalized)
 }
@@ -211,12 +235,12 @@ fn artifact_object_store_config() -> Option<ObjectStoreConfig> {
     })
 }
 
-fn artifact_object_store_config_for_bucket(bucket: &str) -> Result<ObjectStoreConfig, Status> {
+fn artifact_object_store_config_for_bucket(
+    bucket: &str,
+) -> Result<ObjectStoreConfig, &'static str> {
     let normalized_bucket = bucket.trim();
     if normalized_bucket.is_empty() {
-        return Err(Status::failed_precondition(
-            "object storage bucket is not configured",
-        ));
+        return Err("object storage bucket is not configured");
     }
     Ok(ObjectStoreConfig {
         bucket: normalized_bucket.to_string(),
@@ -228,30 +252,20 @@ fn artifact_object_store_config_for_bucket(bucket: &str) -> Result<ObjectStoreCo
     })
 }
 
-fn metadata_json_for(
-    source_path: &str,
-    descriptor: &ArtifactDescriptor,
-    size_bytes: u64,
-    upload_outcome: &str,
-    source_metadata_json: &str,
-    purpose: &str,
-    storage_backing: &str,
-    object_store_bucket: &str,
-    object_store_key: &str,
-) -> String {
+fn metadata_json_for(context: &MetadataJsonContext<'_>) -> String {
     json!({
-        "artifact_id": descriptor.artifact_id,
-        "object_key": descriptor.object_key,
-        "content_hash": descriptor.content_hash,
-        "mime_type": descriptor.mime_type,
-        "logical_filename": source_path,
-        "size_bytes": size_bytes,
-        "upload_outcome": upload_outcome,
-        "storage_backing": storage_backing,
-        "object_store_bucket": if object_store_bucket.trim().is_empty() { None::<String> } else { Some(object_store_bucket.to_string()) },
-        "object_store_key": if object_store_key.trim().is_empty() { None::<String> } else { Some(object_store_key.to_string()) },
-        "source_metadata_json": source_metadata_json,
-        "purpose": purpose,
+        "artifact_id": context.descriptor.artifact_id,
+        "object_key": context.descriptor.object_key,
+        "content_hash": context.descriptor.content_hash,
+        "mime_type": context.descriptor.mime_type,
+        "logical_filename": context.source_path,
+        "size_bytes": context.size_bytes,
+        "upload_outcome": context.upload_outcome,
+        "storage_backing": context.storage_backing,
+        "object_store_bucket": if context.object_store_bucket.trim().is_empty() { None::<String> } else { Some(context.object_store_bucket.to_string()) },
+        "object_store_key": if context.object_store_key.trim().is_empty() { None::<String> } else { Some(context.object_store_key.to_string()) },
+        "source_metadata_json": context.source_metadata_json,
+        "purpose": context.purpose,
     })
     .to_string()
 }
@@ -337,7 +351,8 @@ async fn load_object_store_payload(
     bucket: &str,
     object_store_key: &str,
 ) -> Result<Vec<u8>, Status> {
-    let config = artifact_object_store_config_for_bucket(bucket)?;
+    let config =
+        artifact_object_store_config_for_bucket(bucket).map_err(Status::failed_precondition)?;
     let response = artifact_object_store_client(&config)
         .await?
         .get_object()
@@ -493,15 +508,7 @@ async fn load_record_by_artifact_id(
 }
 
 async fn persist_uploaded_record(
-    agent_id: &str,
-    logical_filename: &str,
-    object_key: String,
-    mime_type: String,
-    source_metadata_json: String,
-    purpose: String,
-    staging_path: &Path,
-    content_hash: String,
-    size_bytes: u64,
+    request: PersistUploadedRecordRequest<'_>,
 ) -> Result<ArtifactRecord> {
     let client = artifact_postgres_client()
         .await
@@ -510,10 +517,10 @@ async fn persist_uploaded_record(
         .await
         .map_err(anyhow::Error::msg)?;
     let descriptor = ArtifactDescriptor {
-        artifact_id: artifact_id_for_name(logical_filename, &content_hash),
-        object_key,
-        content_hash,
-        mime_type,
+        artifact_id: artifact_id_for_name(request.logical_filename, &request.content_hash),
+        object_key: request.object_key,
+        content_hash: request.content_hash,
+        mime_type: request.mime_type,
     };
     let config = artifact_object_store_config().ok_or_else(|| {
         anyhow::anyhow!("object storage is required but KNOWLEDGE_V2_S3_BUCKET is not configured")
@@ -523,34 +530,34 @@ async fn persist_uploaded_record(
         &config,
         &object_store_key,
         &descriptor.mime_type,
-        staging_path,
+        request.staging_path,
     )
     .await?;
     let storage_backing = OBJECT_STORAGE_STORAGE_BACKING.to_string();
     let object_store_bucket = config.bucket.clone();
     let upload_outcome = OBJECT_STORAGE_UPLOAD_OUTCOME.to_string();
     let payload: Option<Vec<u8>> = None;
-    let metadata_json = metadata_json_for(
-        logical_filename,
-        &descriptor,
-        size_bytes,
-        &upload_outcome,
-        &source_metadata_json,
-        &purpose,
-        &storage_backing,
-        &object_store_bucket,
-        &object_store_key,
-    );
+    let metadata_json = metadata_json_for(&MetadataJsonContext {
+        source_path: request.logical_filename,
+        descriptor: &descriptor,
+        size_bytes: request.size_bytes,
+        upload_outcome: &upload_outcome,
+        source_metadata_json: &request.source_metadata_json,
+        purpose: &request.purpose,
+        storage_backing: &storage_backing,
+        object_store_bucket: &object_store_bucket,
+        object_store_key: &object_store_key,
+    });
     let record = ArtifactRecord {
-        agent_id: agent_id.to_string(),
+        agent_id: request.agent_id.to_string(),
         descriptor: ArtifactRecordDescriptor {
             artifact_id: descriptor.artifact_id,
             object_key: descriptor.object_key,
             content_hash: descriptor.content_hash,
             mime_type: descriptor.mime_type,
         },
-        source_path: logical_filename.to_string(),
-        size_bytes,
+        source_path: request.logical_filename.to_string(),
+        size_bytes: request.size_bytes,
         storage_backing: storage_backing.clone(),
         object_store_bucket: object_store_bucket.clone(),
         object_store_key: object_store_key.clone(),
@@ -612,7 +619,7 @@ async fn persist_uploaded_record(
                 &record.storage_backing,
                 &record.object_store_bucket,
                 &record.object_store_key,
-                &source_metadata_json,
+                &request.source_metadata_json,
                 &record.metadata_json,
                 &record.evidence_json,
                 &record.upload_outcome,
@@ -661,7 +668,8 @@ impl ArtifactEngineService for ArtifactServer {
                 Status::internal(format!("failed to read artifact upload stream: {error}"))
             })?
             .ok_or_else(|| Status::invalid_argument("artifact upload stream is empty"))?;
-        let agent_scope = normalize_agent_scope(&first.agent_id)?;
+        let agent_scope =
+            normalize_agent_scope(&first.agent_id).map_err(Status::invalid_argument)?;
         let logical_filename = first.logical_filename.trim();
         if logical_filename.is_empty() {
             return Err(Status::invalid_argument("logical_filename is required"));
@@ -765,17 +773,17 @@ impl ArtifactEngineService for ArtifactServer {
             Some(object_key) => object_key,
             None => default_object_key(&agent_scope, &content_hash, logical_filename),
         };
-        let record = persist_uploaded_record(
-            &agent_scope,
+        let record = persist_uploaded_record(PersistUploadedRecordRequest {
+            agent_id: &agent_scope,
             logical_filename,
             object_key,
             mime_type,
             source_metadata_json,
             purpose,
-            &staging_path,
+            staging_path: &staging_path,
             content_hash,
             size_bytes,
-        )
+        })
         .await
         .map_err(|error| {
             Status::internal(format!("failed to persist uploaded artifact: {error}"))
@@ -793,7 +801,8 @@ impl ArtifactEngineService for ArtifactServer {
         request: Request<GenerateEvidenceByArtifactIdRequest>,
     ) -> Result<Response<GenerateEvidenceResponse>, Status> {
         let payload = request.into_inner();
-        let agent_scope = normalize_agent_scope(&payload.agent_id)?;
+        let agent_scope =
+            normalize_agent_scope(&payload.agent_id).map_err(Status::invalid_argument)?;
         let artifact_id = payload.artifact_id.trim();
         if artifact_id.is_empty() {
             return Err(Status::invalid_argument("artifact_id is required"));
@@ -851,7 +860,8 @@ impl ArtifactEngineService for ArtifactServer {
         request: Request<GetArtifactMetadataByArtifactIdRequest>,
     ) -> Result<Response<GetArtifactMetadataResponse>, Status> {
         let payload = request.into_inner();
-        let agent_scope = normalize_agent_scope(&payload.agent_id)?;
+        let agent_scope =
+            normalize_agent_scope(&payload.agent_id).map_err(Status::invalid_argument)?;
         let artifact_id = payload.artifact_id.trim();
         if artifact_id.is_empty() {
             return Err(Status::invalid_argument("artifact_id is required"));
@@ -972,7 +982,7 @@ mod tests {
     use std::collections::HashMap;
     use std::net::TcpListener as StdTcpListener;
     use std::process::{Command, Stdio};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
     use axum::body::Bytes;
     use axum::extract::{Path as AxumPath, State};
@@ -983,10 +993,10 @@ mod tests {
     use koda_proto::artifact::v1::artifact_engine_service_client::ArtifactEngineServiceClient;
     use tempfile::TempDir;
     use tokio::net::TcpListener;
-    use tokio::sync::oneshot;
+    use tokio::sync::{oneshot, Mutex};
     use tokio_stream::wrappers::TcpListenerStream;
 
-    type ObjectMap = Arc<Mutex<HashMap<String, Vec<u8>>>>;
+    type ObjectMap = Arc<StdMutex<HashMap<String, Vec<u8>>>>;
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1037,7 +1047,7 @@ mod tests {
         async fn start(bucket: &str) -> Self {
             let state = FakeS3State {
                 bucket: bucket.to_string(),
-                objects: Arc::new(Mutex::new(HashMap::new())),
+                objects: Arc::new(StdMutex::new(HashMap::new())),
             };
             let app = Router::new()
                 .route("/:bucket", head(head_bucket))
@@ -1299,7 +1309,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn object_storage_roundtrip_is_durable_across_instances() {
-        let _env_lock = env_lock().lock().unwrap();
+        let _env_lock = env_lock().lock().await;
         let postgres = PostgresHarness::start();
         let fake_s3 = FakeS3Server::start("artifact-proof-bucket").await;
         let artifact_root = TempDir::new().unwrap();

@@ -102,6 +102,28 @@ class TestJiraService:
             result = await service.execute("unknown", "action", {})
         assert "Unknown command" in result
 
+    def test_service_falls_back_to_legacy_config_when_broker_is_unavailable(self):
+        with (
+            patch(
+                "koda.services.core_connection_broker.get_core_connection_broker",
+                side_effect=RuntimeError("offline"),
+            ),
+            patch("atlassian.Jira") as mock_cls,
+            patch("koda.services.atlassian_client.JIRA_URL", "https://test.atlassian.net"),
+            patch("koda.services.atlassian_client.JIRA_USERNAME", "test@test.com"),
+            patch("koda.services.atlassian_client.JIRA_API_TOKEN", "token"),
+            patch("koda.services.atlassian_client.JIRA_CLOUD", True),
+        ):
+            JiraService()
+
+        mock_cls.assert_called_once_with(
+            api_version="3",
+            url="https://test.atlassian.net",
+            username="test@test.com",
+            password="token",
+            cloud=True,
+        )
+
     @pytest.mark.asyncio
     async def test_issues_search(self):
         with patch("atlassian.Jira") as mock_cls:
@@ -884,6 +906,20 @@ class TestJiraAdfAndTransitions:
 
         mock_client.myself.assert_called_once()
 
+    def test_verify_identity_returns_authenticated_profile(self):
+        service, mock_client = self._make_service()
+        mock_client.myself.return_value = {
+            "accountId": "agent-123",
+            "displayName": "Agent User",
+            "emailAddress": "agent@example.com",
+        }
+
+        profile = service.verify_identity()
+
+        assert profile["accountId"] == "agent-123"
+        assert profile["displayName"] == "Agent User"
+        mock_client.myself.assert_called_once_with()
+
     @pytest.mark.asyncio
     async def test_issues_create_description_adf(self):
         service, mock_client = self._make_service()
@@ -1213,6 +1249,30 @@ class TestConfluenceService:
             result = await service.execute("spaces", "list", {})
         assert "Exit 0:" in result
         assert "DEV" in result
+
+    def test_verify_read_access_returns_first_space_summary(self):
+        with patch("atlassian.Confluence") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.get_all_spaces.return_value = {
+                "results": [{"key": "DEV", "name": "Developer Docs"}],
+            }
+            with (
+                patch("koda.services.atlassian_client.CONFLUENCE_URL", "https://wiki.example.com"),
+                patch("koda.services.atlassian_client.CONFLUENCE_USERNAME", "agent@example.com"),
+                patch("koda.services.atlassian_client.CONFLUENCE_API_TOKEN", "token"),
+                patch("koda.services.atlassian_client.CONFLUENCE_CLOUD", True),
+            ):
+                service = ConfluenceService()
+
+        probe = service.verify_read_access()
+
+        assert probe == {
+            "space_count": 1,
+            "first_space_key": "DEV",
+            "first_space_name": "Developer Docs",
+        }
+        mock_client.get_all_spaces.assert_called_once_with(start=0, limit=1)
 
     @pytest.mark.asyncio
     async def test_unknown_command(self):

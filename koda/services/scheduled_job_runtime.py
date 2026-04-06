@@ -21,6 +21,14 @@ def _jobs() -> Any:
 async def _dispatch_run(application: Any, run: dict[str, Any]) -> None:
     job = run["job"]
     try:
+        blocked_reason = _policy_snapshot_drift_reason(run)
+        if blocked_reason:
+            await _block_run_due_to_policy_drift(
+                application=application,
+                run=run,
+                reason=blocked_reason,
+            )
+            return
         if job["job_type"] == "agent_query":
             await _dispatch_agent_query(application, run)
         elif job["job_type"] == "reminder":
@@ -41,6 +49,79 @@ async def _dispatch_run(application: Any, run: dict[str, Any]) -> None:
             notification_chat_id=job["chat_id"],
             telegram_bot=getattr(application, "bot", None),
         )
+
+
+def _policy_snapshot_drift_reason(run: dict[str, Any]) -> str | None:
+    jobs = _jobs()
+    job = run["job"]
+    metadata = run.get("metadata") or {}
+    stored_hash = str(metadata.get("policy_snapshot_hash") or "").strip()
+    stored_snapshot = metadata.get("policy_snapshot")
+    if not stored_hash or not isinstance(stored_snapshot, dict):
+        return "Scheduled run blocked because its policy snapshot is missing."
+    _, _, snapshot_hash = jobs._policy_snapshot_payload(job)
+    if not snapshot_hash:
+        return "Scheduled run blocked because policy snapshot could not be resolved."
+    if stored_hash != snapshot_hash:
+        return "Scheduled run blocked because the job policy changed after validation."
+    return None
+
+
+async def _block_run_due_to_policy_drift(*, application: Any, run: dict[str, Any], reason: str) -> None:
+    jobs = _jobs()
+    job = run["job"]
+    now = jobs._utcnow()
+    transitioned = jobs._transition_run(
+        int(run["id"]),
+        from_statuses={jobs.RUN_STATUS_RUNNING},
+        status=jobs.RUN_STATUS_BLOCKED,
+        completed_at=jobs._iso(now),
+        verification_status="blocked_by_policy",
+        summary_text=reason,
+        error_message=reason,
+        lease_owner=None,
+        lease_expires_at=None,
+        next_attempt_at=None,
+    )
+    if not transitioned:
+        return
+    jobs._touch_job(
+        int(job["id"]),
+        status=jobs.JOB_STATUS_VALIDATION_PENDING,
+        next_run_at=None,
+        last_failure_at=jobs._iso(now),
+    )
+    jobs._suppress_pending_runs(
+        int(job["id"]),
+        status=jobs.RUN_STATUS_BLOCKED,
+        error_message=reason,
+    )
+    jobs._record_scheduler_event(
+        scheduled_job_id=int(job["id"]),
+        scheduled_run_id=int(run["id"]),
+        trace_id=str(run.get("trace_id") or "") or None,
+        event_type="run.blocked_by_policy",
+        source="scheduler_runtime",
+        status_from=jobs.RUN_STATUS_RUNNING,
+        status_to=jobs.RUN_STATUS_BLOCKED,
+        reason=reason,
+        details={"trigger_reason": run.get("trigger_reason")},
+    )
+    await _notify_run(
+        telegram_bot=application.bot,
+        chat_id=int(job["chat_id"]),
+        job=job,
+        run={
+            **run,
+            "status": jobs.RUN_STATUS_BLOCKED,
+            "verification_status": "blocked_by_policy",
+            "completed_at": jobs._iso(now),
+            "error_message": reason,
+            "summary_text": reason,
+        },
+        summary_text=reason,
+        notification_status_on_success="sent",
+    )
 
 
 async def _dispatch_agent_query(application: Any, run: dict[str, Any]) -> None:
@@ -69,6 +150,15 @@ async def _dispatch_agent_query(application: Any, run: dict[str, Any]) -> None:
         task_id=task_id,
         provider_effective=job.get("provider_preference"),
         model_effective=job.get("model_preference"),
+        lease_heartbeat_at=jobs._iso(jobs._utcnow()),
+    )
+    jobs._record_scheduler_event(
+        scheduled_job_id=int(job["id"]),
+        scheduled_run_id=int(run["id"]),
+        trace_id=str(run.get("trace_id") or "") or None,
+        event_type="run.dispatched",
+        source="scheduler_runtime",
+        details={"task_id": task_id, "provider": job.get("provider_preference"), "model": job.get("model_preference")},
     )
 
 
@@ -101,6 +191,9 @@ async def _dispatch_reminder(application: Any, run: dict[str, Any]) -> None:
 
 async def _dispatch_shell_command(application: Any, run: dict[str, Any]) -> None:
     jobs = _jobs()
+    from koda.agent_contract import evaluate_integration_grant
+    from koda.knowledge.task_policy_defaults import default_execution_policy
+    from koda.services.execution_policy import evaluate_execution_policy
     from koda.services.shell_runner import run_shell_command
     from koda.utils.approval import _execution_approved
     from koda.utils.formatting import escape_html
@@ -132,6 +225,56 @@ async def _dispatch_shell_command(application: Any, run: dict[str, Any]) -> None
             duration_ms=0.0,
             verification_status="blocked",
             notification_summary="Scheduled shell command blocked because it is not read-only.",
+            notification_chat_id=int(job["chat_id"]),
+            telegram_bot=application.bot,
+        )
+        return
+    policy_snapshot = job.get("policy_snapshot") if isinstance(job.get("policy_snapshot"), dict) else {}
+    grant_decision = evaluate_integration_grant(
+        "shell",
+        {"args": command},
+        {"integration_grants": policy_snapshot.get("integration_grants") if policy_snapshot else {}},
+    )
+    if not grant_decision.allowed:
+        await handle_run_failure(
+            run_id=int(run["id"]),
+            task_id=None,
+            error_message=f"Scheduled shell command blocked by integration policy ({grant_decision.reason}).",
+            provider_effective=None,
+            model_effective=None,
+            duration_ms=0.0,
+            verification_status="blocked_by_policy",
+            notification_summary="Scheduled shell command blocked by integration policy.",
+            notification_chat_id=int(job["chat_id"]),
+            telegram_bot=application.bot,
+        )
+        return
+    policy_evaluation = evaluate_execution_policy(
+        "shell",
+        {"args": command},
+        task_kind="general",
+        effective_policy=default_execution_policy("general"),
+        tool_policy={"allowed_tool_ids": list(policy_snapshot.get("allowed_tool_ids") or [])},
+        resource_access_policy={
+            "integration_grants": policy_snapshot.get("integration_grants") if policy_snapshot else {}
+        },
+        execution_policy=(
+            policy_snapshot.get("execution_policy")
+            if isinstance(policy_snapshot.get("execution_policy"), dict)
+            else None
+        ),
+        known_tool=True,
+    )
+    if policy_evaluation.decision != "allow":
+        await handle_run_failure(
+            run_id=int(run["id"]),
+            task_id=None,
+            error_message=f"Scheduled shell command blocked by execution policy ({policy_evaluation.reason_code}).",
+            provider_effective=None,
+            model_effective=None,
+            duration_ms=0.0,
+            verification_status="blocked_by_policy",
+            notification_summary="Scheduled shell command blocked by execution policy.",
             notification_chat_id=int(job["chat_id"]),
             telegram_bot=application.bot,
         )
@@ -220,8 +363,9 @@ async def handle_run_cancellation(
         "disposition": status,
         "finalized_at": jobs._iso(now),
     }
-    jobs._touch_run(
+    transitioned = jobs._transition_run(
         run_id,
+        from_statuses={jobs.RUN_STATUS_RUNNING},
         status=status,
         completed_at=jobs._iso(now),
         task_id=task_id,
@@ -233,6 +377,8 @@ async def handle_run_cancellation(
         next_attempt_at=None,
         error_message=reason,
     )
+    if not transitioned:
+        return
     if run["trigger_reason"] == jobs.RUN_TRIGGER_MANUAL_TEST:
         new_status = jobs.JOB_STATUS_ARCHIVED if job["status"] == jobs.JOB_STATUS_ARCHIVED else job["status"]
         jobs._touch_job(
@@ -244,6 +390,17 @@ async def handle_run_cancellation(
         jobs._touch_job(int(job["id"]), status=jobs.JOB_STATUS_ARCHIVED, next_run_at=None, last_run_at=jobs._iso(now))
     else:
         jobs._touch_job(int(job["id"]), last_run_at=jobs._iso(now))
+    jobs._record_scheduler_event(
+        scheduled_job_id=int(job["id"]),
+        scheduled_run_id=run_id,
+        trace_id=str(run.get("trace_id") or "") or None,
+        event_type="run.cancelled",
+        source="scheduler_runtime",
+        status_from=jobs.RUN_STATUS_RUNNING,
+        status_to=status,
+        reason=reason,
+        details={"task_id": task_id, "notification_chat_id": notification_chat_id},
+    )
     await _notify_run(
         telegram_bot=telegram_bot,
         chat_id=notification_chat_id,
@@ -304,8 +461,9 @@ async def handle_run_success(
     }
     job_status = str(job["status"])
     next_run_at = job.get("next_run_at")
-    jobs._touch_run(
+    transitioned = jobs._transition_run(
         run_id,
+        from_statuses={jobs.RUN_STATUS_RUNNING},
         status=run_status,
         completed_at=jobs._iso(now),
         duration_ms=duration_ms,
@@ -320,6 +478,8 @@ async def handle_run_success(
         next_attempt_at=None,
         error_message=None,
     )
+    if not transitioned:
+        return
     with contextlib.suppress(Exception):
         from koda.services.metrics import SCHEDULED_RUN_TRANSITIONS
 
@@ -357,6 +517,8 @@ async def handle_run_success(
             status=job_status,
             last_run_at=jobs._iso(now),
             next_run_at=next_run_at if job_status == jobs.JOB_STATUS_ACTIVE else job.get("next_run_at"),
+            last_validated_at=jobs._iso(now),
+            last_validation_run_id=run_id,
             last_success_at=jobs._iso(now) if run_status == jobs.RUN_STATUS_SUCCEEDED else job.get("last_success_at"),
             last_failure_at=jobs._iso(now) if run_status != jobs.RUN_STATUS_SUCCEEDED else job.get("last_failure_at"),
         )
@@ -379,7 +541,25 @@ async def handle_run_success(
         if job["trigger_type"] == "one_shot" and run_status == jobs.RUN_STATUS_SUCCEEDED:
             updates["status"] = jobs.JOB_STATUS_ARCHIVED
             updates["next_run_at"] = None
+            job_status = jobs.JOB_STATUS_ARCHIVED
         jobs._touch_job(int(job["id"]), **updates)
+    jobs._record_scheduler_event(
+        scheduled_job_id=int(job["id"]),
+        scheduled_run_id=run_id,
+        trace_id=str(run.get("trace_id") or "") or None,
+        event_type="run.completed" if run_status == jobs.RUN_STATUS_SUCCEEDED else "run.blocked",
+        source="scheduler_runtime",
+        status_from=jobs.RUN_STATUS_RUNNING,
+        status_to=run_status,
+        details={
+            "task_id": task_id,
+            "verification_status": verification_status,
+            "provider_effective": provider_effective,
+            "model_effective": model_effective,
+            "duration_ms": duration_ms,
+            "job_status": job_status,
+        },
+    )
     await _notify_run(
         telegram_bot=telegram_bot,
         chat_id=notification_chat_id,
@@ -439,8 +619,9 @@ async def handle_run_failure(
     terminal_status = jobs.RUN_STATUS_BLOCKED if verification_status == "blocked" else jobs.RUN_STATUS_FAILED
     if should_retry:
         next_retry = now + timedelta(seconds=_scheduler_retry_delay(attempt))
-        jobs._touch_run(
+        transitioned = jobs._transition_run(
             run_id,
+            from_statuses={jobs.RUN_STATUS_RUNNING},
             status=jobs.RUN_STATUS_RETRYING,
             attempt=attempt,
             next_attempt_at=jobs._iso(next_retry),
@@ -456,14 +637,28 @@ async def handle_run_failure(
             lease_owner=None,
             lease_expires_at=None,
         )
+        if not transitioned:
+            return
         with contextlib.suppress(Exception):
             from koda.services.metrics import SCHEDULED_RUN_TRANSITIONS
 
             SCHEDULED_RUN_TRANSITIONS.labels(agent_id=jobs.AGENT_ID or "default", status=jobs.RUN_STATUS_RETRYING).inc()
         jobs._touch_job(int(job["id"]), last_run_at=jobs._iso(now), last_failure_at=jobs._iso(now))
+        jobs._record_scheduler_event(
+            scheduled_job_id=int(job["id"]),
+            scheduled_run_id=run_id,
+            trace_id=str(run.get("trace_id") or "") or None,
+            event_type="run.retried",
+            source="scheduler_runtime",
+            status_from=jobs.RUN_STATUS_RUNNING,
+            status_to=jobs.RUN_STATUS_RETRYING,
+            reason=error_message,
+            details={"task_id": task_id, "attempt": attempt, "next_retry_at": jobs._iso(next_retry), "dlq_id": dlq_id},
+        )
     else:
-        jobs._touch_run(
+        transitioned = jobs._transition_run(
             run_id,
+            from_statuses={jobs.RUN_STATUS_RUNNING},
             status=terminal_status,
             attempt=attempt,
             completed_at=jobs._iso(now),
@@ -479,6 +674,8 @@ async def handle_run_failure(
             lease_expires_at=None,
             next_attempt_at=None,
         )
+        if not transitioned:
+            return
         with contextlib.suppress(Exception):
             from koda.services.metrics import SCHEDULED_RUN_TRANSITIONS
 
@@ -506,6 +703,23 @@ async def handle_run_failure(
                 status=jobs.RUN_STATUS_BLOCKED,
                 error_message="Job moved to failed_open after terminal failure.",
             )
+        jobs._record_scheduler_event(
+            scheduled_job_id=int(job["id"]),
+            scheduled_run_id=run_id,
+            trace_id=str(run.get("trace_id") or "") or None,
+            event_type="run.failed" if terminal_status == jobs.RUN_STATUS_FAILED else "run.blocked",
+            source="scheduler_runtime",
+            status_from=jobs.RUN_STATUS_RUNNING,
+            status_to=terminal_status,
+            reason=error_message,
+            details={
+                "task_id": task_id,
+                "attempt": attempt,
+                "verification_status": verification_status,
+                "job_status": new_job_status,
+                "dlq_id": dlq_id,
+            },
+        )
     await _notify_run(
         telegram_bot=telegram_bot,
         chat_id=notification_chat_id,
@@ -553,6 +767,7 @@ def _notification_text(
     lines = [
         f"⏱ Job #{job['id']} • run #{run['id']}",
         f"Status: {run.get('status')}",
+        f"Trace: {run.get('trace_id') or 'n/a'}",
         f"Planejado: {planned}",
         f"Executado: {actual}",
         f"Duração: {duration_label}",

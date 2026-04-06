@@ -255,7 +255,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 4 }}
-                  className="runtime-actions-menu"
+                  className="app-floating-surface runtime-actions-menu"
                   role="menu"
                 >
                   <MenuAction
@@ -490,12 +490,14 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.14, ease: "easeOut" }}
               onClick={() => setDetailsOpen(false)}
             />
             <motion.aside
-              initial={{ opacity: 0, x: 14 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
               className="runtime-detail-sheet"
             >
               <div className="runtime-detail-sheet__header">

@@ -70,13 +70,13 @@ function MemoryReferenceList({
   }
 
   return (
-    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.012)]">
+    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
       {items.map((item) => (
         <button
           key={item.memory_id}
           type="button"
           onClick={() => onSelectMemory(item.memory_id)}
-          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(255,255,255,0.018)]"
+          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]"
         >
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-[var(--text-primary)]">
@@ -106,7 +106,7 @@ function ReviewHistory({
   }
 
   return (
-    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.012)]">
+    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
       {history.map((entry) => (
         <div key={entry.id} className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -159,7 +159,7 @@ function MemoryReviewDetailPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(12,12,12,0.9)] px-5 py-4">
+      <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] px-5 py-4">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
             <span
@@ -422,7 +422,7 @@ export function MemoryCurationDetail({
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(12,12,12,0.9)] px-5 py-4">
+          <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] px-5 py-4">
             <div className="flex flex-col gap-3">
               <div className="min-w-0">
                 <p className="eyebrow">{t("memory.curation.detail.learningTitle")}</p>
@@ -434,7 +434,10 @@ export function MemoryCurationDetail({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5" style={{ maxHeight: 'calc(100dvh - var(--shell-topbar-height) - 24rem)' }}>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
+            style={{ maxHeight: "calc(100dvh - var(--shell-topbar-height) - 24rem)" }}
+          >
             <MemoryClusterDetail
               detail={detail as MemoryClusterReviewDetail}
               onSelectMemory={onSelectMemory}

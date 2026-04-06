@@ -643,12 +643,103 @@ export function serializeToolPolicy(data: ToolPolicyData): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Execution Policy                                                          */
+/* -------------------------------------------------------------------------- */
+
+export interface ExecutionPolicyData {
+  version: number;
+  source?: string;
+  defaults: Record<string, unknown>;
+  rules: Array<{
+    name: string;
+    priority: number;
+    match: Record<string, unknown>;
+    decision: string;
+    reason?: string;
+    preview_fields?: string[];
+    approval_scope_kind?: string;
+    approval_ttl_seconds?: number;
+  }>;
+  _extra: Record<string, unknown>;
+}
+
+const EXECUTION_POLICY_KEYS = ["version", "source", "defaults", "rules"];
+
+function asExecutionPolicyRules(
+  value: unknown,
+): ExecutionPolicyData["rules"] {
+  const arr = Array.isArray(value) ? value : [];
+  return arr
+    .map((item, index) => {
+      const parsed = asObject(item);
+      const match = asObject(parsed.match);
+      return {
+        name: asString(parsed.name, `rule_${index}`),
+        priority: asNumber(parsed.priority, 0),
+        match,
+        decision: asString(parsed.decision, "require_approval"),
+        reason: asString(parsed.reason) || undefined,
+        preview_fields: asStringArray(parsed.preview_fields),
+        approval_scope_kind: asString(parsed.approval_scope_kind) || undefined,
+        approval_ttl_seconds:
+          typeof parsed.approval_ttl_seconds === "number"
+            ? parsed.approval_ttl_seconds
+            : undefined,
+      };
+    })
+    .filter((rule) => Boolean(rule.name && rule.decision));
+}
+
+export function parseExecutionPolicy(json: string): ExecutionPolicyData {
+  const obj = safeParseJson(json);
+  const { known, extra } = extractKnown(obj, EXECUTION_POLICY_KEYS);
+  return {
+    version: asNumber(known.version, 1),
+    source: asString(known.source),
+    defaults: asObject(known.defaults),
+    rules: asExecutionPolicyRules(known.rules),
+    _extra: extra,
+  };
+}
+
+export function serializeExecutionPolicy(data: ExecutionPolicyData): string {
+  return JSON.stringify(
+    mergeBack(
+      {
+        version: data.version,
+        source: data.source,
+        defaults: data.defaults,
+        rules: data.rules,
+      },
+      data._extra,
+    ),
+    null,
+    2,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Resource Access Policy                                                    */
 /* -------------------------------------------------------------------------- */
 
 export interface ResourceAccessPolicyData {
   allowed_global_secret_keys: string[];
   allowed_shared_env_keys: string[];
+  integration_grants: Record<
+    string,
+    {
+      enabled?: boolean;
+      allow_actions?: string[];
+      deny_actions?: string[];
+      approval_mode?: string;
+      secret_keys?: string[];
+      shared_env_keys?: string[];
+      allowed_domains?: string[];
+      allowed_paths?: string[];
+      allowed_db_envs?: string[];
+      allow_private_network?: boolean;
+    }
+  >;
   local_env: Record<string, string>;
   _extra: Record<string, unknown>;
 }
@@ -656,8 +747,42 @@ export interface ResourceAccessPolicyData {
 const RESOURCE_ACCESS_POLICY_KEYS = [
   "allowed_global_secret_keys",
   "allowed_shared_env_keys",
+  "integration_grants",
   "local_env",
 ];
+
+function asIntegrationGrants(
+  value: unknown,
+): ResourceAccessPolicyData["integration_grants"] {
+  const obj = asObject(value);
+  return Object.fromEntries(
+    Object.entries(obj)
+      .map(([integrationId, grant]) => {
+        const parsed = asObject(grant);
+        const normalized = mergeBack(
+          {
+            enabled:
+              typeof parsed.enabled === "boolean" ? parsed.enabled : undefined,
+            allow_actions: asStringArray(parsed.allow_actions),
+            deny_actions: asStringArray(parsed.deny_actions),
+            approval_mode: asString(parsed.approval_mode),
+            secret_keys: asStringArray(parsed.secret_keys),
+            shared_env_keys: asStringArray(parsed.shared_env_keys),
+            allowed_domains: asStringArray(parsed.allowed_domains),
+            allowed_paths: asStringArray(parsed.allowed_paths),
+            allowed_db_envs: asStringArray(parsed.allowed_db_envs),
+            allow_private_network:
+              typeof parsed.allow_private_network === "boolean"
+                ? parsed.allow_private_network
+                : undefined,
+          },
+          {},
+        );
+        return [integrationId, normalized];
+      })
+      .filter(([, grant]) => Object.keys(grant).length > 0),
+  );
+}
 
 export function parseResourceAccessPolicy(json: string): ResourceAccessPolicyData {
   const obj = safeParseJson(json);
@@ -665,6 +790,7 @@ export function parseResourceAccessPolicy(json: string): ResourceAccessPolicyDat
   return {
     allowed_global_secret_keys: asStringArray(known.allowed_global_secret_keys),
     allowed_shared_env_keys: asStringArray(known.allowed_shared_env_keys),
+    integration_grants: asIntegrationGrants(known.integration_grants),
     local_env: asStringMap(known.local_env),
     _extra: extra,
   };
@@ -676,6 +802,7 @@ export function serializeResourceAccessPolicy(data: ResourceAccessPolicyData): s
       {
         allowed_global_secret_keys: data.allowed_global_secret_keys,
         allowed_shared_env_keys: data.allowed_shared_env_keys,
+        integration_grants: data.integration_grants,
         local_env: data.local_env,
       },
       data._extra,
@@ -744,10 +871,10 @@ export function parseMemoryPolicy(json: string): MemoryPolicyData {
   const promotionPolicy = asObject(profile.promotion_policy);
   return {
     enabled: asBool(known.enabled, true),
-    max_recall: asNumber(known.max_recall, 25),
-    recall_threshold: asNumber(known.recall_threshold, 0.25),
+    max_recall: asNumber(known.max_recall, 8),
+    recall_threshold: asNumber(known.recall_threshold, 0.65),
     recall_timeout: asNumber(known.recall_timeout, 3),
-    max_context_tokens: asNumber(known.max_context_tokens, 3500),
+    max_context_tokens: asNumber(known.max_context_tokens, 4000),
     recency_half_life_days: asNumber(known.recency_half_life_days, 120),
     max_extraction_items: asNumber(known.max_extraction_items, 15),
     extraction_provider: asString(known.extraction_provider),
@@ -882,11 +1009,11 @@ export function parseKnowledgePolicy(json: string): KnowledgePolicyData {
     max_source_age_days: asNumber(known.max_source_age_days, 3650),
     require_owner_provenance: asBool(
       known.require_owner_provenance,
-      false,
+      true,
     ),
     require_freshness_provenance: asBool(
       known.require_freshness_provenance,
-      false,
+      true,
     ),
     promotion_mode: asString(known.promotion_mode, "review_queue"),
     _extra: extra,
@@ -926,12 +1053,11 @@ export function serializeKnowledgePolicy(data: KnowledgePolicyData): string {
 export interface VoicePolicyData {
   mode: string;
   style: string;
-  duration_target: string;
   tts_notes: string;
   _extra: Record<string, unknown>;
 }
 
-const VOICE_POLICY_KEYS = ["mode", "style", "duration_target", "tts_notes"];
+const VOICE_POLICY_KEYS = ["mode", "style", "tts_notes"];
 
 export function parseVoicePolicy(json: string): VoicePolicyData {
   const obj = safeParseJson(json);
@@ -939,7 +1065,6 @@ export function parseVoicePolicy(json: string): VoicePolicyData {
   return {
     mode: asString(known.mode, "disabled"),
     style: asString(known.style),
-    duration_target: asString(known.duration_target),
     tts_notes: asString(known.tts_notes),
     _extra: extra,
   };
@@ -951,8 +1076,8 @@ export function serializeVoicePolicy(data: VoicePolicyData): string {
       {
         mode: data.mode,
         style: data.style,
-        duration_target: data.duration_target,
         tts_notes: data.tts_notes,
+        tts_defaults: "Fale naturalmente no idioma configurado do agente. Evite caracteres especiais, emojis ou formatacao que nao faca sentido como audio falado. Produza audio claro e natural como fala.",
       },
       data._extra,
     ),
@@ -1041,4 +1166,277 @@ export function serializeMemoryExtractionSchema(
     null,
     2,
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Workspace Spec                                                             */
+/* -------------------------------------------------------------------------- */
+
+export interface WorkspaceSpecData {
+  hard_rules: {
+    non_negotiables: string[];
+    forbidden_actions: string[];
+    security_rules: string[];
+  };
+  response_policy: {
+    language: string;
+    citation_policy: string;
+    quality_bar: string;
+  };
+  model_policy: {
+    allowed_providers: string[];
+    max_budget_usd: number | null;
+    max_total_budget_usd: number | null;
+  };
+  resource_access_policy: {
+    integration_grants: string[];
+  };
+  _extra: Record<string, unknown>;
+}
+
+const WORKSPACE_SPEC_KEYS = [
+  "hard_rules",
+  "response_policy",
+  "model_policy",
+  "resource_access_policy",
+];
+
+export function parseWorkspaceSpec(json: string): WorkspaceSpecData {
+  const obj = safeParseJson(json);
+  const { known, extra } = extractKnown(obj, WORKSPACE_SPEC_KEYS);
+
+  const hardRules = asObject(known.hard_rules);
+  const responsePolicy = asObject(known.response_policy);
+  const modelPolicy = asObject(known.model_policy);
+  const resourceAccess = asObject(known.resource_access_policy);
+
+  return {
+    hard_rules: {
+      non_negotiables: asStringArray(hardRules.non_negotiables),
+      forbidden_actions: asStringArray(hardRules.forbidden_actions),
+      security_rules: asStringArray(hardRules.security_rules),
+    },
+    response_policy: {
+      language: asString(responsePolicy.language, "pt-BR"),
+      citation_policy: asString(responsePolicy.citation_policy, "cite when grounded"),
+      quality_bar: asString(responsePolicy.quality_bar, "professional"),
+    },
+    model_policy: {
+      allowed_providers: asStringArray(modelPolicy.allowed_providers),
+      max_budget_usd:
+        modelPolicy.max_budget_usd === undefined || modelPolicy.max_budget_usd === null
+          ? null
+          : asNumber(modelPolicy.max_budget_usd),
+      max_total_budget_usd:
+        modelPolicy.max_total_budget_usd === undefined || modelPolicy.max_total_budget_usd === null
+          ? null
+          : asNumber(modelPolicy.max_total_budget_usd),
+    },
+    resource_access_policy: {
+      integration_grants: asStringArray(resourceAccess.integration_grants),
+    },
+    _extra: extra,
+  };
+}
+
+export function serializeWorkspaceSpec(data: WorkspaceSpecData): string {
+  return JSON.stringify(
+    mergeBack(
+      {
+        hard_rules: mergeBack(
+          {
+            non_negotiables: data.hard_rules.non_negotiables,
+            forbidden_actions: data.hard_rules.forbidden_actions,
+            security_rules: data.hard_rules.security_rules,
+          },
+          {},
+        ),
+        response_policy: mergeBack(
+          {
+            language: data.response_policy.language,
+            citation_policy: data.response_policy.citation_policy,
+            quality_bar: data.response_policy.quality_bar,
+          },
+          {},
+        ),
+        model_policy: mergeBack(
+          {
+            allowed_providers: data.model_policy.allowed_providers,
+            max_budget_usd: data.model_policy.max_budget_usd,
+            max_total_budget_usd: data.model_policy.max_total_budget_usd,
+          },
+          {},
+        ),
+        resource_access_policy: mergeBack(
+          {
+            integration_grants: data.resource_access_policy.integration_grants,
+          },
+          {},
+        ),
+      },
+      data._extra,
+    ),
+    null,
+    2,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Squad Spec                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export interface SquadSpecData {
+  operating_instructions: {
+    default_workflow: string[];
+    execution_heuristics: string[];
+    handoff_expectations: string[];
+  };
+  interaction_style: {
+    tone: string;
+    collaboration_style: string;
+    writing_style: string;
+  };
+  tool_policy: {
+    allowed_categories: string[];
+    allowed_tool_ids: string[];
+  };
+  knowledge_policy: Record<string, unknown>;
+  hard_rules: {
+    approval_requirements: string[];
+  };
+  _extra: Record<string, unknown>;
+}
+
+const SQUAD_SPEC_KEYS = [
+  "operating_instructions",
+  "interaction_style",
+  "tool_policy",
+  "knowledge_policy",
+  "hard_rules",
+];
+
+export function parseSquadSpec(json: string): SquadSpecData {
+  const obj = safeParseJson(json);
+  const { known, extra } = extractKnown(obj, SQUAD_SPEC_KEYS);
+
+  const operatingInstructions = asObject(known.operating_instructions);
+  const interactionStyle = asObject(known.interaction_style);
+  const toolPolicy = asObject(known.tool_policy);
+  const hardRules = asObject(known.hard_rules);
+
+  return {
+    operating_instructions: {
+      default_workflow: asStringArray(operatingInstructions.default_workflow),
+      execution_heuristics: asStringArray(operatingInstructions.execution_heuristics),
+      handoff_expectations: asStringArray(operatingInstructions.handoff_expectations),
+    },
+    interaction_style: {
+      tone: asString(interactionStyle.tone, "profissional"),
+      collaboration_style: asString(interactionStyle.collaboration_style, "colaborativo"),
+      writing_style: asString(interactionStyle.writing_style, "claro e direto"),
+    },
+    tool_policy: {
+      allowed_categories: asStringArray(toolPolicy.allowed_categories),
+      allowed_tool_ids: asStringArray(toolPolicy.allowed_tool_ids),
+    },
+    knowledge_policy: asObject(known.knowledge_policy),
+    hard_rules: {
+      approval_requirements: asStringArray(hardRules.approval_requirements),
+    },
+    _extra: extra,
+  };
+}
+
+export function serializeSquadSpec(data: SquadSpecData): string {
+  return JSON.stringify(
+    mergeBack(
+      {
+        operating_instructions: mergeBack(
+          {
+            default_workflow: data.operating_instructions.default_workflow,
+            execution_heuristics: data.operating_instructions.execution_heuristics,
+            handoff_expectations: data.operating_instructions.handoff_expectations,
+          },
+          {},
+        ),
+        interaction_style: mergeBack(
+          {
+            tone: data.interaction_style.tone,
+            collaboration_style: data.interaction_style.collaboration_style,
+            writing_style: data.interaction_style.writing_style,
+          },
+          {},
+        ),
+        tool_policy: mergeBack(
+          {
+            allowed_categories: data.tool_policy.allowed_categories,
+            allowed_tool_ids: data.tool_policy.allowed_tool_ids,
+          },
+          {},
+        ),
+        knowledge_policy: data.knowledge_policy,
+        hard_rules: mergeBack(
+          {
+            approval_requirements: data.hard_rules.approval_requirements,
+          },
+          {},
+        ),
+      },
+      data._extra,
+    ),
+    null,
+    2,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Skill Policy Stubs                                                         */
+/* -------------------------------------------------------------------------- */
+
+export type CustomSkill = {
+  id: string;
+  name: string;
+  instruction: string;
+  category: string;
+  content: string;
+  enabled?: boolean;
+  aliases?: string[];
+  tags?: string[];
+  output_format_enforcement?: string;
+};
+
+export type SkillPolicyData = {
+  enabled?: boolean;
+  max_skills?: number;
+  skill_budget_pct?: number;
+  [key: string]: unknown;
+};
+
+export function parseSkillPolicy(raw: string): SkillPolicyData {
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    return {
+      enabled: true,
+      max_skills: 6,
+      skill_budget_pct: 0.15,
+      ...parsed,
+    };
+  } catch { return { enabled: true, max_skills: 6, skill_budget_pct: 0.15 }; }
+}
+
+export function serializeSkillPolicy(policy: SkillPolicyData): string {
+  return JSON.stringify({
+    enabled: true,
+    max_skills: 6,
+    skill_budget_pct: 0.15,
+    ...policy,
+  }, null, 2);
+}
+
+export function parseCustomSkills(raw: string): CustomSkill[] {
+  try { return JSON.parse(raw || "[]"); } catch { return []; }
+}
+
+export function serializeCustomSkills(skills: CustomSkill[]): string {
+  return JSON.stringify(skills, null, 2);
 }

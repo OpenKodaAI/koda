@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BotEditorProvider } from "@/hooks/use-bot-editor";
 import { ToastProvider } from "@/hooks/use-toast";
@@ -200,30 +199,33 @@ function renderTab(
 }
 
 describe("TabPublicacao", () => {
-  it("renders the publishing summary in PT-BR and keeps collapsible diagnostics closed", async () => {
-    const user = userEvent.setup();
+  it("renders the change summary and publication sections", () => {
     renderTab();
 
-    expect(screen.getByText("Resumo final")).toBeInTheDocument();
-    expect(screen.getByText("Versão publicada")).toBeInTheDocument();
-    expect(screen.getByText("Próxima publicação")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Prompt compilado" })).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("prompt final compilado")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Prompt compilado" }));
-    expect(screen.getByDisplayValue("prompt final compilado")).toBeInTheDocument();
+    expect(screen.getByText("Resumo de alteracoes")).toBeInTheDocument();
+    expect(screen.getByText("Versao publicada")).toBeInTheDocument();
+    expect(screen.getByText("Versao desejada")).toBeInTheDocument();
+    expect(screen.getByText("Status")).toBeInTheDocument();
+    expect(screen.getByText("Publicado")).toBeInTheDocument();
   });
 
-  it("renders the modeled runtime prompt preview from the canonical compiled-prompt payload", async () => {
-    const user = userEvent.setup();
+  it("renders clone and delete sections", () => {
     renderTab();
 
-    await user.click(screen.getByRole("button", { name: "Spec efetivo" }));
+    expect(screen.getByText("Clonar agente")).toBeInTheDocument();
+    expect(screen.getByText("Remover agente")).toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Prompt efetivo modelado")).toBeInTheDocument();
-    expect(screen.getByText("budget ok")).toBeInTheDocument();
-    expect(screen.getByText("runtime_modeled_static")).toBeInTheDocument();
-    expect(screen.getByText("immutable_base_policy")).toBeInTheDocument();
-    expect(screen.getByText("tool_contracts")).toBeInTheDocument();
+  it("renders the delete confirmation trigger", () => {
+    renderTab();
+
+    expect(screen.getByRole("button", { name: "Remover agente" })).toBeInTheDocument();
+  });
+
+  it("shows published badge when no pending changes exist", () => {
+    renderTab();
+
+    expect(screen.getByText("Publicado")).toBeInTheDocument();
+    expect(screen.queryByText("Alteracoes pendentes")).not.toBeInTheDocument();
   });
 });

@@ -140,9 +140,20 @@ class _StoreStub:
                 return dict(row)
         return None
 
+    def touch_attach_session_by_id(self, session_id: int) -> dict[str, Any] | None:
+        for row in self.attach_sessions:
+            if int(row.get("id") or 0) == session_id:
+                return dict(row)
+        return None
+
     def close_attach_session(self, token: str) -> None:
         for row in self.attach_sessions:
             if str(row.get("token") or "") == token:
+                row["status"] = "closed"
+
+    def close_attach_session_by_id(self, session_id: int) -> None:
+        for row in self.attach_sessions:
+            if int(row.get("id") or 0) == session_id:
                 row["status"] = "closed"
 
     def list_attach_sessions(self, task_id: int) -> list[dict[str, Any]]:
@@ -550,6 +561,7 @@ def _build_controller(
     monkeypatch.setattr(controller_module, "RecoveryManager", lambda store: SimpleNamespace())
     monkeypatch.setattr(controller_module, "PortAllocator", _PortAllocatorStub)
     monkeypatch.setattr(controller_module, "RUNTIME_BROWSER_LIVE_ENABLED", False)
+    monkeypatch.setattr(controller_module, "RUNTIME_ENVIRONMENTS_ENABLED", True)
     monkeypatch.setattr(controller_module, "RUNTIME_RECOVERY_ENABLED", False)
     monkeypatch.setattr(controller_module.shutil, "which", lambda name: f"/usr/bin/{name}")
     return controller_module.RuntimeController(runtime_root=tmp_path / "runtime")

@@ -3,8 +3,10 @@
 import asyncio
 import inspect
 import json
+import os
 import shlex
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,6 +78,57 @@ MAX_AUTO_AUDIO = 2
 MAX_AUTO_IMAGE_SIZE = 10 * 1024 * 1024
 MAX_AUTO_AUDIO_SIZE = 15 * 1024 * 1024
 MAX_TRANSCRIPTION_CHARS = 2000
+
+
+def _current_agent_id() -> str:
+    return str(os.environ.get("AGENT_ID") or AGENT_ID or "").strip().upper()
+
+
+def _resolved_atlassian_base_urls() -> tuple[str, str]:
+    jira_url = JIRA_URL
+    confluence_url = CONFLUENCE_URL
+    current_agent = _current_agent_id()
+    if current_agent:
+        with suppress(Exception):
+            from koda.services.core_connection_broker import get_core_connection_broker
+
+            urls = get_core_connection_broker().atlassian_base_urls(agent_id=current_agent)
+            jira_url = str(urls.get("jira") or jira_url or "").strip()
+            confluence_url = str(urls.get("confluence") or confluence_url or "").strip()
+    return jira_url, confluence_url
+
+
+def _resolve_atlassian_client_kwargs(integration_id: str) -> dict[str, Any]:
+    normalized = integration_id.strip().lower()
+    if normalized == "jira":
+        legacy_kwargs = {
+            "url": JIRA_URL,
+            "username": JIRA_USERNAME,
+            "password": JIRA_API_TOKEN,
+            "cloud": JIRA_CLOUD,
+        }
+    elif normalized == "confluence":
+        legacy_kwargs = {
+            "url": CONFLUENCE_URL,
+            "username": CONFLUENCE_USERNAME,
+            "password": CONFLUENCE_API_TOKEN,
+            "cloud": CONFLUENCE_CLOUD,
+        }
+    else:
+        raise KeyError(normalized)
+
+    current_agent = _current_agent_id()
+    if current_agent:
+        with suppress(Exception):
+            from koda.services.core_connection_broker import get_core_connection_broker
+
+            resolved_kwargs = get_core_connection_broker().atlassian_client_kwargs(
+                normalized,
+                agent_id=current_agent,
+            )
+            if resolved_kwargs:
+                return {**legacy_kwargs, **resolved_kwargs}
+    return legacy_kwargs
 
 
 def is_image_mime(mime_type: str) -> bool:
@@ -461,7 +514,8 @@ def _format_issue_analysis(
                 unique_urls.append(u)
         lines.append(f"### URLs Found ({len(unique_urls)})")
         for u in unique_urls:
-            cat = classify_url(u, JIRA_URL, CONFLUENCE_URL)
+            jira_url, confluence_url = _resolved_atlassian_base_urls()
+            cat = classify_url(u, jira_url, confluence_url)
             lines.append(f"- [{cat}] {u}")
 
     # Image paths for queue_manager regex detection
@@ -580,16 +634,11 @@ def _process_media_attachments(
 class JiraService:
     """Async wrapper around atlassian-python-api Jira client."""
 
-    def __init__(self) -> None:
+    def __init__(self, client_kwargs: dict[str, Any] | None = None) -> None:
         from atlassian import Jira
 
-        self._client = Jira(
-            url=JIRA_URL,
-            username=JIRA_USERNAME,
-            password=JIRA_API_TOKEN,
-            cloud=JIRA_CLOUD,
-            api_version="3",
-        )
+        kwargs = dict(client_kwargs or _resolve_atlassian_client_kwargs("jira"))
+        self._client = Jira(api_version="3", **kwargs)
         self._jira_identity: dict[str, Any] | None = None
         self._jira_identity_loaded = False
 
@@ -657,6 +706,13 @@ class JiraService:
             return None
         normalized = account_id.strip()
         return normalized or None
+
+    def verify_identity(self) -> dict[str, Any]:
+        """Run a lightweight authenticated probe and return the current identity."""
+        identity = self._client.myself()
+        if not isinstance(identity, dict):
+            raise ValueError("Jira identity probe returned an unexpected payload.")
+        return cast(dict[str, Any], identity)
 
     def _get_issue_comment(self, issue_key: str, comment_id: str) -> dict[str, Any]:
         comment = self._client.issue_get_comment(issue_key, comment_id)
@@ -1044,7 +1100,8 @@ class JiraService:
     async def build_issue_dossier(self, issue_key: str, *, query: str = "") -> IssueContextDossier:
         """Build the proactive issue dossier used by tooling and runtime prefetch."""
         confluence_client = None
-        if CONFLUENCE_URL:
+        _jira_url, confluence_url = _resolved_atlassian_base_urls()
+        if confluence_url:
             try:
                 confluence_client = get_confluence_service()._client
             except Exception:
@@ -1395,15 +1452,11 @@ class JiraService:
 class ConfluenceService:
     """Async wrapper around atlassian-python-api Confluence client."""
 
-    def __init__(self) -> None:
+    def __init__(self, client_kwargs: dict[str, Any] | None = None) -> None:
         from atlassian import Confluence
 
-        self._client = Confluence(
-            url=CONFLUENCE_URL,
-            username=CONFLUENCE_USERNAME,
-            password=CONFLUENCE_API_TOKEN,
-            cloud=CONFLUENCE_CLOUD,
-        )
+        kwargs = dict(client_kwargs or _resolve_atlassian_client_kwargs("confluence"))
+        self._client = Confluence(**kwargs)
 
     async def execute(self, resource: str, action: str, params: dict[str, str]) -> str:
         """Dispatch to the correct Confluence API method."""
@@ -1481,6 +1534,20 @@ class ConfluenceService:
         _require(params, "key")
         return self._client.get_space(params["key"])
 
+    def verify_read_access(self) -> dict[str, Any]:
+        """Run a lightweight authenticated read probe and return a compact summary."""
+        probe = self._client.get_all_spaces(start=0, limit=1)
+        if isinstance(probe, dict):
+            results = probe.get("results")
+            if isinstance(results, list):
+                first = cast(dict[str, Any], results[0]) if results else {}
+                return {
+                    "space_count": len(results),
+                    "first_space_key": str(first.get("key") or ""),
+                    "first_space_name": str(first.get("name") or ""),
+                }
+        raise ValueError("Confluence read probe returned an unexpected payload.")
+
     _handlers: dict[str, object] = {
         "pages_get": _pages_get,
         "pages_create": _pages_create,
@@ -1495,21 +1562,12 @@ class ConfluenceService:
 
 # --- Lazy singletons ---
 
-_jira_service: JiraService | None = None
-_confluence_service: ConfluenceService | None = None
-
 
 def get_jira_service() -> JiraService:
-    """Lazy singleton — creates JiraService on first call."""
-    global _jira_service
-    if _jira_service is None:
-        _jira_service = JiraService()
-    return _jira_service
+    """Create a Jira service bound to the current agent connection."""
+    return JiraService()
 
 
 def get_confluence_service() -> ConfluenceService:
-    """Lazy singleton — creates ConfluenceService on first call, with JIRA fallback for credentials."""
-    global _confluence_service
-    if _confluence_service is None:
-        _confluence_service = ConfluenceService()
-    return _confluence_service
+    """Create a Confluence service bound to the current agent connection."""
+    return ConfluenceService()

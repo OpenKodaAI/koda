@@ -7,9 +7,11 @@ export interface RuntimeRelayDescriptor {
   botId: string;
   taskId: number;
   upstreamUrl: string;
+  upstreamHeaders?: Record<string, string>;
   createdAt: string;
   expiresAt: string;
   terminalId?: number | null;
+  tokenHash?: string;
 }
 
 interface RuntimeRelayStore {
@@ -48,14 +50,19 @@ export async function cleanupExpiredRuntimeRelayDescriptors() {
 }
 
 export async function createRuntimeRelayDescriptor(
-  descriptor: Omit<RuntimeRelayDescriptor, "id" | "createdAt">
+  descriptor: Omit<RuntimeRelayDescriptor, "id" | "createdAt" | "tokenHash">,
+  sessionToken?: string,
 ) {
   await cleanupExpiredRuntimeRelayDescriptors();
   const store = getRuntimeRelayStore();
+  const tokenHash = sessionToken
+    ? crypto.createHash("sha256").update(sessionToken).digest("hex")
+    : undefined;
   const payload: RuntimeRelayDescriptor = {
     ...descriptor,
     id: crypto.randomBytes(18).toString("hex"),
     createdAt: new Date().toISOString(),
+    ...(tokenHash ? { tokenHash } : {}),
   };
   store.descriptors.set(payload.id, payload);
   return payload;

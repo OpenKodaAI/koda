@@ -179,8 +179,6 @@ export function SettingsWarningIndicator({
                 width: panelPosition?.width,
                 maxHeight: panelPosition?.maxHeight,
                 visibility: panelPosition ? "visible" : "hidden",
-                backdropFilter: "blur(52px) saturate(172%) brightness(1.08)",
-                WebkitBackdropFilter: "blur(52px) saturate(172%) brightness(1.08)",
               }}
             >
               <div className="relative z-[1] border-b border-[rgba(255,255,255,0.06)] px-4 py-3">

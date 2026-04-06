@@ -7,9 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useAsyncResource } from "@/hooks/use-async-resource";
+import { useQueryClient } from "@tanstack/react-query";
+import { useRuntimeQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { parseResponseError } from "@/lib/http-client";
+import { queryKeys } from "@/lib/query/keys";
 import type {
   RuntimeEvent,
   RuntimeMutationResult,
@@ -41,57 +43,73 @@ interface UseRuntimeTaskResult {
   refresh: () => Promise<void>;
   mutate: (
     resourcePath: string,
-    options?: { searchParams?: URLSearchParams; body?: Record<string, unknown> }
+    options?: { searchParams?: URLSearchParams; body?: Record<string, unknown> },
   ) => Promise<RuntimeMutationResult | Record<string, unknown>>;
-  fetchResource: <T>(resourcePath: string, searchParams?: URLSearchParams) => Promise<T>;
+  fetchResource: <T>(
+    resourcePath: string,
+    searchParams?: URLSearchParams,
+  ) => Promise<T>;
 }
 
-export function useRuntimeTask(botId: string, taskId: number): UseRuntimeTaskResult {
+export function useRuntimeTask(
+  botId: string,
+  taskId: number,
+): UseRuntimeTaskResult {
   const { tl } = useAppI18n();
+  const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const lastSeqRef = useRef(0);
-  const refreshTimerRef = useRef<number | null>(null);
 
-  const fetchBundle = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch(`/api/runtime/bots/${botId}/tasks/${taskId}`, {
-      cache: "no-store",
-      signal,
-    });
+  const taskQueryKey = queryKeys.runtime.task(botId, taskId);
 
-    if (!response.ok) {
-      throw new Error(
-        await parseResponseError(
-          response,
-          tl("Não foi possível carregar a task de runtime."),
-        ),
+  const fetchBundle = useCallback(
+    async (signal?: AbortSignal) => {
+      const response = await fetch(
+        `/api/runtime/bots/${botId}/tasks/${taskId}`,
+        { cache: "no-store", signal },
       );
-    }
 
-    const payload = await readJson<RuntimeTaskBundle>(response);
-    lastSeqRef.current = payload.events.at(-1)?.seq ?? lastSeqRef.current;
-    return payload;
-  }, [botId, taskId, tl]);
+      if (!response.ok) {
+        throw new Error(
+          await parseResponseError(
+            response,
+            tl("Não foi possível carregar a task de runtime."),
+          ),
+        );
+      }
 
-  const resource = useAsyncResource<RuntimeTaskBundle>({
+      const payload = await readJson<RuntimeTaskBundle>(response);
+      lastSeqRef.current =
+        payload.events.at(-1)?.seq ?? lastSeqRef.current;
+      return payload;
+    },
+    [botId, taskId, tl],
+  );
+
+  const taskQuery = useRuntimeQuery<RuntimeTaskBundle>({
+    queryKey: taskQueryKey,
     enabled: Boolean(botId && taskId),
-    pollIntervalMs: 18_000,
-    fetcher: async (signal) => fetchBundle(signal),
+    refetchInterval: 18_000,
+    queryFn: async ({ signal }) => fetchBundle(signal),
   });
 
-  const bundle = resource.data;
+  const bundle = taskQuery.data ?? null;
 
   const refresh = useCallback(async () => {
-    await resource.refresh({ background: true, preserveError: true });
-  }, [resource]);
+    await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+  }, [queryClient, taskQueryKey]);
 
   const fetchResource = useCallback(
-    async <T,>(resourcePath: string, searchParams?: URLSearchParams) => {
-      const suffix = searchParams?.toString() ? `?${searchParams.toString()}` : "";
+    async <T,>(
+      resourcePath: string,
+      searchParams?: URLSearchParams,
+    ) => {
+      const suffix = searchParams?.toString()
+        ? `?${searchParams.toString()}`
+        : "";
       const response = await fetch(
         `/api/runtime/bots/${botId}/tasks/${taskId}/${resourcePath}${suffix}`,
-        {
-          cache: "no-store",
-        }
+        { cache: "no-store" },
       );
 
       if (!response.ok) {
@@ -105,13 +123,16 @@ export function useRuntimeTask(botId: string, taskId: number): UseRuntimeTaskRes
 
       return readJson<T>(response);
     },
-    [botId, taskId, tl]
+    [botId, taskId, tl],
   );
 
   const mutate = useCallback(
     async (
       resourcePath: string,
-      options?: { searchParams?: URLSearchParams; body?: Record<string, unknown> }
+      options?: {
+        searchParams?: URLSearchParams;
+        body?: Record<string, unknown>;
+      },
     ): Promise<RuntimeMutationResult | Record<string, unknown>> => {
       const suffix = options?.searchParams?.toString()
         ? `?${options.searchParams.toString()}`
@@ -123,38 +144,32 @@ export function useRuntimeTask(botId: string, taskId: number): UseRuntimeTaskRes
       }
       const response = await fetch(
         `/api/runtime/bots/${botId}/tasks/${taskId}/${resourcePath}${suffix}`,
-        fetchInit
+        fetchInit,
       );
 
       const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(payload?.error || tl("Falha ao executar {{resourcePath}}", { resourcePath }));
+        throw new Error(
+          payload?.error ||
+            tl("Falha ao executar {{resourcePath}}", { resourcePath }),
+        );
       }
 
-      void resource.refresh({ background: true, preserveError: true });
+      void queryClient.invalidateQueries({ queryKey: taskQueryKey });
       return (payload ?? {}) as RuntimeMutationResult | Record<string, unknown>;
     },
-    [botId, resource, taskId, tl]
+    [botId, queryClient, taskId, taskQueryKey, tl],
   );
 
   useEffect(() => {
     let disposed = false;
     let reconnectTimer: number | null = null;
 
-    const scheduleRefresh = () => {
-      if (refreshTimerRef.current) {
-        window.clearTimeout(refreshTimerRef.current);
-      }
-      refreshTimerRef.current = window.setTimeout(() => {
-        void resource.refresh({ background: true, preserveError: true }).catch(() => undefined);
-      }, 1200);
-    };
-
     const connect = () => {
       if (disposed) return;
       const es = new EventSource(
-        `/api/runtime/bots/${botId}/stream?task_id=${taskId}&after_seq=${lastSeqRef.current}`
+        `/api/runtime/bots/${botId}/stream?task_id=${taskId}&after_seq=${lastSeqRef.current}`,
       );
 
       es.onopen = () => {
@@ -168,18 +183,21 @@ export function useRuntimeTask(botId: string, taskId: number): UseRuntimeTaskRes
             lastSeqRef.current = Math.max(lastSeqRef.current, payload.seq);
           }
 
+          // Apply event directly to cache instead of scheduling HTTP refetch.
           startTransition(() => {
-            resource.setData((current) =>
-              current
-                ? {
-                    ...current,
-                    events: mergeEvents(current.events, [{ ...payload, botId }]),
-                  }
-                : current
+            queryClient.setQueryData(
+              taskQueryKey,
+              (current: RuntimeTaskBundle | undefined) =>
+                current
+                  ? {
+                      ...current,
+                      events: mergeEvents(current.events, [
+                        { ...payload, botId },
+                      ]),
+                    }
+                  : current,
             );
           });
-
-          scheduleRefresh();
         } catch {
           // Ignore malformed stream events.
         }
@@ -202,15 +220,14 @@ export function useRuntimeTask(botId: string, taskId: number): UseRuntimeTaskRes
       disposed = true;
       source?.close();
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
     };
-  }, [botId, resource, taskId]);
+  }, [botId, queryClient, taskId, taskQueryKey]);
 
   return {
     bundle,
-    loading: resource.initialLoading && !bundle,
-    refreshing: resource.refreshing,
-    error: resource.error,
+    loading: taskQuery.isLoading && !bundle,
+    refreshing: taskQuery.isFetching && !taskQuery.isLoading,
+    error: taskQuery.error?.message ?? null,
     connected,
     refresh,
     mutate,

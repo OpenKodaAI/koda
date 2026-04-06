@@ -31,7 +31,7 @@ class TestCmdSetdirSecurity:
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
-        context.user_data = {"work_dir": "/tmp", "_approve_all": True}
+        context.user_data = {"work_dir": "/tmp"}
         return update, context
 
     @pytest.mark.asyncio

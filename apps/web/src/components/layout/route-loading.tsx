@@ -225,7 +225,7 @@ export function ExecutionsRouteLoading() {
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2.5">
               {Array.from({ length: 4 }).map((_, idx) => (
-                <div key={idx} className="border-b border-[rgba(255,255,255,0.06)] px-0 py-2">
+                <div key={idx} className="border-b border-[var(--border-subtle)] px-0 py-2">
                   <div className="skeleton h-2.5 w-14 rounded-xl" />
                   <div className="mt-2 skeleton h-3 w-16 rounded-xl" />
                 </div>

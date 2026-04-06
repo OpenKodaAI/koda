@@ -25,8 +25,10 @@ interface BotSwitcherProps {
   fullWidth?: boolean;
   singleRow?: boolean;
   placeholder?: string;
-  variant?: "field" | "action-button";
+  variant?: "field" | "action-button" | "session-chip";
   menuPlacement?: "bottom-start" | "bottom-end" | "top-start" | "top-end";
+  showSearch?: boolean;
+  disabled?: boolean;
 }
 
 export function BotSwitcher({
@@ -38,9 +40,12 @@ export function BotSwitcher({
   showAll = true,
   className,
   fullWidth = false,
+  singleRow = false,
   placeholder,
   variant = "field",
   menuPlacement = "bottom-start",
+  showSearch,
+  disabled = false,
 }: BotSwitcherProps) {
   const { t } = useAppI18n();
   const { bots } = useBotCatalog();
@@ -53,17 +58,22 @@ export function BotSwitcher({
     left: number;
     width: number;
     maxHeight: number;
+    placeAbove: boolean;
   } | null>(null);
   const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const resolvedActiveBotId = useMemo(() => {
+    if (!activeBotId) return undefined;
+    return availableBotIds.find((botId) => botId.toLowerCase() === activeBotId.toLowerCase()) ?? undefined;
+  }, [activeBotId, availableBotIds]);
 
   const resolvedBotIds = useMemo(
     () =>
       multiple
         ? resolveBotSelection(selectedBotIds, availableBotIds)
-        : activeBotId && availableBotIds.includes(activeBotId)
-          ? [activeBotId]
+        : resolvedActiveBotId
+          ? [resolvedActiveBotId]
           : [],
-    [activeBotId, availableBotIds, multiple, selectedBotIds],
+    [availableBotIds, multiple, resolvedActiveBotId, selectedBotIds],
   );
 
   const selectedSet = useMemo(() => new Set(resolvedBotIds), [resolvedBotIds]);
@@ -80,11 +90,12 @@ export function BotSwitcher({
     );
   }, [bots, search]);
   const effectivePlaceholder = placeholder ?? t("botSwitcher.placeholder");
+  const shouldShowSearch = showSearch ?? bots.length > 7;
 
   const summaryLabel = multiple
     ? formatBotSelectionLabel(resolvedBotIds, bots)
-    : activeBotId
-      ? selectedBots[0]?.label ?? activeBotId
+    : resolvedActiveBotId
+      ? selectedBots[0]?.label ?? resolvedActiveBotId
       : showAll
         ? t("botSwitcher.allBots")
         : effectivePlaceholder;
@@ -96,8 +107,8 @@ export function BotSwitcher({
           selected: resolvedBotIds.length,
           total: bots.length,
         })
-    : activeBotId
-      ? selectedBots[0]?.id ?? activeBotId
+    : resolvedActiveBotId
+      ? selectedBots[0]?.id ?? resolvedActiveBotId
       : showAll
         ? t("botSwitcher.noBotFilter")
         : t("botSwitcher.selectOne");
@@ -106,6 +117,7 @@ export function BotSwitcher({
   const previewBots = previewPool.slice(0, 3);
   const previewOverflowCount = Math.max(previewPool.length - previewBots.length, 0);
   const actionBot = selectedBots[0] ?? null;
+  const chipBot = selectedBots[0] ?? null;
 
   function closeMenu() {
     setOpen(false);
@@ -152,7 +164,12 @@ export function BotSwitcher({
           : Math.min(rect.width, window.innerWidth - viewportPadding * 2);
 
       const alignRight = menuPlacement.endsWith("end");
-      const placeAbove = menuPlacement.startsWith("top");
+      const preferredPlaceAbove = menuPlacement.startsWith("top");
+      const spaceAbove = rect.top - viewportPadding - gap;
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding - gap;
+      const placeAbove = preferredPlaceAbove
+        ? !(spaceAbove < 220 && spaceBelow > spaceAbove)
+        : spaceBelow < 260 && spaceAbove > spaceBelow;
       const left = alignRight
         ? Math.min(
             Math.max(rect.right - width, viewportPadding),
@@ -166,14 +183,15 @@ export function BotSwitcher({
         ? Math.max(viewportPadding, rect.top - gap)
         : Math.min(rect.bottom + gap, window.innerHeight - viewportPadding);
       const maxHeight = placeAbove
-        ? Math.max(180, rect.top - viewportPadding - gap)
-        : Math.max(180, window.innerHeight - rect.bottom - viewportPadding - gap);
+        ? Math.max(180, spaceAbove)
+        : Math.max(180, spaceBelow);
 
       setPanelPosition({
         top,
         left,
         width,
         maxHeight,
+        placeAbove,
       });
     };
 
@@ -206,7 +224,7 @@ export function BotSwitcher({
       return;
     }
 
-    onBotChange?.(activeBotId === botId && showAll ? undefined : botId);
+    onBotChange?.(resolvedActiveBotId === botId && showAll ? undefined : botId);
     closeMenu();
   }
 
@@ -225,15 +243,17 @@ export function BotSwitcher({
           className={cn(
             "workspace-topbar__tool bot-switcher__action-trigger",
             open && "workspace-topbar__tool--active",
+            disabled && "pointer-events-none opacity-70",
           )}
-          onClick={() =>
+          onClick={() => {
+            if (disabled) return;
             setOpen((current) => {
               if (current) {
                 setSearch("");
               }
               return !current;
-            })
-          }
+            });
+          }}
           aria-expanded={open}
           aria-haspopup="dialog"
           aria-label={multiple ? t("botSwitcher.ariaMultiple") : t("sessions.composer.selectBot")}
@@ -255,13 +275,61 @@ export function BotSwitcher({
             </span>
             <span className="truncate">{summaryLabel}</span>
           </span>
+          {!disabled && (
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-[var(--text-primary)] transition-transform duration-200",
+                open && "rotate-180",
+              )}
+            />
+          )}
+        </ActionButton>
+      ) : variant === "session-chip" ? (
+        <button
+          type="button"
+          onClick={() =>
+            setOpen((current) => {
+              if (current) {
+                setSearch("");
+              }
+              return !current;
+            })
+          }
+          className={cn(
+            "session-bot-chip flex min-h-[2.2rem] w-auto min-w-[10.75rem] max-w-full items-center justify-between gap-2 rounded-[0.95rem] border px-2.5 py-1.5 text-left transition-colors",
+            disabled && "pointer-events-none opacity-70",
+          )}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label={multiple ? t("botSwitcher.ariaMultiple") : t("botSwitcher.ariaSingle")}
+        >
+          <span className="flex min-w-0 items-center gap-2.5">
+            {chipBot ? (
+              <BotAgentGlyph
+                botId={chipBot.id}
+                color={chipBot.color}
+                variant="list"
+                shape="swatch"
+                className="h-7 w-7 shrink-0 bot-swatch--animated"
+              />
+            ) : (
+              <span className="session-bot-chip__icon">
+                <Bot className="h-4 w-4" />
+              </span>
+            )}
+
+            <span className="min-w-0 truncate text-[12.5px] font-medium tracking-[-0.01em] text-[var(--text-primary)]">
+              {summaryLabel}
+            </span>
+          </span>
+
           <ChevronDown
             className={cn(
-              "h-4 w-4 shrink-0 text-[var(--text-primary)] transition-transform duration-200",
+              "h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)] transition-transform duration-200",
               open && "rotate-180",
             )}
           />
-        </ActionButton>
+        </button>
       ) : (
         <button
           type="button"
@@ -273,29 +341,28 @@ export function BotSwitcher({
               return !current;
             })
           }
-          className="field-shell flex min-h-[46px] w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
+          className={cn(
+            "field-shell flex w-full items-center justify-between gap-3 text-left",
+            singleRow ? "min-h-[42px] px-3.5 py-2" : "min-h-[46px] px-4 py-2.5",
+          )}
           aria-expanded={open}
           aria-haspopup="dialog"
           aria-label={multiple ? t("botSwitcher.ariaMultiple") : t("botSwitcher.ariaSingle")}
         >
           <span className="flex min-w-0 items-center gap-3">
-            <span className="flex shrink-0 items-center -space-x-2.5">
+            <span className="flex shrink-0 items-center -space-x-1.5">
               {previewBots.map((bot) => (
-                <span
+                <BotAgentGlyph
                   key={bot.id}
-                  className="relative z-[1] flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(10,10,10,0.98)] text-[var(--text-primary)] shadow-[0_8px_24px_rgba(0,0,0,0.28)]"
-                >
-                  <BotAgentGlyph
-                    botId={bot.id}
-                    color={bot.color}
-                    active={selectedSet.has(bot.id)}
-                    variant="list"
-                    className="h-4 w-4"
-                  />
-                </span>
+                  botId={bot.id}
+                  color={bot.color}
+                  variant="list"
+                  shape="swatch"
+                  className="bot-switcher__preview-glyph h-8 w-8 bot-swatch--animated"
+                />
               ))}
               {previewOverflowCount > 0 ? (
-                <span className="relative z-[1] flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.08)] text-[10px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)] shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
+                <span className="relative z-[1] flex h-8 w-8 items-center justify-center rounded-[0.72rem] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[10px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)]">
                   {previewOverflowCount}+
                 </span>
               ) : null}
@@ -305,14 +372,16 @@ export function BotSwitcher({
               <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
                 {summaryLabel}
               </span>
-              <span className="mt-0.5 block truncate text-[11px] text-[var(--text-quaternary)]">
-                {helperLabel}
-              </span>
+              {!singleRow ? (
+                <span className="mt-0.5 block truncate text-[11px] text-[var(--text-quaternary)]">
+                  {helperLabel}
+                </span>
+              ) : null}
             </span>
           </span>
 
           <span className="flex shrink-0 items-center gap-2">
-            {multiple && resolvedBotIds.length !== bots.length ? (
+            {!singleRow && multiple && resolvedBotIds.length !== bots.length ? (
               <span className="chip hidden sm:inline-flex">{resolvedBotIds.length}</span>
             ) : null}
             <ChevronDown
@@ -338,35 +407,33 @@ export function BotSwitcher({
                 left: panelPosition?.left ?? 0,
                 width: panelPosition?.width,
                 maxHeight: panelPosition?.maxHeight,
-                background:
-                  variant === "action-button"
-                    ? "linear-gradient(180deg, rgba(24, 24, 28, 0.14) 0%, rgba(10, 10, 12, 0.22) 100%), rgba(8, 8, 10, 0.06)"
-                    : "linear-gradient(180deg, rgba(24, 24, 28, 0.16) 0%, rgba(10, 10, 12, 0.24) 100%), rgba(8, 8, 10, 0.08)",
-                backdropFilter: "blur(52px) saturate(168%) brightness(1.08)",
-                WebkitBackdropFilter:
-                  "blur(52px) saturate(168%) brightness(1.08)",
-                transform: menuPlacement.startsWith("top") ? "translateY(-100%)" : undefined,
+                transform: panelPosition?.placeAbove ? "translateY(-100%)" : undefined,
                 visibility: panelPosition ? "visible" : "hidden",
               }}
             >
-              <div className="border-b border-[var(--border-subtle)] p-3">
-                <label className="app-search">
-                  <Search className="h-4 w-4 text-[var(--text-quaternary)]" />
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={t("botSwitcher.searchPlaceholder")}
-                  />
-                </label>
-              </div>
+              {shouldShowSearch ? (
+                <div className="border-b border-[var(--border-subtle)] p-3">
+                  <label className="app-search">
+                    <Search className="h-4 w-4 text-[var(--text-quaternary)]" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={t("botSwitcher.searchPlaceholder")}
+                    />
+                  </label>
+                </div>
+              ) : null}
 
               {showAll ? (
                 <div className="border-b border-[var(--border-subtle)] p-2">
                   <button
                     type="button"
                     onClick={handleSelectAll}
-                    className="flex w-full items-center justify-between gap-3 rounded-[0.8rem] px-3 py-2.5 text-left transition-colors hover:bg-[rgba(255,255,255,0.028)]"
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-[0.8rem] px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]",
+                      variant === "session-chip" && "bot-switcher__menu-row bot-switcher__menu-row--session",
+                    )}
                     aria-pressed={
                       multiple
                         ? resolvedBotIds.length === bots.length
@@ -374,41 +441,57 @@ export function BotSwitcher({
                     }
                   >
                     <span className="flex min-w-0 items-center gap-3">
-                      <span
-                        className={cn(
-                          "flex h-5 w-5 shrink-0 items-center justify-center rounded-[0.45rem] border text-[var(--text-primary)]",
-                          (multiple
+                      {variant === "session-chip" ? (
+                        <span className="session-bot-chip__icon">
+                          <Bot className="h-4 w-4" />
+                        </span>
+                      ) : (
+                        <span
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-[0.45rem] border text-[var(--text-primary)]",
+                            (multiple
+                              ? resolvedBotIds.length === bots.length
+                              : activeBotId === undefined)
+                              ? "border-[var(--border-strong)] bg-[var(--surface-elevated)]"
+                              : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]",
+                            )}
+                        >
+                          {(multiple
                             ? resolvedBotIds.length === bots.length
-                            : activeBotId === undefined)
-                            ? "border-[rgba(255,255,255,0.26)] bg-[rgba(255,255,255,0.12)]"
-                            : "border-[var(--border-subtle)] bg-[rgba(255,255,255,0.03)]",
-                        )}
-                      >
-                        {(multiple
-                          ? resolvedBotIds.length === bots.length
-                          : activeBotId === undefined) ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : null}
-                      </span>
+                            : activeBotId === undefined) ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : null}
+                        </span>
+                      )}
                       <span className="min-w-0">
                         <span className="block text-sm font-medium text-[var(--text-primary)]">
                           {t("botSwitcher.allBots")}
                         </span>
-                        <span className="block text-[11px] text-[var(--text-quaternary)]">
-                          {t("botSwitcher.botsVisible", { count: bots.length })}
-                        </span>
+                        {variant === "session-chip" ? null : (
+                          <span className="block text-[11px] text-[var(--text-quaternary)]">
+                            {t("botSwitcher.botsVisible", { count: bots.length })}
+                          </span>
+                        )}
                       </span>
                     </span>
-                    <span className="text-[11px] text-[var(--text-quaternary)]">
-                      {bots.length}
-                    </span>
+                    {variant === "session-chip" ? (
+                      (multiple
+                        ? resolvedBotIds.length === bots.length
+                        : activeBotId === undefined) ? (
+                        <Check className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+                      ) : null
+                    ) : (
+                      <span className="text-[11px] text-[var(--text-quaternary)]">
+                        {bots.length}
+                      </span>
+                    )}
                   </button>
                 </div>
               ) : null}
 
               <div
                 className="overflow-y-auto p-2"
-                style={{ maxHeight: panelPosition ? Math.max(140, panelPosition.maxHeight - 70) : 320 }}
+                style={{ maxHeight: panelPosition ? Math.max(140, panelPosition.maxHeight - (shouldShowSearch ? 70 : 16)) : 320 }}
               >
                 {visibleBots.length > 0 ? (
                   visibleBots.map((bot) => {
@@ -419,49 +502,57 @@ export function BotSwitcher({
                         key={bot.id}
                         type="button"
                         onClick={() => handleToggle(bot.id)}
-                        className="flex w-full items-center justify-between gap-3 rounded-[0.8rem] px-3 py-2.5 text-left transition-colors hover:bg-[rgba(255,255,255,0.028)]"
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 rounded-[0.8rem] px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]",
+                          variant === "session-chip" && "bot-switcher__menu-row bot-switcher__menu-row--session",
+                        )}
                         aria-pressed={isActive}
                       >
                         <span className="flex min-w-0 items-center gap-3">
-                          <span
-                            className={cn(
-                              "flex h-5 w-5 shrink-0 items-center justify-center rounded-[0.45rem] border text-[var(--text-primary)]",
-                              isActive
-                                ? "border-[rgba(255,255,255,0.26)] bg-[rgba(255,255,255,0.12)]"
-                                : "border-[var(--border-subtle)] bg-[rgba(255,255,255,0.03)]",
-                            )}
-                          >
-                            {isActive ? <Check className="h-3.5 w-3.5" /> : null}
-                          </span>
+                          {variant === "session-chip" ? null : (
+                            <span
+                              className={cn(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-[0.45rem] border text-[var(--text-primary)]",
+                                isActive
+                                  ? "border-[var(--border-strong)] bg-[var(--surface-elevated)]"
+                                  : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]",
+                              )}
+                            >
+                              {isActive ? <Check className="h-3.5 w-3.5" /> : null}
+                            </span>
+                          )}
 
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)]">
-                            <BotAgentGlyph
-                              botId={bot.id}
-                              color={bot.color}
-                              active={isActive}
-                              variant="list"
-                              className="h-4.5 w-4.5"
-                            />
-                          </span>
+                          <BotAgentGlyph
+                            botId={bot.id}
+                            color={bot.color}
+                            variant="list"
+                            shape="swatch"
+                            className="bot-switcher__menu-glyph h-8 w-8 bot-swatch--animated"
+                          />
 
                           <span className="min-w-0">
                             <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
                               {bot.label}
                             </span>
-                            <span className="block truncate text-[11px] font-mono text-[var(--text-quaternary)]">
-                              {bot.id}
-                            </span>
+                            {variant === "session-chip" ? null : (
+                              <span className="block truncate text-[11px] font-mono text-[var(--text-quaternary)]">
+                                {bot.id}
+                              </span>
+                            )}
                           </span>
                         </span>
 
-                        {!multiple ? (
-                          <span
-                            className={cn(
-                              "h-2.5 w-2.5 shrink-0 rounded-full",
-                              isActive ? "opacity-100" : "opacity-0",
-                            )}
-                            style={{ backgroundColor: bot.color }}
-                          />
+                        {variant === "session-chip" ? (
+                          isActive ? (
+                            <Check className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+                          ) : null
+                        ) : !multiple ? (
+                          isActive ? (
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full border border-[var(--border-strong)]"
+                              style={{ backgroundColor: bot.color }}
+                            />
+                          ) : null
                         ) : null}
                       </button>
                     );

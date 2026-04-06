@@ -87,6 +87,8 @@ describe("Sidebar", () => {
   });
 
   it("prefetches heavy routes on intent and shows pending feedback on click", () => {
+    vi.useFakeTimers();
+
     render(
       <I18nProvider initialLanguage="pt-BR">
         <AppTourProvider
@@ -102,12 +104,16 @@ describe("Sidebar", () => {
     const agentsLink = screen.getByRole("link", { name: /Agentes/i });
     fireEvent.mouseEnter(agentsLink);
 
+    vi.advanceTimersByTime(150);
+
     expect(prefetchMock).toHaveBeenCalledWith("/control-plane");
 
     const homeLink = screen.getByRole("link", { name: /Início/i });
     fireEvent.click(homeLink);
 
     expect(homeLink).toHaveAttribute("aria-busy", "true");
+
+    vi.useRealTimers();
   });
 
   it("hides section labels when the sidebar is collapsed", () => {

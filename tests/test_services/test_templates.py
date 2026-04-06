@@ -163,7 +163,9 @@ class TestSkills:
     def test_skill_content_is_markdown(self):
         """Each skill should contain structured markdown content."""
         for name, content in _SKILL_TEMPLATES.items():
-            assert content.startswith("#"), f"Skill '{name}' should start with a markdown heading"
+            # Skills may start with YAML frontmatter (---) or a heading (#)
+            starts_ok = content.startswith("#") or content.startswith("---")
+            assert starts_ok, f"Skill '{name}' should start with heading or frontmatter"
             assert "## Approach" in content, f"Skill '{name}' should have an Approach section"
             assert "## Key Principles" in content, f"Skill '{name}' should have Key Principles"
 

@@ -16,9 +16,10 @@ describe("control-plane web auth route", () => {
 
   it("seals a verified operator token into an http-only cookie", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toBe("http://control.local/api/control-plane/onboarding/status");
-      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer operator-token");
-      return new Response(JSON.stringify({ ok: true }), {
+      expect(String(input)).toBe("http://control.local/api/control-plane/auth/legacy/exchange");
+      expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+      expect(JSON.parse(String(init?.body))).toEqual({ token: "operator-token" });
+      return new Response(JSON.stringify({ ok: true, session_token: "kodas_session" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -31,6 +32,7 @@ describe("control-plane web auth route", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Origin: "http://localhost",
         },
         body: JSON.stringify({ token: "operator-token" }),
       }) as never,
@@ -41,7 +43,14 @@ describe("control-plane web auth route", () => {
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    const cleared = await DELETE();
+    const cleared = await DELETE(
+      new Request("http://localhost/api/control-plane/web-auth", {
+        method: "DELETE",
+        headers: {
+          Origin: "http://localhost",
+        },
+      }) as never,
+    );
     expect(cleared.headers.get("set-cookie")).toContain("koda_operator_session=");
     expect(cleared.headers.get("set-cookie")).toContain("Max-Age=0");
   });
@@ -55,6 +64,7 @@ describe("control-plane web auth route", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Origin: "http://localhost",
         },
         body: JSON.stringify({ token: "invalid-token" }),
       }) as never,

@@ -115,6 +115,7 @@ def _voice_label_for_defaults(voice_id: str, *, provider_id: str) -> str:
 
 def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     manager = ControlPlaneManager()
+    snapshot = manager.build_draft_snapshot(agent_id)
     model_state = manager.get_model_policy(agent_id)
     policy = _safe_json_object(model_state.get("policy"))
     provider_catalog = _safe_json_object(model_state.get("provider_catalog"))
@@ -123,6 +124,7 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     general_settings = _general_settings(manager)
     provider_connections = _provider_connections_from_general_settings(general_settings)
     functional_catalog = _functional_catalog_from_general_settings(general_settings)
+    provider_runtime_eligibility = _safe_json_object(snapshot.get("provider_runtime_eligibility"))
 
     default_provider = (
         _nonempty_text(
@@ -205,6 +207,7 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
         "provider_catalog": provider_catalog,
         "provider_catalog_map": provider_catalog_map,
         "provider_connections": provider_connections,
+        "provider_runtime_eligibility": provider_runtime_eligibility,
         "available_providers": list(provider_catalog.get("enabled_providers") or []),
         "available_models_by_provider": {
             provider_id: list(_safe_json_object(payload).get("available_models") or [])

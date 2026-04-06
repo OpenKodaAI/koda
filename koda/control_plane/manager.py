@@ -8,9 +8,14 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,8 +23,10 @@ from typing import Any, cast
 from uuid import uuid4
 
 from koda.agent_contract import (
+    CORE_INTEGRATION_CATALOG,
     normalize_string_list,
     resolve_allowed_tool_ids,
+    resolve_core_integration_catalog,
     resolve_core_provider_catalog,
     resolve_feature_filtered_tools,
 )
@@ -44,10 +51,11 @@ from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_VOICE_ID,
     ensure_kokoro_voice_downloaded,
     kokoro_catalog_payload,
-    kokoro_managed_voices_path,
+    kokoro_managed_voices_storage_path,
     kokoro_voice_file_path,
     kokoro_voice_metadata,
 )
+from koda.services.mcp_connection_broker import decrypt_env_values, resolve_mcp_runtime_connection
 from koda.services.prompt_budget import PromptSegment, preview_compiled_prompt, preview_modeled_runtime_prompt
 from koda.services.provider_auth import (
     MANAGED_PROVIDER_IDS,
@@ -75,6 +83,7 @@ from .agent_spec import (
     build_agent_spec_from_snapshot,
     compose_agent_prompt,
     merge_agent_documents,
+    merge_hierarchical_documents,
     normalize_agent_spec,
     normalize_autonomy_policy,
     normalize_knowledge_policy,
@@ -82,6 +91,7 @@ from .agent_spec import (
     parse_json_env_value,
     render_markdown_documents_from_agent_spec,
     resolve_agent_documents,
+    resolve_scope_documents,
     validate_agent_spec,
 )
 from .crypto import decrypt_secret, encrypt_secret, mask_secret
@@ -111,6 +121,13 @@ from .database import (
     run_coro_sync,
     with_connection,
 )
+from .execution_policy import (
+    build_mcp_action_catalog,
+    build_policy_catalog,
+    evaluate_execution_policy,
+    resolve_execution_policy,
+)
+from .mcp_catalog import authoritative_mcp_catalog_entries
 from .settings import (
     AGENT_SECTIONS,
     CONTROL_PLANE_AUTO_IMPORT,
@@ -164,6 +181,52 @@ _KNOWLEDGE_ENTRY_METADATA_FIELDS: tuple[str, ...] = (
     "environment",
     "team",
 )
+_RESERVED_MCP_SERVER_KEYS: frozenset[str] = frozenset(
+    {"docker", "filesystem", "github", "gitlab", "memory", "puppeteer"}
+)
+
+
+def _normalize_mcp_server_key(server_key: Any) -> str:
+    return str(server_key or "").strip().lower()
+
+
+def _is_reserved_mcp_server_key(server_key: Any) -> bool:
+    return _normalize_mcp_server_key(server_key) in _RESERVED_MCP_SERVER_KEYS
+
+
+def _mcp_connection_key(server_key: Any) -> str:
+    return f"mcp:{_normalize_mcp_server_key(server_key)}"
+
+
+def _core_connection_key(integration_id: Any) -> str:
+    return f"core:{str(integration_id or '').strip().lower()}"
+
+
+def _parse_connection_key(connection_key: Any) -> tuple[str, str]:
+    raw = str(connection_key or "").strip()
+    if not raw:
+        raise ValueError("connection_key is required")
+    if ":" in raw:
+        kind, value = raw.split(":", 1)
+        normalized_kind = kind.strip().lower()
+        normalized_value = value.strip().lower()
+        if normalized_kind in {"mcp", "core"} and normalized_value:
+            if normalized_kind == "mcp":
+                return "mcp", _normalize_mcp_server_key(normalized_value)
+            return "core", normalized_value
+    normalized = raw.lower()
+    if normalized in CORE_INTEGRATION_CATALOG:
+        return "core", normalized
+    return "mcp", _normalize_mcp_server_key(normalized)
+
+
+_CORE_CONNECTION_SOURCE_ORIGINS: frozenset[str] = frozenset(
+    {"agent_binding", "imported_default", "local_session", "system_default"}
+)
+_CORE_LEGACY_AUTH_MODE_ALIASES: dict[str, str] = {
+    "cli_auth": "local_session",
+    "profile": "local_session",
+}
 
 
 def _normalize_user_id_values(value: Any) -> list[str]:
@@ -223,8 +286,9 @@ def _build_runtime_prompt_preview_payload(
     ).strip()
     static_segments: list[PromptSegment] = []
     tool_contracts = build_agent_tools_prompt(
-        postgres_env=None,
         tool_policy=_safe_json_object(agent_spec.get("tool_policy")) or None,
+        execution_policy=_safe_json_object(agent_spec.get("execution_policy")) or None,
+        resource_access_policy=_safe_json_object(agent_spec.get("resource_access_policy")) or None,
     )
     if tool_contracts.strip():
         static_segments.append(
@@ -410,7 +474,6 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "gws_enabled": ("GWS_ENABLED", "bool"),
         "jira_enabled": ("JIRA_ENABLED", "bool"),
         "confluence_enabled": ("CONFLUENCE_ENABLED", "bool"),
-        "postgres_enabled": ("POSTGRES_ENABLED", "bool"),
         "aws_enabled": ("AWS_ENABLED", "bool"),
         "whisper_enabled": ("WHISPER_ENABLED", "bool"),
         "tts_enabled": ("TTS_ENABLED", "bool"),
@@ -573,6 +636,7 @@ _NON_SECRET_SYSTEM_ENV_KEYS: frozenset[str] = frozenset(
     | {"DEFAULT_MODEL", "MODEL_PRICING_USD"}
 )
 _CORE_ONLY_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_LOCAL_UI_TOKEN", "RUNTIME_TOKEN"})
+_HIDDEN_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"POSTGRES_URL"})
 _GENERAL_ALLOWED_USAGE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
 _GENERAL_ALLOWED_VALUE_TYPES: frozenset[str] = frozenset({"text", "secret"})
 _PROVIDER_LOGIN_SESSION_PENDING_TTL = timedelta(hours=1)
@@ -585,6 +649,7 @@ _PROVIDER_LOGIN_SESSION_SENSITIVE_KEYS: tuple[str, ...] = (
     "instructions",
     "output_preview",
     "last_error",
+    "code_verifier",
 )
 _PROVIDER_DOWNLOAD_HISTORY_TTL = timedelta(hours=24)
 _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
@@ -834,20 +899,14 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
                 "label": "Arquivo de credenciais",
                 "input_type": "path",
                 "storage": "env",
-                "required": True,
+                "required": False,
             },
-        ),
-    },
-    "postgres": {
-        "title": "Postgres",
-        "description": "Conexao global para consultas governadas e inspeção de schema.",
-        "fields": (
             {
-                "key": "POSTGRES_URL",
-                "label": "Connection string",
+                "key": "GWS_SERVICE_ACCOUNT_KEY",
+                "label": "JSON da service account",
                 "input_type": "password",
                 "storage": "secret",
-                "required": True,
+                "required": False,
             },
         ),
     },
@@ -876,9 +935,85 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
                 "storage": "env",
                 "required": False,
             },
+            {
+                "key": "AWS_ROLE_ARN",
+                "label": "Role ARN",
+                "input_type": "text",
+                "storage": "env",
+                "required": False,
+            },
+            {
+                "key": "AWS_ROLE_SESSION_NAME",
+                "label": "Role session name",
+                "input_type": "text",
+                "storage": "env",
+                "required": False,
+            },
+            {
+                "key": "AWS_EXTERNAL_ID",
+                "label": "External ID",
+                "input_type": "text",
+                "storage": "env",
+                "required": False,
+            },
+            {
+                "key": "AWS_ACCESS_KEY_ID",
+                "label": "Access key ID",
+                "input_type": "password",
+                "storage": "secret",
+                "required": False,
+            },
+            {
+                "key": "AWS_SECRET_ACCESS_KEY",
+                "label": "Secret access key",
+                "input_type": "password",
+                "storage": "secret",
+                "required": False,
+            },
+            {
+                "key": "AWS_SESSION_TOKEN",
+                "label": "Session token",
+                "input_type": "password",
+                "storage": "secret",
+                "required": False,
+            },
+        ),
+    },
+    "gh": {
+        "title": "GitHub CLI",
+        "description": "Token opcional para uso governado do GitHub CLI quando a sessao local nao for usada.",
+        "fields": (
+            {
+                "key": "GH_TOKEN",
+                "label": "GitHub token",
+                "input_type": "password",
+                "storage": "secret",
+                "required": False,
+            },
+        ),
+    },
+    "glab": {
+        "title": "GitLab CLI",
+        "description": "Token opcional para uso governado do GitLab CLI quando a sessao local nao for usada.",
+        "fields": (
+            {
+                "key": "GITLAB_TOKEN",
+                "label": "GitLab token",
+                "input_type": "password",
+                "storage": "secret",
+                "required": False,
+            },
         ),
     },
 }
+_CORE_CONNECTION_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        str(field.get("key") or "").strip().upper()
+        for template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.values()
+        for field in template.get("fields", ())
+        if str(field.get("key") or "").strip()
+    }
+)
 
 
 @dataclass(slots=True)
@@ -886,12 +1021,37 @@ class RuntimeSnapshot:
     agent_id: str
     version: int
     runtime_dir: Path
-    env: dict[str, str]
+    process_env: dict[str, str]
+    connection_refs: list[dict[str, Any]]
     health_url: str
     runtime_base_url: str
     state_backend: str
     db_file_name: str
     persisted_to_disk: bool = False
+
+    @property
+    def env(self) -> dict[str, str]:
+        return self.process_env
+
+
+class _VerificationTimeout(RuntimeError):
+    """Raised when an integration verification probe exceeds its time budget."""
+
+
+def _run_with_timeout(func: Any, timeout_seconds: int = 10) -> Any:
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise _VerificationTimeout(f"Verification timed out after {timeout_seconds}s") from exc
+
+
+def _mint_google_service_account_token(credentials_path: str) -> dict[str, Any]:
+    from koda.services.provider_auth import _mint_google_service_account_token as mint_service_account_token
+
+    return cast(dict[str, Any], mint_service_account_token(credentials_path))
 
 
 def _normalize_agent_id(agent_id: str) -> str:
@@ -948,6 +1108,12 @@ def _row_has_column(row: Any, column: str) -> bool:
 
 def _safe_json_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _row_json(row: Any, column: str) -> dict[str, Any]:
+    """Safely extract a JSON column from a DB row as a dict."""
+    raw = row.get(column) if hasattr(row, "get") else None
+    return _safe_json_object(json_load(raw or "{}", {}))
 
 
 def _user_selectable_provider_ids(provider_catalog: dict[str, Any]) -> list[str]:
@@ -1064,7 +1230,7 @@ def _local_env_key_is_reserved(key: str) -> bool:
 
 def _global_secret_is_grantable(secret_key: str) -> bool:
     normalized = str(secret_key or "").strip().upper()
-    if normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS:
+    if normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS or normalized in _HIDDEN_GLOBAL_SECRET_KEYS:
         return False
     return not normalized.startswith("CONTROL_PLANE_")
 
@@ -1303,16 +1469,40 @@ class ControlPlaneManager:
         self._elevenlabs_voice_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ollama_model_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._provider_login_processes: dict[str, Any] = {}
+        self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
         self._provider_download_threads: dict[str, threading.Thread] = {}
 
+    def _auto_seed_enabled(self) -> bool:
+        """Skip auto-seeding for tests that instantiate via ``object.__new__``."""
+        return hasattr(self, "_seeding_legacy_state")
+
     def ensure_seeded(self) -> None:
+        if not self._auto_seed_enabled():
+            return
         if self._seeding_legacy_state:
             return
         if CONTROL_PLANE_AUTO_IMPORT:
             self.import_legacy_state()
+        self._seed_authoritative_mcp_catalog()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
         self._cleanup_provider_download_jobs()
+
+    def _seed_authoritative_mcp_catalog(self) -> None:
+        if not self._auto_seed_enabled():
+            return
+        if self._seeding_legacy_state:
+            return
+        self._seeding_legacy_state = True
+        try:
+            for entry in authoritative_mcp_catalog_entries():
+                server_key = str(entry.pop("server_key"))
+                try:
+                    self.upsert_mcp_catalog_entry(server_key, entry)
+                except Exception:
+                    log.debug("control_plane_mcp_seed_failed", server_key=server_key, exc_info=True)
+        finally:
+            self._seeding_legacy_state = False
 
     def _require_agent_row(self, agent_id: str) -> tuple[str, Any]:
         normalized = _normalize_agent_id(agent_id)
@@ -1372,11 +1562,18 @@ class ControlPlaneManager:
         unassigned_agent_count: int = 0,
         squads: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        documents = resolve_scope_documents(
+            "workspace",
+            _row_json(row, "spec_json"),
+            _row_json(row, "documents_json"),
+        )
         return {
             "id": str(row["id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
             "color": str(row["color"] or ""),
+            "spec": {},
+            "documents": documents,
             "agent_count": agent_count,
             "squads": squads or [],
             "virtual_buckets": {
@@ -1391,12 +1588,19 @@ class ControlPlaneManager:
         }
 
     def _serialize_squad_row(self, row: Any, *, agent_count: int = 0) -> dict[str, Any]:
+        documents = resolve_scope_documents(
+            "squad",
+            _row_json(row, "spec_json"),
+            _row_json(row, "documents_json"),
+        )
         return {
             "id": str(row["id"]),
             "workspace_id": str(row["workspace_id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
             "color": str(row["color"] or ""),
+            "spec": {},
+            "documents": documents,
             "agent_count": agent_count,
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
@@ -1697,6 +1901,119 @@ class ControlPlaneManager:
         with_connection(_delete)
         return True
 
+    # ------------------------------------------------------------------
+    # Workspace / Squad hierarchical spec CRUD
+    # ------------------------------------------------------------------
+
+    def get_workspace_spec(self, workspace_id: str) -> dict[str, Any]:
+        """Return the workspace-level spec and documents."""
+        row = self._workspace_row(workspace_id)
+        documents = resolve_scope_documents(
+            "workspace",
+            _row_json(row, "spec_json"),
+            _row_json(row, "documents_json"),
+        )
+        return {"spec": {}, "documents": documents}
+
+    def update_workspace_spec(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Store one effective workspace-level system prompt."""
+        self.ensure_seeded()
+        row = self._workspace_row(workspace_id)
+        normalized_docs = resolve_scope_documents(
+            "workspace",
+            _safe_json_object(payload.get("spec")),
+            _safe_json_object(payload.get("documents")),
+        )
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET spec_json = ?, documents_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (json_dump({}), json_dump(normalized_docs), now_iso(), str(row["id"])),
+        )
+        return {"spec": {}, "documents": normalized_docs}
+
+    def get_squad_spec(self, workspace_id: str, squad_id: str) -> dict[str, Any]:
+        """Return the squad-level spec and documents."""
+        workspace_row = self._workspace_row(workspace_id)
+        squad_row = self._squad_row(squad_id)
+        if str(squad_row["workspace_id"]) != str(workspace_row["id"]):
+            raise ValueError("squad_id must belong to the selected workspace")
+        documents = resolve_scope_documents(
+            "squad",
+            _row_json(squad_row, "spec_json"),
+            _row_json(squad_row, "documents_json"),
+        )
+        return {"spec": {}, "documents": documents}
+
+    def update_squad_spec(self, workspace_id: str, squad_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Store one effective squad-level system prompt."""
+        self.ensure_seeded()
+        workspace_row = self._workspace_row(workspace_id)
+        squad_row = self._squad_row(squad_id)
+        if str(squad_row["workspace_id"]) != str(workspace_row["id"]):
+            raise ValueError("squad_id must belong to the selected workspace")
+        normalized_docs = resolve_scope_documents(
+            "squad",
+            _safe_json_object(payload.get("spec")),
+            _safe_json_object(payload.get("documents")),
+        )
+        execute(
+            """
+            UPDATE cp_workspace_squads
+            SET spec_json = ?, documents_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (json_dump({}), json_dump(normalized_docs), now_iso(), str(squad_row["id"])),
+        )
+        return {"spec": {}, "documents": normalized_docs}
+
+    def _resolve_hierarchical_spec(
+        self,
+        agent_spec: dict[str, Any],
+        agent_row: Any,
+    ) -> dict[str, Any]:
+        """Apply workspace -> squad -> agent system-prompt inheritance to an agent spec."""
+        workspace_id = _normalize_optional_org_id(agent_row.get("workspace_id") if hasattr(agent_row, "get") else None)
+        squad_id = _normalize_optional_org_id(agent_row.get("squad_id") if hasattr(agent_row, "get") else None)
+
+        workspace_docs: dict[str, str] | None = None
+        squad_docs: dict[str, str] | None = None
+
+        if workspace_id:
+            try:
+                ws_row = self._workspace_row(workspace_id)
+                workspace_docs = resolve_scope_documents(
+                    "workspace",
+                    _row_json(ws_row, "spec_json"),
+                    _row_json(ws_row, "documents_json"),
+                )
+            except (KeyError, ValueError):
+                pass
+
+        if squad_id:
+            try:
+                sq_row = self._squad_row(squad_id)
+                if str(sq_row["workspace_id"]) == (workspace_id or ""):
+                    squad_docs = resolve_scope_documents(
+                        "squad",
+                        _row_json(sq_row, "spec_json"),
+                        _row_json(sq_row, "documents_json"),
+                    )
+            except (KeyError, ValueError):
+                pass
+
+        merged_spec = dict(agent_spec)
+
+        # Merge documents from all levels
+        agent_docs = _safe_json_object(agent_spec.get("documents"))
+        merged_docs = merge_hierarchical_documents(workspace_docs, squad_docs, agent_docs)
+        if merged_docs:
+            merged_spec["documents"] = merged_docs
+
+        return merged_spec
+
     def _resolve_named_asset_row(self, table: str, agent_id: str, asset_id: int) -> tuple[str, Any]:
         normalized, _ = self._require_agent_row(agent_id)
         row = fetch_one(
@@ -1746,6 +2063,21 @@ class ControlPlaneManager:
             if encrypted:
                 return decrypt_secret(encrypted)
         return _trimmed_text(os.environ.get(secret_key))
+
+    def _persist_provider_secret(self, provider_id: str, api_key: str) -> None:
+        """Store a provider API key obtained via OAuth subscription login."""
+        env_key = PROVIDER_API_KEY_ENV_KEYS.get(cast(Any, provider_id))
+        if not env_key or not api_key:
+            return
+        self.upsert_global_secret_asset(
+            env_key,
+            {
+                "value": api_key,
+                "description": f"Credential for {PROVIDER_TITLES.get(cast(Any, provider_id), provider_id)} (via OAuth)",
+                "usage_scope": "system_only",
+            },
+            persist_sections=True,
+        )
 
     def _global_secret_preview_state(self, secret_key: str) -> tuple[bool, str]:
         normalized_secret_key = _normalize_secret_key(secret_key)
@@ -2045,6 +2377,7 @@ class ControlPlaneManager:
             "supports_subscription_login": bool(_safe_json_object(catalog).get("supports_subscription_login", True)),
             "supports_local_connection": "local" in (_safe_json_object(catalog).get("supported_auth_modes") or []),
             "supported_auth_modes": _safe_json_object(catalog).get("supported_auth_modes") or ["api_key"],
+            "connection_managed": bool(_safe_json_object(catalog).get("connection_managed", False)),
             "login_flow_kind": _safe_json_object(catalog).get("login_flow_kind"),
             "requires_project_id": bool(_safe_json_object(catalog).get("requires_project_id", False)),
             "api_key_present": api_key_present,
@@ -2092,10 +2425,15 @@ class ControlPlaneManager:
         meta = self._access_meta_map("global_secret_meta", sections=sections).get(normalized, {})
         return _normalize_general_usage_scope(meta.get("usage_scope"), default="agent_grant")
 
-    def _current_global_secrets(self, *, sections: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    def _current_global_secrets(
+        self,
+        *,
+        sections: dict[str, dict[str, Any]] | None = None,
+        include_hidden: bool = False,
+    ) -> list[dict[str, Any]]:
         rows = fetch_all("SELECT * FROM cp_secret_values WHERE scope_id = 'global' ORDER BY secret_key ASC")
         secret_meta = self._access_meta_map("global_secret_meta", sections=sections)
-        return [
+        secrets = [
             {
                 "id": int(row["id"]),
                 "scope": "global",
@@ -2109,6 +2447,9 @@ class ControlPlaneManager:
             }
             for row in rows
         ]
+        if include_hidden:
+            return secrets
+        return [secret for secret in secrets if secret["secret_key"] not in _HIDDEN_GLOBAL_SECRET_KEYS]
 
     def _reconcile_global_secret_classification(self) -> None:
         rows = fetch_all("SELECT id, secret_key, encrypted_value FROM cp_secret_values WHERE scope_id = 'global'")
@@ -2252,7 +2593,6 @@ class ControlPlaneManager:
             "browser": self._bool_from_env(env, "BROWSER_FEATURES_ENABLED")
             or self._bool_from_env(env, "BROWSER_ENABLED")
             or self._bool_from_env(env, "RUNTIME_BROWSER_LIVE_ENABLED"),
-            "postgres": self._bool_from_env(env, "POSTGRES_ENABLED"),
             "jira": self._bool_from_env(env, "JIRA_ENABLED"),
             "confluence": self._bool_from_env(env, "CONFLUENCE_ENABLED"),
             "gws": self._bool_from_env(env, "GWS_ENABLED"),
@@ -2292,6 +2632,7 @@ class ControlPlaneManager:
                 binary = _trimmed_text(env.get("WHISPER_BIN") or os.environ.get("WHISPER_BIN") or "whisper-cli")
             else:
                 binary = "claude"
+            ollama_catalog_items: list[dict[str, Any]] | None = None
             if provider == "ollama":
                 auth_mode, base_url, api_key = self._resolve_ollama_connection_inputs(env=env)
                 live_catalog = self._fetch_ollama_model_catalog(
@@ -2299,7 +2640,12 @@ class ControlPlaneManager:
                     base_url=base_url,
                     api_key=api_key,
                 )
-                live_models = [str(item["model_id"]) for item in _safe_json_list(live_catalog.get("items")) if item]
+                ollama_catalog_items = [
+                    cast(dict[str, Any], _safe_json_object(item))
+                    for item in _safe_json_list(live_catalog.get("items"))
+                    if item
+                ]
+                live_models = [str(item["model_id"]) for item in ollama_catalog_items if item.get("model_id")]
                 if live_models:
                     available_models = live_models
                 if not default_model and live_models:
@@ -2317,6 +2663,7 @@ class ControlPlaneManager:
                 "functional_models": resolve_provider_function_model_catalog(
                     provider,
                     available_models=available_models,
+                    ollama_catalog_items=ollama_catalog_items,
                 ),
             }
             if enabled and str(definition.get("category") or "general") != "infra":
@@ -2649,6 +2996,9 @@ class ControlPlaneManager:
     def _build_validation_report(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         agent_id = _trimmed_text(_safe_json_object(snapshot.get("agent")).get("id"))
         agent_spec = self.get_agent_spec(agent_id, snapshot=snapshot)
+        agent_row = fetch_one("SELECT * FROM cp_agent_definitions WHERE id = ?", (_normalize_agent_id(agent_id),))
+        if agent_row is not None:
+            agent_spec = self._resolve_hierarchical_spec(agent_spec, agent_row)
         feature_flags, available_models, enabled_providers = self._validation_inputs(snapshot)
         validation = validate_agent_spec(
             agent_spec,
@@ -2813,9 +3163,67 @@ class ControlPlaneManager:
             ),
         )
 
-    def get_dashboard_session(self, agent_id: str, session_id: str) -> dict[str, Any] | None:
+    def list_dashboard_session_summaries(
+        self,
+        *,
+        agent_ids: list[str],
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        seen_agent_ids: set[str] = set()
+        for agent_id in agent_ids:
+            normalized, _ = self._require_dashboard_agent(agent_id)
+            if normalized in seen_agent_ids:
+                continue
+            seen_agent_ids.add(normalized)
+            items.extend(
+                cast(
+                    list[dict[str, Any]],
+                    self._dashboard_store().list_sessions(
+                        normalized,
+                        search=search,
+                        limit=5000,
+                        offset=0,
+                    ),
+                )
+            )
+        items.sort(
+            key=lambda item: str(item.get("last_activity_at") or ""),
+            reverse=True,
+        )
+        deduped_items: list[dict[str, Any]] = []
+        seen_sessions: set[tuple[str, str]] = set()
+        for item in items:
+            key = (
+                str(item.get("bot_id") or item.get("agent_id") or ""),
+                str(item.get("session_id") or ""),
+            )
+            if not key[0] or not key[1] or key in seen_sessions:
+                continue
+            seen_sessions.add(key)
+            deduped_items.append(item)
+        return deduped_items[offset : offset + limit]
+
+    def get_dashboard_session(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+    ) -> dict[str, Any] | None:
         normalized, _ = self._require_dashboard_agent(agent_id)
-        return cast(dict[str, Any] | None, self._dashboard_store().get_session(normalized, session_id))
+        return cast(
+            dict[str, Any] | None,
+            self._dashboard_store().get_session(
+                normalized,
+                session_id,
+                limit=limit,
+                before=before,
+            ),
+        )
 
     def send_dashboard_session_message(
         self,
@@ -2988,6 +3396,1726 @@ class ControlPlaneManager:
         normalized, _ = self._require_dashboard_agent(agent_id)
         return cast(dict[str, Any], dashboard_apply_memory_curation_action(normalized, payload))
 
+    def _serialize_core_catalog_entry(self, definition: dict[str, Any]) -> dict[str, Any]:
+        integration_id = str(definition.get("id") or "").strip().lower()
+        auth_modes = [str(item).strip() for item in definition.get("auth_modes") or [] if str(item).strip()]
+        default_auth = auth_modes[0] if auth_modes else "none"
+        return {
+            "connection_key": _core_connection_key(integration_id),
+            "kind": "core",
+            "integration_key": integration_id,
+            "display_name": str(definition.get("title") or integration_id),
+            "description": str(definition.get("description") or ""),
+            "category": str(definition.get("category") or "general"),
+            "transport_kind": str(definition.get("transport") or "core"),
+            "auth_capabilities": {"modes": auth_modes},
+            "auth_strategy_default": default_auth,
+            "official_support_level": "core",
+            "oauth_mode": "confidential" if any("oauth" in mode for mode in auth_modes) else "none",
+            "remote_url": None,
+            "vendor_notes": "",
+            "default_policy": "always_ask",
+            "env_schema": [],
+            "headers_schema": [],
+            "documentation_url": str(definition.get("documentation_url") or "") or None,
+            "logo_key": str(definition.get("logo_key") or integration_id) or None,
+            "metadata": {
+                "supports_persistence": bool(definition.get("supports_persistence")),
+                "health_probe": str(definition.get("health_probe") or ""),
+            },
+        }
+
+    def _serialize_core_connection_payload(self, integration_id: str) -> dict[str, Any]:
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        row = self._integration_connection_row(normalized)
+        metadata = (
+            _safe_json_object(json_load(row.get("metadata_json"), {}))
+            if row is not None and _row_has_column(row, "metadata_json")
+            else {}
+        )
+        auth_method = self._resolve_integration_auth_mode(normalized)
+        configured = (
+            bool(int(row.get("configured") or 0))
+            if row is not None and _row_has_column(row, "configured")
+            else self._integration_configured(normalized)
+        )
+        verified = (
+            bool(int(row.get("verified") or 0)) if row is not None and _row_has_column(row, "verified") else False
+        )
+        if not configured:
+            verified = False
+        status = self._integration_connection_status(
+            {
+                "configured": configured,
+                "verified": verified,
+                "last_error": _trimmed_text(row.get("last_error")) if row is not None else "",
+            }
+        )
+        return {
+            "connection_key": _core_connection_key(normalized),
+            "kind": "core",
+            "integration_key": normalized,
+            "status": status,
+            "transport_kind": str(definition.transport or "core"),
+            "auth_strategy": auth_method,
+            "auth_method": auth_method,
+            "official_support_level": "core",
+            "source_origin": "system_default",
+            "account_label": _trimmed_text(row.get("account_label")) if row is not None else None,
+            "provider_account_id": _nonempty_text(
+                (
+                    _trimmed_text(row.get("provider_account_id"))
+                    if row is not None and _row_has_column(row, "provider_account_id")
+                    else ""
+                )
+                or metadata.get("provider_account_id")
+                or metadata.get("account")
+                or metadata.get("account_id")
+            )
+            or None,
+            "expires_at": (
+                _trimmed_text(row.get("expires_at"))
+                if row is not None and _row_has_column(row, "expires_at")
+                else _nonempty_text(metadata.get("expires_at"))
+            )
+            or None,
+            "last_verified_at": _trimmed_text(row.get("last_verified_at")) if row is not None else None,
+            "last_error": _trimmed_text(row.get("last_error")) if row is not None else None,
+            "tool_count": 0,
+            "connected": configured,
+            "enabled": configured,
+            "fields": self._integration_fields_payload(normalized),
+            "metadata": {
+                **metadata,
+                "verified": verified,
+                "configured": configured,
+                "supports_persistence": bool(definition.supports_persistence),
+                "health_probe": str(definition.health_probe or ""),
+            },
+        }
+
+    def _serialize_agent_core_connection_payload(self, agent_id: str, integration_id: str) -> dict[str, Any]:
+        try:
+            normalized_agent, _ = self._require_agent_row(agent_id)
+            agent_exists = True
+        except KeyError:
+            normalized_agent = _normalize_agent_id(agent_id)
+            agent_exists = False
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        row = self._core_agent_connection_row(normalized_agent, normalized) if agent_exists else None
+        metadata = (
+            _safe_json_object(json_load(row.get("metadata_json"), {}))
+            if row is not None and _row_has_column(row, "metadata_json")
+            else {}
+        )
+        auth_method = (
+            self._resolve_agent_core_auth_method(normalized_agent, normalized)
+            if agent_exists
+            else (definition.auth_modes[0] if definition.auth_modes else "none")
+        )
+        enabled = bool(int(row.get("enabled") or 0)) if row is not None else False
+        configured = (
+            self._agent_core_connection_configured(normalized_agent, normalized)
+            if row is not None and agent_exists
+            else False
+        )
+        verified = bool(int(row.get("verified") or 0)) if row is not None else False
+        if not enabled:
+            verified = False
+        source_origin = (
+            _trimmed_text(row.get("source_origin")) if row is not None and _row_has_column(row, "source_origin") else ""
+        )
+        if not source_origin:
+            source_origin = "local_session" if auth_method == "local_session" else "agent_binding"
+        runtime_connected = bool(enabled and configured)
+        payload = {
+            "connection_key": _core_connection_key(normalized),
+            "kind": "core",
+            "integration_key": normalized,
+            "status": self._integration_connection_status(
+                {
+                    "verified": verified and runtime_connected,
+                    "configured": runtime_connected,
+                    "last_error": _trimmed_text(row.get("last_error")) if row is not None else "",
+                }
+            ),
+            "transport_kind": str(definition.transport or "core"),
+            "auth_strategy": auth_method,
+            "auth_method": auth_method,
+            "official_support_level": "core",
+            "source_origin": source_origin,
+            "account_label": _trimmed_text(row.get("account_label")) if row is not None else None,
+            "provider_account_id": (
+                _trimmed_text(row.get("provider_account_id"))
+                if row is not None and _row_has_column(row, "provider_account_id")
+                else _nonempty_text(
+                    metadata.get("provider_account_id") or metadata.get("account") or metadata.get("account_id")
+                )
+            )
+            or None,
+            "expires_at": (
+                _trimmed_text(row.get("expires_at"))
+                if row is not None and _row_has_column(row, "expires_at")
+                else _nonempty_text(metadata.get("expires_at"))
+            )
+            or None,
+            "last_verified_at": _trimmed_text(row.get("last_verified_at")) if row is not None else None,
+            "last_error": _trimmed_text(row.get("last_error")) if row is not None else None,
+            "tool_count": 0,
+            "connected": runtime_connected,
+            "enabled": enabled,
+            "fields": self._agent_core_fields_payload(normalized_agent, normalized) if agent_exists else [],
+            "metadata": {
+                **metadata,
+                "verified": verified,
+                "configured": configured,
+                "supports_persistence": bool(definition.supports_persistence),
+                "health_probe": str(definition.health_probe or ""),
+            },
+        }
+        return payload
+
+    def resolve_agent_core_runtime_connection(self, agent_id: str, integration_id: str) -> dict[str, Any] | None:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        row = self._core_agent_connection_row(normalized_agent, normalized)
+        if row is None or not bool(int(row.get("enabled") or 0)):
+            return None
+
+        config_values = {
+            str(key): _stringify_env_value(value)
+            for key, value in self._agent_core_connection_config(normalized_agent, normalized).items()
+            if _stringify_env_value(value).strip()
+        }
+        secret_refs: dict[str, str] = {}
+        secret_values: dict[str, str] = {}
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized, {})
+        for field in template.get("fields", ()):
+            if str(field.get("storage") or "env") != "secret":
+                continue
+            secret_key = str(field.get("key") or "").strip().upper()
+            if not secret_key:
+                continue
+            secret_refs[secret_key] = f"agent:{normalized_agent}:{secret_key}"
+            value = self.get_decrypted_secret_value(normalized_agent, secret_key)
+            if value:
+                secret_values[secret_key] = value
+
+        metadata = (
+            _safe_json_object(json_load(row.get("metadata_json"), {})) if _row_has_column(row, "metadata_json") else {}
+        )
+        auth_method = self._resolve_agent_core_auth_method(normalized_agent, normalized)
+        configured = self._agent_core_connection_configured(normalized_agent, normalized)
+        connected = bool(configured and int(row.get("enabled") or 0))
+        source_origin = _trimmed_text(row.get("source_origin")) or (
+            "local_session" if auth_method == "local_session" else "agent_binding"
+        )
+        return {
+            "agent_id": normalized_agent,
+            "connection_key": _core_connection_key(normalized),
+            "kind": "core",
+            "integration_key": normalized,
+            "auth_method": auth_method,
+            "source_origin": source_origin,
+            "status": self._integration_connection_status(
+                {
+                    "verified": bool(int(row.get("verified") or 0)) and connected,
+                    "configured": connected,
+                    "last_error": _trimmed_text(row.get("last_error")),
+                }
+            ),
+            "connected": connected,
+            "account_label": _trimmed_text(row.get("account_label")) or None,
+            "provider_account_id": (
+                _trimmed_text(row.get("provider_account_id"))
+                or _nonempty_text(
+                    metadata.get("provider_account_id") or metadata.get("account") or metadata.get("account_id")
+                )
+                or None
+            ),
+            "expires_at": _trimmed_text(row.get("expires_at")) or _nonempty_text(metadata.get("expires_at")) or None,
+            "last_verified_at": _trimmed_text(row.get("last_verified_at")) or None,
+            "last_error": _trimmed_text(row.get("last_error")) or None,
+            "config_values": config_values,
+            "secret_refs": secret_refs,
+            "secret_values": secret_values,
+            "metadata": metadata,
+            "tool_policies": {},
+        }
+
+    def list_connection_catalog(self) -> dict[str, Any]:
+        self.ensure_seeded()
+        items = [self._serialize_core_catalog_entry(dict(item)) for item in resolve_core_integration_catalog()]
+        items.extend(self._serialize_unified_mcp_catalog_entry(row) for row in self.list_mcp_catalog())
+        return {
+            "items": items,
+            "governance": {
+                "catalog_source": "backend",
+                "default_policy": "always_ask",
+            },
+        }
+
+    def list_connection_defaults(self) -> dict[str, Any]:
+        self.ensure_seeded()
+        items = [
+            self._serialize_core_connection_payload(str(definition.get("id") or ""))
+            for definition in resolve_core_integration_catalog()
+        ]
+        return {"items": items}
+
+    def import_agent_connection_default(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind != "core":
+            raise ValueError("connection_defaults_supported_only_for_core")
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized = value.strip().lower()
+        row = self._integration_connection_row(normalized)
+        if row is None or not bool(int(row.get("configured") or 0)):
+            raise ValueError("connection_default_not_configured")
+
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized, {})
+        sections = self._system_settings_sections()
+        import_fields: list[dict[str, Any]] = []
+        for field in template.get("fields", ()):
+            key = str(field.get("key") or "").strip().upper()
+            if not key:
+                continue
+            if str(field.get("storage") or "env") == "secret":
+                secret_row = fetch_one(
+                    "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
+                    (key,),
+                )
+                encrypted = _trimmed_text(secret_row["encrypted_value"]) if secret_row is not None else ""
+                if encrypted:
+                    import_fields.append({"key": key, "value": decrypt_secret(encrypted)})
+                continue
+            section_name = self._infer_section_from_env_key(key)
+            section_payload = _safe_json_object(sections.get(section_name))
+            env_map = _safe_json_object(section_payload.get("env"))
+            value_text = _nonempty_text(env_map.get(key))
+            if value_text:
+                import_fields.append({"key": key, "value": value_text})
+
+        config = self._persist_agent_core_connection_fields(normalized_agent, normalized, import_fields)
+        metadata = (
+            _safe_json_object(json_load(row.get("metadata_json"), {})) if _row_has_column(row, "metadata_json") else {}
+        )
+        auth_method = self._resolve_agent_core_auth_method(
+            normalized_agent,
+            normalized,
+            requested_auth_method=_trimmed_text(row.get("auth_method") or row.get("auth_mode")),
+        )
+        source_origin = "local_session" if auth_method == "local_session" else "imported_default"
+        if auth_method == "local_session":
+            metadata["allow_local_session"] = bool(metadata.get("allow_local_session"))
+        self._persist_core_agent_connection_row(
+            normalized_agent,
+            normalized,
+            auth_method=auth_method,
+            source_origin=source_origin,
+            configured=(
+                True
+                if normalized == "browser"
+                else self._agent_core_connection_configured(normalized_agent, normalized)
+            ),
+            verified=False,
+            account_label="",
+            provider_account_id="",
+            expires_at="",
+            last_verified_at="",
+            last_error="",
+            auth_expired=False,
+            checked_via="",
+            config=config,
+            metadata=metadata,
+            enabled=True,
+        )
+        return {"connection": self._serialize_agent_core_connection_payload(normalized_agent, normalized)}
+
+    def list_agent_connections(self, agent_id: str) -> dict[str, Any]:
+        self.ensure_seeded()
+        items = [
+            self._serialize_agent_core_connection_payload(agent_id, str(definition.get("id") or ""))
+            for definition in resolve_core_integration_catalog()
+        ]
+        items.extend(self.list_mcp_agent_connections(agent_id))
+        return {"items": items}
+
+    def get_agent_connection(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            return self._serialize_agent_core_connection_payload(agent_id, value)
+        return self.get_mcp_agent_connection(agent_id, value)
+
+    def put_agent_connection(self, agent_id: str, connection_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            normalized_agent, _ = self._require_agent_row(agent_id)
+            normalized = value.strip().lower()
+            definition = CORE_INTEGRATION_CATALOG.get(normalized)
+            if definition is None:
+                raise KeyError(normalized)
+            request_payload = payload or {}
+            existing_row = self._core_agent_connection_row(normalized_agent, normalized)
+            existing_metadata = (
+                _safe_json_object(json_load(existing_row.get("metadata_json"), {}))
+                if existing_row is not None and _row_has_column(existing_row, "metadata_json")
+                else {}
+            )
+            merged_metadata = {
+                **existing_metadata,
+                **_safe_json_object(request_payload.get("metadata")),
+            }
+            requested_auth_method = _trimmed_text(request_payload.get("auth_method")) or _trimmed_text(
+                request_payload.get("auth_mode")
+            )
+            auth_method = self._resolve_agent_core_auth_method(
+                normalized_agent,
+                normalized,
+                requested_auth_method=requested_auth_method,
+            )
+            if auth_method == "local_session":
+                merged_metadata["allow_local_session"] = bool(
+                    request_payload.get("allow_local_session", merged_metadata.get("allow_local_session", False))
+                )
+            updated_config = self._persist_agent_core_connection_fields(
+                normalized_agent,
+                normalized,
+                _safe_json_list(request_payload.get("fields")),
+            )
+            enabled = bool(
+                request_payload.get(
+                    "enabled",
+                    existing_row.get("enabled") if existing_row is not None else True,
+                )
+            )
+            configured = enabled and (
+                True
+                if normalized == "browser"
+                else self._agent_core_connection_configured(normalized_agent, normalized)
+            )
+            source_origin = str(request_payload.get("source_origin") or "").strip().lower()
+            if auth_method == "local_session":
+                source_origin = "local_session"
+            elif not source_origin:
+                if existing_row is not None and _row_has_column(existing_row, "source_origin"):
+                    source_origin = _trimmed_text(existing_row.get("source_origin"))
+                source_origin = source_origin or "agent_binding"
+            self._persist_core_agent_connection_row(
+                normalized_agent,
+                normalized,
+                auth_method=auth_method,
+                source_origin=source_origin,
+                configured=configured,
+                verified=False,
+                account_label="",
+                provider_account_id="",
+                expires_at="",
+                last_verified_at="",
+                last_error="",
+                auth_expired=False,
+                checked_via="",
+                config=updated_config,
+                metadata=merged_metadata,
+                enabled=enabled,
+            )
+            return self._serialize_agent_core_connection_payload(normalized_agent, normalized)
+        return self.upsert_mcp_agent_connection(agent_id, value, payload)
+
+    def delete_agent_connection(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            normalized_agent, _ = self._require_agent_row(agent_id)
+            normalized = value.strip().lower()
+            self._clear_agent_core_connection_fields(normalized_agent, normalized)
+            execute(
+                "DELETE FROM cp_agent_connections WHERE agent_id = ? AND connection_key = ?",
+                (normalized_agent, _core_connection_key(normalized)),
+            )
+            return {"connection": self._serialize_agent_core_connection_payload(normalized_agent, normalized)}
+        return self.delete_mcp_agent_connection(agent_id, value)
+
+    def verify_agent_connection(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            return self.verify_agent_core_connection(agent_id, value)
+        return self.test_mcp_connection(agent_id, value)
+
+    def _integration_connection_row(self, integration_id: str) -> Any:
+        normalized = integration_id.strip().lower()
+        try:
+            return fetch_one(
+                "SELECT * FROM cp_connection_defaults WHERE connection_key = ?",
+                (_core_connection_key(normalized),),
+            )
+        except Exception:
+            return None
+
+    def _persist_integration_connection_row(
+        self,
+        integration_id: str,
+        *,
+        auth_mode: str,
+        configured: bool,
+        verified: bool,
+        account_label: str = "",
+        last_verified_at: str = "",
+        last_error: str = "",
+        auth_expired: bool = False,
+        checked_via: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        normalized = integration_id.strip().lower()
+        now = now_iso()
+        metadata_json = json_dump(_safe_json_object(metadata))
+        execute(
+            """
+            INSERT INTO cp_connection_defaults (
+                connection_key,
+                kind,
+                integration_key,
+                auth_method,
+                configured,
+                verified,
+                account_label,
+                provider_account_id,
+                expires_at,
+                source_origin,
+                last_verified_at,
+                last_error,
+                auth_expired,
+                checked_via,
+                metadata_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(connection_key) DO UPDATE SET
+                auth_method = excluded.auth_method,
+                configured = excluded.configured,
+                verified = excluded.verified,
+                account_label = excluded.account_label,
+                provider_account_id = excluded.provider_account_id,
+                expires_at = excluded.expires_at,
+                source_origin = excluded.source_origin,
+                last_verified_at = excluded.last_verified_at,
+                last_error = excluded.last_error,
+                auth_expired = excluded.auth_expired,
+                checked_via = excluded.checked_via,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                _core_connection_key(normalized),
+                "core",
+                normalized,
+                auth_mode.strip() or "none",
+                1 if configured else 0,
+                1 if verified else 0,
+                account_label.strip(),
+                _nonempty_text(_safe_json_object(metadata).get("provider_account_id")),
+                _nonempty_text(_safe_json_object(metadata).get("expires_at")),
+                "system_default",
+                last_verified_at.strip(),
+                last_error.strip(),
+                1 if auth_expired else 0,
+                checked_via.strip(),
+                metadata_json,
+                now,
+                now,
+            ),
+        )
+
+    def _core_agent_connection_row(self, agent_id: str, integration_id: str) -> Any:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized_integration = integration_id.strip().lower()
+        return fetch_one(
+            "SELECT * FROM cp_agent_connections WHERE agent_id = ? AND connection_key = ?",
+            (normalized_agent, _core_connection_key(normalized_integration)),
+        )
+
+    def _persist_core_agent_connection_row(
+        self,
+        agent_id: str,
+        integration_id: str,
+        *,
+        auth_method: str,
+        source_origin: str,
+        configured: bool,
+        verified: bool,
+        account_label: str = "",
+        provider_account_id: str = "",
+        expires_at: str = "",
+        last_verified_at: str = "",
+        last_error: str = "",
+        auth_expired: bool = False,
+        checked_via: str = "",
+        config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized_integration = integration_id.strip().lower()
+        normalized_origin = str(source_origin or "agent_binding").strip().lower() or "agent_binding"
+        if normalized_origin not in _CORE_CONNECTION_SOURCE_ORIGINS:
+            normalized_origin = "agent_binding"
+        now = now_iso()
+        execute(
+            """
+            INSERT INTO cp_agent_connections (
+                agent_id,
+                connection_key,
+                kind,
+                integration_key,
+                auth_method,
+                source_origin,
+                enabled,
+                configured,
+                verified,
+                account_label,
+                provider_account_id,
+                expires_at,
+                last_verified_at,
+                last_error,
+                auth_expired,
+                checked_via,
+                config_json,
+                metadata_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_id, connection_key) DO UPDATE SET
+                auth_method = excluded.auth_method,
+                source_origin = excluded.source_origin,
+                enabled = excluded.enabled,
+                configured = excluded.configured,
+                verified = excluded.verified,
+                account_label = excluded.account_label,
+                provider_account_id = excluded.provider_account_id,
+                expires_at = excluded.expires_at,
+                last_verified_at = excluded.last_verified_at,
+                last_error = excluded.last_error,
+                auth_expired = excluded.auth_expired,
+                checked_via = excluded.checked_via,
+                config_json = excluded.config_json,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                normalized_agent,
+                _core_connection_key(normalized_integration),
+                "core",
+                normalized_integration,
+                auth_method.strip() or "none",
+                normalized_origin,
+                1 if enabled else 0,
+                1 if configured else 0,
+                1 if verified else 0,
+                account_label.strip(),
+                provider_account_id.strip(),
+                expires_at.strip(),
+                last_verified_at.strip(),
+                last_error.strip(),
+                1 if auth_expired else 0,
+                checked_via.strip(),
+                json_dump(_safe_json_object(config)),
+                json_dump(_safe_json_object(metadata)),
+                now,
+                now,
+            ),
+        )
+
+    def _agent_secret_preview_state(self, agent_id: str, secret_key: str) -> tuple[bool, str]:
+        secret = self.get_secret_asset(agent_id, secret_key, scope="agent")
+        if secret is None:
+            return False, ""
+        preview = _nonempty_text(secret.get("preview")) or "Segredo configurado"
+        return True, preview
+
+    def _record_integration_health_check(self, integration_id: str, payload: dict[str, Any]) -> None:
+        _ = (integration_id, payload)
+
+    def _stored_global_secret_preview_state(self, secret_key: str) -> tuple[bool, str]:
+        secret = self.get_global_secret_asset(secret_key)
+        if secret is None:
+            return False, ""
+        preview = _nonempty_text(secret.get("preview")) or "Segredo configurado"
+        return True, preview
+
+    def _stored_global_secret_value(self, secret_key: str) -> str:
+        secret = self.get_global_secret_asset(secret_key)
+        if secret is None:
+            return ""
+        return _nonempty_text(secret.get("value"))
+
+    def _global_secret_value(self, secret_key: str) -> str:
+        normalized_secret_key = _normalize_secret_key(secret_key)
+        row = fetch_one(
+            "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
+            (normalized_secret_key,),
+        )
+        if row is not None:
+            encrypted = _trimmed_text(row["encrypted_value"])
+            if encrypted:
+                return decrypt_secret(encrypted)
+        return _trimmed_text(os.environ.get(normalized_secret_key))
+
+    def _system_default_connection_config(self, integration_id: str) -> dict[str, str]:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return {}
+        sections = self._system_settings_sections()
+        values: dict[str, str] = {}
+        for field in template["fields"]:
+            if str(field.get("storage") or "env") == "secret":
+                continue
+            key = str(field.get("key") or "").strip().upper()
+            if not key:
+                continue
+            section_name = self._infer_section_from_env_key(key)
+            section_payload = _safe_json_object(sections.get(section_name))
+            env_map = _safe_json_object(section_payload.get("env"))
+            value = _nonempty_text(env_map.get(key))
+            if value:
+                values[key] = value
+        return values
+
+    def _integration_fields_payload(self, integration_id: str) -> list[dict[str, Any]]:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return []
+        config = self._system_default_connection_config(normalized)
+        payload: list[dict[str, Any]] = []
+        for field in template["fields"]:
+            entry = dict(field)
+            key = str(field["key"])
+            if str(field.get("storage") or "env") == "secret":
+                value_present, preview = self._stored_global_secret_preview_state(key)
+                payload.append(
+                    {
+                        **entry,
+                        "value": "",
+                        "preview": preview,
+                        "value_present": value_present,
+                        "usage_scope": "system_only",
+                    }
+                )
+                continue
+            payload.append(
+                {
+                    **entry,
+                    "value": _trimmed_text(config.get(key)),
+                }
+            )
+        return payload
+
+    def _agent_core_connection_config(self, agent_id: str, integration_id: str) -> dict[str, Any]:
+        row = self._core_agent_connection_row(agent_id, integration_id)
+        if row is None:
+            return {}
+        return _safe_json_object(json_load(row.get("config_json"), {}))
+
+    def _agent_core_fields_payload(self, agent_id: str, integration_id: str) -> list[dict[str, Any]]:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return []
+        config = self._agent_core_connection_config(agent_id, normalized)
+        payload: list[dict[str, Any]] = []
+        for field in template["fields"]:
+            entry = dict(field)
+            key = str(field["key"])
+            storage = str(field.get("storage") or "env")
+            if storage == "secret":
+                value_present, preview = self._agent_secret_preview_state(agent_id, key)
+                payload.append(
+                    {
+                        **entry,
+                        "value": "",
+                        "preview": preview,
+                        "value_present": value_present,
+                        "usage_scope": "agent_only",
+                    }
+                )
+                continue
+            payload.append({**entry, "value": _trimmed_text(config.get(key))})
+        return payload
+
+    def _persist_agent_core_connection_fields(
+        self,
+        agent_id: str,
+        integration_id: str,
+        payload_fields: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized_integration = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized_integration)
+        if template is None:
+            return self._agent_core_connection_config(normalized_agent, normalized_integration)
+        row = self._core_agent_connection_row(normalized_agent, normalized_integration)
+        config = _safe_json_object(json_load(row.get("config_json"), {})) if row is not None else {}
+        provided_fields = {
+            str(_safe_json_object(field).get("key") or ""): _safe_json_object(field)
+            for field in payload_fields
+            if str(_safe_json_object(field).get("key") or "")
+        }
+        for field in template["fields"]:
+            key = str(field["key"])
+            entry = provided_fields.get(key)
+            if entry is None:
+                continue
+            clear = bool(entry.get("clear"))
+            value = _nonempty_text(entry.get("value"))
+            storage = str(field.get("storage") or "env")
+            if storage == "secret":
+                if clear:
+                    self.delete_secret_asset(normalized_agent, key)
+                elif value:
+                    self.upsert_secret_asset(normalized_agent, key, {"value": value})
+                continue
+            if clear:
+                config.pop(key, None)
+            elif value:
+                config[key] = value
+        return config
+
+    def _clear_agent_core_connection_fields(self, agent_id: str, integration_id: str) -> None:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return
+        for field in template["fields"]:
+            key = str(field["key"])
+            if str(field.get("storage") or "env") == "secret":
+                self.delete_secret_asset(agent_id, key)
+
+    def _resolve_agent_core_auth_method(
+        self,
+        agent_id: str,
+        integration_id: str,
+        *,
+        requested_auth_method: str | None = None,
+    ) -> str:
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        supported_modes = {str(mode).strip().lower() for mode in definition.auth_modes}
+        raw_requested = str(requested_auth_method or "").strip().lower()
+        requested = _CORE_LEGACY_AUTH_MODE_ALIASES.get(raw_requested, raw_requested)
+        if requested and requested in supported_modes:
+            return requested
+        row = self._core_agent_connection_row(agent_id, normalized)
+        persisted_raw = _trimmed_text(row.get("auth_method") if row is not None else "").lower()
+        persisted = _CORE_LEGACY_AUTH_MODE_ALIASES.get(persisted_raw, persisted_raw)
+        config = self._agent_core_connection_config(agent_id, normalized)
+        if normalized == "browser":
+            return "none"
+        if normalized == "gws":
+            if self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"):
+                return "service_account_key"
+            return "service_account"
+        if normalized in {"jira", "confluence"}:
+            return "api_token"
+        if normalized in {"gh", "glab"}:
+            if persisted in supported_modes:
+                return persisted
+            return "local_session"
+        if normalized == "aws":
+            if persisted in supported_modes:
+                return persisted
+            if _nonempty_text(config.get("AWS_ROLE_ARN")):
+                return "assume_role"
+            if self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID") and self.get_secret_asset(
+                agent_id, "AWS_SECRET_ACCESS_KEY"
+            ):
+                return "access_key"
+            return "local_session"
+        if persisted in supported_modes:
+            return persisted
+        return definition.auth_modes[0] if definition.auth_modes else "none"
+
+    def _agent_core_connection_configured(self, agent_id: str, integration_id: str) -> bool:
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        row = self._core_agent_connection_row(agent_id, normalized)
+        if normalized == "browser":
+            return bool(row and int(row.get("configured") or 0))
+        config = self._agent_core_connection_config(agent_id, normalized)
+        auth_method = self._resolve_agent_core_auth_method(agent_id, normalized)
+        if normalized == "gws":
+            if auth_method == "service_account_key":
+                return bool(self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"))
+            return bool(_nonempty_text(config.get("GWS_CREDENTIALS_FILE")))
+        if normalized in {"jira", "confluence"}:
+            required_secret = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
+            required_env = (
+                ("JIRA_URL", "JIRA_USERNAME") if normalized == "jira" else ("CONFLUENCE_URL", "CONFLUENCE_USERNAME")
+            )
+            return bool(self.get_secret_asset(agent_id, required_secret)) and all(
+                _nonempty_text(config.get(key)) for key in required_env
+            )
+        if normalized in {"gh", "glab"}:
+            if auth_method == "local_session":
+                return bool(row)
+            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
+            return bool(self.get_secret_asset(agent_id, secret_key))
+        if normalized == "aws":
+            if not _nonempty_text(config.get("AWS_DEFAULT_REGION")):
+                return False
+            if auth_method == "local_session":
+                return bool(row)
+            if auth_method == "assume_role":
+                return (
+                    bool(_nonempty_text(config.get("AWS_ROLE_ARN")))
+                    and bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID"))
+                    and bool(self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY"))
+                )
+            return bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID")) and bool(
+                self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY")
+            )
+        return bool(row)
+
+    def _resolve_integration_auth_mode(
+        self,
+        integration_id: str,
+        *,
+        requested_auth_mode: str | None = None,
+    ) -> str:
+        normalized = integration_id.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        supported_modes = {mode.strip().lower() for mode in definition.auth_modes}
+        requested = _nonempty_text(requested_auth_mode).lower()
+        if requested and requested in supported_modes:
+            return requested
+
+        row = self._integration_connection_row(normalized)
+        persisted_raw_auth_method = (
+            _trimmed_text(row.get("auth_method")).lower()
+            if row is not None and _row_has_column(row, "auth_method")
+            else ""
+        )
+        persisted_auth_mode = _CORE_LEGACY_AUTH_MODE_ALIASES.get(
+            persisted_raw_auth_method,
+            persisted_raw_auth_method,
+        )
+        config = self._system_default_connection_config(normalized)
+        if normalized == "browser":
+            return "none"
+        if normalized == "gws":
+            if self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"):
+                return "service_account_key"
+            return "service_account"
+        if normalized in {"jira", "confluence"}:
+            return "api_token"
+        if normalized == "aws":
+            if self._stored_global_secret_value("AWS_ACCESS_KEY_ID") and self._stored_global_secret_value(
+                "AWS_SECRET_ACCESS_KEY"
+            ):
+                return "access_key"
+            if _nonempty_text(config.get("AWS_ROLE_ARN")):
+                return "assume_role"
+            if persisted_auth_mode in supported_modes:
+                return persisted_auth_mode
+            if "assume_role" in supported_modes:
+                return "assume_role"
+            return definition.auth_modes[0] if definition.auth_modes else "none"
+        if normalized == "gh":
+            if self._stored_global_secret_value("GH_TOKEN"):
+                return "token"
+            if persisted_auth_mode in supported_modes:
+                return persisted_auth_mode
+            if "token" in supported_modes:
+                return "token"
+            return definition.auth_modes[0] if definition.auth_modes else "none"
+        if normalized == "glab":
+            if self._stored_global_secret_value("GITLAB_TOKEN"):
+                return "token"
+            if persisted_auth_mode in supported_modes:
+                return persisted_auth_mode
+            if "token" in supported_modes:
+                return "token"
+            return definition.auth_modes[0] if definition.auth_modes else "none"
+        if persisted_auth_mode in supported_modes:
+            return persisted_auth_mode
+        return definition.auth_modes[0] if definition.auth_modes else "none"
+
+    def _persist_integration_credential_fields(self, integration_id: str, payload_fields: list[dict[str, Any]]) -> None:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return
+        provided_fields = {
+            str(_safe_json_object(field).get("key") or ""): _safe_json_object(field)
+            for field in payload_fields
+            if str(_safe_json_object(field).get("key") or "")
+        }
+        sections = self._system_settings_sections()
+        access_section = dict(self._access_section(sections))
+        system_env_meta = dict(self._access_meta_map("system_env_meta", sections=sections))
+        global_secret_meta = dict(self._access_meta_map("global_secret_meta", sections=sections))
+
+        for field in template["fields"]:
+            env_key = str(field["key"])
+            entry = provided_fields.get(env_key)
+            if entry is None:
+                continue
+            clear = bool(entry.get("clear"))
+            value = _nonempty_text(entry.get("value"))
+            storage = str(field.get("storage") or "env")
+            title = str(template["title"])
+
+            if storage == "secret":
+                if clear:
+                    global_secret_meta.pop(env_key, None)
+                    self.delete_global_secret_asset(env_key, persist_sections=False)
+                    continue
+                if not value:
+                    continue
+                global_secret_meta[env_key] = {
+                    "description": f"Credencial global de {title}",
+                    "usage_scope": "system_only",
+                }
+                self.upsert_global_secret_asset(
+                    env_key,
+                    {
+                        "value": value,
+                        "description": f"Credencial global de {title}",
+                        "usage_scope": "system_only",
+                    },
+                    persist_sections=False,
+                )
+                continue
+
+            section_name = self._infer_section_from_env_key(env_key)
+            section_payload = dict(_safe_json_object(sections.get(section_name)))
+            env_map = dict(_safe_json_object(section_payload.get("env")))
+            if clear:
+                env_map.pop(env_key, None)
+                system_env_meta.pop(env_key, None)
+            elif value:
+                env_map[env_key] = value
+                system_env_meta[env_key] = {"description": f"Configuração global de {title}"}
+            if env_map:
+                section_payload["env"] = env_map
+            else:
+                section_payload.pop("env", None)
+            sections[section_name] = section_payload
+
+        if global_secret_meta:
+            access_section["global_secret_meta"] = global_secret_meta
+        else:
+            access_section.pop("global_secret_meta", None)
+        if system_env_meta:
+            access_section["system_env_meta"] = system_env_meta
+        else:
+            access_section.pop("system_env_meta", None)
+        sections["access"] = access_section
+        self._persist_global_sections(sections)
+
+    def _clear_integration_credential_fields(self, integration_id: str) -> None:
+        normalized = integration_id.strip().lower()
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            return
+        self._persist_integration_credential_fields(
+            normalized,
+            [{"key": str(field["key"]), "clear": True} for field in template["fields"]],
+        )
+
+    def _integration_configured(self, integration_id: str) -> bool:
+        normalized = integration_id.strip().lower()
+        row = self._integration_connection_row(normalized)
+        fields = {
+            str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
+        }
+        if normalized in {"gh", "glab"}:
+            if row is not None:
+                return bool(int(row["configured"] or 0))
+            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
+            return bool(self._stored_global_secret_value(secret_key))
+        if normalized == "gws":
+            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
+            return bool(credentials_file or self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"))
+        template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
+        if template is None:
+            if normalized == "browser":
+                if row is None:
+                    return False
+                return bool(int(row["configured"] or 0))
+            return True
+        for field in template["fields"]:
+            if not bool(field.get("required")):
+                continue
+            key = str(field["key"])
+            if str(field.get("storage") or "env") == "secret":
+                if not self._stored_global_secret_value(key):
+                    return False
+                continue
+            if not _nonempty_text(fields.get(key, {}).get("value")):
+                return False
+        return True
+
+    def _integration_connection_status(self, payload: dict[str, Any]) -> str:
+        if bool(payload.get("verified")):
+            return "verified"
+        if bool(payload.get("configured")):
+            return "configured"
+        if _nonempty_text(payload.get("last_error")):
+            return "error"
+        return "not_configured"
+
+    def get_connection_default(self, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind != "core":
+            raise KeyError(connection_key)
+        return self._serialize_core_connection_payload(value)
+
+    def put_connection_default(self, connection_key: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind != "core":
+            raise KeyError(connection_key)
+        normalized = value.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        request_payload = payload or {}
+        self._persist_integration_credential_fields(normalized, _safe_json_list(request_payload.get("fields")))
+        configured = self._integration_configured(normalized)
+        if normalized == "browser" and not configured:
+            configured = True
+        auth_method = self._resolve_integration_auth_mode(
+            normalized,
+            requested_auth_mode=_trimmed_text(
+                request_payload.get("auth_method") or request_payload.get("auth_strategy")
+            ),
+        )
+        self._persist_integration_connection_row(
+            normalized,
+            auth_mode=auth_method,
+            configured=configured,
+            verified=False,
+            account_label="",
+            last_verified_at="",
+            last_error="",
+            auth_expired=False,
+            checked_via="",
+            metadata=_safe_json_object(request_payload.get("metadata")),
+        )
+        return self.get_connection_default(connection_key)
+
+    def delete_connection_default(self, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind != "core":
+            raise KeyError(connection_key)
+        normalized = value.strip().lower()
+        definition = CORE_INTEGRATION_CATALOG.get(normalized)
+        if definition is None:
+            raise KeyError(normalized)
+        self._clear_integration_credential_fields(normalized)
+        self._persist_integration_connection_row(
+            normalized,
+            auth_mode=definition.auth_modes[0] if definition.auth_modes else "none",
+            configured=False,
+            verified=False,
+            account_label="",
+            last_verified_at="",
+            last_error="",
+            auth_expired=False,
+            checked_via="",
+            metadata={},
+        )
+        return {"connection": self.get_connection_default(connection_key)}
+
+    def set_integration_system_enabled(self, integration_id: str, enabled: bool) -> dict[str, Any]:
+        normalized = integration_id.strip().lower()
+        payload = dict(self.get_system_settings())
+        integrations = dict(_safe_json_object(payload.get("integrations")))
+        integrations[f"{normalized}_enabled"] = bool(enabled)
+        payload["integrations"] = integrations
+        sections = self._apply_system_settings_to_sections(payload)
+        self._persist_global_sections(sections)
+        return {
+            "integration_id": normalized,
+            "enabled": bool(enabled),
+            "connection": self.get_connection_default(_core_connection_key(normalized)),
+        }
+
+    def _verify_agent_core_connection_configuration(self, agent_id: str, integration_id: str) -> dict[str, Any]:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized = integration_id.strip().lower()
+        row = self._core_agent_connection_row(normalized_agent, normalized)
+        if row is None or not bool(int(row.get("enabled") or 0)):
+            return {
+                "verified": False,
+                "account_label": "",
+                "last_error": f"{normalized} connection is not enabled for this agent.",
+                "checked_via": "agent_binding",
+                "auth_expired": False,
+                "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+            }
+
+        from koda.services.core_connection_broker import get_core_connection_broker
+
+        broker = get_core_connection_broker()
+
+        if normalized == "browser":
+            return {
+                "verified": self._agent_core_connection_configured(normalized_agent, normalized),
+                "account_label": "",
+                "last_error": "",
+                "checked_via": "agent_binding",
+                "auth_expired": False,
+                "details": {"auth_method": "none"},
+            }
+
+        if normalized == "aws":
+            region = _nonempty_text(
+                self._agent_core_connection_config(normalized_agent, normalized).get("AWS_DEFAULT_REGION")
+            )
+            if not region:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": "AWS missing default region.",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+            try:
+                import boto3  # type: ignore
+            except ImportError:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": "boto3 not installed.",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+            try:
+                resolved, session_kwargs = broker.build_boto3_session_kwargs(agent_id=normalized_agent)
+                session = boto3.Session(**session_kwargs)
+                identity = session.client("sts").get_caller_identity()
+                return {
+                    "verified": True,
+                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
+                    "last_error": "",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {
+                        "auth_method": resolved.auth_method,
+                        "region": region,
+                        "account": str(identity.get("Account") or ""),
+                        "arn": str(identity.get("Arn") or ""),
+                        "user_id": str(identity.get("UserId") or ""),
+                    },
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+
+        if normalized in {"gh", "glab"}:
+            cli = "gh" if normalized == "gh" else "glab"
+            checked_via = f"{cli}_api_user"
+            try:
+                from koda.services.provider_env import build_tool_subprocess_env
+
+                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
+                    proc_env = build_tool_subprocess_env(env_overrides=env)
+                    result = subprocess.run(
+                        [cli, "api", "user"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=proc_env,
+                    )
+            except FileNotFoundError:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": f"{cli} CLI not found.",
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+            if result.returncode != 0:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": (
+                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
+                    ),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {"auth_method": resolved.auth_method},
+                }
+            try:
+                payload = _safe_json_object(json.loads(result.stdout or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            return {
+                "verified": True,
+                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
+                "last_error": "",
+                "checked_via": checked_via,
+                "auth_expired": False,
+                "details": {"auth_method": resolved.auth_method, **payload},
+            }
+
+        if normalized == "gws":
+            try:
+                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
+                    credentials_file = _nonempty_text(
+                        env.get("GWS_CREDENTIALS_FILE") or env.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    )
+                    token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": "service_account_token",
+                    "auth_expired": False,
+                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+                }
+            return {
+                "verified": True,
+                "account_label": _nonempty_text(token_info.get("client_email")),
+                "last_error": "",
+                "checked_via": "service_account_token",
+                "auth_expired": False,
+                "details": {
+                    "auth_method": resolved.auth_method,
+                    "client_email": _nonempty_text(token_info.get("client_email")),
+                    "project_id": _nonempty_text(token_info.get("project_id")),
+                    "token_uri": _nonempty_text(token_info.get("token_uri")),
+                },
+            }
+
+        if normalized in {"jira", "confluence"}:
+            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
+            try:
+                kwargs = broker.atlassian_client_kwargs(normalized, agent_id=normalized_agent)
+                if normalized == "jira":
+                    from atlassian import Jira  # type: ignore
+
+                    def _probe() -> Any:
+                        client = Jira(**kwargs, api_version="3")
+                        return client.myself()
+                else:
+                    from atlassian import Confluence  # type: ignore
+
+                    def _probe() -> Any:
+                        client = Confluence(**kwargs)
+                        return client.get_all_spaces(limit=1)
+
+                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
+                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
+                return {
+                    "verified": True,
+                    "account_label": _nonempty_text(payload.get("displayName"))
+                    or _nonempty_text(payload.get("emailAddress")),
+                    "last_error": "",
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": payload,
+                }
+            except _VerificationTimeout as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {},
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {},
+                }
+
+        return {
+            "verified": self._agent_core_connection_configured(normalized_agent, normalized),
+            "account_label": "",
+            "last_error": "",
+            "checked_via": "agent_binding",
+            "auth_expired": False,
+            "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
+        }
+
+    def verify_agent_core_connection(self, agent_id: str, integration_id: str) -> dict[str, Any]:
+        normalized_agent, _ = self._require_agent_row(agent_id)
+        normalized = integration_id.strip().lower()
+        row = self._core_agent_connection_row(normalized_agent, normalized)
+        if row is None:
+            raise KeyError(_core_connection_key(normalized))
+        result = self._verify_agent_core_connection_configuration(normalized_agent, normalized)
+        existing_metadata = (
+            _safe_json_object(json_load(row.get("metadata_json"), {})) if _row_has_column(row, "metadata_json") else {}
+        )
+        merged_metadata = {
+            **existing_metadata,
+            **_safe_json_object(result.get("details")),
+        }
+        auth_method = self._resolve_agent_core_auth_method(normalized_agent, normalized)
+        source_origin = _trimmed_text(row.get("source_origin")) or (
+            "local_session" if auth_method == "local_session" else "agent_binding"
+        )
+        self._persist_core_agent_connection_row(
+            normalized_agent,
+            normalized,
+            auth_method=auth_method,
+            source_origin=source_origin,
+            configured=self._agent_core_connection_configured(normalized_agent, normalized),
+            verified=bool(result.get("verified")),
+            account_label=_nonempty_text(result.get("account_label")),
+            provider_account_id=_nonempty_text(
+                _safe_json_object(result.get("details")).get("provider_account_id")
+                or _safe_json_object(result.get("details")).get("account")
+                or _safe_json_object(result.get("details")).get("account_id")
+            ),
+            expires_at=_nonempty_text(_safe_json_object(result.get("details")).get("expires_at")),
+            last_verified_at=now_iso() if bool(result.get("verified")) else "",
+            last_error=_nonempty_text(result.get("last_error")),
+            auth_expired=bool(result.get("auth_expired")),
+            checked_via=_nonempty_text(result.get("checked_via")),
+            config=self._agent_core_connection_config(normalized_agent, normalized),
+            metadata=merged_metadata,
+            enabled=bool(int(row.get("enabled") or 0)),
+        )
+        return {
+            "connection": self._serialize_agent_core_connection_payload(normalized_agent, normalized),
+            "verification": result,
+        }
+
+    def _verify_integration_configuration(self, integration_id: str) -> dict[str, Any]:
+        normalized = integration_id.strip().lower()
+        fields = {
+            str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
+        }
+
+        if normalized == "aws":
+            region = _nonempty_text(fields.get("AWS_DEFAULT_REGION", {}).get("value"))
+            if not region:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": "AWS missing default region.",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_mode": "unknown", "region": region},
+                }
+            try:
+                import boto3  # type: ignore
+            except ImportError:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": "boto3 not installed.",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_mode": "unknown", "region": region},
+                }
+
+            access_key_id = self._global_secret_value("AWS_ACCESS_KEY_ID")
+            secret_access_key = self._global_secret_value("AWS_SECRET_ACCESS_KEY")
+            session_token = self._global_secret_value("AWS_SESSION_TOKEN")
+            profile_name = _nonempty_text(fields.get("AWS_PROFILE_PROD", {}).get("value")) or _nonempty_text(
+                fields.get("AWS_PROFILE_DEV", {}).get("value")
+            )
+            auth_mode = self._resolve_integration_auth_mode(normalized)
+            session_kwargs: dict[str, Any] = {"region_name": region}
+            if auth_mode == "access_key" and access_key_id and secret_access_key:
+                session_kwargs["aws_access_key_id"] = access_key_id
+                session_kwargs["aws_secret_access_key"] = secret_access_key
+                if session_token:
+                    session_kwargs["aws_session_token"] = session_token
+            elif profile_name:
+                session_kwargs["profile_name"] = profile_name
+            try:
+                session = boto3.Session(**session_kwargs)
+                identity = session.client("sts").get_caller_identity()
+                return {
+                    "verified": True,
+                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
+                    "last_error": "",
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {
+                        "auth_mode": auth_mode,
+                        "region": region,
+                        "account": str(identity.get("Account") or ""),
+                        "arn": str(identity.get("Arn") or ""),
+                        "user_id": str(identity.get("UserId") or ""),
+                    },
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": "sts_get_caller_identity",
+                    "auth_expired": False,
+                    "details": {"auth_mode": auth_mode, "region": region},
+                }
+
+        if normalized in {"gh", "glab"}:
+            cli = "gh" if normalized == "gh" else "glab"
+            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
+            auth_mode = self._resolve_integration_auth_mode(normalized)
+            command_env = dict(os.environ)
+            token_value = self._global_secret_value(secret_key)
+            if auth_mode == "token":
+                if not token_value:
+                    return {
+                        "verified": False,
+                        "account_label": "",
+                        "last_error": f"{cli} token missing.",
+                        "checked_via": f"{cli}_api_user",
+                        "auth_expired": False,
+                        "details": {"auth_mode": auth_mode},
+                    }
+                command_env[secret_key] = token_value
+            try:
+                result = subprocess.run(
+                    [cli, "api", "user"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=command_env,
+                )
+            except FileNotFoundError:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": f"{cli} CLI not found.",
+                    "checked_via": f"{cli}_api_user",
+                    "auth_expired": False,
+                    "details": {"auth_mode": auth_mode},
+                }
+            if result.returncode != 0:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": (
+                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
+                    ),
+                    "checked_via": f"{cli}_api_user",
+                    "auth_expired": False,
+                    "details": {"auth_mode": auth_mode},
+                }
+            try:
+                payload = _safe_json_object(json.loads(result.stdout or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            return {
+                "verified": True,
+                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
+                "last_error": "",
+                "checked_via": f"{cli}_api_user",
+                "auth_expired": False,
+                "details": {"auth_mode": auth_mode, **payload},
+            }
+
+        if normalized == "gws":
+            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
+            service_account_key = self._global_secret_value("GWS_SERVICE_ACCOUNT_KEY")
+            if not credentials_file and not service_account_key:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": "GWS credentials missing.",
+                    "checked_via": "service_account_token",
+                    "auth_expired": False,
+                    "details": {"credentials_source": "missing"},
+                }
+            credentials_source = "file" if credentials_file else "secret"
+            temp_path = ""
+            try:
+                if not credentials_file:
+                    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+                        handle.write(service_account_key)
+                        temp_path = handle.name
+                    credentials_file = temp_path
+                token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
+                return {
+                    "verified": True,
+                    "account_label": _nonempty_text(token_info.get("client_email")),
+                    "last_error": "",
+                    "checked_via": "service_account_token",
+                    "auth_expired": False,
+                    "details": {
+                        "credentials_source": credentials_source,
+                        "client_email": _nonempty_text(token_info.get("client_email")),
+                        "project_id": _nonempty_text(token_info.get("project_id")),
+                        "token_uri": _nonempty_text(token_info.get("token_uri")),
+                    },
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": "service_account_token",
+                    "auth_expired": False,
+                    "details": {"credentials_source": credentials_source},
+                }
+            finally:
+                if temp_path:
+                    with contextlib.suppress(OSError):
+                        os.unlink(temp_path)
+
+        if normalized in {"jira", "confluence"}:
+            template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized, {})
+            for field in template.get("fields", ()):
+                key = str(field["key"])
+                if str(field.get("storage") or "env") == "secret":
+                    if not self._global_secret_value(key):
+                        return {
+                            "verified": False,
+                            "account_label": "",
+                            "last_error": f"{normalized} credentials missing.",
+                            "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
+                            "auth_expired": False,
+                            "details": {},
+                        }
+                    continue
+                if not _nonempty_text(fields.get(key, {}).get("value")):
+                    return {
+                        "verified": False,
+                        "account_label": "",
+                        "last_error": f"{normalized} credentials missing.",
+                        "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
+                        "auth_expired": False,
+                        "details": {},
+                    }
+            url_key = "JIRA_URL" if normalized == "jira" else "CONFLUENCE_URL"
+            user_key = "JIRA_USERNAME" if normalized == "jira" else "CONFLUENCE_USERNAME"
+            token_key = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
+            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
+            try:
+                if normalized == "jira":
+                    from atlassian import Jira  # type: ignore
+
+                    def _probe() -> Any:
+                        client = Jira(
+                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
+                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
+                            password=self._global_secret_value(token_key),
+                        )
+                        return client.myself()
+                else:
+                    from atlassian import Confluence  # type: ignore
+
+                    def _probe() -> Any:
+                        client = Confluence(
+                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
+                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
+                            password=self._global_secret_value(token_key),
+                        )
+                        return client.get_all_spaces(limit=1)
+
+                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
+                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
+                return {
+                    "verified": True,
+                    "account_label": _nonempty_text(payload.get("displayName"))
+                    or _nonempty_text(payload.get("emailAddress")),
+                    "last_error": "",
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": payload,
+                }
+            except _VerificationTimeout as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {},
+                }
+            except Exception as exc:
+                return {
+                    "verified": False,
+                    "account_label": "",
+                    "last_error": str(exc),
+                    "checked_via": checked_via,
+                    "auth_expired": False,
+                    "details": {},
+                }
+
+        return {
+            "verified": self._integration_configured(normalized),
+            "account_label": "",
+            "last_error": "",
+            "checked_via": "static",
+            "auth_expired": False,
+            "details": {},
+        }
+
+    def verify_connection_default(self, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind != "core":
+            raise KeyError(connection_key)
+        normalized = value.strip().lower()
+        result = self._verify_integration_configuration(normalized)
+        self._record_integration_health_check(normalized, result)
+        self._persist_integration_connection_row(
+            normalized,
+            auth_mode=self._resolve_integration_auth_mode(
+                normalized,
+                requested_auth_mode=_trimmed_text(self.get_connection_default(connection_key).get("auth_method")),
+            ),
+            configured=self._integration_configured(normalized),
+            verified=bool(result.get("verified")),
+            account_label=_nonempty_text(result.get("account_label")),
+            last_verified_at=now_iso() if bool(result.get("verified")) else "",
+            last_error=_nonempty_text(result.get("last_error")),
+            auth_expired=bool(result.get("auth_expired")),
+            checked_via=_nonempty_text(result.get("checked_via")),
+            metadata=_safe_json_object(result.get("details")),
+        )
+        return {
+            "connection": self.get_connection_default(connection_key),
+            "verification": result,
+        }
+
     def get_core_tools(self) -> dict[str, Any]:
         env = self._merged_global_env()
         return {
@@ -3006,6 +5134,15 @@ class ControlPlaneManager:
                 connection = self.get_provider_connection(provider_id)
                 payload["connection_status"] = connection.get("connection_status")
                 payload["connection"] = connection
+                # Add extra models when using API key authentication
+                auth_mode = str(connection.get("auth_mode") or "").strip().lower()
+                if auth_mode == "api_key":
+                    from koda.provider_models import resolve_api_key_extra_model_ids
+
+                    extra = resolve_api_key_extra_model_ids(provider_id)
+                    if extra:
+                        current = payload.get("available_models") or []
+                        payload["available_models"] = list(dict.fromkeys(current + extra))
             payload["functional_models"] = resolve_provider_function_model_catalog(
                 provider_id,
                 available_models=[
@@ -3342,7 +5479,7 @@ class ControlPlaneManager:
         )
 
     def _provider_login_session_dict(self, state: ProviderLoginSessionState) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "session_id": state.session_id,
             "provider_id": state.provider_id,
             "auth_mode": state.auth_mode,
@@ -3355,6 +5492,9 @@ class ControlPlaneManager:
             "output_preview": state.output_preview,
             "last_error": state.last_error,
         }
+        if state.code_verifier:
+            d["code_verifier"] = state.code_verifier
+        return d
 
     def _provider_login_session_storage_dict(self, state: ProviderLoginSessionState) -> dict[str, Any]:
         payload = {
@@ -3447,15 +5587,52 @@ class ControlPlaneManager:
 
     def _sync_provider_login_session(self, provider_id: str, session_id: str) -> dict[str, Any]:
         self._cleanup_provider_login_sessions()
+        normalized_provider = provider_id.strip().lower()
         row = fetch_one(
             "SELECT * FROM cp_provider_login_sessions WHERE id = ? AND provider_id = ?",
-            (session_id, provider_id.strip().lower()),
+            (session_id, normalized_provider),
         )
         if row is None:
             raise KeyError(session_id)
         handle = self._provider_login_processes.get(session_id)
         if handle is not None:
             state = parse_login_session_state(session_id, handle)
+            if state.auth_mode == "subscription_login" and state.status in {"awaiting_browser", "completed"}:
+                connection_row = self._provider_connection_row(normalized_provider)
+                verification = verify_provider_subscription_login(
+                    cast(Any, normalized_provider),
+                    project_id=_trimmed_text(connection_row["project_id"]),
+                    base_env=self._merged_global_env(),
+                    work_dir=self._provider_auth_work_dir(normalized_provider),
+                )
+                if verification.verified:
+                    with contextlib.suppress(Exception):
+                        handle.terminate()
+                    self._provider_login_processes.pop(session_id, None)
+                    state = ProviderLoginSessionState(
+                        session_id=session_id,
+                        provider_id=cast(Any, normalized_provider),
+                        auth_mode="subscription_login",
+                        status="completed",
+                        command=state.command,
+                        message="Autenticacao confirmada e verificada pelo backend.",
+                        instructions=state.instructions,
+                        output_preview=state.output_preview,
+                    )
+                elif state.status == "completed":
+                    state = ProviderLoginSessionState(
+                        session_id=session_id,
+                        provider_id=cast(Any, normalized_provider),
+                        auth_mode="subscription_login",
+                        status="pending",
+                        command=state.command,
+                        auth_url=state.auth_url,
+                        user_code=state.user_code,
+                        message="Login concluido no provedor; validando autenticacao no backend.",
+                        instructions=state.instructions,
+                        output_preview=state.output_preview,
+                        last_error=verification.last_error,
+                    )
             self._persist_provider_login_session(state)
             if state.status in {"completed", "error", "cancelled"}:
                 self._provider_login_processes.pop(session_id, None)
@@ -3463,8 +5640,67 @@ class ControlPlaneManager:
             if row is None:
                 raise KeyError(session_id)
         details = self._inflate_provider_login_session_details(_safe_json_object(json_load(row["details_json"], {})))
+        # Skip the "no handle → cancel" path when a direct OAuth exchange is
+        # pending (code_verifier stored in memory).  The user hasn't submitted
+        # the code yet; the session must stay in awaiting_browser.
+        has_direct_oauth = session_id in getattr(self, "_claude_oauth_verifiers", {})
+        if (
+            handle is None
+            and not has_direct_oauth
+            and str(row["status"] or details.get("status") or "pending")
+            in {
+                "pending",
+                "awaiting_browser",
+            }
+        ):
+            auth_mode = _nonempty_text(details.get("auth_mode")) or "subscription_login"
+            if auth_mode == "subscription_login":
+                connection_row = self._provider_connection_row(normalized_provider)
+                verification = verify_provider_subscription_login(
+                    cast(Any, normalized_provider),
+                    project_id=_trimmed_text(connection_row["project_id"]),
+                    base_env=self._merged_global_env(),
+                    work_dir=self._provider_auth_work_dir(normalized_provider),
+                )
+                if verification.verified:
+                    completed_state = ProviderLoginSessionState(
+                        session_id=session_id,
+                        provider_id=cast(Any, normalized_provider),
+                        auth_mode="subscription_login",
+                        status="completed",
+                        command=_nonempty_text(details.get("command")),
+                        message="Autenticacao confirmada e verificada pelo backend.",
+                        instructions=_nonempty_text(details.get("instructions")),
+                        output_preview=_nonempty_text(details.get("output_preview")),
+                    )
+                    self._persist_provider_login_session(completed_state)
+                    row = fetch_one("SELECT * FROM cp_provider_login_sessions WHERE id = ?", (session_id,))
+                    if row is None:
+                        raise KeyError(session_id)
+                    details = self._inflate_provider_login_session_details(
+                        _safe_json_object(json_load(row["details_json"], {}))
+                    )
+                elif str(row["status"] or details.get("status") or "pending") == "awaiting_browser":
+                    cancelled_state = ProviderLoginSessionState(
+                        session_id=session_id,
+                        provider_id=cast(Any, normalized_provider),
+                        auth_mode="subscription_login",
+                        status="cancelled",
+                        command=_nonempty_text(details.get("command")),
+                        message="O fluxo de login expirou antes da autenticacao ser confirmada.",
+                        instructions=_nonempty_text(details.get("instructions")),
+                        output_preview=_nonempty_text(details.get("output_preview")),
+                        last_error=verification.last_error,
+                    )
+                    self._persist_provider_login_session(cancelled_state)
+                    row = fetch_one("SELECT * FROM cp_provider_login_sessions WHERE id = ?", (session_id,))
+                    if row is None:
+                        raise KeyError(session_id)
+                    details = self._inflate_provider_login_session_details(
+                        _safe_json_object(json_load(row["details_json"], {}))
+                    )
         details.setdefault("session_id", session_id)
-        details.setdefault("provider_id", provider_id.strip().lower())
+        details.setdefault("provider_id", normalized_provider)
         details["status"] = str(row["status"] or details.get("status") or "pending")
         details["completed_at"] = _trimmed_text(row["completed_at"])
         details["created_at"] = _trimmed_text(row["created_at"])
@@ -3778,13 +6014,14 @@ class ControlPlaneManager:
 
     def put_provider_local_connection(self, provider_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
-        if normalized != "ollama":
+        if normalized == "ollama":
+            base_url = self._resolve_ollama_base_url(
+                auth_mode="local",
+                env={"OLLAMA_BASE_URL": _trimmed_text(payload.get("base_url"))},
+            )
+            self._persist_provider_connection_meta(normalized, base_url=base_url)
+        elif normalized != "claude":
             raise ValueError(f"unsupported local provider connection: {provider_id}")
-        base_url = self._resolve_ollama_base_url(
-            auth_mode="local",
-            env={"OLLAMA_BASE_URL": _trimmed_text(payload.get("base_url"))},
-        )
-        self._persist_provider_connection_meta(normalized, base_url=base_url)
         self._persist_provider_connection_row(
             normalized,
             auth_mode="local",
@@ -3802,13 +6039,15 @@ class ControlPlaneManager:
         normalized = provider_id.strip().lower()
         if normalized not in MANAGED_PROVIDER_IDS:
             raise ValueError(f"unsupported provider connection: {provider_id}")
-        if normalized == "ollama":
-            raise ValueError("Ollama usa conexão local/servidor ou API key nesta interface.")
+        if normalized in {"ollama", "claude"}:
+            title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
+            raise ValueError(f"{title} usa API key ou conexão local nesta interface.")
         payload = payload or {}
         project_id = _trimmed_text(payload.get("project_id"))
         existing_row = self._provider_connection_row(normalized)
         if not project_id:
             project_id = _trimmed_text(existing_row["project_id"])
+
         handle, state = start_login_process(
             cast(Any, normalized),
             project_id=project_id,
@@ -3837,6 +6076,33 @@ class ControlPlaneManager:
     def get_provider_login_session(self, provider_id: str, session_id: str) -> dict[str, Any]:
         return self._sync_provider_login_session(provider_id, session_id)
 
+    def reauth_provider_connection(self, provider_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.start_provider_login(provider_id, payload)
+
+    def submit_provider_login_code(
+        self,
+        provider_id: str,
+        session_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized = provider_id.strip().lower()
+        code = _trimmed_text(_safe_json_object(payload).get("code"))
+
+        # Write code to CLI subprocess (Codex, Gemini).
+        handle = self._provider_login_processes.get(session_id)
+        if handle is None:
+            raise KeyError(session_id)
+        if code:
+            handle.write(code + "\n")
+            proc = getattr(handle, "process", None)
+            if proc is not None:
+                deadline = time.monotonic() + 6.0
+                while time.monotonic() < deadline:
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.3)
+        return self._sync_provider_login_session(normalized, session_id)
+
     def verify_provider_connection(self, provider_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
         row = self._provider_connection_row(normalized)
@@ -3844,9 +6110,13 @@ class ControlPlaneManager:
         if normalized == "elevenlabs":
             auth_mode = "api_key"
         project_id = _trimmed_text(row["project_id"])
-        if normalized == "ollama" and auth_mode == "local":
-            base_url = self._resolve_ollama_base_url(auth_mode="local")
-            result = verify_provider_local_connection("ollama", base_url=base_url)
+        if auth_mode == "local":
+            result = verify_provider_local_connection(
+                cast(Any, normalized),
+                base_url=self._resolve_ollama_base_url(auth_mode="local") if normalized == "ollama" else "",
+                base_env=self._merged_global_env(),
+                work_dir=self._provider_auth_work_dir(normalized),
+            )
             configured = True
         elif auth_mode == "api_key":
             api_key = self._provider_api_key_secret_value(normalized)
@@ -3910,6 +6180,8 @@ class ControlPlaneManager:
                 "plan_label": result.plan_label,
                 "checked_via": result.checked_via,
                 "last_error": result.last_error,
+                "auth_expired": result.auth_expired,
+                "details": dict(result.details),
             },
         }
 
@@ -4008,6 +6280,7 @@ class ControlPlaneManager:
                     "model_policy",
                     "tool_policy",
                     "autonomy_policy",
+                    "execution_policy",
                     "memory_policy",
                     "knowledge_policy",
                     "resource_access_policy",
@@ -4034,6 +6307,7 @@ class ControlPlaneManager:
             "memory_policy",
             "knowledge_policy",
             "autonomy_policy",
+            "execution_policy",
             "resource_access_policy",
             "voice_policy",
             "image_analysis_policy",
@@ -4116,6 +6390,12 @@ class ControlPlaneManager:
                 runtime_payload,
                 _safe_json_object(updated_spec.get("autonomy_policy")),
             )
+        if "execution_policy" in payload:
+            execution_policy = _safe_json_object(updated_spec.get("execution_policy"))
+            if execution_policy:
+                runtime_payload["execution_policy"] = execution_policy
+            else:
+                runtime_payload.pop("execution_policy", None)
         if "memory_extraction_schema" in payload:
             extraction_schema = _safe_json_object(updated_spec.get("memory_extraction_schema"))
             if extraction_schema:
@@ -4327,6 +6607,97 @@ class ControlPlaneManager:
     def put_autonomy_policy(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)
         return self.put_agent_spec(normalized, {"autonomy_policy": _safe_json_object(payload.get("policy", payload))})
+
+    def _execution_policy_catalog(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = snapshot or self.build_draft_snapshot(normalized)
+        feature_flags, _, _ = self._validation_inputs(snapshot)
+        mcp_actions: list[dict[str, Any]] = []
+        for connection in self.list_mcp_agent_connections(normalized):
+            if not bool(connection.get("enabled", True)):
+                continue
+            server_key = str(connection.get("server_key") or "").strip()
+            if not server_key:
+                continue
+            try:
+                connection_catalog = self.get_mcp_catalog_entry(server_key)
+            except Exception:
+                connection_catalog = {}
+            tools_payload = self.get_mcp_connection_tools(normalized, server_key)
+            mcp_actions.extend(
+                build_mcp_action_catalog(
+                    server_key=server_key,
+                    tools=[tool for tool in tools_payload.get("tools") or [] if isinstance(tool, dict)],
+                    tool_policies=_safe_json_object(tools_payload.get("policies")),
+                    transport=str(connection_catalog.get("transport_type") or tools_payload.get("kind") or "mcp"),
+                    connection_title=str(connection_catalog.get("display_name") or server_key),
+                    connection_description=str(connection_catalog.get("description") or ""),
+                )
+            )
+        return build_policy_catalog(feature_flags=feature_flags, mcp_actions=mcp_actions)
+
+    def get_execution_policy(self, agent_id: str) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = self.build_draft_snapshot(normalized)
+        agent_spec = self.get_agent_spec(normalized, snapshot=snapshot)
+        catalog = self._execution_policy_catalog(normalized, snapshot=snapshot)
+        validation = self._validation_inputs(snapshot)
+        feature_flags = validation[0]
+        policy = resolve_execution_policy(agent_spec, feature_flags=feature_flags)
+        source = _trimmed_text(_safe_json_object(policy).get("source")) or (
+            "execution_policy" if _safe_json_object(agent_spec.get("execution_policy")) else "compiled_legacy"
+        )
+        return {
+            "agent_id": normalized,
+            "policy": policy,
+            "source": source,
+            "catalog": catalog,
+            "legacy": {
+                "tool_policy": _safe_json_object(agent_spec.get("tool_policy")),
+                "autonomy_policy": _safe_json_object(agent_spec.get("autonomy_policy")),
+                "resource_access_policy": _safe_json_object(agent_spec.get("resource_access_policy")),
+            },
+        }
+
+    def put_execution_policy(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        return self.put_agent_spec(
+            normalized,
+            {"execution_policy": _safe_json_object(payload.get("policy", payload))},
+        )
+
+    def get_execution_policy_catalog(self, agent_id: str) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = self.build_draft_snapshot(normalized)
+        catalog = self._execution_policy_catalog(normalized, snapshot=snapshot)
+        feature_flags, _, _ = self._validation_inputs(snapshot)
+        agent_spec = self.get_agent_spec(normalized, snapshot=snapshot)
+        policy = resolve_execution_policy(agent_spec, feature_flags=feature_flags)
+        return {
+            "agent_id": normalized,
+            "catalog": catalog,
+            "policy": policy,
+        }
+
+    def evaluate_execution_policy(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = self.build_draft_snapshot(normalized)
+        feature_flags, _, _ = self._validation_inputs(snapshot)
+        agent_spec = self.get_agent_spec(normalized, snapshot=snapshot)
+        policy = _safe_json_object(payload.get("policy")) or resolve_execution_policy(
+            agent_spec,
+            feature_flags=feature_flags,
+        )
+        catalog = self._execution_policy_catalog(normalized, snapshot=snapshot)
+        envelope = _safe_json_object(payload.get("action") or payload.get("envelope") or payload)
+        evaluation = evaluate_execution_policy(policy, envelope, policy_catalog=catalog)
+        return {
+            "agent_id": normalized,
+            "policy": policy,
+            "catalog": catalog,
+            "action": envelope,
+            "evaluation": evaluation,
+        }
 
     def list_knowledge_candidates(
         self,
@@ -4741,6 +7112,7 @@ class ControlPlaneManager:
                 id, display_name, status, appearance_json, storage_namespace, runtime_endpoint_json,
                 applied_version, desired_version, metadata_json, workspace_id, squad_id, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO NOTHING
             """,
             (
                 agent_id,
@@ -4938,49 +7310,6 @@ class ControlPlaneManager:
                 best_profile = profile_key
         return best_profile
 
-    def _integration_credentials_payload(
-        self,
-        *,
-        merged_env: dict[str, str],
-        sections: dict[str, dict[str, Any]],
-    ) -> tuple[dict[str, Any], dict[str, str]]:
-        global_secrets = {str(item["secret_key"]): item for item in self._current_global_secrets(sections=sections)}
-        credentials: dict[str, Any] = {}
-        source_badges: dict[str, str] = {}
-        for integration_key, template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.items():
-            items: list[dict[str, Any]] = []
-            for field in template["fields"]:
-                env_key = str(field["key"])
-                storage = str(field["storage"])
-                if storage == "secret":
-                    secret = global_secrets.get(env_key)
-                    value_present, preview = self._global_secret_preview_state(env_key)
-                    items.append(
-                        {
-                            **field,
-                            "value": "",
-                            "preview": str(secret.get("preview") or "") if secret else preview,
-                            "value_present": bool(secret) or value_present,
-                            "usage_scope": str(secret.get("usage_scope") or "system_only") if secret else "system_only",
-                        }
-                    )
-                    source_badges[f"credentials.{env_key}"] = (
-                        "custom" if secret else ("env" if os.environ.get(env_key) else "system_default")
-                    )
-                else:
-                    current_value = _nonempty_text(merged_env.get(env_key) or os.environ.get(env_key))
-                    items.append({**field, "value": current_value})
-                    source_badges[f"credentials.{env_key}"] = self._system_settings_badge(
-                        env_key,
-                        merged_env=merged_env,
-                    )
-            credentials[integration_key] = {
-                "title": template["title"],
-                "description": template["description"],
-                "fields": items,
-            }
-        return credentials, source_badges
-
     def _custom_global_variables_payload(
         self,
         legacy_settings: dict[str, Any],
@@ -5039,11 +7368,7 @@ class ControlPlaneManager:
             )
         return sorted(variables, key=lambda item: (item["type"] != "secret", item["key"]))
 
-    def _general_review_warnings(
-        self,
-        values: dict[str, Any],
-        integration_credentials: dict[str, Any],
-    ) -> list[str]:
+    def _general_review_warnings(self, values: dict[str, Any]) -> list[str]:
         warnings: list[str] = []
         models = _safe_json_object(values.get("models"))
         provider_connections = {
@@ -5106,10 +7431,15 @@ class ControlPlaneManager:
 
         resources = _safe_json_object(values.get("resources"))
         integrations = _safe_json_object(resources.get("integrations"))
+        defaults_by_integration = {
+            str(item.get("integration_key") or "").strip().lower(): _safe_json_object(item)
+            for item in _safe_json_list(self.list_connection_defaults().get("items"))
+            if str(item.get("kind") or "").strip().lower() == "core"
+        }
         for integration_key, template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.items():
             if not bool(integrations.get(f"{integration_key}_enabled")):
                 continue
-            payload = _safe_json_object(integration_credentials.get(integration_key))
+            payload = defaults_by_integration.get(integration_key, {})
             fields = _safe_json_list(payload.get("fields"))
             missing = [
                 str(field.get("label") or field.get("key"))
@@ -5472,7 +7802,6 @@ class ControlPlaneManager:
                     "gws_enabled",
                     "jira_enabled",
                     "confluence_enabled",
-                    "postgres_enabled",
                     "aws_enabled",
                     "docker_enabled",
                     "whisper_enabled",
@@ -5514,10 +7843,6 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        integration_credentials, credential_badges = self._integration_credentials_payload(
-            merged_env=merged_env,
-            sections=sections,
-        )
         provider_connections = {
             provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
@@ -5540,14 +7865,12 @@ class ControlPlaneManager:
             "resources": resource_values,
             "memory_and_knowledge": memory_values,
             "variables": self._custom_global_variables_payload(legacy_settings, sections=sections),
-            "integration_credentials": integration_credentials,
             "provider_connections": provider_connections,
         }
         source_badges = {
             field: self._system_settings_badge(env_key, merged_env=merged_env)
             for field, env_key in _GENERAL_FIELD_SOURCE_ENV_KEYS.items()
         }
-        source_badges.update(credential_badges)
         for provider_id in _safe_json_object(provider_catalog.get("providers")):
             source_badges[f"models.providers_enabled.{provider_id}"] = self._system_settings_badge(
                 f"{provider_id.upper()}_ENABLED",
@@ -5588,7 +7911,12 @@ class ControlPlaneManager:
                         ),
                         "login_flow_kind": _safe_json_object(payload).get("login_flow_kind"),
                         "requires_project_id": bool(_safe_json_object(payload).get("requires_project_id", False)),
+                        "connection_managed": bool(_safe_json_object(payload).get("connection_managed", False)),
+                        "supports_local_connection": bool(
+                            _safe_json_object(payload).get("supports_local_connection", False)
+                        ),
                         "connection_status": _safe_json_object(payload).get("connection_status") or {},
+                        "connection": _safe_json_object(payload).get("connection") or {},
                         "functional_models": _safe_json_object(payload).get("functional_models") or [],
                     }
                     for provider_id, payload in _safe_json_object(provider_catalog.get("providers")).items()
@@ -5693,7 +8021,7 @@ class ControlPlaneManager:
                 ],
             },
             "review": {
-                "warnings": self._general_review_warnings(values, integration_credentials),
+                "warnings": self._general_review_warnings(values),
                 "hidden_sections": ["runtime", "scheduler"],
             },
         }
@@ -5747,7 +8075,6 @@ class ControlPlaneManager:
             _safe_json_object(memory_and_knowledge.get("autonomy_policy"))
         )
         variables = _safe_json_list(payload.get("variables"))
-        integration_credentials = _safe_json_object(payload.get("integration_credentials"))
 
         current_general = dict(_safe_json_object(current.get("general")))
         current_scheduler = dict(_safe_json_object(current.get("scheduler")))
@@ -5955,7 +8282,6 @@ class ControlPlaneManager:
             "gws_enabled",
             "jira_enabled",
             "confluence_enabled",
-            "postgres_enabled",
             "aws_enabled",
             "docker_enabled",
             "whisper_enabled",
@@ -6009,9 +8335,22 @@ class ControlPlaneManager:
         )
 
         custom_shared_variables: list[dict[str, str]] = []
-        custom_system_variables: list[dict[str, str]] = []
+        template_keys = {
+            str(field["key"])
+            for template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.values()
+            for field in template["fields"]
+        }
+        custom_system_variables = [
+            entry
+            for entry in _normalize_env_entries(current.get("additional_env_vars"))
+            if entry["key"] in template_keys
+        ]
         next_shared_meta: dict[str, dict[str, Any]] = {}
-        next_system_meta: dict[str, dict[str, Any]] = {}
+        next_system_meta: dict[str, dict[str, Any]] = {
+            key: value
+            for key, value in self._access_meta_map("system_env_meta", sections=sections).items()
+            if key in template_keys
+        }
         desired_secret_keys: set[str] = set()
 
         for item in variables:
@@ -6051,53 +8390,11 @@ class ControlPlaneManager:
             else:
                 next_system_meta[key] = {"description": description}
 
-        template_keys = {
-            str(field["key"])
-            for template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.values()
-            for field in template["fields"]
-        }
-        existing_secrets = {item["secret_key"] for item in self._current_global_secrets(sections=sections)}
-        for integration_key, template in _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.items():
-            payload_fields = _safe_json_object(integration_credentials.get(integration_key))
-            provided_fields = {
-                str(_safe_json_object(field).get("key")): _safe_json_object(field)
-                for field in _safe_json_list(payload_fields.get("fields"))
-            }
-            for field in template["fields"]:
-                env_key = str(field["key"])
-                entry = provided_fields.get(env_key, {})
-                if str(field["storage"]) == "secret":
-                    desired_secret_keys.add(env_key)
-                    global_secret_meta[env_key] = {
-                        "description": f"Credencial global de {template['title']}",
-                        "usage_scope": "system_only",
-                    }
-                    if bool(entry.get("clear")):
-                        global_secret_meta.pop(env_key, None)
-                        self.delete_global_secret_asset(env_key, persist_sections=False)
-                        continue
-                    value = _nonempty_text(entry.get("value"))
-                    if value:
-                        self.upsert_global_secret_asset(
-                            env_key,
-                            {
-                                "value": value,
-                                "description": f"Credencial global de {template['title']}",
-                                "usage_scope": "system_only",
-                            },
-                            persist_sections=False,
-                        )
-                    elif env_key in existing_secrets:
-                        continue
-                else:
-                    value = _nonempty_text(entry.get("value"))
-                    if value:
-                        custom_system_variables.append({"key": env_key, "value": value})
-                        next_system_meta[env_key] = {"description": f"Configuração global de {template['title']}"}
-
-        for secret in self._current_global_secrets(sections=sections):
+        for secret in self._current_global_secrets(sections=sections, include_hidden=True):
             secret_key = str(secret["secret_key"])
-            if secret_key in template_keys and secret_key not in desired_secret_keys:
+            if secret_key in _HIDDEN_GLOBAL_SECRET_KEYS:
+                continue
+            if secret_key in template_keys:
                 continue
             if secret_key not in desired_secret_keys:
                 global_secret_meta.pop(secret_key, None)
@@ -6536,6 +8833,23 @@ class ControlPlaneManager:
             "updated_at": str(row["updated_at"] or ""),
         }
 
+    def get_decrypted_secret_value(self, agent_id: str, secret_key: str) -> str | None:
+        """Return the decrypted value of an agent secret. Internal use only."""
+        normalized, _ = self._require_agent_row(agent_id)
+        scope_id = _scope_id(normalized)
+        normalized_key = _normalize_secret_key(secret_key)
+        row = fetch_one(
+            "SELECT encrypted_value FROM cp_secret_values WHERE scope_id = ? AND secret_key = ?",
+            (scope_id, normalized_key),
+        )
+        if row is None:
+            return None
+        encrypted = str(row["encrypted_value"] or "").strip()
+        if not encrypted:
+            return None
+        log.info("secret_value_accessed", agent_id=agent_id, secret_key=secret_key)
+        return decrypt_secret(encrypted)
+
     def upsert_secret_asset(
         self, agent_id: str, secret_key: str, payload: dict[str, Any], *, scope: str = "agent"
     ) -> dict[str, Any]:
@@ -6634,6 +8948,8 @@ class ControlPlaneManager:
                 continue
             env.update(_section_env(_safe_json_object(data)))
         env.update(self._provider_connection_env())
+        for env_key in _CORE_CONNECTION_RUNTIME_ENV_KEYS:
+            env.pop(env_key, None)
         for api_key_env in PROVIDER_API_KEY_ENV_KEYS.values():
             env.pop(api_key_env, None)
         access_effective = _safe_json_object(section_states["access"]["effective"])
@@ -6667,6 +8983,7 @@ class ControlPlaneManager:
         runtime_endpoint.update(_safe_json_object(json_load(agent_row["runtime_endpoint_json"], {})))
         appearance = _safe_json_object(json_load(agent_row["appearance_json"], {}))
         appearance.setdefault("label", str(agent_row["display_name"]))
+        connection_refs = self._runtime_connection_refs(normalized)
         return {
             "agent": {
                 "id": normalized,
@@ -6679,6 +8996,8 @@ class ControlPlaneManager:
             },
             "sections": sections,
             "env": env,
+            "process_env": env,
+            "connection_refs": connection_refs,
             "documents": documents,
             "knowledge_assets": knowledge_assets,
             "templates": templates,
@@ -6782,15 +9101,32 @@ class ControlPlaneManager:
         inline_mode = True
         persisted_to_disk = False
 
-        runtime_env = dict(self._merged_global_env())
-        runtime_env.update(
-            {key: _stringify_env_value(value) for key, value in _safe_json_object(snapshot.get("env")).items()}
-        )
-        runtime_env.update(self._provider_connection_env())
+        runtime_env = {
+            key: _stringify_env_value(value)
+            for key, value in _safe_json_object(snapshot.get("process_env") or snapshot.get("env")).items()
+        }
+        for env_key in _CORE_CONNECTION_RUNTIME_ENV_KEYS:
+            runtime_env.pop(env_key, None)
+        connection_refs = [
+            _safe_json_object(item)
+            for item in _safe_json_list(snapshot.get("connection_refs"))
+            if isinstance(item, dict)
+        ]
         runtime_snapshot = dict(snapshot)
         runtime_snapshot["env"] = runtime_env
+        runtime_snapshot["process_env"] = runtime_env
+        runtime_snapshot["connection_refs"] = connection_refs
 
         agent_spec = self.get_agent_spec(normalized, snapshot=runtime_snapshot)
+
+        # Apply workspace -> squad -> agent hierarchical merge
+        try:
+            agent_row = fetch_one("SELECT * FROM cp_agent_definitions WHERE id = ?", (normalized,))
+            if agent_row is not None:
+                agent_spec = self._resolve_hierarchical_spec(agent_spec, agent_row)
+        except Exception:
+            log.warning("hierarchical_spec_merge_skipped", agent_id=normalized, exc_info=True)
+
         docs = _safe_json_object(agent_spec.get("documents"))
         composed_prompt = _compose_agent_prompt(docs)
 
@@ -6850,15 +9186,21 @@ class ControlPlaneManager:
         else:
             env["TTS_DEFAULT_VOICE"] = kokoro_default_voice
         try:
-            env["KOKORO_VOICES_PATH"] = str(kokoro_managed_voices_path())
+            env["KOKORO_VOICES_PATH"] = str(kokoro_managed_voices_storage_path())
         except Exception:
             log.warning("control_plane_kokoro_assets_unavailable", agent_id=normalized, exc_info=True)
+        resource_access_policy = _safe_json_object(agent_spec.get("resource_access_policy"))
+        if resource_access_policy and "AGENT_RESOURCE_ACCESS_POLICY_JSON" not in env:
+            env["AGENT_RESOURCE_ACCESS_POLICY_JSON"] = json_dump(resource_access_policy)
         if _safe_json_object(agent_spec.get("tool_policy")) and "AGENT_TOOL_POLICY_JSON" not in env:
             env["AGENT_TOOL_POLICY_JSON"] = json_dump(agent_spec["tool_policy"])
         if _safe_json_object(agent_spec.get("model_policy")) and "AGENT_MODEL_POLICY_JSON" not in env:
             env["AGENT_MODEL_POLICY_JSON"] = json_dump(agent_spec["model_policy"])
         if _safe_json_object(agent_spec.get("autonomy_policy")) and "AGENT_AUTONOMY_POLICY_JSON" not in env:
             env["AGENT_AUTONOMY_POLICY_JSON"] = json_dump(agent_spec["autonomy_policy"])
+        provider_runtime_eligibility = _safe_json_object(snapshot.get("provider_runtime_eligibility"))
+        if provider_runtime_eligibility and "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON" not in env:
+            env["AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON"] = json_dump(provider_runtime_eligibility)
         allowed_tool_ids = normalize_string_list(
             _safe_json_object(agent_spec.get("tool_policy")).get("allowed_tool_ids")
         )
@@ -6970,6 +9312,8 @@ class ControlPlaneManager:
             if knowledge_policy.get("object_store_root") not in (None, ""):
                 env["KNOWLEDGE_V2_OBJECT_STORE_ROOT"] = _stringify_env_value(knowledge_policy["object_store_root"])
         for secret_key, secret_payload in _safe_json_object(snapshot.get("secrets")).items():
+            if secret_key.strip().upper() in _CORE_CONNECTION_RUNTIME_ENV_KEYS:
+                continue
             encrypted_value = str(_safe_json_object(secret_payload).get("encrypted_value") or "").strip()
             if not encrypted_value:
                 continue
@@ -7005,7 +9349,8 @@ class ControlPlaneManager:
             agent_id=normalized,
             version=actual_version,
             runtime_dir=runtime_dir,
-            env=self._scoped_env(normalized, env),
+            process_env=self._scoped_env(normalized, env),
+            connection_refs=connection_refs,
             health_url=health_url,
             runtime_base_url=runtime_base_url,
             state_backend=STATE_BACKEND,
@@ -7067,6 +9412,8 @@ class ControlPlaneManager:
             )
 
     def import_legacy_state(self) -> None:
+        if not self._auto_seed_enabled():
+            return
         if self._seeding_legacy_state:
             return
         self._seeding_legacy_state = True
@@ -7413,6 +9760,31 @@ class ControlPlaneManager:
         sanitized["secrets"] = secrets
         return sanitized
 
+    def _runtime_connection_refs(self, agent_id: str) -> list[dict[str, Any]]:
+        normalized, _ = self._require_agent_row(agent_id)
+        refs: list[dict[str, Any]] = []
+        for connection in self.list_agent_connections(normalized).get("items", []):
+            item = _safe_json_object(connection)
+            refs.append(
+                {
+                    "connection_key": str(item.get("connection_key") or ""),
+                    "kind": str(item.get("kind") or ""),
+                    "integration_key": str(item.get("integration_key") or ""),
+                    "status": str(item.get("status") or ""),
+                    "transport_kind": str(item.get("transport_kind") or ""),
+                    "auth_method": str(item.get("auth_method") or ""),
+                    "source_origin": str(item.get("source_origin") or ""),
+                    "connected": bool(item.get("connected")),
+                    "enabled": bool(item.get("enabled", item.get("connected"))),
+                    "account_label": _nonempty_text(item.get("account_label")) or None,
+                    "provider_account_id": _nonempty_text(item.get("provider_account_id")) or None,
+                    "expires_at": _nonempty_text(item.get("expires_at")) or None,
+                    "last_verified_at": _nonempty_text(item.get("last_verified_at")) or None,
+                    "last_error": _nonempty_text(item.get("last_error")) or None,
+                }
+            )
+        return refs
+
     def _snapshot_version(self, agent_id: str, snapshot: dict[str, Any]) -> int:
         normalized = _normalize_agent_id(agent_id)
         row = fetch_one(
@@ -7582,6 +9954,977 @@ class ControlPlaneManager:
                     "content": path.read_text(encoding="utf-8"),
                 },
             )
+
+    # ------------------------------------------------------------------ #
+    #  MCP Server Catalog                                                  #
+    # ------------------------------------------------------------------ #
+
+    def list_mcp_catalog(self) -> list[dict[str, Any]]:
+        self.ensure_seeded()
+        rows = fetch_all("SELECT * FROM cp_mcp_server_catalog ORDER BY display_name")
+        return [
+            self._serialize_mcp_catalog_row(row) for row in rows if not _is_reserved_mcp_server_key(row["server_key"])
+        ]
+
+    def get_mcp_catalog_entry(self, server_key: str) -> dict[str, Any]:
+        self.ensure_seeded()
+        if _is_reserved_mcp_server_key(server_key):
+            raise KeyError(f"MCP server not found: {server_key}")
+        row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
+        if row is None:
+            raise KeyError(f"MCP server not found: {server_key}")
+        return self._serialize_mcp_catalog_row(row)
+
+    def upsert_mcp_catalog_entry(self, server_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_seeded()
+        normalized_server_key = _normalize_mcp_server_key(server_key)
+        if not normalized_server_key:
+            raise ValueError("MCP server key must not be empty.")
+        if _is_reserved_mcp_server_key(normalized_server_key):
+            raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
+        now = now_iso()
+        display_name = str(payload.get("display_name") or normalized_server_key)
+        description = str(payload.get("description") or "")
+        transport_type = str(payload.get("transport_type") or "stdio")
+        transport_kind = str(payload.get("transport_kind") or ("remote" if payload.get("remote_url") else "local"))
+        command = payload.get("command") or []
+        command_json = json_dump(command)
+        url = payload.get("url") or None
+        remote_url = payload.get("remote_url") or url
+        env_schema = payload.get("env_schema") or []
+        env_schema_json = json_dump(env_schema)
+        headers_schema = payload.get("headers_schema") or []
+        headers_schema_json = json_dump(headers_schema)
+        documentation_url = payload.get("documentation_url") or None
+        logo_key = payload.get("logo_key") or None
+        category = str(payload.get("category") or "general")
+        enabled = 1 if payload.get("enabled", True) else 0
+        oauth_enabled = 1 if payload.get("oauth_enabled", False) else 0
+        auth_strategy = str(payload.get("auth_strategy") or "no_auth")
+        official_support_level = str(payload.get("official_support_level") or "community_manual")
+        oauth_mode = str(payload.get("oauth_mode") or "none")
+        oauth_metadata_url = payload.get("oauth_metadata_url") or None
+        tool_discovery_mode = str(payload.get("tool_discovery_mode") or "runtime")
+        vendor_notes = str(payload.get("vendor_notes") or "")
+        default_policy = str(payload.get("default_policy") or "always_ask")
+        metadata_json = json_dump(payload.get("metadata") or {})
+        execute(
+            """
+            INSERT INTO cp_mcp_server_catalog (
+                server_key, display_name, description, transport_type, command_json, url,
+                env_schema_json, documentation_url, logo_key, category, enabled,
+                metadata_json, created_at, updated_at, oauth_enabled, transport_kind,
+                auth_strategy, official_support_level, oauth_mode, oauth_metadata_url,
+                remote_url, headers_schema_json, tool_discovery_mode, vendor_notes,
+                default_policy
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (server_key) DO UPDATE SET
+                display_name = excluded.display_name,
+                description = excluded.description,
+                transport_type = excluded.transport_type,
+                command_json = excluded.command_json,
+                url = excluded.url,
+                env_schema_json = excluded.env_schema_json,
+                documentation_url = excluded.documentation_url,
+                logo_key = excluded.logo_key,
+                category = excluded.category,
+                enabled = excluded.enabled,
+                metadata_json = excluded.metadata_json,
+                oauth_enabled = excluded.oauth_enabled,
+                transport_kind = excluded.transport_kind,
+                auth_strategy = excluded.auth_strategy,
+                official_support_level = excluded.official_support_level,
+                oauth_mode = excluded.oauth_mode,
+                oauth_metadata_url = excluded.oauth_metadata_url,
+                remote_url = excluded.remote_url,
+                headers_schema_json = excluded.headers_schema_json,
+                tool_discovery_mode = excluded.tool_discovery_mode,
+                vendor_notes = excluded.vendor_notes,
+                default_policy = excluded.default_policy,
+                updated_at = excluded.updated_at
+            """,
+            (
+                normalized_server_key,
+                display_name,
+                description,
+                transport_type,
+                command_json,
+                url,
+                env_schema_json,
+                documentation_url,
+                logo_key,
+                category,
+                enabled,
+                metadata_json,
+                now,
+                now,
+                oauth_enabled,
+                transport_kind,
+                auth_strategy,
+                official_support_level,
+                oauth_mode,
+                oauth_metadata_url,
+                remote_url,
+                headers_schema_json,
+                tool_discovery_mode,
+                vendor_notes,
+                default_policy,
+            ),
+        )
+        return self.get_mcp_catalog_entry(normalized_server_key)
+
+    def delete_mcp_catalog_entry(self, server_key: str) -> dict[str, Any]:
+        execute("DELETE FROM cp_mcp_tool_policies WHERE server_key = ?", (server_key,))
+        execute("DELETE FROM cp_mcp_discovered_tools WHERE server_key = ?", (server_key,))
+        execute("DELETE FROM cp_mcp_agent_connections WHERE server_key = ?", (server_key,))
+        count = execute("DELETE FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
+        return {"deleted": bool(count)}
+
+    def _serialize_mcp_catalog_row(self, row: Any) -> dict[str, Any]:
+        metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+        return {
+            "server_key": str(row["server_key"]),
+            "display_name": str(row.get("display_name") or ""),
+            "description": str(row.get("description") or ""),
+            "transport_type": str(row.get("transport_type") or "stdio"),
+            "transport_kind": str(row.get("transport_kind") or "local"),
+            "command": json_load(str(row.get("command_json") or "[]"), []),
+            "url": row.get("url") or None,
+            "remote_url": row.get("remote_url") or row.get("url") or None,
+            "env_schema": json_load(str(row.get("env_schema_json") or "[]"), []),
+            "headers_schema": json_load(str(row.get("headers_schema_json") or "[]"), []),
+            "documentation_url": row.get("documentation_url") or None,
+            "logo_key": row.get("logo_key") or None,
+            "category": str(row.get("category") or "general"),
+            "enabled": bool(int(row["enabled"])) if row.get("enabled") is not None else True,
+            "oauth_enabled": bool(int(row.get("oauth_enabled") or 0)),
+            "auth_strategy": str(row.get("auth_strategy") or "no_auth"),
+            "official_support_level": str(row.get("official_support_level") or "community_manual"),
+            "oauth_mode": str(row.get("oauth_mode") or "none"),
+            "oauth_metadata_url": row.get("oauth_metadata_url") or None,
+            "tool_discovery_mode": str(row.get("tool_discovery_mode") or "runtime"),
+            "vendor_notes": str(row.get("vendor_notes") or ""),
+            "default_policy": str(row.get("default_policy") or "always_ask"),
+            "metadata": metadata,
+            "auth_capabilities": _safe_json_object(metadata.get("auth_capabilities")),
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+
+    def _serialize_unified_mcp_catalog_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "connection_key": _mcp_connection_key(row.get("server_key")),
+            "kind": "mcp",
+            "integration_key": str(row.get("server_key") or ""),
+            "display_name": str(row.get("display_name") or row.get("server_key") or ""),
+            "description": str(row.get("description") or ""),
+            "category": str(row.get("category") or "general"),
+            "transport_kind": str(row.get("transport_kind") or "local"),
+            "auth_capabilities": _safe_json_object(row.get("auth_capabilities")),
+            "auth_strategy_default": str(row.get("auth_strategy") or "no_auth"),
+            "official_support_level": str(row.get("official_support_level") or "community_manual"),
+            "oauth_mode": str(row.get("oauth_mode") or "none"),
+            "remote_url": row.get("remote_url") or row.get("url") or None,
+            "vendor_notes": str(row.get("vendor_notes") or ""),
+            "default_policy": str(row.get("default_policy") or "always_ask"),
+            "env_schema": row.get("env_schema") or [],
+            "headers_schema": row.get("headers_schema") or [],
+            "documentation_url": row.get("documentation_url") or None,
+            "logo_key": row.get("logo_key") or None,
+            "metadata": _safe_json_object(row.get("metadata")),
+            "enabled": bool(row.get("enabled", True)),
+        }
+
+    # ------------------------------------------------------------------ #
+    #  MCP Agent Connections                                               #
+    # ------------------------------------------------------------------ #
+
+    def list_mcp_agent_connections(self, agent_id: str) -> list[dict[str, Any]]:
+        self.ensure_seeded()
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_agent_connections WHERE agent_id = ? ORDER BY server_key",
+            (normalized,),
+        )
+        return [
+            self._serialize_mcp_connection_row(row)
+            for row in rows
+            if not _is_reserved_mcp_server_key(row["server_key"])
+        ]
+
+    def get_mcp_agent_connection(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        self.ensure_seeded()
+        if _is_reserved_mcp_server_key(server_key):
+            raise KeyError(f"MCP connection not found: {agent_id}/{server_key}")
+        normalized = _normalize_agent_id(agent_id)
+        row = fetch_one(
+            "SELECT * FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        if row is None:
+            raise KeyError(f"MCP connection not found: {normalized}/{server_key}")
+        return self._serialize_mcp_connection_row(row)
+
+    def upsert_mcp_agent_connection(self, agent_id: str, server_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_seeded()
+        normalized_server_key = _normalize_mcp_server_key(server_key)
+        if _is_reserved_mcp_server_key(normalized_server_key):
+            raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
+        # Verify server exists in catalog
+        catalog_row = fetch_one(
+            "SELECT server_key FROM cp_mcp_server_catalog WHERE server_key = ?",
+            (normalized_server_key,),
+        )
+        if catalog_row is None:
+            raise KeyError(f"unknown MCP server: {normalized_server_key}")
+        normalized = _normalize_agent_id(agent_id)
+        now = now_iso()
+        existing_row = fetch_one(
+            "SELECT * FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+            (normalized, normalized_server_key),
+        )
+        enabled = 1 if payload.get("enabled", True) else 0
+        transport_override = (
+            payload["transport_override"]
+            if "transport_override" in payload
+            else (existing_row.get("transport_override") if existing_row else None)
+        ) or None
+        command_override_json = (
+            json_dump(payload.get("command_override"))
+            if "command_override" in payload
+            else (existing_row.get("command_override_json") if existing_row else None)
+        )
+        url_override = (
+            payload["url_override"]
+            if "url_override" in payload
+            else (existing_row.get("url_override") if existing_row else None)
+        ) or None
+        raw_env = payload.get("env_values") or {}
+        encrypted_env = json_load(str(existing_row.get("env_values_json") or "{}"), {}) if existing_row else {}
+        clear_env_keys = {str(item).strip() for item in payload.get("clear_env_keys") or [] if str(item).strip()}
+        for clear_key in clear_env_keys:
+            encrypted_env.pop(clear_key, None)
+        for key, value in raw_env.items():
+            normalized_key = str(key).strip()
+            if normalized_key and value not in (None, ""):
+                encrypted_env[normalized_key] = encrypt_secret(str(value))
+        env_values_json = json_dump(encrypted_env)
+        existing_metadata = json_load(str(existing_row.get("metadata_json") or "{}"), {}) if existing_row else {}
+        merged_metadata = {**existing_metadata, **_safe_json_object(payload.get("metadata"))}
+        metadata_json = json_dump(merged_metadata)
+        auth_method = str(payload.get("auth_method") or "").strip() or (
+            str(existing_row.get("auth_method") or "manual") if existing_row else "manual"
+        )
+        execute(
+            """
+            INSERT INTO cp_mcp_agent_connections (
+                agent_id, server_key, enabled, transport_override, command_override_json,
+                url_override, env_values_json, metadata_json, created_at, updated_at, auth_method
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (agent_id, server_key) DO UPDATE SET
+                enabled = excluded.enabled,
+                transport_override = excluded.transport_override,
+                command_override_json = excluded.command_override_json,
+                url_override = excluded.url_override,
+                env_values_json = excluded.env_values_json,
+                metadata_json = excluded.metadata_json,
+                auth_method = excluded.auth_method,
+                updated_at = excluded.updated_at
+            """,
+            (
+                normalized,
+                normalized_server_key,
+                enabled,
+                transport_override,
+                command_override_json,
+                url_override,
+                env_values_json,
+                metadata_json,
+                now,
+                now,
+                auth_method,
+            ),
+        )
+        return self.get_mcp_agent_connection(agent_id, normalized_server_key)
+
+    def delete_mcp_agent_connection(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        execute(
+            "DELETE FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        execute(
+            "DELETE FROM cp_mcp_discovered_tools WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        count = execute(
+            "DELETE FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        self.delete_oauth_tokens(normalized, server_key)
+        return {"deleted": bool(count)}
+
+    def _serialize_mcp_connection_row(self, row: Any) -> dict[str, Any]:
+        env_values_json = str(row.get("env_values_json") or "{}")
+        try:
+            encrypted = json_load(env_values_json, {})
+            masked = {k: mask_secret(v) if v else "" for k, v in encrypted.items()}
+        except Exception:
+            masked = {}
+        server_key = str(row["server_key"])
+        catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
+        catalog = self._serialize_mcp_catalog_row(catalog_row) if catalog_row is not None else {}
+        oauth_status = self.get_oauth_token_status(str(row["agent_id"]), server_key)
+        tool_count = len(json_load(str(row.get("cached_tools_json") or "[]"), []))
+        enabled = bool(int(row["enabled"])) if row.get("enabled") is not None else True
+        status = "verified"
+        if not enabled:
+            status = "disabled"
+        elif _nonempty_text(row.get("last_error")):
+            status = "error"
+        elif not row.get("last_connected_at"):
+            status = "configured" if oauth_status.get("connected") or masked else "not_configured"
+        return {
+            "connection_key": _mcp_connection_key(server_key),
+            "kind": "mcp",
+            "integration_key": server_key,
+            "agent_id": str(row["agent_id"]),
+            "server_key": server_key,
+            "enabled": enabled,
+            "transport_override": row.get("transport_override") or None,
+            "command_override": json_load(str(row.get("command_override_json") or "null"), None),
+            "command_override_json": row.get("command_override_json") or None,
+            "url_override": row.get("url_override") or None,
+            "env_values": masked,
+            "last_connected_at": row.get("last_connected_at") or None,
+            "last_error": row.get("last_error") or None,
+            "cached_tools_json": row.get("cached_tools_json") or None,
+            "cached_tools_at": row.get("cached_tools_at") or None,
+            "auth_method": str(row.get("auth_method") or "manual"),
+            "metadata": json_load(str(row.get("metadata_json") or "{}"), {}),
+            "tool_count": tool_count,
+            "status": status,
+            "transport_kind": str(catalog.get("transport_kind") or "local"),
+            "auth_strategy": str(catalog.get("auth_strategy") or "no_auth"),
+            "official_support_level": str(catalog.get("official_support_level") or "community_manual"),
+            "account_label": oauth_status.get("account_label"),
+            "provider_account_id": oauth_status.get("provider_account_id"),
+            "expires_at": oauth_status.get("expires_at"),
+            "last_verified_at": row.get("last_connected_at") or None,
+            "connected": enabled,
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+
+    def _decrypt_mcp_env_values(self, env_values_json: str) -> dict[str, str]:
+        return decrypt_env_values(env_values_json)
+
+    def get_mcp_runtime_config(self, agent_id: str) -> list[dict[str, Any]]:
+        """Get full MCP config with decrypted credentials for runtime bootstrap."""
+        normalized = _normalize_agent_id(agent_id)
+        connections = fetch_all(
+            "SELECT * FROM cp_mcp_agent_connections WHERE agent_id = ? AND enabled = 1",
+            (normalized,),
+        )
+        result = []
+        for row in connections:
+            server_key = str(row["server_key"])
+            if _is_reserved_mcp_server_key(server_key):
+                continue
+            catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
+            resolved = resolve_mcp_runtime_connection(
+                normalized,
+                server_key,
+                connection_row=row,
+                catalog_row=catalog_row,
+            )
+            if resolved:
+                result.append(resolved)
+        return result
+
+    # ------------------------------------------------------------------ #
+    #  MCP Tool Policies                                                   #
+    # ------------------------------------------------------------------ #
+
+    def list_mcp_tool_policies(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        if _is_reserved_mcp_server_key(server_key):
+            return []
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ? ORDER BY tool_name",
+            (normalized, server_key),
+        )
+        return [self._serialize_mcp_policy_row(row) for row in rows]
+
+    def upsert_mcp_tool_policy(self, agent_id: str, server_key: str, tool_name: str, policy: str) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
+        valid_policies = ("auto", "always_allow", "always_ask", "blocked")
+        if policy not in valid_policies:
+            raise ValueError(f"invalid MCP tool policy: {policy}")
+        normalized = _normalize_agent_id(agent_id)
+        now = now_iso()
+        execute(
+            """
+            INSERT INTO cp_mcp_tool_policies (agent_id, server_key, tool_name, policy, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (agent_id, server_key, tool_name) DO UPDATE SET
+                policy = excluded.policy,
+                updated_at = excluded.updated_at
+            """,
+            (normalized, server_key, tool_name, policy, now),
+        )
+        row = fetch_one(
+            "SELECT * FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ? AND tool_name = ?",
+            (normalized, server_key, tool_name),
+        )
+        return self._serialize_mcp_policy_row(row) if row else {}
+
+    def delete_mcp_tool_policy(self, agent_id: str, server_key: str, tool_name: str) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            return {"deleted": False}
+        normalized = _normalize_agent_id(agent_id)
+        count = execute(
+            "DELETE FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ? AND tool_name = ?",
+            (normalized, server_key, tool_name),
+        )
+        return {"deleted": bool(count)}
+
+    def _serialize_mcp_policy_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "agent_id": str(row["agent_id"]),
+            "server_key": str(row["server_key"]),
+            "tool_name": str(row["tool_name"]),
+            "policy": str(row.get("policy") or "auto"),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+
+    def list_agent_connection_tool_policies(self, agent_id: str, connection_key: str) -> list[dict[str, Any]]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            return []
+        return self.list_mcp_tool_policies(agent_id, value)
+
+    def upsert_agent_connection_tool_policy(
+        self,
+        agent_id: str,
+        connection_key: str,
+        tool_name: str,
+        policy: str,
+    ) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            raise ValueError("tool_policies_not_supported_for_core_connections")
+        return self.upsert_mcp_tool_policy(agent_id, value, tool_name, policy)
+
+    def delete_agent_connection_tool_policy(self, agent_id: str, connection_key: str, tool_name: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            return {"deleted": False}
+        return self.delete_mcp_tool_policy(agent_id, value, tool_name)
+
+    # ------------------------------------------------------------------ #
+    #  MCP Test Connection / Discover Tools                                #
+    # ------------------------------------------------------------------ #
+
+    def test_mcp_connection(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Test an MCP server connection by starting it temporarily."""
+        from koda.services.mcp_manager import McpServerInstance
+
+        normalized = _normalize_agent_id(agent_id)
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "healthy": False, "error": "connection_not_found", "server_key": server_key}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            healthy = run_coro_sync(instance.health_check())
+            self._record_mcp_runtime_state(
+                normalized,
+                server_key,
+                success=True,
+                error="",
+                tools=[self._tool_to_payload(tool) for tool in instance.cached_tools],
+            )
+            return {
+                "success": True,
+                "healthy": healthy,
+                "tool_count": len(instance.cached_tools),
+                "server_key": server_key,
+            }
+        except Exception as exc:
+            self._record_mcp_runtime_state(normalized, server_key, success=False, error=str(exc), tools=[])
+            return {
+                "success": False,
+                "healthy": False,
+                "error": str(exc),
+                "server_key": server_key,
+            }
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    def discover_mcp_tools(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Discover tools from an MCP server and cache them."""
+        from koda.services.mcp_manager import McpServerInstance
+
+        normalized = _normalize_agent_id(agent_id)
+        before_tools = {
+            str(tool.get("name") or ""): str(tool.get("signature_hash") or self._mcp_tool_signature_hash(tool))
+            for tool in self._list_active_mcp_discovered_tools(normalized, server_key)
+            if str(tool.get("name") or "").strip()
+        }
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "error": "connection_not_found", "tools": [], "tool_count": 0, "cached_at": None}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            tools = instance.cached_tools
+            tools_data = [self._tool_to_payload(tool) for tool in tools]
+            after_tools = {
+                str(tool.get("name") or ""): self._mcp_tool_signature_hash(tool)
+                for tool in tools_data
+                if str(tool.get("name") or "").strip()
+            }
+            diff = {
+                "added": sorted(name for name in after_tools if name not in before_tools),
+                "removed": sorted(name for name in before_tools if name not in after_tools),
+                "changed": sorted(
+                    name
+                    for name, signature_hash in after_tools.items()
+                    if before_tools.get(name) not in (None, signature_hash)
+                ),
+            }
+            now = self._record_mcp_runtime_state(
+                normalized,
+                server_key,
+                success=True,
+                error="",
+                tools=tools_data,
+            )
+            self._reset_changed_tool_policies(normalized, server_key, diff["changed"])
+            discovery_run = self._persist_connection_discovery_run(
+                normalized,
+                _mcp_connection_key(server_key),
+                status="succeeded",
+                tools=self._list_active_mcp_discovered_tools(normalized, server_key),
+                diff=diff,
+            )
+            tools_payload = self.get_mcp_connection_tools(normalized, server_key)
+            return {
+                "success": True,
+                "tool_count": len(tools_data),
+                "tools": tools_payload["tools"],
+                "policies": tools_payload["policies"],
+                "summary": tools_payload["summary"],
+                "cached_at": now,
+                "last_discovered_at": discovery_run["discovered_at"],
+                "diff": discovery_run["diff"],
+            }
+        except Exception as exc:
+            self._record_mcp_runtime_state(normalized, server_key, success=False, error=str(exc), tools=[])
+            self._persist_connection_discovery_run(
+                normalized,
+                _mcp_connection_key(server_key),
+                status="failed",
+                tools=[],
+                diff={"added": [], "removed": [], "changed": []},
+                error=str(exc),
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "tools": [],
+                "tool_count": 0,
+                "cached_at": None,
+            }
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    def _resolve_mcp_runtime_payload(self, agent_id: str, server_key: str) -> dict[str, Any] | None:
+        catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
+        if catalog_row is None:
+            raise KeyError(server_key)
+        connection_row = fetch_one(
+            "SELECT * FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+            (agent_id, server_key),
+        )
+        if connection_row is None:
+            return None
+        return resolve_mcp_runtime_connection(
+            agent_id,
+            server_key,
+            connection_row=connection_row,
+            catalog_row=catalog_row,
+        )
+
+    def _tool_to_payload(self, tool: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+        }
+        if tool.annotations:
+            payload["annotations"] = {
+                "title": tool.annotations.title,
+                "read_only_hint": tool.annotations.read_only_hint,
+                "destructive_hint": tool.annotations.destructive_hint,
+                "idempotent_hint": tool.annotations.idempotent_hint,
+            }
+        return payload
+
+    def _mcp_tool_signature_hash(self, tool: dict[str, Any]) -> str:
+        signature = {
+            "input_schema": tool.get("input_schema") or {},
+            "annotations": _safe_json_object(tool.get("annotations")),
+        }
+        return hashlib.sha256(json_dump(signature).encode("utf-8")).hexdigest()
+
+    def _serialize_mcp_discovered_tool_row(self, row: Any) -> dict[str, Any]:
+        annotations = json_load(str(row.get("annotations_json") or "{}"), {})
+        tool = {
+            "name": str(row.get("tool_name") or ""),
+            "description": str(row.get("description") or ""),
+            "input_schema": json_load(str(row.get("input_schema_json") or "{}"), {}),
+            "annotations": annotations,
+            "risk_level": str(row.get("risk_level") or "read"),
+            "signature_hash": str(row.get("schema_hash") or ""),
+            "discovered_at": str(row.get("discovered_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+        if not annotations:
+            tool.pop("annotations", None)
+        return tool
+
+    def _list_active_mcp_discovered_tools(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        rows = fetch_all(
+            """
+            SELECT * FROM cp_mcp_discovered_tools
+            WHERE agent_id = ? AND server_key = ?
+            ORDER BY tool_name
+            """,
+            (agent_id, server_key),
+        )
+        return [self._serialize_mcp_discovered_tool_row(row) for row in rows]
+
+    def _build_tool_summary(self, tools: list[dict[str, Any]]) -> dict[str, int]:
+        summary = {"total": len(tools), "read_only": 0, "write": 0, "destructive": 0}
+        for tool in tools:
+            annotations = _safe_json_object(tool.get("annotations"))
+            if annotations.get("destructive_hint") is True:
+                summary["destructive"] += 1
+            if annotations.get("read_only_hint") is True:
+                summary["read_only"] += 1
+            else:
+                summary["write"] += 1
+        return summary
+
+    def _reset_changed_tool_policies(self, agent_id: str, server_key: str, tool_names: list[str]) -> None:
+        if not tool_names:
+            return
+        now = now_iso()
+        for tool_name in tool_names:
+            execute(
+                """
+                INSERT INTO cp_mcp_tool_policies (agent_id, server_key, tool_name, policy, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (agent_id, server_key, tool_name) DO UPDATE SET
+                    policy = excluded.policy,
+                    updated_at = excluded.updated_at
+                """,
+                (agent_id, server_key, tool_name, "always_ask", now),
+            )
+
+    def _persist_connection_discovery_run(
+        self,
+        agent_id: str,
+        connection_key: str,
+        *,
+        status: str,
+        tools: list[dict[str, Any]],
+        diff: dict[str, list[str]] | None = None,
+        error: str = "",
+    ) -> dict[str, Any]:
+        run_id = str(uuid4())
+        now = now_iso()
+        diff_payload = {
+            "added": sorted(diff.get("added") or []) if isinstance(diff, dict) else [],
+            "removed": sorted(diff.get("removed") or []) if isinstance(diff, dict) else [],
+            "changed": sorted(diff.get("changed") or []) if isinstance(diff, dict) else [],
+        }
+        execute(
+            """
+            INSERT INTO cp_connection_discovery_runs (
+                run_id, agent_id, connection_key, status, tool_count, diff_json,
+                error, discovered_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                agent_id,
+                connection_key,
+                status,
+                len(tools),
+                json_dump(diff_payload),
+                error,
+                now,
+                now,
+                now,
+            ),
+        )
+        for tool in tools:
+            annotations = _safe_json_object(tool.get("annotations"))
+            execute(
+                """
+                INSERT INTO cp_connection_discovery_run_tools (
+                    run_id, tool_name, description, input_schema_json, annotations_json,
+                    risk_level, signature_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    str(tool.get("name") or ""),
+                    str(tool.get("description") or ""),
+                    json_dump(tool.get("input_schema") or {}),
+                    json_dump(annotations),
+                    str(tool.get("risk_level") or "read"),
+                    str(tool.get("signature_hash") or self._mcp_tool_signature_hash(tool)),
+                    now,
+                ),
+            )
+        return {
+            "run_id": run_id,
+            "status": status,
+            "diff": diff_payload,
+            "tool_count": len(tools),
+            "discovered_at": now,
+            "error": error or None,
+        }
+
+    def _latest_connection_discovery_run(self, agent_id: str, connection_key: str) -> dict[str, Any] | None:
+        row = fetch_one(
+            """
+            SELECT * FROM cp_connection_discovery_runs
+            WHERE agent_id = ? AND connection_key = ?
+            ORDER BY discovered_at DESC, created_at DESC
+            """,
+            (agent_id, connection_key),
+        )
+        if row is None:
+            return None
+        return {
+            "run_id": str(row.get("run_id") or ""),
+            "status": str(row.get("status") or "unknown"),
+            "tool_count": int(row.get("tool_count") or 0),
+            "diff": json_load(str(row.get("diff_json") or "{}"), {}),
+            "error": _nonempty_text(row.get("error")) or None,
+            "discovered_at": _nonempty_text(row.get("discovered_at")) or None,
+        }
+
+    def get_mcp_connection_tools(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        active_tools = self._list_active_mcp_discovered_tools(normalized, server_key)
+        policies = {
+            str(item.get("tool_name") or ""): str(item.get("policy") or "auto")
+            for item in self.list_mcp_tool_policies(normalized, server_key)
+        }
+        latest_run = self._latest_connection_discovery_run(normalized, _mcp_connection_key(server_key))
+        last_discovered_at = None
+        if active_tools:
+            last_discovered_at = max(str(tool.get("discovered_at") or "") for tool in active_tools) or None
+        return {
+            "connection_key": _mcp_connection_key(server_key),
+            "kind": "mcp",
+            "integration_key": server_key,
+            "tools": active_tools,
+            "policies": policies,
+            "summary": self._build_tool_summary(active_tools),
+            "last_discovered_at": latest_run.get("discovered_at") if latest_run else last_discovered_at,
+            "diff": (
+                _safe_json_object(latest_run.get("diff")) if latest_run else {"added": [], "removed": [], "changed": []}
+            ),
+        }
+
+    def get_agent_connection_tools(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            return {
+                "connection_key": _core_connection_key(value),
+                "kind": "core",
+                "integration_key": value,
+                "tools": [],
+                "policies": {},
+                "summary": {"total": 0, "read_only": 0, "write": 0, "destructive": 0},
+                "last_discovered_at": None,
+                "diff": {"added": [], "removed": [], "changed": []},
+            }
+        return self.get_mcp_connection_tools(agent_id, value)
+
+    def discover_agent_connection_tools(self, agent_id: str, connection_key: str) -> dict[str, Any]:
+        kind, value = _parse_connection_key(connection_key)
+        if kind == "core":
+            raise ValueError("tool_discovery_not_supported_for_core_connections")
+        return self.discover_mcp_tools(agent_id, value)
+
+    def _persist_default_mcp_tool_policies(self, agent_id: str, server_key: str, tools: list[dict[str, Any]]) -> None:
+        now = now_iso()
+        for tool in tools:
+            tool_name = str(tool.get("name") or "").strip()
+            if not tool_name:
+                continue
+            execute(
+                """
+                INSERT INTO cp_mcp_tool_policies (agent_id, server_key, tool_name, policy, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (agent_id, server_key, tool_name) DO NOTHING
+                """,
+                (agent_id, server_key, tool_name, "always_ask", now),
+            )
+
+    def _persist_mcp_discovered_tools(
+        self,
+        agent_id: str,
+        server_key: str,
+        tools: list[dict[str, Any]],
+        discovered_at: str,
+    ) -> None:
+        execute(
+            "DELETE FROM cp_mcp_discovered_tools WHERE agent_id = ? AND server_key = ?",
+            (agent_id, server_key),
+        )
+        for tool in tools:
+            annotations = _safe_json_object(tool.get("annotations"))
+            risk_level = "read"
+            if annotations.get("destructive_hint") is True:
+                risk_level = "destructive"
+            elif annotations.get("read_only_hint") is not True:
+                risk_level = "write"
+            schema_json = json_dump(tool.get("input_schema") or {})
+            signature_hash = self._mcp_tool_signature_hash(tool)
+            execute(
+                """
+                INSERT INTO cp_mcp_discovered_tools (
+                    agent_id, server_key, tool_name, description, input_schema_json,
+                    annotations_json, risk_level, schema_hash, discovered_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    agent_id,
+                    server_key,
+                    str(tool.get("name") or ""),
+                    str(tool.get("description") or ""),
+                    schema_json,
+                    json_dump(annotations),
+                    risk_level,
+                    signature_hash,
+                    discovered_at,
+                    discovered_at,
+                ),
+            )
+
+    def _record_mcp_runtime_state(
+        self,
+        agent_id: str,
+        server_key: str,
+        *,
+        success: bool,
+        error: str,
+        tools: list[dict[str, Any]],
+    ) -> str:
+        now = now_iso()
+        current = fetch_one(
+            "SELECT last_connected_at FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+            (agent_id, server_key),
+        )
+        last_connected_at = now if success else (str(current.get("last_connected_at") or "") if current else "")
+        execute(
+            """
+            UPDATE cp_mcp_agent_connections
+            SET last_connected_at = ?, last_error = ?, cached_tools_json = ?, cached_tools_at = ?, updated_at = ?
+            WHERE agent_id = ? AND server_key = ?
+            """,
+            (
+                last_connected_at,
+                error,
+                json_dump(tools),
+                now if tools else None,
+                now,
+                agent_id,
+                server_key,
+            ),
+        )
+        self._persist_mcp_discovered_tools(agent_id, server_key, tools, now)
+        self._persist_default_mcp_tool_policies(agent_id, server_key, tools)
+        return now
+
+    # ------------------------------------------------------------------ #
+    #  MCP OAuth Token Management                                          #
+    # ------------------------------------------------------------------ #
+
+    def get_oauth_token_status(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Return OAuth token metadata for an agent+server pair.
+
+        Never exposes raw tokens -- only connection status, expiry, account
+        label, and last error.
+        """
+        normalized = _normalize_agent_id(agent_id)
+        token_row = fetch_one(
+            "SELECT * FROM cp_mcp_oauth_tokens WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        if token_row is None:
+            conn_row = fetch_one(
+                "SELECT auth_method FROM cp_mcp_agent_connections WHERE agent_id = ? AND server_key = ?",
+                (normalized, server_key),
+            )
+            return {
+                "connected": False,
+                "expires_at": None,
+                "provider_account_id": None,
+                "account_label": None,
+                "last_error": None,
+                "auth_method": str(conn_row["auth_method"]) if conn_row and conn_row.get("auth_method") else "manual",
+            }
+        return {
+            "connected": True,
+            "expires_at": str(token_row.get("expires_at") or "") or None,
+            "provider_account_id": str(token_row.get("provider_account_id") or "") or None,
+            "account_label": str(token_row.get("provider_account_label") or "") or None,
+            "last_error": str(token_row.get("last_error") or "") or None,
+            "auth_method": "oauth",
+        }
+
+    def delete_oauth_tokens(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Delete stored OAuth tokens for an agent+server pair."""
+        normalized = _normalize_agent_id(agent_id)
+        count = execute(
+            "DELETE FROM cp_mcp_oauth_tokens WHERE agent_id = ? AND server_key = ?",
+            (normalized, server_key),
+        )
+        return {"deleted": bool(count)}
+
+    def list_oauth_enabled_servers(self) -> list[str]:
+        """Return server keys that have OAuth enabled in the catalog."""
+        rows = fetch_all("SELECT server_key FROM cp_mcp_server_catalog WHERE oauth_enabled = 1 ORDER BY server_key")
+        return [str(row["server_key"]) for row in rows]
 
 
 _MANAGER: ControlPlaneManager | None = None

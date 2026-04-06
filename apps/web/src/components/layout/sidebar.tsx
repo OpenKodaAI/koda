@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildSidebarFooterSections,
   buildSidebarPrimarySections,
@@ -111,7 +111,9 @@ function SidebarNavSectionGroup({
     <div
       className={cn(
         "flex flex-col gap-1",
-        bordered && !collapsed && "border-t border-[rgba(255,255,255,0.08)] pt-3",
+        bordered &&
+          !collapsed &&
+          "border-t border-[var(--border-subtle)] pt-3",
         bordered && collapsed && "lg:pt-3",
         collapsed && "lg:items-center lg:gap-1.5",
       )}
@@ -153,17 +155,31 @@ export function Sidebar({
   const primarySections = buildSidebarPrimarySections(t);
   const footerSections = buildSidebarFooterSections(t);
 
+  const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleIntentPrefetch = useCallback(
     (item: SidebarNavItem) => {
       if (item.prefetchStrategy !== "intent") {
         return;
       }
 
-      router.prefetch(item.href);
-      prefetchRouteData(item.href);
+      if (intentTimerRef.current) {
+        clearTimeout(intentTimerRef.current);
+      }
+
+      intentTimerRef.current = setTimeout(() => {
+        router.prefetch(item.href);
+        prefetchRouteData(item.href);
+      }, 150);
     },
     [prefetchRouteData, router],
   );
+
+  useEffect(() => {
+    return () => {
+      if (intentTimerRef.current) clearTimeout(intentTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => onMobileOpenChange(false));
@@ -204,9 +220,10 @@ export function Sidebar({
     <>
       <div
         className={cn(
-          "fixed inset-0 z-40 bg-[rgba(6,6,7,0.76)] backdrop-blur-sm transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:hidden",
+          "app-overlay-backdrop bg-[var(--overlay-backdrop)] backdrop-blur-sm transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:hidden",
           mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
         )}
+        style={{ zIndex: 40 }}
         onClick={() => onMobileOpenChange(false)}
         aria-hidden="true"
       />
@@ -268,7 +285,7 @@ export function Sidebar({
           <div
             className={cn(
               "mt-auto pt-4",
-              !collapsed && "border-t border-[rgba(255,255,255,0.08)]",
+              !collapsed && "border-t border-[var(--border-subtle)]",
             )}
           >
             <nav className={cn("flex flex-col gap-3", collapsed && "lg:items-center lg:gap-2")}>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -17,6 +18,8 @@ from koda.services.cache_config import (
     CACHE_ENABLED,
     CACHE_FUZZY_SUGGEST_THRESHOLD,
     CACHE_FUZZY_THRESHOLD,
+    CACHE_SEMANTIC_CHUNK_SIZE,
+    CACHE_SEMANTIC_LIMIT,
     CACHE_TTL_DAYS,
 )
 from koda.state.agent_scope import normalize_agent_scope
@@ -32,7 +35,8 @@ from koda.state.cache_store import (
 )
 
 log = get_logger(__name__)
-_MANAGERS: dict[str, CacheManager] = {}
+_MAX_MANAGERS = 50
+_MANAGERS: OrderedDict[str, CacheManager] = OrderedDict()
 
 
 def _build_sentence_transformer() -> Any:
@@ -259,7 +263,7 @@ class CacheManager:
         if source_scope or strategy_version or model_family:
             return None
         try:
-            rows = cache_list_active_entries(user_id, limit=64, agent_id=self._agent_scope())
+            rows = cache_list_active_entries(user_id, limit=CACHE_SEMANTIC_LIMIT, agent_id=self._agent_scope())
         except RuntimeError:
             log.warning("cache_primary_backend_unavailable", agent_id=self._agent_scope(), user_id=user_id)
             return None
@@ -278,13 +282,23 @@ class CacheManager:
         await self._get_model()
         loop = asyncio.get_running_loop()
         query_embedding = await loop.run_in_executor(None, partial(self._embed_sync, normalized))
-        candidate_queries = [normalize_query(str(row.get("query_text") or "")) for row in rows]
-        candidate_embeddings = await loop.run_in_executor(None, partial(self._embed_sync_batch, candidate_queries))
+
+        # Process candidates in chunks with early termination
+        chunk_size = max(1, CACHE_SEMANTIC_CHUNK_SIZE)
         best_match: tuple[dict[str, Any], float] | None = None
-        for row, candidate_embedding in zip(rows, candidate_embeddings, strict=True):
-            similarity = self._similarity(query_embedding, candidate_embedding)
-            if best_match is None or similarity > best_match[1]:
-                best_match = (row, similarity)
+        for chunk_start in range(0, len(rows), chunk_size):
+            chunk_rows = rows[chunk_start : chunk_start + chunk_size]
+            chunk_queries = [normalize_query(str(row.get("query_text") or "")) for row in chunk_rows]
+            chunk_embeddings = await loop.run_in_executor(None, partial(self._embed_sync_batch, chunk_queries))
+            for row, candidate_embedding in zip(chunk_rows, chunk_embeddings, strict=True):
+                similarity = self._similarity(query_embedding, candidate_embedding)
+                if best_match is None or similarity > best_match[1]:
+                    best_match = (row, similarity)
+            # Early termination: if the best candidate already exceeds the
+            # fuzzy-auto threshold there is no need to embed more chunks.
+            if best_match is not None and best_match[1] >= CACHE_FUZZY_THRESHOLD:
+                break
+
         if best_match is None:
             return None
         row, similarity = best_match
@@ -357,7 +371,11 @@ class CacheManager:
 def get_cache_manager(agent_id: str | None = None) -> CacheManager:
     scope = normalize_agent_scope(agent_id, fallback=AGENT_ID)
     manager = _MANAGERS.get(scope)
-    if manager is None:
-        manager = CacheManager(scope)
-        _MANAGERS[scope] = manager
+    if manager is not None:
+        _MANAGERS.move_to_end(scope)
+        return manager
+    if len(_MANAGERS) >= _MAX_MANAGERS:
+        _MANAGERS.popitem(last=False)
+    manager = CacheManager(scope)
+    _MANAGERS[scope] = manager
     return manager

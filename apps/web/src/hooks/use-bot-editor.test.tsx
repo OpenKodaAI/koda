@@ -9,6 +9,7 @@ import type {
   ControlPlaneCoreCapabilities,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
+  ControlPlaneExecutionPolicyPayload,
   ControlPlaneCoreTools,
   ControlPlaneSystemSettings,
   ControlPlaneWorkspaceTree,
@@ -120,6 +121,7 @@ function StateProbe() {
     <>
       <div data-testid="display-name">{state.displayName}</div>
       <div data-testid="compiled-prompt">{state.compiledPrompt}</div>
+      <pre data-testid="execution-policy-json">{state.executionPolicyJson}</pre>
       <pre data-testid="knowledge-json">{state.knowledgeJson}</pre>
     </>
   );
@@ -181,14 +183,17 @@ describe("useBotEditor", () => {
     function Harness({
       bot,
       compiledPromptPayload,
+      executionPolicyPayload,
     }: {
       bot: ControlPlaneBot;
       compiledPromptPayload?: ControlPlaneCompiledPrompt | null;
+      executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null;
     }) {
       return (
         <BotEditorProvider
           bot={bot}
           compiledPromptPayload={compiledPromptPayload}
+          executionPolicyPayload={executionPolicyPayload}
           core={core}
           workspaces={workspaces}
           systemSettings={systemSettings}
@@ -200,16 +205,58 @@ describe("useBotEditor", () => {
 
     const { rerender } = render(
       <Harness
-        bot={makeBot()}
+        bot={makeBot({
+          agent_spec: {
+            ...makeBot().agent_spec,
+            execution_policy: {
+              version: 99,
+              source: "legacy",
+              defaults: { stale: true },
+            },
+          },
+        })}
         compiledPromptPayload={{
           bot_id: "ATLAS",
           compiled_prompt: "compiled canonical",
           documents: {},
         }}
+        executionPolicyPayload={{
+          agent_id: "ATLAS",
+          source: "compiled_legacy",
+          policy: {
+            version: 1,
+            source: "compiled_legacy",
+            defaults: { preview: true },
+            rules: [
+              {
+                name: "allow_read",
+                priority: 10,
+                match: { tool_id: "notes.read" },
+                decision: "allow",
+              },
+            ],
+          },
+          catalog: {
+            version: 1,
+            decision_values: ["allow", "allow_with_preview", "require_approval", "deny"],
+            effect_tags: [],
+            selector_keys: ["tool_id"],
+            core_tools: [],
+            core_integrations: [],
+          },
+          legacy: {
+            tool_policy: {},
+            autonomy_policy: {},
+            resource_access_policy: {},
+          },
+        }}
       />,
     );
     expect(screen.getByTestId("display-name")).toHaveTextContent("ATLAS");
     expect(screen.getByTestId("compiled-prompt")).toHaveTextContent("compiled canonical");
+    expect(screen.getByTestId("execution-policy-json")).toHaveTextContent(
+      '"source": "compiled_legacy"',
+    );
 
     rerender(
       <Harness

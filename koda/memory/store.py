@@ -14,6 +14,7 @@ from koda.memory.config import (
     MEMORY_MAX_PER_USER,
 )
 from koda.memory.embedding_queue import (
+    EmbeddingJob,
     cancel_embedding_job,
     cancel_embedding_jobs_for_user,
     claim_embedding_jobs,
@@ -75,8 +76,8 @@ def _memory_type_from_value(raw: object) -> MemoryType:
 class MemoryStore:
     """Manages canonical memory state with primary-backend semantic retrieval."""
 
-    def __init__(self, agent_id: str | None) -> None:
-        bid = normalize_agent_scope(agent_id)
+    def __init__(self, agent_id: str | None, user_id: int | str | None = None) -> None:
+        bid = normalize_agent_scope(agent_id, user_id=user_id)
         self._agent_id = bid
         self._vector_index_mode = "canonical"
         self._repair_lock = asyncio.Lock()
@@ -189,31 +190,46 @@ class MemoryStore:
         mark_embedding_job_completed(memory.id, agent_id=self._agent_id)
         return True
 
+    def _repair_single_job(self, job: EmbeddingJob) -> bool:
+        """Process one embedding repair job. Returns True if the job was resolved."""
+        memory = get_entry(job.memory_id)
+        if (
+            memory is None
+            or not memory.is_active
+            or normalize_agent_scope(memory.agent_id, fallback=self._agent_id) != self._agent_id
+        ):
+            cancel_embedding_job(job.memory_id, agent_id=self._agent_id)
+            return False
+        update_embedding_state(
+            memory.id or job.memory_id,
+            vector_ref_id="",
+            embedding_status="ready",
+            attempts=0,
+            last_error="",
+        )
+        mark_embedding_job_completed(job.memory_id, agent_id=self._agent_id)
+        return True
+
     async def repair_pending_embeddings(self, limit: int = 16) -> int:
         """Consume the persisted repair queue and backfill missing embeddings."""
         async with self._repair_lock:
             jobs = claim_embedding_jobs(self._agent_id, limit=max(1, min(limit, MEMORY_EMBEDDING_REPAIR_BATCH_SIZE)))
             if not jobs:
                 return 0
-            resolved = 0
-            for job in jobs:
-                memory = get_entry(job.memory_id)
-                if (
-                    memory is None
-                    or not memory.is_active
-                    or normalize_agent_scope(memory.agent_id, fallback=self._agent_id) != self._agent_id
-                ):
-                    cancel_embedding_job(job.memory_id, agent_id=self._agent_id)
-                    continue
-                update_embedding_state(
-                    memory.id or job.memory_id,
-                    vector_ref_id="",
-                    embedding_status="ready",
-                    attempts=0,
-                    last_error="",
-                )
-                mark_embedding_job_completed(job.memory_id, agent_id=self._agent_id)
-                resolved += 1
+
+            sem = asyncio.Semaphore(4)
+
+            async def _repair_one(job: EmbeddingJob) -> bool:
+                async with sem:
+                    try:
+                        return await asyncio.to_thread(self._repair_single_job, job)
+                    except Exception:
+                        log.exception("embedding_repair_failed", job_id=getattr(job, "id", None))
+                        return False
+
+            results = await asyncio.gather(*[_repair_one(job) for job in jobs])
+            resolved = sum(1 for r in results if r)
+
             if resolved:
                 record_memory_quality_counter(self._agent_id, "embedding", "repaired", delta=resolved)
                 log.info("memory_embedding_repaired", count=resolved, agent_id=self._agent_id)

@@ -9,7 +9,7 @@ import pytest
 from telegram.error import TimedOut
 
 from koda.config import DEFAULT_SYSTEM_PROMPT, IMAGE_TEMP_DIR, JIRA_ENABLED, VOICE_ACTIVE_PROMPT
-from koda.knowledge.policy import default_execution_policy
+from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.knowledge.types import KnowledgeLayer
 from koda.services.artifact_ingestion import (
     ArtifactDossier,
@@ -25,17 +25,20 @@ from koda.services.queue_manager import (
     QueryContext,
     QueueItem,
     RunResult,
+    TaskInfo,
     _apply_policy_overrides,
     _compact_tool_label,
     _get_throttle_interval,
     _parse_queue_item,
     _post_process,
     _prepare_query_context,
+    _process_queue,
     _resolve_provider_context,
     _run_streaming,
     _run_with_provider_fallback,
     _select_policy_runbook,
     _should_switch_provider,
+    enqueue,
 )
 from koda.utils.progress import _format_elapsed
 
@@ -184,6 +187,7 @@ class TestRuntimeTerminalCutover:
 
         with (
             patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+            patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True),
             patch("koda.services.queue_manager.run_llm_streaming", side_effect=_fake_stream),
             patch("koda.services.queue_manager._send_typing", new_callable=AsyncMock),
         ):
@@ -989,6 +993,40 @@ class TestPolicySelection:
         assert mock_save_mapping.call_args_list[-1].args == ("canon-1", "claude", "fresh-thread", "claude-sonnet-4-6")
 
     @pytest.mark.asyncio
+    async def test_run_with_provider_fallback_fails_closed_when_no_provider_is_eligible(self):
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+        )
+        item = QueueItem(chat_id=111, query_text="hello")
+        context = MagicMock()
+        context.user_data = {"provider": "claude", "auto_model": False, "provider_sessions": {}}
+
+        with (
+            patch("koda.services.queue_manager.get_provider_fallback_chain", return_value=[]),
+            patch(
+                "koda.services.queue_manager.get_provider_runtime_eligibility",
+                return_value={
+                    "claude": {"eligible": False, "reason": "unverified"},
+                    "codex": {"eligible": False, "reason": "disabled"},
+                },
+            ),
+        ):
+            result = await _run_with_provider_fallback(ctx, item, 111, 111, context, task_id=7)
+
+        assert result.error is True
+        assert result.error_kind == "provider_runtime"
+        assert result.result == "No verified providers are eligible for runtime fallback."
+        assert result.warnings == ["no eligible verified providers"]
+
+    @pytest.mark.asyncio
     async def test_post_process_logs_actual_fallback_model(self):
         context = MagicMock()
         context.user_data = {
@@ -1099,3 +1137,88 @@ class TestCancelQueuedTask:
         # Clean up
         _cancelled_task_ids.clear()
         _user_queues.pop(user_id, None)
+
+
+class TestQueueOrdering:
+    @pytest.mark.asyncio
+    async def test_enqueue_reports_fifo_feedback_when_user_already_has_task_running(self):
+        from koda.services.queue_manager import _user_queues, _user_tasks
+
+        user_id = 321
+        update = MagicMock()
+        update.effective_chat.id = 321
+        update.message = AsyncMock()
+        context = MagicMock()
+        context.user_data = {
+            "provider": "codex",
+            "provider_sessions": {},
+            "session_id": "canon-1",
+        }
+        _user_tasks[user_id] = {
+            1: TaskInfo(task_id=1, user_id=user_id, chat_id=321, query_text="primeira"),
+        }
+
+        try:
+            with (
+                patch("koda.services.queue_manager.create_task", return_value=2),
+                patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", False),
+                patch("koda.services.queue_manager._sync_user_queue_observability"),
+                patch("koda.services.queue_manager._ensure_queue_worker", new_callable=AsyncMock),
+            ):
+                task_id = await enqueue(user_id, update, context, "segunda")
+
+            assert task_id == 2
+            update.message.reply_text.assert_awaited_once()
+            feedback = update.message.reply_text.await_args.args[0]
+            assert "coloquei na fila" in feedback.lower()
+            assert "tarefa atual" in feedback.lower()
+            assert "#2" in feedback
+        finally:
+            _user_tasks.pop(user_id, None)
+            _user_queues.pop(user_id, None)
+
+    @pytest.mark.asyncio
+    async def test_process_queue_is_fifo_and_never_runs_same_user_tasks_in_parallel(self):
+        from koda.services.queue_manager import _queue_workers, _unregister_task, _user_queues, _user_tasks
+
+        user_id = 654
+        context = MagicMock()
+        context.user_data = {}
+        queue = asyncio.Queue()
+        _user_queues[user_id] = queue
+
+        first_update = MagicMock()
+        first_update.effective_chat.id = 654
+        second_update = MagicMock()
+        second_update.effective_chat.id = 654
+
+        await queue.put((first_update, "primeira", None, None, 1))
+        await queue.put((second_update, "segunda", None, None, 2))
+
+        started: list[int] = []
+        active = 0
+        max_active = 0
+
+        async def _fake_execute(raw_item, _user_id, _context, task_id, task_info):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            started.append(task_id)
+            await asyncio.sleep(0)
+            active -= 1
+            _unregister_task(task_info)
+
+        try:
+            with (
+                patch("koda.services.queue_manager._execute_single_task", side_effect=_fake_execute),
+                patch("koda.services.queue_manager._sync_user_queue_observability"),
+            ):
+                await _process_queue(user_id, context)
+
+            assert started == [1, 2]
+            assert max_active == 1
+            assert queue.qsize() == 0
+        finally:
+            _queue_workers.pop(user_id, None)
+            _user_tasks.pop(user_id, None)
+            _user_queues.pop(user_id, None)

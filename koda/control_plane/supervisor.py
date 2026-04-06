@@ -15,6 +15,7 @@ from koda.logging_config import get_logger
 
 from .api import control_plane_auth_middleware, control_plane_error_middleware, setup_control_plane_routes
 from .manager import RuntimeSnapshot, get_control_plane_manager
+from .rate_limit import control_plane_rate_limit_middleware
 from .settings import (
     CONTROL_PLANE_BIND,
     CONTROL_PLANE_POLL_INTERVAL_SECONDS,
@@ -25,6 +26,26 @@ from .settings import (
 )
 
 log = get_logger(__name__)
+
+_SAFE_RUNTIME_PARENT_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -47,7 +68,13 @@ class ControlPlaneSupervisor:
 
     async def start(self) -> None:
         self._manager.ensure_seeded()
-        app = web.Application(middlewares=[control_plane_error_middleware, control_plane_auth_middleware])
+        app = web.Application(
+            middlewares=[
+                control_plane_rate_limit_middleware,
+                control_plane_error_middleware,
+                control_plane_auth_middleware,
+            ]
+        )
         setup_control_plane_routes(app)
         app.router.add_get("/health", self._health)
         self._runner = web.AppRunner(app)
@@ -123,9 +150,51 @@ class ControlPlaneSupervisor:
 
     async def _start_worker(self, agent_id: str, version: int) -> None:
         runtime = self._manager.build_runtime_snapshot(agent_id, version=version)
-        env = dict(os.environ)
-        env.update(runtime.env)
+        # Build worker env: parent env → snapshot env → system overrides.
+        # Snapshot may contain stale values for infrastructure flags that must
+        # come from the host environment, so we re-apply critical system vars.
+        _SYSTEM_ENV_KEYS = {
+            "STATE_BACKEND",
+            "POSTGRES_ENABLED",
+            "POSTGRES_URL",
+            "POSTGRES_DB",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "KNOWLEDGE_V2_POSTGRES_DSN",
+            "KNOWLEDGE_V2_POSTGRES_SCHEMA",
+            "KNOWLEDGE_V2_STORAGE_MODE",
+            "KNOWLEDGE_V2_S3_BUCKET",
+            "KNOWLEDGE_V2_S3_ENDPOINT_URL",
+            "KNOWLEDGE_V2_S3_REGION",
+            "KNOWLEDGE_V2_S3_ACCESS_KEY_ID",
+            "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY",
+            "KNOWLEDGE_V2_S3_PREFIX",
+        }
+        env = {key: value for key, value in os.environ.items() if key in _SAFE_RUNTIME_PARENT_ENV_KEYS}
+        env.update(runtime.process_env)
+        # Restore system infrastructure vars that the snapshot should not override
+        for key in _SYSTEM_ENV_KEYS:
+            parent_val = os.environ.get(key)
+            if parent_val is not None:
+                env[key] = parent_val
+        # Override available models based on provider auth mode
+        try:
+            from koda.provider_models import resolve_api_key_extra_model_ids, resolve_known_general_model_ids
+
+            for provider_id, env_key in [("codex", "CODEX_AVAILABLE_MODELS"), ("claude", "CLAUDE_AVAILABLE_MODELS")]:
+                connection = self._manager.get_provider_connection(provider_id)
+                auth_mode = str(connection.get("auth_mode") or "").strip().lower()
+                base_models = resolve_known_general_model_ids(provider_id)
+                if auth_mode == "api_key":
+                    extra = resolve_api_key_extra_model_ids(provider_id)
+                    base_models = list(dict.fromkeys(base_models + extra))
+                if base_models:
+                    env[env_key] = ",".join(base_models)
+        except Exception:
+            pass
+
         env["AGENT_ID"] = agent_id
+        env["_KODA_RUNTIME_BOOTSTRAPPED"] = "1"
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -146,6 +215,13 @@ class ControlPlaneSupervisor:
         state = self._workers.pop(agent_id, None)
         if state is None:
             return
+        # Clean up MCP servers for this agent
+        try:
+            from koda.services.mcp_manager import mcp_server_manager
+
+            await mcp_server_manager.stop_all_for_agent(agent_id)
+        except Exception:
+            pass
         process = state.process
         if process.returncode is None:
             process.send_signal(signal.SIGINT)

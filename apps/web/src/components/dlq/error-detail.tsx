@@ -68,7 +68,7 @@ function MetadataViewer({ json }: { json: string }) {
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] p-4">
+      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] p-4">
         <span className="font-mono text-sm italic text-subtle">{t("dlq.detail.emptyMetadata")}</span>
       </div>
     );
@@ -88,7 +88,7 @@ function copyText(value: string | null | undefined) {
 
 export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
   const { t } = useAppI18n();
-  const presence = useAnimatedPresence(Boolean(entry), { entry }, { duration: 300 });
+  const presence = useAnimatedPresence(Boolean(entry), { entry }, { duration: 180 });
   const renderedEntry = presence.renderedValue.entry;
 
   useBodyScrollLock(presence.shouldRender);
@@ -106,7 +106,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
     <>
       <div
         className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "app-overlay-backdrop",
           presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
@@ -114,10 +114,10 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
 
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full max-w-xl will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "fixed inset-y-0 right-0 z-[70] w-full max-w-xl transition-opacity duration-150 ease-out",
           presence.isVisible
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         role="dialog"
         aria-modal="true"
@@ -140,7 +140,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                     <span className="app-card-row__eyebrow">DLQ #{renderedEntry.id}</span>
                     <span className="font-mono text-xs text-[var(--text-tertiary)]">Task #{renderedEntry.task_id}</span>
                     {renderedEntry.bot_id && (
-                      <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                      <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                         {renderedEntry.bot_id}
                       </span>
                     )}
@@ -188,12 +188,12 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                   </div>
                   <button
                     onClick={() => copyText(renderedEntry.error_message)}
-                    className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors hover:opacity-90"
+                    className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
                     style={getSemanticIconStyle("danger")}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                      {t("common.copy")}
-                    </button>
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {t("common.copy")}
+                  </button>
                 </div>
                 <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-7" style={getSemanticTextStyle("danger")}>
                   {renderedEntry.error_message ?? "\u2014"}

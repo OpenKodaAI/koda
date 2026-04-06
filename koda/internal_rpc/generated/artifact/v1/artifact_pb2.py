@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from common.v1 import metadata_pb2 as common_dot_v1_dot_metadata__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x61rtifact/v1/artifact.proto\x12\x10koda.artifact.v1\x1a\x18\x63ommon/v1/metadata.proto\"\x94\x01\n\x12\x41rtifactDescriptor\x12\x1f\n\x0b\x61rtifact_id\x18\x01 \x01(\tR\nartifactId\x12\x1d\n\nobject_key\x18\x02 \x01(\tR\tobjectKey\x12!\n\x0c\x63ontent_hash\x18\x03 \x01(\tR\x0b\x63ontentHash\x12\x1b\n\tmime_type\x18\x04 \x01(\tR\x08mimeType\"\xaf\x02\n\x12PutArtifactRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x15\n\x06\x62ot_id\x18\x02 \x01(\tR\x05\x62otId\x12)\n\x10logical_filename\x18\x03 \x01(\tR\x0flogicalFilename\x12\x1d\n\nobject_key\x18\x04 \x01(\tR\tobjectKey\x12\x1b\n\tmime_type\x18\x05 \x01(\tR\x08mimeType\x12\x30\n\x14source_metadata_json\x18\x06 \x01(\tR\x12sourceMetadataJson\x12\x18\n\x07purpose\x18\x07 \x01(\tR\x07purpose\x12\x12\n\x04\x64\x61ta\x18\x08 \x01(\x0cR\x04\x64\x61ta\"\xa3\x01\n\x13PutArtifactResponse\x12@\n\x08\x61rtifact\x18\x01 \x01(\x0b\x32$.koda.artifact.v1.ArtifactDescriptorR\x08\x61rtifact\x12#\n\rmetadata_json\x18\x02 \x01(\tR\x0cmetadataJson\x12%\n\x0eupload_outcome\x18\x03 \x01(\tR\ruploadOutcome\"?\n\x18GenerateEvidenceResponse\x12#\n\revidence_json\x18\x01 \x01(\tR\x0c\x65videnceJson\"\x9a\x01\n#GenerateEvidenceByArtifactIdRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x15\n\x06\x62ot_id\x18\x02 \x01(\tR\x05\x62otId\x12\x1f\n\x0b\x61rtifact_id\x18\x03 \x01(\tR\nartifactId\"\x84\x01\n\x1bGetArtifactMetadataResponse\x12@\n\x08\x61rtifact\x18\x01 \x01(\x0b\x32$.koda.artifact.v1.ArtifactDescriptorR\x08\x61rtifact\x12#\n\rmetadata_json\x18\x02 \x01(\tR\x0cmetadataJson\"\x9d\x01\n&GetArtifactMetadataByArtifactIdRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x15\n\x06\x62ot_id\x18\x02 \x01(\tR\x05\x62otId\x12\x1f\n\x0b\x61rtifact_id\x18\x03 \x01(\tR\nartifactId2\xcf\x03\n\x15\x41rtifactEngineService\x12\\\n\x0bPutArtifact\x12$.koda.artifact.v1.PutArtifactRequest\x1a%.koda.artifact.v1.PutArtifactResponse(\x01\x12\x81\x01\n\x1cGenerateEvidenceByArtifactId\x12\x35.koda.artifact.v1.GenerateEvidenceByArtifactIdRequest\x1a*.koda.artifact.v1.GenerateEvidenceResponse\x12\x8a\x01\n\x1fGetArtifactMetadataByArtifactId\x12\x38.koda.artifact.v1.GetArtifactMetadataByArtifactIdRequest\x1a-.koda.artifact.v1.GetArtifactMetadataResponse\x12G\n\x06Health\x12\x1d.koda.common.v1.HealthRequest\x1a\x1e.koda.common.v1.HealthResponseB\x87\x01\n\x14\x63om.koda.artifact.v1B\rArtifactProtoP\x01\xa2\x02\x03KAX\xaa\x02\x10Koda.Artifact.V1\xca\x02\x10Koda\\Artifact\\V1\xe2\x02\x1cKoda\\Artifact\\V1\\GPBMetadata\xea\x02\x12Koda::Artifact::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x61rtifact/v1/artifact.proto\x12\x10koda.artifact.v1\x1a\x18\x63ommon/v1/metadata.proto\"\x94\x01\n\x12\x41rtifactDescriptor\x12\x1f\n\x0b\x61rtifact_id\x18\x01 \x01(\tR\nartifactId\x12\x1d\n\nobject_key\x18\x02 \x01(\tR\tobjectKey\x12!\n\x0c\x63ontent_hash\x18\x03 \x01(\tR\x0b\x63ontentHash\x12\x1b\n\tmime_type\x18\x04 \x01(\tR\x08mimeType\"\xb3\x02\n\x12PutArtifactRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12)\n\x10logical_filename\x18\x03 \x01(\tR\x0flogicalFilename\x12\x1d\n\nobject_key\x18\x04 \x01(\tR\tobjectKey\x12\x1b\n\tmime_type\x18\x05 \x01(\tR\x08mimeType\x12\x30\n\x14source_metadata_json\x18\x06 \x01(\tR\x12sourceMetadataJson\x12\x18\n\x07purpose\x18\x07 \x01(\tR\x07purpose\x12\x12\n\x04\x64\x61ta\x18\x08 \x01(\x0cR\x04\x64\x61ta\"\xa3\x01\n\x13PutArtifactResponse\x12@\n\x08\x61rtifact\x18\x01 \x01(\x0b\x32$.koda.artifact.v1.ArtifactDescriptorR\x08\x61rtifact\x12#\n\rmetadata_json\x18\x02 \x01(\tR\x0cmetadataJson\x12%\n\x0eupload_outcome\x18\x03 \x01(\tR\ruploadOutcome\"?\n\x18GenerateEvidenceResponse\x12#\n\revidence_json\x18\x01 \x01(\tR\x0c\x65videnceJson\"\x9e\x01\n#GenerateEvidenceByArtifactIdRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1f\n\x0b\x61rtifact_id\x18\x03 \x01(\tR\nartifactId\"\x84\x01\n\x1bGetArtifactMetadataResponse\x12@\n\x08\x61rtifact\x18\x01 \x01(\x0b\x32$.koda.artifact.v1.ArtifactDescriptorR\x08\x61rtifact\x12#\n\rmetadata_json\x18\x02 \x01(\tR\x0cmetadataJson\"\xa1\x01\n&GetArtifactMetadataByArtifactIdRequest\x12;\n\x08metadata\x18\x01 \x01(\x0b\x32\x1f.koda.common.v1.RequestMetadataR\x08metadata\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1f\n\x0b\x61rtifact_id\x18\x03 \x01(\tR\nartifactId2\xcf\x03\n\x15\x41rtifactEngineService\x12\\\n\x0bPutArtifact\x12$.koda.artifact.v1.PutArtifactRequest\x1a%.koda.artifact.v1.PutArtifactResponse(\x01\x12\x81\x01\n\x1cGenerateEvidenceByArtifactId\x12\x35.koda.artifact.v1.GenerateEvidenceByArtifactIdRequest\x1a*.koda.artifact.v1.GenerateEvidenceResponse\x12\x8a\x01\n\x1fGetArtifactMetadataByArtifactId\x12\x38.koda.artifact.v1.GetArtifactMetadataByArtifactIdRequest\x1a-.koda.artifact.v1.GetArtifactMetadataResponse\x12G\n\x06Health\x12\x1d.koda.common.v1.HealthRequest\x1a\x1e.koda.common.v1.HealthResponseB\x87\x01\n\x14\x63om.koda.artifact.v1B\rArtifactProtoP\x01\xa2\x02\x03KAX\xaa\x02\x10Koda.Artifact.V1\xca\x02\x10Koda\\Artifact\\V1\xe2\x02\x1cKoda\\Artifact\\V1\\GPBMetadata\xea\x02\x12Koda::Artifact::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,17 +36,17 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ARTIFACTDESCRIPTOR']._serialized_start=75
   _globals['_ARTIFACTDESCRIPTOR']._serialized_end=223
   _globals['_PUTARTIFACTREQUEST']._serialized_start=226
-  _globals['_PUTARTIFACTREQUEST']._serialized_end=529
-  _globals['_PUTARTIFACTRESPONSE']._serialized_start=532
-  _globals['_PUTARTIFACTRESPONSE']._serialized_end=695
-  _globals['_GENERATEEVIDENCERESPONSE']._serialized_start=697
-  _globals['_GENERATEEVIDENCERESPONSE']._serialized_end=760
-  _globals['_GENERATEEVIDENCEBYARTIFACTIDREQUEST']._serialized_start=763
-  _globals['_GENERATEEVIDENCEBYARTIFACTIDREQUEST']._serialized_end=917
-  _globals['_GETARTIFACTMETADATARESPONSE']._serialized_start=920
-  _globals['_GETARTIFACTMETADATARESPONSE']._serialized_end=1052
-  _globals['_GETARTIFACTMETADATABYARTIFACTIDREQUEST']._serialized_start=1055
-  _globals['_GETARTIFACTMETADATABYARTIFACTIDREQUEST']._serialized_end=1212
-  _globals['_ARTIFACTENGINESERVICE']._serialized_start=1215
-  _globals['_ARTIFACTENGINESERVICE']._serialized_end=1678
+  _globals['_PUTARTIFACTREQUEST']._serialized_end=533
+  _globals['_PUTARTIFACTRESPONSE']._serialized_start=536
+  _globals['_PUTARTIFACTRESPONSE']._serialized_end=699
+  _globals['_GENERATEEVIDENCERESPONSE']._serialized_start=701
+  _globals['_GENERATEEVIDENCERESPONSE']._serialized_end=764
+  _globals['_GENERATEEVIDENCEBYARTIFACTIDREQUEST']._serialized_start=767
+  _globals['_GENERATEEVIDENCEBYARTIFACTIDREQUEST']._serialized_end=925
+  _globals['_GETARTIFACTMETADATARESPONSE']._serialized_start=928
+  _globals['_GETARTIFACTMETADATARESPONSE']._serialized_end=1060
+  _globals['_GETARTIFACTMETADATABYARTIFACTIDREQUEST']._serialized_start=1063
+  _globals['_GETARTIFACTMETADATABYARTIFACTIDREQUEST']._serialized_end=1224
+  _globals['_ARTIFACTENGINESERVICE']._serialized_start=1227
+  _globals['_ARTIFACTENGINESERVICE']._serialized_end=1690
 # @@protoc_insertion_point(module_scope)

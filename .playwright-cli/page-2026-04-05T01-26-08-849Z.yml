@@ -1,0 +1,191 @@
+- generic [active] [ref=e1]:
+  - link "Ir para o conteúdo principal" [ref=e2] [cursor=pointer]:
+    - /url: "#conteudo-principal"
+  - generic [ref=e3]:
+    - complementary "Main navigation" [ref=e4]:
+      - generic [ref=e5]:
+        - link "Koda" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Koda" [ref=e9]
+          - generic [ref=e11]: Koda
+        - navigation [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: Koda
+            - generic [ref=e15]:
+              - link "Home" [ref=e16] [cursor=pointer]:
+                - /url: /
+                - img [ref=e17]
+                - generic [ref=e19]: Home
+              - link "Runtime" [ref=e20] [cursor=pointer]:
+                - /url: /runtime
+                - img [ref=e21]
+                - generic [ref=e26]: Runtime
+              - link "Agents" [ref=e27] [cursor=pointer]:
+                - /url: /control-plane
+                - img [ref=e28]
+                - generic [ref=e31]: Agents
+          - generic [ref=e32]:
+            - generic [ref=e33]: Operations
+            - generic [ref=e34]:
+              - link "Executions" [ref=e35] [cursor=pointer]:
+                - /url: /executions
+                - img [ref=e36]
+                - generic [ref=e40]: Executions
+              - link "Sessions" [ref=e41] [cursor=pointer]:
+                - /url: /sessions
+                - img [ref=e42]
+                - generic [ref=e45]: Sessions
+              - link "Schedules" [ref=e46] [cursor=pointer]:
+                - /url: /schedules
+                - img [ref=e47]
+                - generic [ref=e50]: Schedules
+              - link "Dead letter queue" [ref=e51] [cursor=pointer]:
+                - /url: /dlq
+                - img [ref=e52]
+                - generic [ref=e54]: Dead letter queue
+          - generic [ref=e55]:
+            - generic [ref=e56]: Analysis
+            - generic [ref=e57]:
+              - link "Memory" [ref=e58] [cursor=pointer]:
+                - /url: /memory
+                - img [ref=e59]
+                - generic [ref=e64]: Memory
+              - link "Costs" [ref=e65] [cursor=pointer]:
+                - /url: /costs
+                - img [ref=e66]
+                - generic [ref=e69]: Costs
+        - navigation [ref=e71]:
+          - generic [ref=e72]:
+            - generic [ref=e73]: System
+            - link "General settings" [ref=e75] [cursor=pointer]:
+              - /url: /control-plane/system
+              - img [ref=e76]
+              - generic [ref=e79]: General settings
+    - main [ref=e80]:
+      - generic [ref=e83]:
+        - complementary [ref=e85]:
+          - generic [ref=e88]:
+            - generic [ref=e89]:
+              - img [ref=e90]
+              - textbox [ref=e93]:
+                - /placeholder: Search by name or message
+            - button "New chat" [ref=e94] [cursor=pointer]:
+              - img [ref=e95]
+          - generic [ref=e142]:
+            - button "Backend Developer 6 hr. ago Bom dia" [ref=e143] [cursor=pointer]:
+              - generic [ref=e150]:
+                - generic [ref=e151]:
+                  - paragraph [ref=e153]: Backend Developer
+                  - generic [ref=e154]: 6 hr. ago
+                - paragraph [ref=e155]: Bom dia
+            - button "Backend Developer 6 hr. ago Bom dia" [ref=e156] [cursor=pointer]:
+              - generic [ref=e163]:
+                - generic [ref=e164]:
+                  - paragraph [ref=e166]: Backend Developer
+                  - generic [ref=e167]: 6 hr. ago
+                - paragraph [ref=e168]: Bom dia
+            - button "Backend Developer 7 hr. ago Gere uma imagem de um gato" [ref=e169] [cursor=pointer]:
+              - generic [ref=e176]:
+                - generic [ref=e177]:
+                  - paragraph [ref=e179]: Backend Developer
+                  - generic [ref=e180]: 7 hr. ago
+                - paragraph [ref=e181]: Gere uma imagem de um gato
+            - button "Backend Developer 7 hr. ago Bom dia" [ref=e182] [cursor=pointer]:
+              - generic [ref=e189]:
+                - generic [ref=e190]:
+                  - paragraph [ref=e192]: Backend Developer
+                  - generic [ref=e193]: 7 hr. ago
+                - paragraph [ref=e194]: Bom dia
+            - button "Backend Developer 7 hr. ago Bom dia Códex" [ref=e195] [cursor=pointer]:
+              - generic [ref=e202]:
+                - generic [ref=e203]:
+                  - paragraph [ref=e205]: Backend Developer
+                  - generic [ref=e206]: 7 hr. ago
+                - paragraph [ref=e207]: Bom dia Códex
+            - button "Backend Developer 7 hr. ago teste" [ref=e208] [cursor=pointer]:
+              - generic [ref=e215]:
+                - generic [ref=e216]:
+                  - paragraph [ref=e218]: Backend Developer
+                  - generic [ref=e219]: 7 hr. ago
+                - paragraph [ref=e220]: teste
+            - button "Backend Developer 7 hr. ago teste" [ref=e221] [cursor=pointer]:
+              - generic [ref=e228]:
+                - generic [ref=e229]:
+                  - paragraph [ref=e231]: Backend Developer
+                  - generic [ref=e232]: 7 hr. ago
+                - paragraph [ref=e233]: teste
+            - button "Backend Developer 8 hr. ago teste" [ref=e234] [cursor=pointer]:
+              - generic [ref=e241]:
+                - generic [ref=e242]:
+                  - paragraph [ref=e244]: Backend Developer
+                  - generic [ref=e245]: 8 hr. ago
+                - paragraph [ref=e246]: teste
+            - button "Backend Developer 17 hr. ago Olá" [ref=e391] [cursor=pointer]:
+              - generic [ref=e254]:
+                - generic [ref=e255]:
+                  - paragraph [ref=e257]: Backend Developer
+                  - generic [ref=e258]: 17 hr. ago
+                - paragraph [ref=e259]: Olá
+            - button "Backend Developer 17 hr. ago ola" [ref=e260] [cursor=pointer]:
+              - generic [ref=e267]:
+                - generic [ref=e268]:
+                  - paragraph [ref=e270]: Backend Developer
+                  - generic [ref=e271]: 17 hr. ago
+                - paragraph [ref=e272]: ola
+            - button "Backend Developer 17 hr. ago Teste2" [ref=e273] [cursor=pointer]:
+              - generic [ref=e280]:
+                - generic [ref=e281]:
+                  - paragraph [ref=e283]: Backend Developer
+                  - generic [ref=e284]: 17 hr. ago
+                - paragraph [ref=e285]: Teste2
+            - button "Backend Developer 17 hr. ago masd13123" [ref=e286] [cursor=pointer]:
+              - generic [ref=e293]:
+                - generic [ref=e294]:
+                  - paragraph [ref=e296]: Backend Developer
+                  - generic [ref=e297]: 17 hr. ago
+                - paragraph [ref=e298]: masd13123
+            - button "Backend Developer 17 hr. ago 43756387" [ref=e299] [cursor=pointer]:
+              - generic [ref=e306]:
+                - generic [ref=e307]:
+                  - paragraph [ref=e309]: Backend Developer
+                  - generic [ref=e310]: 17 hr. ago
+                - paragraph [ref=e311]: "43756387"
+            - button "Backend Developer 18 hr. ago 09678" [ref=e312] [cursor=pointer]:
+              - generic [ref=e319]:
+                - generic [ref=e320]:
+                  - paragraph [ref=e322]: Backend Developer
+                  - generic [ref=e323]: 18 hr. ago
+                - paragraph [ref=e324]: "09678"
+            - button "Backend Developer 18 hr. ago 1234" [ref=e325] [cursor=pointer]:
+              - generic [ref=e332]:
+                - generic [ref=e333]:
+                  - paragraph [ref=e335]: Backend Developer
+                  - generic [ref=e336]: 18 hr. ago
+                - paragraph [ref=e337]: "1234"
+        - generic [ref=e109]:
+          - button "Conversation info" [ref=e339] [cursor=pointer]:
+            - img [ref=e340]
+          - generic [ref=e111]:
+            - generic [ref=e343]: Apr 4
+            - generic [ref=e345]:
+              - generic [ref=e346]:
+                - paragraph [ref=e348]: Bom dia
+                - generic [ref=e349]:
+                  - generic [ref=e350]: "#36"
+                  - generic [ref=e351]: gpt-5.4-mini
+                  - generic [ref=e352]: 24.4s
+                  - generic [ref=e353]: $0.00
+              - generic [ref=e354]:
+                - generic [ref=e355]: You
+                - generic [ref=e356]: 6 hr. ago
+          - generic [ref=e121]:
+            - generic "Selected bot" [ref=e357]:
+              - generic [ref=e364]: Backend Developer
+            - generic [ref=e133]:
+              - textbox "Write your message to start or continue the conversation..." [ref=e365]
+              - button "Send" [disabled] [ref=e135]:
+                - img [ref=e136]
+            - generic [ref=e138]:
+              - paragraph [ref=e139]: Continue the current conversation.
+              - paragraph [ref=e140]: Enter to send • Shift + Enter for a line break
+  - alert [ref=e141]

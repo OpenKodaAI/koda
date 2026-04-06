@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { setCurrentLanguage } from "@/lib/i18n";
 import {
   normalizeFallbackOrder,
+  SETTINGS_SECTIONS,
   STEP_TO_SECTION,
   sanitizeVariableDraft,
   sourceBadgeLabel,
@@ -81,9 +82,20 @@ describe("system settings model helpers", () => {
       account: "general",
       models: "models",
       integrations: "integrations",
+      mcp: "integrations",
       memory: "intelligence",
-      variables: "intelligence",
+      variables: "variables",
       review: "general",
     });
+  });
+
+  it("keeps MCP out of the visible settings sections", () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
+      "general",
+      "models",
+      "integrations",
+      "intelligence",
+      "variables",
+    ]);
   });
 });

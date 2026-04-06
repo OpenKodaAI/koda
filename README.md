@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="public/koda-mark-white.svg" alt="Koda mark" width="88" />
-</p>
-
-<h1 align="center">Koda</h1>
+<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%; background-color: #000000;">
+  <img src="public/koda_hero.jpeg" alt="Koda" width="30%" />
+</div>
 
 <p align="center">
   <strong>Open-source harness for orchestrating multi-agent, multi-provider AI systems.</strong>
@@ -52,9 +50,16 @@ The public quickstart brings up the platform stack first. Product configuration 
 
 ## Quickstart
 
-1. Clone the repository.
+1. Install the npm CLI or use `npx`.
 2. Run the installer.
 3. Open the dashboard and finish bootstrap in the control plane.
+
+```bash
+npm install -g koda
+koda install
+```
+
+Repository contributors can still use the source wrapper:
 
 ```bash
 git clone https://github.com/OpenKodaAI/koda.git /opt/koda
@@ -62,17 +67,18 @@ cd /opt/koda
 ./scripts/install.sh
 ```
 
-When the installer completes, use the two URLs it prints:
+When the installer completes, start in the dashboard:
 
-- Dashboard: `http://127.0.0.1:3000`
-- Bootstrap: `http://127.0.0.1:8090/setup`
+- Dashboard setup: `http://127.0.0.1:3000/control-plane`
+- Dashboard home: `http://127.0.0.1:3000`
 
-From there you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
+From there you can unlock the operator session, validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
+From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
 
 ## What The Stack Starts
 
 - `web` on port `3000` for the operator-facing UI
-- `app` on port `8090` for `/setup`, `/health`, `/api/control-plane/*`, and `/api/runtime/*`
+- `app` on port `8090` for `/health`, `/setup` compatibility, `/api/control-plane/*`, and `/api/runtime/*`
 - `postgres` for durable state
 - `seaweedfs` plus `seaweedfs-init` for bundled S3-compatible object storage
 
@@ -86,8 +92,8 @@ The operational UI is part of the product itself. The dashboard runs as the offi
 
 ## What Koda Includes
 
-- A control plane for setup, provider configuration, agent management, secrets, and operational settings
-- A dedicated web dashboard for operations, onboarding, runtime inspection, and control-plane workflows
+- A control plane for provider configuration, agent management, secrets, and operational settings
+- A dedicated web dashboard for first-run setup, operations, runtime inspection, and control-plane workflows
 - A runtime API for inspection, orchestration, command execution, and runtime supervision
 - Postgres-backed durable state for runtime, control-plane, knowledge, memory, and audit records
 - SeaweedFS-backed bundled object storage for the quickstart path through a generic S3-compatible contract
@@ -97,7 +103,7 @@ The operational UI is part of the product itself. The dashboard runs as the offi
 
 ## Core Capabilities
 
-- Control-plane-first bootstrap with web onboarding instead of hand-maintained per-agent env files
+- Control-plane-first bootstrap with first-run setup directly in the web dashboard instead of hand-maintained per-agent env files
 - Multi-agent orchestration with isolated runtime state, prompt contracts, and operational settings
 - Multi-provider execution so each agent can be configured for the models and tools that fit its role
 - Harness-style architecture that lets operators define agents for any niche, workflow, or task class
@@ -130,7 +136,8 @@ For a public architecture walkthrough, start with [Documentation Index](docs/REA
 ## Public Interfaces
 
 - `/` for the main operations dashboard served by `apps/web`
-- `/setup` for first-boot configuration
+- `/control-plane` in `apps/web` as the canonical first-boot configuration surface
+- `/setup` as a compatibility bridge into the dashboard setup flow
 - `/api/control-plane/agents/*` for canonical agent-management operations
 - `/api/control-plane/dashboard/agents/*` for canonical operational dashboard data
 - `/api/runtime/*` for runtime inspection and control
@@ -157,11 +164,20 @@ cp apps/web/.env.example apps/web/.env.local
 pnpm dev:web
 ```
 
+Containerized local development with live reload:
+
+```bash
+pnpm dev:stack:build
+```
+
+This development stack mounts the repository directly into the `app` and `web` containers, runs the web UI in Next.js development mode, restarts the control-plane backend automatically on source changes, and keeps frontend build output ephemeral so UI changes are not served from an old image layer. The dev frontend image also pre-seeds the package store and `node_modules` cache so the first boot is much faster than rebuilding the production image on each edit. When dependency manifests change, restarting the dev stack reapplies installs automatically.
+
 ## Documentation
 
 - [Documentation index](docs/README.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [Runtime architecture](docs/architecture/runtime.md)
+- [Security readiness](docs/security/README.md)
 - [API reference](docs/reference/api.md)
 - [Local install](docs/install/local.md)
 - [VPS install](docs/install/vps.md)
@@ -173,6 +189,8 @@ pnpm dev:web
 ## Contributing, Security, And Licensing
 
 Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, validation, and documentation expectations. Security-sensitive reporting guidance lives in [SECURITY.md](SECURITY.md), and community participation expectations live in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+For the application-security baseline, threat model, ASVS mapping, and operational hardening checklist, use [docs/security/README.md](docs/security/README.md).
 
 Koda is published under the Apache-2.0 license.
 
@@ -197,4 +215,22 @@ pnpm lint:web
 pnpm test:web
 pnpm build:web
 python3 scripts/generate_repo_map.py --check
+pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
 ```
+
+If you touch the Rust workspace, also run:
+
+```bash
+cargo fmt --check --manifest-path rust/Cargo.toml
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml --workspace
+```
+
+## GitHub CI
+
+Koda validates pull requests with a tiered GitHub Actions pipeline:
+
+- `pr-quality` runs required checks for Python quality, Python tests on 3.11 and 3.12, web lint/test/build, repo-hygiene, Rust validation, and Docker smoke coverage
+- `security` runs dependency audits, Bandit, Gitleaks, CodeQL, and container scanning on pull requests, on `main`, and on a weekly schedule
+
+Coverage thresholds are sourced from [pyproject.toml](pyproject.toml), not duplicated in workflow files. GitHub uploads `pytest`/coverage artifacts, `vitest` results, and SARIF findings so failures can be reviewed directly in artifacts or in the Security tab.
