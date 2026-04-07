@@ -14,7 +14,7 @@ The recommended bundled storage path uses:
 ## Recommended Flow
 
 ```bash
-npm install -g koda
+npm install -g @openkodaai/koda
 koda install --headless
 ```
 
@@ -26,7 +26,8 @@ which installs the npm CLI locally and stages the release bundle into `.koda-rel
 The default production overlay keeps both the dashboard and the control plane bound to localhost. A reverse proxy should:
 
 - publish `/` to the Koda web UI
-- publish `/control-plane` to the Koda dashboard setup and operator surface
+- publish `/control-plane/setup` to the dedicated onboarding surface
+- publish `/control-plane` to the control-plane home and operator surface
 - terminate TLS
 - optionally keep `/setup` only as a compatibility redirect
 - publish `/api/control-plane/*`
@@ -84,11 +85,11 @@ Run:
 python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
 ```
 
-Then finish product configuration through `/control-plane` in the dashboard.
+Then finish product configuration through `/control-plane/setup` in the dashboard.
 
 ## Upgrade Path
 
-- install the new npm CLI release or run `npx koda@latest update`
+- install the new npm CLI release or run `npx @openkodaai/koda@latest update`
 - rerun `koda update`
 - let the CLI run doctor checks and rollback automatically if the new bundle is unhealthy
 - verify control-plane health and setup status

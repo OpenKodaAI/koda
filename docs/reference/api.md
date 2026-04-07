@@ -12,21 +12,21 @@ This document is a guide to the public shape of the platform, not a replacement 
 
 ### Dashboard Setup
 
+- `GET /control-plane/setup` on the Next.js web app
 - `GET /control-plane` on the Next.js web app
 
 Purpose:
 
-- canonical first-boot configuration flow
-- operator session entry
-- ongoing product configuration inside the dashboard
+- canonical first-boot configuration flow on `/control-plane/setup`
+- control-plane home and catalog on `/control-plane` after auth/setup is complete
+- operator session entry and ongoing product configuration inside the dashboard
 
 ### Compatibility Setup Bridge
-
 - `GET /setup`
 
 Purpose:
 
-- compatibility page that points operators to the dashboard flow
+- compatibility page that points operators to `/control-plane/setup`
 - bridge for older quickstart links and published reverse-proxy routes
 
 ### Control Plane
@@ -97,7 +97,7 @@ Purpose:
 ## Intended Usage
 
 - infrastructure bootstrap happens through Docker and `.env`
-- product bootstrap happens through `/control-plane` in the dashboard
+- product bootstrap happens through `/control-plane/setup` in the dashboard
 - ongoing product management happens through the control plane and its HTTP APIs
 - runtime operations are exposed through dedicated runtime routes, not mixed into setup endpoints
 

@@ -26,7 +26,7 @@ def load_control_plane_openapi_spec() -> dict[str, Any]:
 def _dashboard_urls(request: web.Request) -> tuple[str, str]:
     public_base = str(os.environ.get("WEB_PUBLIC_BASE_URL") or "").strip().rstrip("/")
     if public_base:
-        return f"{public_base}/control-plane", "/control-plane"
+        return f"{public_base}/control-plane/setup", "/control-plane/setup"
 
     headers = getattr(request, "headers", {})
     forwarded_proto = str(headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
@@ -36,7 +36,7 @@ def _dashboard_urls(request: web.Request) -> tuple[str, str]:
     parsed = urlsplit(f"{scheme}://{host}")
     hostname = parsed.hostname or "127.0.0.1"
     web_port = str(os.environ.get("WEB_PORT") or "3000").strip() or "3000"
-    return f"{scheme}://{hostname}:{web_port}/control-plane", "/control-plane"
+    return f"{scheme}://{hostname}:{web_port}/control-plane/setup", "/control-plane/setup"
 
 
 def render_setup_page(request: web.Request) -> str:
@@ -172,14 +172,15 @@ def render_setup_page(request: web.Request) -> str:
       <span class="pill">Compatibility bridge</span>
       <h1>Configuration moved into the dashboard</h1>
       <p>
-        Koda now completes first-run installation directly inside the Next dashboard. Use the
-        dashboard for operator login, access policy, provider verification, and the first agent.
+        Koda now completes first-run installation directly inside the Next dashboard. This
+        compatibility page only bridges older <code>/setup</code> entrypoints into the canonical
+        onboarding route.
       </p>
 
       <div class="actions">
         <a class="button primary" href="{direct_dashboard_url}">Open dashboard setup</a>
         <a class="button secondary" href="{proxied_dashboard_path}">
-          Open /control-plane via reverse proxy
+          Open /control-plane/setup via reverse proxy
         </a>
         <a class="button secondary" href="/openapi/control-plane.json" target="_blank" rel="noreferrer">
           OpenAPI

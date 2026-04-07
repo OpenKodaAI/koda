@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { BotEditorShell } from "@/components/control-plane/editor/bot-editor-shell";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
 import {
@@ -16,6 +16,10 @@ import {
   getControlPlaneCoreTools,
   getControlPlaneWorkspaces,
 } from "@/lib/control-plane";
+import {
+  buildControlPlaneSetupHref,
+  resolveControlPlaneDashboardAccess,
+} from "@/lib/control-plane-dashboard-access";
 
 export default async function ControlPlaneBotPage({
   params,
@@ -23,6 +27,16 @@ export default async function ControlPlaneBotPage({
   params: Promise<{ botId: string }>;
 }) {
   const { botId } = await params;
+  const access = await resolveControlPlaneDashboardAccess();
+
+  if (access.status === "setup_required") {
+    return redirect(buildControlPlaneSetupHref(`/control-plane/bots/${encodeURIComponent(botId)}`));
+  }
+
+  if (access.status === "unavailable") {
+    return <ControlPlaneUnavailable />;
+  }
+
   let payload:
       | {
         bot: Awaited<ReturnType<typeof getControlPlaneBot>>;
@@ -75,7 +89,11 @@ export default async function ControlPlaneBotPage({
     };
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 404) {
-      notFound();
+      return notFound();
+    }
+
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      return redirect(buildControlPlaneSetupHref(`/control-plane/bots/${encodeURIComponent(botId)}`));
     }
 
     return <ControlPlaneUnavailable />;

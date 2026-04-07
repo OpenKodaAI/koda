@@ -37,7 +37,8 @@ This topology is used for both local quickstart and the default single-node VPS 
 Koda intentionally separates infrastructure bootstrap from product configuration:
 
 - `.env` and Docker prepare the platform
-- `/control-plane` and `/api/control-plane/*` configure the product
+- `/control-plane/setup` starts the dashboard onboarding flow
+- `/control-plane` and `/api/control-plane/*` configure the product after auth/setup
 - providers, access policy, secrets, and agents are managed through the control plane
 
 This keeps external layers such as reverse proxies, Tailscale, or VPS platforms thin and infrastructure-focused.
@@ -54,6 +55,7 @@ Koda uses durable storage by default:
 
 The main public entry points are:
 
+- `/control-plane/setup`
 - `/control-plane`
 - `/setup`
 - `/api/control-plane/*`

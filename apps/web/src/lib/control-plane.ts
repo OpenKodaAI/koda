@@ -923,6 +923,7 @@ export type ControlPlaneOnboardingStatus = {
   };
   openapi_url?: string;
   setup_url?: string;
+  dashboard_setup_url?: string;
 };
 
 export type ControlPlaneAuthStatus = {

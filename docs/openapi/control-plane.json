@@ -42,7 +42,7 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Compatibility page that points operators to the Next.js dashboard setup flow"
+            "description": "Compatibility page that points operators to the canonical Next.js dashboard onboarding route at /control-plane/setup"
           }
         }
       }
@@ -63,7 +63,7 @@
         "summary": "Onboarding status",
         "responses": {
           "200": {
-            "description": "Current quickstart, provider, agent, and storage status"
+            "description": "Current quickstart, provider, agent, and storage status, including the legacy /setup bridge and the canonical dashboard setup URL."
           }
         }
       }
@@ -328,7 +328,7 @@
                 "type": "object"
               }
             }
-        }
+          }
         },
         "responses": {
           "200": {

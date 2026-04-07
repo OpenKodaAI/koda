@@ -72,6 +72,7 @@ Global configuration and per-bot authorization are intentionally different layer
 
 ## Public Setup And Management Surfaces
 
+- `/control-plane/setup`
 - `/control-plane`
 - `/setup`
 - `/api/control-plane/onboarding/status`

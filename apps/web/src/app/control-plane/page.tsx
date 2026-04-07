@@ -1,34 +1,27 @@
+import { redirect } from "next/navigation";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
-import { ControlPlaneSetup } from "@/components/control-plane/control-plane-setup";
 import { CatalogLayout } from "@/components/control-plane/catalog/catalog-layout";
 import {
-  getControlPlaneAuthStatus,
   ControlPlaneRequestError,
   getControlPlaneBots,
   getControlPlaneCoreProviders,
-  getControlPlaneOnboardingStatus,
   getGeneralSystemSettings,
   getControlPlaneWorkspaces,
 } from "@/lib/control-plane";
+import {
+  buildControlPlaneSetupHref,
+  resolveControlPlaneDashboardAccess,
+} from "@/lib/control-plane-dashboard-access";
 
 export default async function ControlPlanePage() {
-  let authStatus;
-  let onboardingStatus;
+  const access = await resolveControlPlaneDashboardAccess();
 
-  try {
-    [authStatus, onboardingStatus] = await Promise.all([
-      getControlPlaneAuthStatus(),
-      getControlPlaneOnboardingStatus(),
-    ]);
-  } catch (error) {
-    if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <ControlPlaneUnavailable />;
-    }
-    return <ControlPlaneUnavailable />;
+  if (access.status === "setup_required") {
+    return redirect(buildControlPlaneSetupHref());
   }
 
-  if (!authStatus.authenticated || !onboardingStatus.steps.onboarding_complete) {
-    return <ControlPlaneSetup initialStatus={onboardingStatus} authStatus={authStatus} />;
+  if (access.status === "unavailable") {
+    return <ControlPlaneUnavailable />;
   }
 
   let payload:
@@ -51,7 +44,7 @@ export default async function ControlPlanePage() {
     payload = { bots, coreProviders, workspaces, generalSettings };
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <ControlPlaneUnavailable />;
+      return redirect(buildControlPlaneSetupHref());
     }
     return <ControlPlaneUnavailable />;
   }

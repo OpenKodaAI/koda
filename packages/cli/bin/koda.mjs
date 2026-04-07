@@ -280,12 +280,15 @@ async function collectDoctorPayload(installDir) {
   const env = await readInstallEnv(installDir);
   const controlPlanePort = env.CONTROL_PLANE_PORT || "8090";
   const webPort = env.WEB_PORT || "3000";
+  const dashboardUrl = `http://127.0.0.1:${webPort}`;
   const payload = {
     install_dir: installDir,
     control_plane_url: `http://127.0.0.1:${controlPlanePort}`,
     health_url: `http://127.0.0.1:${controlPlanePort}/health`,
-    dashboard_url: `http://127.0.0.1:${webPort}`,
-    setup_url: `http://127.0.0.1:${webPort}/control-plane`,
+    dashboard_url: dashboardUrl,
+    setup_url: `http://127.0.0.1:${controlPlanePort}/setup`,
+    dashboard_setup_url: `${dashboardUrl}/control-plane/setup`,
+    legacy_setup_url: `http://127.0.0.1:${controlPlanePort}/setup`,
   };
 
   const checks = {};
@@ -323,7 +326,8 @@ async function doctorCommand(args) {
   }
   console.log(`Install dir: ${payload.install_dir}`);
   console.log(`Dashboard:   ${payload.dashboard_url}`);
-  console.log(`Setup:       ${payload.setup_url}`);
+  console.log(`Setup:       ${payload.dashboard_setup_url}`);
+  console.log(`Bridge:      ${payload.legacy_setup_url}`);
   console.log(`Health:      ${payload.health_url}`);
   console.log("");
   for (const [name, result] of Object.entries(payload.checks)) {
@@ -356,7 +360,7 @@ async function issueBootstrapCode(installDir) {
     throw new Error(String(payload.error || "Could not issue a setup code."));
   }
   return {
-    url: `http://127.0.0.1:${webPort}/control-plane`,
+    url: `http://127.0.0.1:${webPort}/control-plane/setup`,
     code: payload.code,
     expires_at: payload.expires_at || null,
   };

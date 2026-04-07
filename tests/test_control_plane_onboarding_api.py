@@ -36,7 +36,7 @@ async def test_setup_page_renders_token_free_ui() -> None:
 
     assert response.content_type == "text/html"
     assert "Configuration moved into the dashboard" in response.text
-    assert "/control-plane" in response.text
+    assert "/control-plane/setup" in response.text
     assert "/openapi/control-plane.json" in response.text
     assert "setup code" in response.text.lower()
     assert "bootstrap-token" not in response.text
@@ -163,7 +163,8 @@ def test_doctor_script_reports_expected_checks() -> None:
         )
 
     assert payload["ok"] is True
-    assert payload["setup_url"].endswith("/control-plane")
+    assert payload["setup_url"].endswith("/setup")
+    assert payload["dashboard_setup_url"].endswith("/control-plane/setup")
     assert payload["legacy_setup_url"].endswith("/setup")
 
 

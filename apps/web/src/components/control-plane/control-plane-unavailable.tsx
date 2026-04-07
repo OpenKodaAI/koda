@@ -10,18 +10,18 @@ export function ControlPlaneUnavailable() {
           <KodaMark className="h-8 w-auto" />
           <div className="space-y-2">
             <h2 className="text-lg font-medium text-[var(--text-primary)]">
-              Control plane access is required
+              Control plane is temporarily unavailable
             </h2>
             <p className="text-sm text-[var(--text-quaternary)]">
-              Sign in through the main dashboard flow to open an operator session, finish setup, or
-              recover access with the break-glass token if migration compatibility is still enabled.
+              Koda could not reach the control-plane backend or its setup status. Check the
+              dashboard, health endpoint, and doctor output, then try the onboarding route again.
             </p>
           </div>
           <a
-            href="/control-plane"
+            href="/control-plane/setup"
             className="button-primary-bottom inline-flex rounded-[0.65rem] px-4 py-3 text-sm font-medium"
           >
-            Open control plane
+            Open dashboard setup
           </a>
         </div>
       </div>

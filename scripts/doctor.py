@@ -144,7 +144,8 @@ def run_doctor(
         "checks": checks,
         "base_url": base_url,
         "dashboard_url": dashboard_url,
-        "setup_url": f"{dashboard_url.rstrip('/')}/control-plane",
+        "setup_url": f"{base_url.rstrip('/')}/setup",
+        "dashboard_setup_url": f"{dashboard_url.rstrip('/')}/control-plane/setup",
         "legacy_setup_url": f"{base_url.rstrip('/')}/setup",
     }
 

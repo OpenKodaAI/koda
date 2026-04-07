@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
 import { SettingsSidebar } from "@/components/control-plane/system/settings-sidebar";
 import { UnsavedChangesGuard } from "@/components/control-plane/system/unsaved-changes-guard";
@@ -6,11 +7,26 @@ import { ToastNotification } from "@/components/ui/toast-notification";
 import { SystemSettingsProvider } from "@/hooks/use-system-settings";
 import { ToastProvider } from "@/hooks/use-toast";
 import {
+  ControlPlaneRequestError,
   getControlPlaneCoreIntegrations,
   getGeneralSystemSettings,
 } from "@/lib/control-plane";
+import {
+  buildControlPlaneSetupHref,
+  resolveControlPlaneDashboardAccess,
+} from "@/lib/control-plane-dashboard-access";
 
 export default async function SystemSettingsLayout({ children }: { children: React.ReactNode }) {
+  const access = await resolveControlPlaneDashboardAccess();
+
+  if (access.status === "setup_required") {
+    return redirect(buildControlPlaneSetupHref("/control-plane/system"));
+  }
+
+  if (access.status === "unavailable") {
+    return <ControlPlaneUnavailable />;
+  }
+
   let settings: Awaited<ReturnType<typeof getGeneralSystemSettings>> | null = null;
   let coreIntegrations: Awaited<ReturnType<typeof getControlPlaneCoreIntegrations>> | null = null;
 
@@ -19,7 +35,10 @@ export default async function SystemSettingsLayout({ children }: { children: Rea
       getGeneralSystemSettings(),
       getControlPlaneCoreIntegrations(),
     ]);
-  } catch {
+  } catch (error) {
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      return redirect(buildControlPlaneSetupHref("/control-plane/system"));
+    }
     return <ControlPlaneUnavailable />;
   }
 

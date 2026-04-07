@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -64,6 +68,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert (ROOT / "docs" / "architecture" / "overview.md").exists()
     assert (ROOT / "docs" / "architecture" / "runtime.md").exists()
     assert (ROOT / "docs" / "reference" / "api.md").exists()
+    assert (ROOT / "docs" / "reference" / "releases.md").exists()
     assert (ROOT / "CONTRIBUTING.md").exists()
     assert (ROOT / "SECURITY.md").exists()
     assert (ROOT / "CODE_OF_CONDUCT.md").exists()
@@ -75,6 +80,9 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert (ROOT / "packages" / "cli" / "bin" / "koda.mjs").exists()
     assert (ROOT / "packages" / "cli" / "release" / "manifest.json").exists()
     assert (ROOT / "scripts" / "build_release_bundle.py").exists()
+    assert (ROOT / "scripts" / "build_release_artifacts.py").exists()
+    assert (ROOT / "scripts" / "release_metadata.py").exists()
+    assert (ROOT / "scripts" / "release_smoke_test.py").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.svg").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.png").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-hero.png").exists()
@@ -89,18 +97,22 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "control-plane-first" in readme_text
     assert "apps/web" in readme_text
     assert "127.0.0.1:3000" in readme_text
+    assert "/control-plane/setup" in readme_text
     assert "/control-plane" in readme_text
     assert "?token=" not in readme_text
-    assert "npm install -g koda" in readme_text
+    assert "npm install -g @openkodaai/koda" in readme_text
+    assert "npx @openkodaai/koda@latest install" in readme_text
     assert "seaweedfs" in readme_text.lower()
     assert "Use Koda" in docs_index_text
     assert "apps/web/" in docs_index_text
-    assert "/control-plane" in local_text
+    assert "/control-plane/setup" in local_text
     assert "koda install" in local_text
+    assert "@openkodaai/koda" in local_text
     assert "?token=" not in local_text
     assert "Product configuration stays inside the control-plane UI and API." in vps_text
     assert "The quickstart path does not require per-agent env configuration" in local_text
     assert "koda update" in vps_text
+    assert "@openkodaai/koda@latest update" in vps_text
 
 
 def test_openapi_document_contains_onboarding_paths() -> None:
@@ -116,9 +128,6 @@ def test_openapi_document_contains_onboarding_paths() -> None:
 
 
 def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> None:
-    import subprocess
-    import sys
-
     bundle_dir = tmp_path / "release"
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "build_release_bundle.py"), "--output-dir", str(bundle_dir)],
@@ -142,11 +151,67 @@ def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> Non
     assert not any("node_modules" in path for path in built_files)
 
 
+def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path) -> None:
+    output_dir = tmp_path / "release-artifacts"
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build_release_artifacts.py"), "--output-dir", str(output_dir)],
+        check=True,
+        cwd=ROOT,
+    )
+
+    payload = json.loads((output_dir / "release-artifacts.json").read_text(encoding="utf-8"))
+
+    assert (output_dir / payload["bundle_archive"]).exists()
+    assert (output_dir / payload["npm_tarball"]).exists()
+    assert (output_dir / payload["asset_checksums"]).exists()
+    assert (output_dir / payload["manifest"]).exists()
+    assert (output_dir / payload["sbom"]).exists()
+
+
+def test_release_metadata_is_publication_ready() -> None:
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "release_metadata.py")], check=True, cwd=ROOT)
+
+    package_payload = json.loads((ROOT / "packages" / "cli" / "package.json").read_text(encoding="utf-8"))
+    manifest_payload = json.loads((ROOT / "packages" / "cli" / "release" / "manifest.json").read_text(encoding="utf-8"))
+    openapi_payload = json.loads((ROOT / "docs" / "openapi" / "control-plane.json").read_text(encoding="utf-8"))
+
+    assert package_payload["name"] == "@openkodaai/koda"
+    assert package_payload["publishConfig"]["access"] == "public"
+    assert package_payload["publishConfig"]["provenance"] is True
+    assert manifest_payload["distribution"]["npm_package"] == "@openkodaai/koda"
+    assert manifest_payload["distribution"]["npm_bin"] == "koda"
+    assert manifest_payload["distribution"]["github_release_tag"] == f"v{package_payload['version']}"
+    assert openapi_payload["info"]["version"] == package_payload["version"]
+
+
 def test_systemd_example_operates_docker_compose() -> None:
     unit_text = (ROOT / "koda.service.example").read_text(encoding="utf-8")
 
     assert "docker compose up -d" in unit_text
     assert "docker compose down" in unit_text
+
+
+def test_release_workflow_enforces_validation_and_protected_publish_path() -> None:
+    workflow_path = ROOT / ".github" / "workflows" / "release.yml"
+    assert workflow_path.exists()
+
+    payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    jobs = payload["jobs"]
+
+    assert "codeql" in jobs
+    assert "publish-ghcr" in jobs
+    assert "publish-npm" in jobs
+    assert "github-release" in jobs
+    assert jobs["publish-ghcr"]["environment"] == "release"
+    assert jobs["publish-npm"]["environment"] == "release"
+    assert jobs["github-release"]["environment"] == "release"
+    assert jobs["publish-npm"]["permissions"]["id-token"] == "write"
+
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    assert "NPM_TOKEN" in workflow_text
+    assert "trusted publishing" in workflow_text
+    assert "npm publish" in workflow_text
+    assert "docker/build-push-action" in workflow_text
 
 
 def test_doctor_checks_dashboard_and_control_plane() -> None:
@@ -155,7 +220,9 @@ def test_doctor_checks_dashboard_and_control_plane() -> None:
     assert "web_dashboard" in doctor_text
     assert "WEB_PORT" in doctor_text
     assert "dashboard_url" in doctor_text
+    assert "dashboard_setup_url" in doctor_text
     assert "legacy_setup_url" in doctor_text
+    assert "/setup" in doctor_text
     assert "/setup?token=" not in doctor_text
     assert "CONTROL_PLANE_MASTER_KEY" not in doctor_text
 

@@ -551,8 +551,8 @@ export function ControlPlaneSetup({
       <PageSection className="space-y-5 p-5 sm:p-6">
         <PageSectionHeader
           eyebrow="Quickstart"
-          title="One surface for install, auth, and onboarding"
-          description="The dashboard now owns the full first-run flow: short-lived setup code, local owner account, HTTP-only session, and then platform bootstrap."
+          title="Secure first-run checklist"
+          description="Move through setup code exchange, owner auth, and platform bootstrap here. Koda unlocks the full control plane after this sequence is ready."
           actions={
             hasOperatorSession ? (
               <button
@@ -1062,11 +1062,10 @@ export function ControlPlaneSetup({
           <aside className="space-y-4 rounded-[28px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] p-5">
             <div className="space-y-2">
               <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
-                Current readiness
+                Readiness checkpoint
               </h2>
               <p className="text-sm text-[var(--text-secondary)]">
-                This panel reflects the secure-first rollout: owner account, operator session, and
-                only then control-plane configuration.
+                This updates as the onboarding flow advances through owner auth and platform bootstrap.
               </p>
             </div>
 

@@ -1,5 +1,5 @@
 {
-  "name": "koda",
+  "name": "@openkodaai/koda",
   "version": "1.0.0",
   "description": "Official Koda Docker-first installer and lifecycle CLI",
   "license": "Apache-2.0",
@@ -13,5 +13,24 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "keywords": [
+    "koda",
+    "ai",
+    "agents",
+    "control-plane",
+    "docker"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenKodaAI/koda.git"
+  },
+  "homepage": "https://github.com/OpenKodaAI/koda#readme",
+  "bugs": {
+    "url": "https://github.com/OpenKodaAI/koda/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

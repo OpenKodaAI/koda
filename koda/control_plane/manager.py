@@ -5269,6 +5269,7 @@ class ControlPlaneManager:
             },
             "openapi_url": "/openapi/control-plane.json",
             "setup_url": "/setup",
+            "dashboard_setup_url": "/control-plane/setup",
         }
 
     def complete_onboarding(self, payload: dict[str, Any]) -> dict[str, Any]:

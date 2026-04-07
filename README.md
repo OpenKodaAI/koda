@@ -55,8 +55,14 @@ The public quickstart brings up the platform stack first. Product configuration 
 3. Open the dashboard and finish bootstrap in the control plane.
 
 ```bash
-npm install -g koda
+npm install -g @openkodaai/koda
 koda install
+```
+
+Or run the installer without a global install:
+
+```bash
+npx @openkodaai/koda@latest install
 ```
 
 Repository contributors can still use the source wrapper:
@@ -69,11 +75,21 @@ cd /opt/koda
 
 When the installer completes, start in the dashboard:
 
-- Dashboard setup: `http://127.0.0.1:3000/control-plane`
-- Dashboard home: `http://127.0.0.1:3000`
+- Dashboard setup: `http://127.0.0.1:3000/control-plane/setup`
+- Control-plane home: `http://127.0.0.1:3000/control-plane`
+- Dashboard overview: `http://127.0.0.1:3000`
 
 From there you can unlock the operator session, validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
 From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
+
+The scoped npm package ships the same product-only release bundle that is attached to GitHub Releases:
+
+- the CLI binary itself
+- the pinned release manifest
+- the compose/bootstrap bundle
+- release checksums and SBOM metadata
+
+That means `npm install -g @openkodaai/koda` installs the product channel, not the source tree.
 
 ## What The Stack Starts
 
@@ -132,11 +148,13 @@ For a public architecture walkthrough, start with [Documentation Index](docs/REA
 - [VPS install](docs/install/vps.md)
 - [Object storage migration](docs/install/object-storage-migration.md)
 - [Configuration reference](docs/config/reference.md)
+- [Release distribution](docs/reference/releases.md)
 
 ## Public Interfaces
 
 - `/` for the main operations dashboard served by `apps/web`
-- `/control-plane` in `apps/web` as the canonical first-boot configuration surface
+- `/control-plane/setup` in `apps/web` as the canonical first-boot configuration surface
+- `/control-plane` in `apps/web` as the control-plane home and agent catalog after auth/setup
 - `/setup` as a compatibility bridge into the dashboard setup flow
 - `/api/control-plane/agents/*` for canonical agent-management operations
 - `/api/control-plane/dashboard/agents/*` for canonical operational dashboard data
@@ -234,3 +252,13 @@ Koda validates pull requests with a tiered GitHub Actions pipeline:
 - `security` runs dependency audits, Bandit, Gitleaks, CodeQL, and container scanning on pull requests, on `main`, and on a weekly schedule
 
 Coverage thresholds are sourced from [pyproject.toml](pyproject.toml), not duplicated in workflow files. GitHub uploads `pytest`/coverage artifacts, `vitest` results, and SARIF findings so failures can be reviewed directly in artifacts or in the Security tab.
+
+## Release Distribution
+
+Official product releases are published through three aligned channels:
+
+- npm as `@openkodaai/koda` for `npm install -g` and `npx`
+- GHCR images pinned by version in the release manifest
+- GitHub Releases with the bundle archive, manifest, checksums, SBOM, and npm tarball
+
+The release workflow runs quality, test, security, Docker, and packaged-install smoke validation before publish. For the release contract and artifact flow, see [Release distribution](docs/reference/releases.md).

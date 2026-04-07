@@ -10,8 +10,14 @@
 ## Quickstart
 
 ```bash
-npm install -g koda
+npm install -g @openkodaai/koda
 koda install
+```
+
+Or without a global install:
+
+```bash
+npx @openkodaai/koda@latest install
 ```
 
 If you are working from the repository itself, the source wrapper installs the same npm CLI and
@@ -31,6 +37,9 @@ The installer will:
 4. start the quickstart stack with the release compose file
 5. run the doctor checks
 6. print the dashboard setup URL plus a short-lived setup code
+
+The scoped npm package already contains the product-only release bundle, so this path does not clone the
+source repository or depend on a second download step.
 
 ## What Starts
 
@@ -59,7 +68,7 @@ Persistent volumes are managed by Docker Compose and are intended to survive con
 
 When the installer finishes, open the dashboard setup URL it prints:
 
-- `http://127.0.0.1:3000/control-plane`
+- `http://127.0.0.1:3000/control-plane/setup`
 - `http://127.0.0.1:3000`
 
 At that point the infrastructure is already ready for use:
@@ -119,7 +128,7 @@ python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --das
 ## Troubleshooting
 
 - If the dashboard is not reachable, verify that `docker compose ps` shows `web` healthy.
-- If `http://127.0.0.1:3000/control-plane` is not reachable, verify that `docker compose ps` shows `web` healthy.
+- If `http://127.0.0.1:3000/control-plane/setup` is not reachable, verify that `docker compose ps` shows `web` healthy.
 - If `http://127.0.0.1:8090/health` is not reachable, verify that `docker compose ps` shows `app` healthy.
 - If object storage checks fail, verify that `seaweedfs` and `seaweedfs-init` both completed successfully.
 - If bootstrap still fails, rerun the doctor command and inspect the reported failing check name.

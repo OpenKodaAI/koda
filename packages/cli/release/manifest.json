@@ -3,6 +3,12 @@
   "product": "koda",
   "version": "1.0.0",
   "published_at": "2026-04-05T00:00:00Z",
+  "distribution": {
+    "npm_package": "@openkodaai/koda",
+    "npm_bin": "koda",
+    "github_release_tag": "v1.0.0",
+    "release_bundle_archive": "koda-1.0.0.tar.gz"
+  },
   "bundle": {
     "compose_file": "bundle/docker-compose.release.yml",
     "env_template": "bundle/.env.bootstrap",

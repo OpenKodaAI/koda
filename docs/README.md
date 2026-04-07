@@ -10,6 +10,7 @@ Use this index when you want to install, operate, evaluate, or contribute to Kod
 
 - [Local install](install/local.md)
 - [VPS install](install/vps.md)
+- [Release distribution](reference/releases.md)
 - [Configuration reference](config/reference.md)
 - [API reference](reference/api.md)
 - the dashboard UI in `apps/web` is the main operator surface served on port `3000`

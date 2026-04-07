@@ -65,6 +65,7 @@ function makeStatus(): ControlPlaneOnboardingStatus {
     },
     openapi_url: "/openapi/control-plane.json",
     setup_url: "/setup",
+    dashboard_setup_url: "/control-plane/setup",
   };
 }
 
