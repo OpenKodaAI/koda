@@ -799,33 +799,37 @@ class TestMultiEnv:
 
 
 class TestReadSSHKeyValidation:
+    @staticmethod
+    def _private_key_fixture(label: str, body: str) -> str:
+        return f"-----BEGIN {label}-----\n{body}\n-----END {label}-----\n"
+
     def test_valid_rsa_key(self, tmp_path):
         key_file = tmp_path / "id_rsa"
-        key_file.write_text("-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ...\n-----END RSA PRIVATE KEY-----\n")
+        key_file.write_text(self._private_key_fixture("RSA PRIVATE KEY", "MIIBogIBAAJ..."))
         result = DBManager._read_ssh_key(str(key_file))
         assert "BEGIN RSA PRIVATE KEY" in result
 
     def test_valid_ec_key(self, tmp_path):
         key_file = tmp_path / "id_ec"
-        key_file.write_text("-----BEGIN EC PRIVATE KEY-----\nMHQCAQEE...\n-----END EC PRIVATE KEY-----\n")
+        key_file.write_text(self._private_key_fixture("EC PRIVATE KEY", "MHQCAQEE..."))
         result = DBManager._read_ssh_key(str(key_file))
         assert "BEGIN EC PRIVATE KEY" in result
 
     def test_valid_openssh_key(self, tmp_path):
         key_file = tmp_path / "id_ed25519"
-        key_file.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNza...\n-----END OPENSSH PRIVATE KEY-----\n")
+        key_file.write_text(self._private_key_fixture("OPENSSH PRIVATE KEY", "b3BlbnNza..."))
         result = DBManager._read_ssh_key(str(key_file))
         assert "BEGIN OPENSSH PRIVATE KEY" in result
 
     def test_valid_encrypted_key(self, tmp_path):
         key_file = tmp_path / "id_enc"
-        key_file.write_text("-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFH...\n-----END ENCRYPTED PRIVATE KEY-----\n")
+        key_file.write_text(self._private_key_fixture("ENCRYPTED PRIVATE KEY", "MIIFH..."))
         result = DBManager._read_ssh_key(str(key_file))
         assert "BEGIN ENCRYPTED PRIVATE KEY" in result
 
     def test_valid_generic_private_key(self, tmp_path):
         key_file = tmp_path / "id_generic"
-        key_file.write_text("-----BEGIN PRIVATE KEY-----\nMIIEvgI...\n-----END PRIVATE KEY-----\n")
+        key_file.write_text(self._private_key_fixture("PRIVATE KEY", "MIIEvgI..."))
         result = DBManager._read_ssh_key(str(key_file))
         assert "BEGIN PRIVATE KEY" in result
 

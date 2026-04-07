@@ -112,6 +112,7 @@ jobs:
         run: |
           mkdir -p artifacts/security
           gitleaks git . \
+            --config .gitleaks.toml \
             --report-format sarif \
             --report-path artifacts/security/gitleaks.sarif \
             --redact \
