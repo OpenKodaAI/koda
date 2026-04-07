@@ -844,6 +844,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing support
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
       - name: Check whether npm package version already exists
         id: npm_status
         shell: bash

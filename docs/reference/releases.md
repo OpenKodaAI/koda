@@ -144,10 +144,15 @@ The publish workflow expects:
 - GitHub `id-token: write` for npm provenance
 - npm authentication configured for the `@openkodaai` scope
 
-The preferred npm path is trusted publishing tied to the automatic caller workflow. In this repository,
-`cut-release-tag.yml` is the workflow that dispatches `release.yml`, so npm trusted publishing should be configured
-against `OpenKodaAI/koda` and `cut-release-tag.yml`. The `release.yml` publish job still needs `id-token: write`
-because it is the workflow that actually runs `npm publish`.
+The preferred npm path is trusted publishing tied to the workflow that actually executes `npm publish`. In this
+repository, that workflow is [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml), even when
+the automatic path starts from [`../../.github/workflows/cut-release-tag.yml`](../../.github/workflows/cut-release-tag.yml).
+Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`, and include the `release` environment
+name in npm if you want the OIDC trust relationship to match the protected publish jobs exactly. The `release.yml`
+publish job needs `id-token: write` because it is the workflow that actually runs `npm publish`.
+
+The publish job upgrades npm before the trusted-publishing attempt so it meets the current npm CLI requirement for
+OIDC-based publishing.
 
 If that path is not yet configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls
 back to that token only after the trusted-publishing attempt fails.
@@ -156,10 +161,11 @@ Recommended GitHub setup:
 
 - create a `release` environment in the repository settings before the first public publish
 - protect a `release` environment and require manual approval if your team wants a final human gate
-- configure npm trusted publishing for `OpenKodaAI/koda` and [cut-release-tag.yml](../../.github/workflows/cut-release-tag.yml)
+- configure npm trusted publishing for `OpenKodaAI/koda`, [release.yml](../../.github/workflows/release.yml), and the
+  optional `release` environment if you want npm to bind trust to the protected deploy stage
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
 - use [release.yml](../../.github/workflows/release.yml) directly for dry runs or operator-controlled publish recovery, but
-  expect trusted publishing to come from `cut-release-tag.yml` on the automatic path
+  expect trusted publishing to come from `release.yml` on both the automatic and manual recovery paths
 
 If a fork or dry-run cannot publish, the workflow should still complete all validation and artifact build steps
 without pushing npm or GHCR assets.
