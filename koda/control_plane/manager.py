@@ -10043,6 +10043,7 @@ class ControlPlaneManager:
                 vendor_notes = excluded.vendor_notes,
                 default_policy = excluded.default_policy,
                 updated_at = excluded.updated_at
+            RETURNING server_key
             """,
             (
                 normalized_server_key,

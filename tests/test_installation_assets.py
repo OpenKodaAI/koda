@@ -47,6 +47,7 @@ def test_docker_compose_quickstart_stack_includes_core_services() -> None:
         "CONTROL_PLANE_API_TOKEN: ${CONTROL_PLANE_API_TOKEN}" not in compose_text.split("web:")[1].split("security:")[0]
     )
     assert "env_file: .env" not in compose_text.split("web:")[1].split("postgres:")[0]
+    assert "/api/health" in compose_text
     assert "postgres_password:" not in compose_text
     assert "s3_access_key:" not in compose_text
     assert "s3_secret_key:" not in compose_text
@@ -241,6 +242,12 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     for workflow_text in (pr_quality_workflow_text, security_workflow_text, release_workflow_text):
         assert "pnpm/action-setup@v5.0.0" in workflow_text
         assert "pnpm/action-setup@v4.2.0" not in workflow_text
+
+    for workflow_text in (pr_quality_workflow_text, release_workflow_text):
+        assert 'wait_for_url "web health" "http://127.0.0.1:3000/api/health"' in workflow_text
+        assert 'wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"' in workflow_text
+        assert 'wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"' in workflow_text
+        assert "curl -fsS http://127.0.0.1:3000/api/health >/dev/null" in workflow_text
 
 
 def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
