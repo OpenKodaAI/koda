@@ -204,9 +204,12 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
 
     assert "codeql" in jobs
     assert "workflow-quality" in jobs
+    assert "ensure-release-tag" in jobs
+    assert "tag-publish-handoff" in jobs
     assert "publish-ghcr" in jobs
     assert "publish-npm" in jobs
     assert "github-release" in jobs
+    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "write"
     assert jobs["publish-ghcr"]["environment"] == "release"
     assert jobs["publish-npm"]["environment"] == "release"
     assert jobs["github-release"]["environment"] == "release"
@@ -216,10 +219,45 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "NPM_TOKEN" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
+    assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
+    assert "tag-triggered release workflow will publish the release artifacts" in workflow_text
+    assert "github.event_name == 'push' || needs.prepare.outputs.create_tag != 'true'" in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
     assert "pnpm/action-setup@v5.0.0" in workflow_text
     assert "pnpm/action-setup@v4.2.0" not in workflow_text
+
+
+def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
+    workflow_path = ROOT / ".github" / "workflows" / "cut-release-tag.yml"
+    assert workflow_path.exists()
+
+    payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    trigger = payload.get("on", payload.get(True))
+
+    assert trigger["push"]["branches"] == ["main"]
+    assert "workflow_dispatch" in trigger
+    assert payload["permissions"]["actions"] == "read"
+    assert payload["permissions"]["contents"] == "write"
+
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    assert '["pr-quality", "security"]' in workflow_text
+    assert "actions/github-script@v8" in workflow_text
+    assert "git tag -a" in workflow_text
+    assert 'git push origin "refs/tags/${TAG}"' in workflow_text
+
+
+def test_release_docs_explain_main_release_automation() -> None:
+    release_docs_text = (ROOT / "docs" / "reference" / "releases.md").read_text(encoding="utf-8")
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Automatic Release Tag Cut" in release_docs_text
+    assert "cut-release-tag" in release_docs_text
+    assert "pr-quality" in release_docs_text
+    assert "security" in release_docs_text
+    assert "v<version>" in release_docs_text
+    assert "tag-triggered `release` run" in release_docs_text
+    assert "Public releases are cut from `main` by version." in readme_text
 
 
 def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:

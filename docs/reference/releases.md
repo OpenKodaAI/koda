@@ -63,6 +63,49 @@ Only after those gates pass does the workflow:
 Stable releases publish the `latest` tag on npm and the `latest` tag on GHCR. Prereleases publish with the npm
 dist-tag `next` and do not overwrite `latest` on the container registry.
 
+## Automatic Release Tag Cut
+
+Merges to `main` do not publish directly. Instead, [`../../.github/workflows/cut-release-tag.yml`](../../.github/workflows/cut-release-tag.yml)
+waits for `pr-quality` and `security` to finish successfully on the exact `main` commit.
+
+After those workflows pass, the automation:
+
+- reads the canonical version from `pyproject.toml` and verifies the synced release metadata files
+- checks whether the matching semantic tag `v<version>` already exists
+- pushes that tag only when it does not already exist
+
+That tag push is what triggers [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in publish
+mode.
+
+This keeps release publication idempotent:
+
+- if `v<version>` already exists on the current commit, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on an older commit, the workflow exits without retagging or publishing a duplicate package
+- to ship a new public release, bump the repository version first, then merge to `main`
+
+For backfills, recovery, or operator-controlled releases, you can still:
+
+- run `cut-release-tag` with `workflow_dispatch`
+- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) with `mode=publish` from the ref you want to release
+- push a matching `v<version>` tag manually
+- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `dry-run` mode before publishing
+
+When `release.yml` runs in `publish` mode from `main` or another non-tag ref, it does not try to publish from that
+branch run after creating the tag. Instead, it validates the ref, creates `v<version>` when needed, and hands the
+publish step off to the tag-triggered `release` run so npm, GHCR, and GitHub Releases are produced exactly once.
+
+Example manual publish from `main` with GitHub CLI:
+
+```bash
+gh workflow run release.yml --ref main -f mode=publish -f release_ref=main
+```
+
+Validation-only dry run from `main`:
+
+```bash
+gh workflow run release.yml --ref main -f mode=dry-run -f release_ref=main
+```
+
 ## Artifact Build Commands
 
 Build the releasable assets locally:
@@ -106,6 +149,7 @@ after the trusted-publishing attempt fails.
 
 Recommended GitHub setup:
 
+- create a `release` environment in the repository settings before the first public publish
 - protect a `release` environment and require manual approval if your team wants a final human gate
 - configure npm trusted publishing for `OpenKodaAI/koda` and [release.yml](../../.github/workflows/release.yml)
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
