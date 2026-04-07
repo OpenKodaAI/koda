@@ -214,6 +214,37 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "docker/build-push-action" in workflow_text
 
 
+def test_security_and_release_workflows_scan_all_runtime_images() -> None:
+    release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    trivy_targets = (
+        "koda.sarif --exit-code 1 koda:",
+        "koda-web.sarif --exit-code 1 koda-web:",
+        "koda-memory.sarif --exit-code 1 koda-memory:",
+        "koda-security.sarif --exit-code 1 koda-security:",
+    )
+
+    for workflow_text in (release_workflow_text, security_workflow_text):
+        assert "docker build -t koda:" in workflow_text
+        assert "docker build -f apps/web/Dockerfile -t koda-web:" in workflow_text
+        assert "docker build -f Dockerfile.memory -t koda-memory:" in workflow_text
+        assert "docker build -f Dockerfile.security -t koda-security:" in workflow_text
+        for trivy_target in trivy_targets:
+            assert trivy_target in workflow_text
+
+
+def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
+    app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in app_dockerfile
+    assert "@googleworkspace/cli" in app_dockerfile
+    assert "/usr/local/bin/gws" in app_dockerfile
+    assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in web_dockerfile
+    assert 'CMD ["node", "server.mjs"]' in web_dockerfile
+    assert 'CMD ["pnpm", "start"]' not in web_dockerfile
+
+
 def test_doctor_checks_dashboard_and_control_plane() -> None:
     doctor_text = (ROOT / "scripts" / "doctor.py").read_text(encoding="utf-8")
 

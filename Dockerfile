@@ -5,7 +5,8 @@ FROM node:22-slim AS node-base
 RUN npm install -g \
     @anthropic-ai/claude-code \
     @openai/codex \
-    @google/gemini-cli
+    @google/gemini-cli \
+    @googleworkspace/cli
 
 FROM python:3.12-slim
 
@@ -19,13 +20,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip==26.0
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node-base /usr/local/bin/claude /usr/local/bin/claude
-RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     && ln -sf /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
-    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini
-
-# Install Google Workspace CLI
-RUN npm install -g @googleworkspace/cli
+    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini \
+    && ln -sf /usr/local/lib/node_modules/@googleworkspace/cli/run.js /usr/local/bin/gws
 
 # Install system dependencies and CLI tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
