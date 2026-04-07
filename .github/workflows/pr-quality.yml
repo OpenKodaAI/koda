@@ -134,7 +134,13 @@ jobs:
       - name: Check repo-map drift
         run: uv run python3 scripts/generate_repo_map.py --check
       - name: Validate AI docs and open source hygiene
-        run: uv run pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
+        run: |
+          uv run pytest -q \
+            tests/test_ai_docs.py \
+            tests/test_repo_map.py \
+            tests/test_open_source_hygiene.py \
+            tests/test_public_docs.py \
+            tests/test_installation_assets.py
         env:
           KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
 

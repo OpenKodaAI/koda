@@ -20,6 +20,24 @@ env:
   UV_VERSION: "0.10.7"
 
 jobs:
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Review dependency diff risk
+        uses: actions/dependency-review-action@v4.9.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime,development
+          vulnerability-check: true
+          show-patched-versions: true
+
   dependency-audit:
     name: dependency-audit
     runs-on: ubuntu-latest
