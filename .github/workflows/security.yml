@@ -87,7 +87,7 @@ jobs:
           python3 scripts/convert_bandit_json_to_sarif.py artifacts/security/bandit.json artifacts/security/bandit.sarif
           exit "${bandit_status}"
       - name: Upload Bandit SARIF
-        if: always() && hashFiles('artifacts/security/bandit.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/bandit.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/bandit.sarif
@@ -117,7 +117,7 @@ jobs:
             --redact \
             --exit-code 1
       - name: Upload Gitleaks SARIF
-        if: always() && hashFiles('artifacts/security/gitleaks.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/gitleaks.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/gitleaks.sarif
@@ -153,6 +153,7 @@ jobs:
         uses: github/codeql-action/analyze@v4.35.1
         with:
           category: /language:${{ matrix.language }}
+          upload: ${{ github.event_name == 'pull_request' && 'never' || 'always' }}
 
   container-scan:
     name: container-scan
@@ -192,25 +193,25 @@ jobs:
           trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:ci
           trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
       - name: Upload Trivy SARIF for koda
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda.sarif
           category: trivy-koda
       - name: Upload Trivy SARIF for koda-web
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-web.sarif
           category: trivy-koda-web
       - name: Upload Trivy SARIF for koda-memory
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-memory.sarif
           category: trivy-koda-memory
       - name: Upload Trivy SARIF for koda-security
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
