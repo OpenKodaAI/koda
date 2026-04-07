@@ -974,13 +974,14 @@ fn spawn_interactive_terminal_process(
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
+    let winsize_ptr = std::ptr::from_mut(&mut winsize);
     let openpty_result = unsafe {
         libc::openpty(
             &mut master_fd,
             &mut slave_fd,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut winsize,
+            winsize_ptr,
         )
     };
     if openpty_result != 0 {
@@ -1002,7 +1003,8 @@ fn spawn_interactive_terminal_process(
     if pid == 0 {
         unsafe {
             let _ = libc::setsid();
-            let _ = libc::ioctl(slave_fd, libc::TIOCSCTTY.into(), 0);
+            let tiocsctty_request = libc::TIOCSCTTY as libc::c_ulong;
+            let _ = libc::ioctl(slave_fd, tiocsctty_request, 0);
             libc::dup2(slave_fd, libc::STDIN_FILENO);
             libc::dup2(slave_fd, libc::STDOUT_FILENO);
             libc::dup2(slave_fd, libc::STDERR_FILENO);

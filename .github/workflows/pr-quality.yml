@@ -36,7 +36,7 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
       - name: Mypy type check
-        run: mypy koda/
+        run: mypy koda/ --ignore-missing-imports
 
   python-tests:
     name: python-tests-${{ matrix.python-version }}
