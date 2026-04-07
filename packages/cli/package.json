@@ -1,6 +1,6 @@
 {
   "name": "@openkodaai/koda",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Official Koda Docker-first installer and lifecycle CLI",
   "license": "Apache-2.0",
   "type": "module",

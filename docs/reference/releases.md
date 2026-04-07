@@ -73,9 +73,10 @@ After those workflows pass, the automation:
 - reads the canonical version from `pyproject.toml` and verifies the synced release metadata files
 - checks whether the matching semantic tag `v<version>` already exists
 - pushes that tag only when it does not already exist
+- dispatches [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `publish` mode for that tag
 
-That tag push is what triggers [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in publish
-mode.
+The extra dispatch step is intentional. GitHub does not start a new `push` workflow when a workflow pushes a tag with
+the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publish run after creating the tag.
 
 This keeps release publication idempotent:
 
@@ -90,9 +91,8 @@ For backfills, recovery, or operator-controlled releases, you can still:
 - push a matching `v<version>` tag manually
 - run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `dry-run` mode before publishing
 
-When `release.yml` runs in `publish` mode from `main` or another non-tag ref, it does not try to publish from that
-branch run after creating the tag. Instead, it validates the ref, creates `v<version>` when needed, and hands the
-publish step off to the tag-triggered `release` run so npm, GHCR, and GitHub Releases are produced exactly once.
+When `release.yml` runs in `publish` mode from `main` or another non-tag ref, it validates the ref, creates
+`v<version>` when needed, and then publishes from that same run after all gates pass.
 
 Example manual publish from `main` with GitHub CLI:
 
