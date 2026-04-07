@@ -27,18 +27,18 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
-      - name: Review dependency diff risk
-        uses: actions/dependency-review-action@v4.9.0
+      - uses: actions/setup-python@v6.2.0
         with:
-          fail-on-severity: high
-          fail-on-scopes: runtime,development
-          vulnerability-check: true
-          show-patched-versions: true
+          python-version: "3.12"
+      - name: Review dependency manifest changes
+        run: |
+          python3 scripts/review_dependency_changes.py \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --head-ref "${{ github.event.pull_request.head.sha }}"
 
   dependency-audit:
     name: dependency-audit

@@ -243,10 +243,9 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "pnpm/action-setup@v5.0.0" in workflow_text
         assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
-    assert "actions/dependency-review-action@v4.9.0" in security_workflow_text
-    assert "fail-on-severity: high" in security_workflow_text
-    assert "fail-on-scopes: runtime,development" in security_workflow_text
-    assert "show-patched-versions: true" in security_workflow_text
+    assert "python3 scripts/review_dependency_changes.py" in security_workflow_text
+    assert "github.event.pull_request.base.sha" in security_workflow_text
+    assert "github.event.pull_request.head.sha" in security_workflow_text
     assert "fetch-depth: 0" in security_workflow_text
 
     for workflow_text in (pr_quality_workflow_text, release_workflow_text):
