@@ -347,8 +347,26 @@ jobs:
         run: uv sync --locked
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
+      - name: Export pinned Python requirements for audit
+        run: |
+          uv export \
+            --format requirements.txt \
+            --locked \
+            --all-groups \
+            --all-extras \
+            --no-editable \
+            --no-emit-project \
+            --no-emit-workspace \
+            --no-header \
+            --no-annotate \
+            --output-file "${RUNNER_TEMP}/python-audit-requirements.txt"
       - name: Python dependency audit
-        run: uv run pip-audit --strict
+        run: |
+          uv run pip-audit \
+            --strict \
+            --requirement "${RUNNER_TEMP}/python-audit-requirements.txt" \
+            --require-hashes \
+            --disable-pip
       - name: Node dependency audit
         run: pnpm audit --audit-level=high
       - name: Install cargo-audit

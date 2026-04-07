@@ -218,6 +218,14 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "NPM_TOKEN" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
+    assert "uv export" in workflow_text
+    assert "--all-extras" in workflow_text
+    assert "--no-editable" in workflow_text
+    assert "--no-emit-project" in workflow_text
+    assert "--no-emit-workspace" in workflow_text
+    assert "python-audit-requirements.txt" in workflow_text
+    assert "--require-hashes" in workflow_text
+    assert "--disable-pip" in workflow_text
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
@@ -277,6 +285,22 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
     pr_quality_workflow_text = (ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8")
+
+    assert "python-audit-requirements.txt" in release_workflow_text
+    assert "python-audit-requirements.txt" in security_workflow_text
+    assert "--all-extras" in release_workflow_text
+    assert "--all-extras" in security_workflow_text
+    assert "--no-editable" in release_workflow_text
+    assert "--no-editable" in security_workflow_text
+    assert "--no-emit-project" in release_workflow_text
+    assert "--no-emit-workspace" in release_workflow_text
+    assert "--no-emit-project" in security_workflow_text
+    assert "--no-emit-workspace" in security_workflow_text
+    assert "--require-hashes" in release_workflow_text
+    assert "--require-hashes" in security_workflow_text
+    assert "--disable-pip" in release_workflow_text
+    assert "--disable-pip" in security_workflow_text
+
     trivy_targets = (
         "koda.sarif --exit-code 1 koda:",
         "koda-web.sarif --exit-code 1 koda-web:",
