@@ -50,10 +50,6 @@ services:
       - koda-runtime:/var/lib/koda/runtime
       - koda-artifacts:/var/lib/koda/artifacts
       - tmp-images:/app/tmp_images
-    secrets:
-      - postgres_password
-      - s3_access_key
-      - s3_secret_key
     healthcheck:
       test:
         [
@@ -157,8 +153,6 @@ services:
       POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB in .env}"
       POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-    secrets:
-      - postgres_password
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -247,11 +241,3 @@ volumes:
   postgres-data:
   seaweedfs-data:
   tmp-images:
-
-secrets:
-  postgres_password:
-    environment: POSTGRES_PASSWORD
-  s3_access_key:
-    environment: S3_ACCESS_KEY_ID
-  s3_secret_key:
-    environment: S3_SECRET_ACCESS_KEY

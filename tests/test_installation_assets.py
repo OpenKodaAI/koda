@@ -47,6 +47,9 @@ def test_docker_compose_quickstart_stack_includes_core_services() -> None:
         "CONTROL_PLANE_API_TOKEN: ${CONTROL_PLANE_API_TOKEN}" not in compose_text.split("web:")[1].split("security:")[0]
     )
     assert "env_file: .env" not in compose_text.split("web:")[1].split("postgres:")[0]
+    assert "postgres_password:" not in compose_text
+    assert "s3_access_key:" not in compose_text
+    assert "s3_secret_key:" not in compose_text
 
 
 def test_install_script_bootstraps_compose_and_doctor() -> None:
