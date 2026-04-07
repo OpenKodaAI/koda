@@ -6,6 +6,7 @@ vi.mock("server-only", () => ({}));
 const redirectMock = vi.fn();
 const resolveControlPlaneDashboardAccessMock = vi.fn();
 const sanitizeControlPlaneNextTargetMock = vi.fn();
+const controlPlaneSetupPropsMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
@@ -18,7 +19,10 @@ vi.mock("@/components/control-plane/control-plane-onboarding-shell", () => ({
 }));
 
 vi.mock("@/components/control-plane/control-plane-setup", () => ({
-  ControlPlaneSetup: () => <div>control-plane-setup</div>,
+  ControlPlaneSetup: (props: { nextTarget?: string | null }) => {
+    controlPlaneSetupPropsMock(props);
+    return <div>control-plane-setup</div>;
+  },
 }));
 
 vi.mock("@/components/control-plane/control-plane-unavailable", () => ({
@@ -48,6 +52,9 @@ describe("control-plane setup page", () => {
 
     expect(screen.getByTestId("onboarding-shell")).toBeInTheDocument();
     expect(screen.getByText("control-plane-setup")).toBeInTheDocument();
+    expect(controlPlaneSetupPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ nextTarget: null }),
+    );
   });
 
   it("redirects ready sessions to the requested control-plane destination", async () => {
@@ -71,5 +78,25 @@ describe("control-plane setup page", () => {
     });
 
     expect(redirectMock).toHaveBeenCalledWith("/control-plane");
+  });
+
+  it("passes the sanitized next target into the setup component", async () => {
+    sanitizeControlPlaneNextTargetMock.mockReturnValue("/control-plane/system");
+    resolveControlPlaneDashboardAccessMock.mockResolvedValue({
+      status: "setup_required",
+      authStatus: {},
+      onboardingStatus: {},
+    });
+
+    const pageModule = await import("./page");
+    render(
+      await pageModule.default({
+        searchParams: Promise.resolve({ next: "/control-plane/system" }),
+      }),
+    );
+
+    expect(controlPlaneSetupPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ nextTarget: "/control-plane/system" }),
+    );
   });
 });

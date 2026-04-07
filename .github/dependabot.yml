@@ -31,6 +31,10 @@ updates:
       day: monday
       time: "04:30"
       timezone: "UTC"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
     groups:
       javascript-dependencies:
         patterns:

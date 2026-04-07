@@ -3,19 +3,24 @@ import { KodaMark } from "@/components/layout/koda-mark";
 
 const ONBOARDING_STEPS = [
   {
-    title: "Exchange setup code",
-    description: "Use the installer or CLI pairing code instead of exposing the recovery token.",
+    title: "Get a setup code",
+    description: "Run the installer or reissue a short-lived code from the CLI.",
     icon: KeyRound,
   },
   {
     title: "Create owner account",
-    description: "Bootstrap a local owner with a password and secure operator sessions.",
+    description: "Bootstrap the first local operator with a password.",
     icon: Rocket,
   },
   {
-    title: "Sign in and finish",
-    description: "Open the HTTP-only session, verify the provider, and unlock the control plane.",
+    title: "Sign in",
+    description: "Open the HTTP-only operator session for the dashboard.",
     icon: LogIn,
+  },
+  {
+    title: "Finish platform setup",
+    description: "Configure access, verify the default provider, and optionally add the first agent.",
+    icon: CheckCircle2,
   },
 ] as const;
 
@@ -48,11 +53,36 @@ export function ControlPlaneOnboardingShell({
                 Canonical flow
               </p>
               <p className="text-[2rem] font-semibold leading-tight tracking-[-0.07em] text-[var(--text-primary)]">
-                Auth and setup now live in their own dedicated dashboard path.
+                First-run setup now lives in its own dedicated dashboard path.
               </p>
               <p className="max-w-sm text-sm leading-6 text-[var(--text-secondary)]">
-                Finish the bootstrap here, then Koda opens the full control plane and agent catalog.
+                Most installs finish in two or three minutes. Complete auth and platform bootstrap
+                here, then Koda opens the full control plane and agent catalog.
               </p>
+            </div>
+
+            <div className="rounded-[24px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-4">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                    Install commands
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                    Use the same setup route for local installs, VPS, or headless hosts.
+                  </p>
+                </div>
+                <div className="space-y-2 text-sm text-[var(--text-primary)]">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background px-3 py-2 font-mono">
+                    koda install
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background px-3 py-2 font-mono">
+                    koda install --headless
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background px-3 py-2 font-mono">
+                    koda auth issue-code
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-3">
@@ -83,7 +113,8 @@ export function ControlPlaneOnboardingShell({
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-emerald-100">Catalog unlocks after bootstrap</p>
                   <p className="text-sm leading-6 text-emerald-50/90">
-                    `/control-plane` now means the control-plane home and agent catalog, not the setup wizard.
+                    `/control-plane/setup` is the onboarding route. `/control-plane` stays reserved
+                    for the real control-plane home once setup is complete.
                   </p>
                 </div>
               </div>

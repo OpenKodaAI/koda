@@ -130,6 +130,21 @@ describe("ControlPlaneSetup", () => {
     expect(screen.getByLabelText(/^username$/i)).toBeInTheDocument();
   });
 
+  it("shows installer guidance and the post-setup destination during first run", () => {
+    renderSetup({
+      initialStatus: makeStatus(),
+      authStatus: makeAuthStatus(),
+      nextTarget: "/control-plane/bots/ATLAS",
+    });
+
+    expect(screen.getByText("koda install")).toBeInTheDocument();
+    expect(screen.getByText("koda install --headless")).toBeInTheDocument();
+    expect(screen.getByText("koda auth issue-code")).toBeInTheDocument();
+    expect(
+      screen.getByText(/koda will return you to \/control-plane\/bots\/ATLAS/i),
+    ).toBeInTheDocument();
+  });
+
   it("registers the owner account and refreshes the route", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () =>

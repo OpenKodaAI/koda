@@ -1,4 +1,4 @@
-import i18n, { type TOptions } from "i18next";
+import i18n, { type InitOptions, type TOptions } from "i18next";
 import { literalResources, resources } from "@/lib/i18n-resources";
 
 export const DEFAULT_LANGUAGE = "en-US" as const;
@@ -62,7 +62,7 @@ export function normalizeLanguage(value?: string | null): AppLanguage {
 
 export function getI18nInstance() {
   if (!i18n.isInitialized) {
-    i18n.init({
+    const initOptions = {
       resources,
       lng: currentLanguageOverride,
       fallbackLng: DEFAULT_LANGUAGE,
@@ -72,8 +72,10 @@ export function getI18nInstance() {
       },
       returnNull: false,
       defaultNS: "translation",
-      initImmediate: false,
-    });
+      initAsync: false,
+    } satisfies InitOptions;
+
+    i18n.init(initOptions);
   }
 
   return i18n;

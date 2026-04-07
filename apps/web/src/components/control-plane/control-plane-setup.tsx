@@ -34,6 +34,33 @@ type SetupStep =
   | "login"
   | "finish_platform";
 
+const SETUP_FLOW: ReadonlyArray<{
+  step: SetupStep;
+  label: string;
+  helper: string;
+}> = [
+  {
+    step: "setup_code",
+    label: "Setup code",
+    helper: "Pair this browser with the installer or CLI.",
+  },
+  {
+    step: "register_owner",
+    label: "Owner account",
+    helper: "Create the first local operator.",
+  },
+  {
+    step: "login",
+    label: "Sign in",
+    helper: "Open the HTTP-only operator session.",
+  },
+  {
+    step: "finish_platform",
+    label: "Finish setup",
+    helper: "Configure access and the default provider.",
+  },
+] as const;
+
 type BootstrapExchangeResponse = {
   ok: boolean;
   registration_token: string;
@@ -168,6 +195,53 @@ function stepDescription(step: SetupStep) {
   }
 }
 
+function stepPosition(step: SetupStep) {
+  return SETUP_FLOW.findIndex((item) => item.step === step);
+}
+
+function isStepComplete(
+  step: SetupStep,
+  {
+    registrationToken,
+    hasOwner,
+    hasOperatorSession,
+    onboardingComplete,
+  }: {
+    registrationToken: string;
+    hasOwner: boolean;
+    hasOperatorSession: boolean;
+    onboardingComplete: boolean;
+  },
+) {
+  switch (step) {
+    case "setup_code":
+      return Boolean(registrationToken.trim()) || hasOwner || hasOperatorSession;
+    case "register_owner":
+      return hasOwner || hasOperatorSession;
+    case "login":
+      return hasOperatorSession;
+    case "finish_platform":
+      return onboardingComplete;
+  }
+}
+
+function formatDestination(nextTarget?: string | null) {
+  return nextTarget || "/control-plane";
+}
+
+function guidanceForStep(step: SetupStep) {
+  switch (step) {
+    case "setup_code":
+      return "Keep the terminal open after `koda install`. If the code expired, run `koda auth issue-code` and continue here.";
+    case "register_owner":
+      return "This is the long-lived dashboard identity. You can change the display name and email later in the control plane.";
+    case "login":
+      return "Use the username or email you just created. After sign-in, the dashboard stores the operator session in an HTTP-only cookie.";
+    case "finish_platform":
+      return "Access policy and provider are the only required inputs here. Creating the first Telegram agent is optional.";
+  }
+}
+
 function StatusBadge({ ready }: { ready: boolean }) {
   return (
     <span
@@ -261,11 +335,13 @@ export function ControlPlaneSetup({
   authStatus,
   initialRegistrationToken = "",
   initialRegistrationExpiresAt = null,
+  nextTarget = null,
 }: {
   initialStatus?: ControlPlaneOnboardingStatus | null;
   authStatus?: ControlPlaneAuthStatus | null;
   initialRegistrationToken?: string;
   initialRegistrationExpiresAt?: string | null;
+  nextTarget?: string | null;
 }) {
   const router = useRouter();
   const [isRefreshing, startTransition] = useTransition();
@@ -310,10 +386,13 @@ export function ControlPlaneSetup({
     hasOwner,
     registrationToken,
   });
+  const currentStepPosition = stepPosition(currentStep);
   const operatorLabel =
     authStatus?.operator?.display_name ||
     authStatus?.operator?.username ||
     "Operator";
+  const onboardingComplete = Boolean(initialStatus?.steps.onboarding_complete);
+  const destinationAfterSetup = formatDestination(nextTarget);
 
   const storageReady = Boolean(
     initialStatus?.storage.database.ready && initialStatus?.storage.object_storage.ready,
@@ -546,13 +625,16 @@ export function ControlPlaneSetup({
 
   return (
     <div className="space-y-6">
-      <PageHeader title={stepTitle(currentStep)} description={stepDescription(currentStep)} />
+      <PageHeader
+        title={stepTitle(currentStep)}
+        description={`${stepDescription(currentStep)} ${nextTarget ? `After setup, Koda will continue to ${destinationAfterSetup}.` : "When setup is complete, Koda opens the control-plane home automatically."}`}
+      />
 
       <PageSection className="space-y-5 p-5 sm:p-6">
         <PageSectionHeader
           eyebrow="Quickstart"
-          title="Secure first-run checklist"
-          description="Move through setup code exchange, owner auth, and platform bootstrap here. Koda unlocks the full control plane after this sequence is ready."
+          title="Guided first-run setup"
+          description="Start with the setup code, create the owner account, sign in, and then finish the minimum platform bootstrap. `/control-plane` unlocks after these checkpoints are ready."
           actions={
             hasOperatorSession ? (
               <button
@@ -566,6 +648,50 @@ export function ControlPlaneSetup({
             ) : undefined
           }
         />
+
+        <div className="grid gap-3 lg:grid-cols-4">
+          {SETUP_FLOW.map(({ step, label, helper }, index) => {
+            const complete = isStepComplete(step, {
+              registrationToken,
+              hasOwner,
+              hasOperatorSession,
+              onboardingComplete,
+            });
+            const active = step === currentStep;
+            return (
+              <div
+                key={step}
+                className={[
+                  "rounded-[24px] border px-4 py-4 transition-colors",
+                  active
+                    ? "border-[var(--border-strong)] bg-[var(--surface-panel-soft)]"
+                    : complete
+                      ? "border-emerald-400/30 bg-emerald-400/10"
+                      : "border-[var(--border-subtle)] bg-background/40",
+                ].join(" ")}
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className={[
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border text-xs font-semibold uppercase tracking-[0.16em]",
+                      active
+                        ? "border-[var(--border-strong)] bg-background text-[var(--text-primary)]"
+                        : complete
+                          ? "border-emerald-400/40 bg-background text-emerald-200"
+                          : "border-[var(--border-subtle)] bg-background text-[var(--text-secondary)]",
+                    ].join(" ")}
+                  >
+                    {complete ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">{label}</p>
+                    <p className="text-xs leading-5 text-[var(--text-secondary)]">{helper}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
         <PageStatGrid className="grid-cols-1 xl:grid-cols-4">
           <PageStatCard
@@ -599,6 +725,27 @@ export function ControlPlaneSetup({
           />
         </PageStatGrid>
 
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="rounded-[24px] border border-[var(--border-subtle)] bg-background/40 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+              What you need now
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+              {guidanceForStep(currentStep)}
+            </p>
+          </div>
+          <div className="rounded-[24px] border border-[var(--border-subtle)] bg-background/40 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+              Destination after setup
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">
+              {nextTarget
+                ? `Koda will return you to ${destinationAfterSetup} after auth and bootstrap are complete.`
+                : "Koda will open /control-plane after auth and bootstrap are complete."}
+            </p>
+          </div>
+        </div>
+
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_360px]">
           {currentStep === "setup_code" ? (
             <div className="space-y-4 rounded-[28px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] p-5">
@@ -616,6 +763,31 @@ export function ControlPlaneSetup({
                     headless or VPS environments, the installer should output the same code plus its
                     expiry.
                   </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background/70 px-3 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                      Local install
+                    </p>
+                    <code className="mt-2 block text-sm text-[var(--text-primary)]">koda install</code>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background/70 px-3 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                      VPS or headless
+                    </p>
+                    <code className="mt-2 block text-sm text-[var(--text-primary)]">
+                      koda install --headless
+                    </code>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-background/70 px-3 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                      Need a new code?
+                    </p>
+                    <code className="mt-2 block text-sm text-[var(--text-primary)]">
+                      koda auth issue-code
+                    </code>
+                  </div>
                 </div>
 
                 <label className="grid gap-2 text-sm">
@@ -1062,10 +1234,25 @@ export function ControlPlaneSetup({
           <aside className="space-y-4 rounded-[28px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] p-5">
             <div className="space-y-2">
               <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
-                Readiness checkpoint
+                Current checkpoint
               </h2>
               <p className="text-sm text-[var(--text-secondary)]">
-                This updates as the onboarding flow advances through owner auth and platform bootstrap.
+                Step {currentStepPosition + 1} of {SETUP_FLOW.length}. This panel follows the
+                first-run path as auth and platform bootstrap become ready.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border-subtle)] px-4 py-3">
+              <p className="text-sm font-medium text-[var(--text-primary)]">Current step</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">{stepTitle(currentStep)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border-subtle)] px-4 py-3">
+              <p className="text-sm font-medium text-[var(--text-primary)]">What happens next</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                {nextTarget
+                  ? `Once setup is complete, Koda will continue to ${destinationAfterSetup}.`
+                  : "Once setup is complete, Koda will open the control-plane home and agent catalog."}
               </p>
             </div>
 
