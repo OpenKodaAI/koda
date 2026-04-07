@@ -226,6 +226,10 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "python-audit-requirements.txt" in workflow_text
     assert "--require-hashes" in workflow_text
     assert "--disable-pip" in workflow_text
+    assert 'npm view "${NPM_PACKAGE_NAME}@${VERSION}" version' in workflow_text
+    assert "Skip npm publish when version already exists" in workflow_text
+    assert 'gh release view "${RELEASE_TAG}"' in workflow_text
+    assert "Skip GitHub release creation when the release already exists" in workflow_text
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
@@ -250,6 +254,8 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert '["pr-quality", "security"]' in workflow_text
     assert "actions/github-script@v8" in workflow_text
     assert "gh release view" in workflow_text
+    assert "Skip dispatch when the release already exists for the current tag" in workflow_text
+    assert "Recover publish when the tag exists but the release is still missing" in workflow_text
     assert "git tag -a" in workflow_text
     assert 'git push origin "refs/tags/${TAG}"' in workflow_text
     assert 'workflow_id: "release.yml"' in workflow_text
