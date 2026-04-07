@@ -11,9 +11,11 @@ import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
-# Set env vars before importing config
-os.environ.setdefault("AGENT_TOKEN", "test-token-123")
-os.environ.setdefault("ALLOWED_USER_IDS", "111,222,333")
+# Set env vars before importing config. Use explicit assignments so CI job-level
+# environment does not change the suite's expected auth/admin fixtures.
+os.environ["AGENT_TOKEN"] = "test-token-123"
+os.environ["ALLOWED_USER_IDS"] = "111,222,333"
+os.environ["KNOWLEDGE_ADMIN_USER_IDS"] = "111,222,333"
 os.environ.setdefault("DEFAULT_WORK_DIR", tempfile.gettempdir())
 # Force a neutral AGENT_ID so host shells or local .env files cannot leak
 # agent-specific residue into the test suite.

@@ -260,7 +260,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          profile: minimal
           components: rustfmt, clippy
       - name: Rust format check
         run: cargo +${{ env.RUST_TOOLCHAIN }} fmt --check
@@ -299,7 +298,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          profile: minimal
       - name: Install Python dependencies
         run: pip install ".[dev]"
       - name: Install web dependencies

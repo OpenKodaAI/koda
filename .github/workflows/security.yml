@@ -43,7 +43,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          profile: minimal
       - name: Install Python dependencies
         run: pip install ".[dev]"
       - name: Install web dependencies

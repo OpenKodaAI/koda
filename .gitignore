@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+!apps/web/.env.example
+!packages/cli/release/bundle/.env.bootstrap
 .claude/
 .pnpm-store/
 .pnpm-debug.log*
