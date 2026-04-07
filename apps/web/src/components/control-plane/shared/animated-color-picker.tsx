@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { ChevronDown, Palette } from "lucide-react";
 import { FormField } from "./form-field";
 import { hexToRgb, validateColor } from "@/lib/control-plane-editor";
@@ -364,28 +364,15 @@ export function AnimatedColorPicker({
           </span>
         </button>
 
-        {panelRoot
+        {panelRoot && open
           ? createPortal(
-              <AnimatePresence initial={false}>
-                {open ? (
-                  <motion.div
+                  <div
                     ref={panelRef}
-                    initial={{
-                      opacity: 0,
-                      y: panelPosition?.placement === "top" ? 6 : -6,
-                      scale: 0.98,
-                    }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{
-                      opacity: 0,
-                      y: panelPosition?.placement === "top" ? 4 : -4,
-                      scale: 0.98,
-                    }}
-                    transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                     role="dialog"
                     aria-label={tl("Painel de cor")}
-                    className="fixed z-[90] overflow-hidden rounded-[0.8rem] border border-[rgba(255,255,255,0.08)] bg-[rgba(12,12,13,0.98)] p-3 shadow-[0_24px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl"
+                    className="app-floating-panel app-overlay-fade-in z-[90] overflow-hidden rounded-[0.8rem] p-3"
                     style={{
+                      position: "fixed",
                       top: panelPosition?.top ?? 0,
                       left: panelPosition?.left ?? 0,
                       width: panelPosition?.width,
@@ -580,9 +567,7 @@ export function AnimatedColorPicker({
                         </p>
                       ) : null}
                     </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>,
+                  </div>,
               panelRoot,
             )
           : null}

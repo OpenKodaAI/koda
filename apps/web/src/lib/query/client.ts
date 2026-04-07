@@ -5,6 +5,9 @@ export function createAppQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
+        staleTime: 10_000,
+        gcTime: 3 * 60_000,
+        refetchOnWindowFocus: false,
         retry(failureCount, error) {
           if (isAbortLikeError(error)) {
             return false;
@@ -21,6 +24,8 @@ export function createAppQueryClient() {
 
           return failureCount < (appError.retryable ? 2 : 1);
         },
+        retryDelay: (attemptIndex: number) =>
+          Math.min(1000 * 2 ** attemptIndex, 30000) + Math.random() * 500,
       },
       mutations: {
         retry(_failureCount, error) {
@@ -28,6 +33,8 @@ export function createAppQueryClient() {
             error instanceof AppError ? error : toAppError(error);
           return appError.retryable;
         },
+        retryDelay: (attemptIndex: number) =>
+          Math.min(1000 * 2 ** attemptIndex, 30000) + Math.random() * 500,
       },
     },
   });

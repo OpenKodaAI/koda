@@ -236,7 +236,7 @@ function OverviewPageContent() {
   const {
     stats: allStats,
     loading,
-  } = useBotStats(undefined, 2000);
+  } = useBotStats();
 
   const modalBotId = useMemo(() => {
     const bot = searchParams.get("bot");
@@ -268,31 +268,17 @@ function OverviewPageContent() {
     [statsByBot, visibleBotIds]
   );
 
-  const totalTasks = visibleEntries.reduce(
-    (sum, entry) => sum + (entry.stats?.totalTasks ?? 0),
-    0
-  );
-  const totalActive = visibleEntries.reduce(
-    (sum, entry) => sum + (entry.stats?.activeTasks ?? 0),
-    0
-  );
-  const totalQueries = visibleEntries.reduce(
-    (sum, entry) => sum + (entry.stats?.totalQueries ?? 0),
-    0
-  );
-  const totalCostToday = visibleEntries.reduce(
-    (sum, entry) => sum + (entry.stats?.todayCost ?? 0),
-    0
-  );
-  const totalPeriodCost = visibleEntries.reduce(
-    (sum, entry) =>
-      sum + (entry.stats?.dailyCosts ?? []).reduce((seriesSum, item) => seriesSum + item.cost, 0),
-    0
-  );
-
-  const activeBots = visibleEntries.filter((entry) => entry.stats?.dbExists);
-  const waitingBots = visibleEntries.filter((entry) => !entry.stats?.dbExists);
-  const scopeLabel = formatBotSelectionLabel(visibleBotIds, bots);
+  const { totalTasks, totalActive, totalQueries, totalCostToday, totalPeriodCost, activeBots, waitingBots, scopeLabel } = useMemo(() => {
+    const totalTasks = visibleEntries.reduce((sum, entry) => sum + (entry.stats?.totalTasks ?? 0), 0);
+    const totalActive = visibleEntries.reduce((sum, entry) => sum + (entry.stats?.activeTasks ?? 0), 0);
+    const totalQueries = visibleEntries.reduce((sum, entry) => sum + (entry.stats?.totalQueries ?? 0), 0);
+    const totalCostToday = visibleEntries.reduce((sum, entry) => sum + (entry.stats?.todayCost ?? 0), 0);
+    const totalPeriodCost = visibleEntries.reduce((sum, entry) => sum + (entry.stats?.dailyCosts ?? []).reduce((seriesSum, item) => seriesSum + item.cost, 0), 0);
+    const activeBots = visibleEntries.filter((entry) => entry.stats?.dbExists);
+    const waitingBots = visibleEntries.filter((entry) => !entry.stats?.dbExists);
+    const scopeLabel = formatBotSelectionLabel(visibleBotIds, bots);
+    return { totalTasks, totalActive, totalQueries, totalCostToday, totalPeriodCost, activeBots, waitingBots, scopeLabel };
+  }, [visibleEntries, visibleBotIds, bots]);
 
   const activityMonitor = useMemo(() => {
     const hourlyActivity = Array.from({ length: 24 }, () => 0);
@@ -539,34 +525,8 @@ function OverviewPageContent() {
       .slice(-7)
       .map(([, cost]) => cost);
   }, [visibleEntries]);
-  const tourVariant =
-    loading && !allStats ? "loading" : visibleEntries.length === 0 ? "empty" : "default";
 
-  if (loading && !allStats) {
-    return (
-      <div className="space-y-4">
-        <div className="max-w-[350px]">
-          <BotSwitcher multiple selectedBotIds={selectedBotIds} onSelectionChange={setSelectedBotIds} />
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="glass-card-sm p-5">
-              <div className="skeleton skeleton-text mb-3" style={{ width: "40%" }} />
-              <div className="skeleton skeleton-heading mb-2" style={{ width: "50%" }} />
-              <div className="skeleton skeleton-text" style={{ width: "65%" }} />
-            </div>
-          ))}
-        </div>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <div className="app-section min-h-[340px] p-5 sm:p-6" />
-          <div className="app-section min-h-[340px] p-5 sm:p-6" />
-        </div>
-        <div className="app-section min-h-[220px] p-5 sm:p-6 lg:p-7" />
-      </div>
-    );
-  }
-
-  const compactStats = [
+  const compactStats = useMemo(() => [
     {
       label: t("overview.stats.totalTasks"),
       value: totalTasks,
@@ -595,7 +555,34 @@ function OverviewPageContent() {
       sparklineData: costSparkline,
       sparklineColor: "rgba(228,180,84,0.7)",
     },
-  ];
+  ], [t, totalTasks, totalActive, totalQueries, totalCostToday, totalPeriodCost, scopeLabel, activeBots.length, waitingBots.length, costSparkline]);
+
+  const tourVariant =
+    loading && !allStats ? "loading" : visibleEntries.length === 0 ? "empty" : "default";
+
+  if (loading && !allStats) {
+    return (
+      <div className="space-y-4">
+        <div className="max-w-[350px]">
+          <BotSwitcher multiple selectedBotIds={selectedBotIds} onSelectionChange={setSelectedBotIds} />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="glass-card-sm p-5">
+              <div className="skeleton skeleton-text mb-3" style={{ width: "40%" }} />
+              <div className="skeleton skeleton-heading mb-2" style={{ width: "50%" }} />
+              <div className="skeleton skeleton-text" style={{ width: "65%" }} />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="app-section min-h-[340px] p-5 sm:p-6" />
+          <div className="app-section min-h-[340px] p-5 sm:p-6" />
+        </div>
+        <div className="app-section min-h-[220px] p-5 sm:p-6 lg:p-7" />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -649,7 +636,7 @@ function OverviewPageContent() {
 
           <AgentPlan
             tasks={agentPlanTasks}
-            className="border-0 bg-transparent px-0 py-0 shadow-none"
+            className="border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-0 py-0 shadow-none"
           />
         </section>
       </div>

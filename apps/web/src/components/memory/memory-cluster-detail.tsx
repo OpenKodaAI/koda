@@ -26,7 +26,7 @@ function ClusterHistory({
   }
 
   return (
-    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.012)]">
+    <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
       {detail.history.map((entry) => (
         <div key={entry.id} className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -72,7 +72,7 @@ export function MemoryClusterDetail({
               color: typeMeta.color,
               backgroundColor: `color-mix(in srgb, ${typeMeta.color} 10%, transparent)`,
             }}
-            >
+          >
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: typeMeta.color }} />
             {getMemoryTypeLabel(detail.cluster.dominant_type, t)}
           </span>
@@ -140,13 +140,13 @@ export function MemoryClusterDetail({
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           <div>
             <p className="eyebrow">{t("memory.curation.detail.primaryMembers")}</p>
-            <div className="mt-3 divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.012)]">
+            <div className="mt-3 divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
               {detail.members.map((member) => (
                 <button
                   key={member.memory_id}
                   type="button"
                   onClick={() => onSelectMemory(member.memory_id)}
-                  className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(255,255,255,0.018)]"
+                  className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-[var(--text-primary)]">
@@ -166,7 +166,7 @@ export function MemoryClusterDetail({
 
           <div>
             <p className="eyebrow">{t("memory.curation.detail.sessionsCovered")}</p>
-            <div className="mt-3 divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.012)]">
+            <div className="mt-3 divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
               {detail.overlaps.length === 0 ? (
                 <div className="px-4 py-3 text-sm text-[var(--text-secondary)]">
                   {t("memory.curation.detail.noLinkedSessions")}

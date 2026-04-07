@@ -26,7 +26,7 @@ function ToggleCard({
   onChange,
 }: {
   label: string;
-  description: string;
+  description?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
@@ -59,7 +59,6 @@ export function MemoryPolicyForm({
         <div className="min-w-[240px] flex-1">
           <ToggleCard
             label={tl("Memória habilitada")}
-            description={tl("Ativa recall e persistência de memória para o agente.")}
             checked={policy.enabled}
             onChange={(checked) => onChange({ ...policy, enabled: checked })}
           />
@@ -99,7 +98,6 @@ export function MemoryPolicyForm({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <FormSelect
           label={tl("Postura de risco")}
-          description={tl("Escolha o equilíbrio entre cautela e iniciativa ao usar memória.")}
           value={policy.risk_posture}
           onChange={(event) =>
             onChange({ ...policy, risk_posture: event.target.value })
@@ -112,7 +110,6 @@ export function MemoryPolicyForm({
         />
         <FormSelect
           label={tl("Densidade de memória")}
-          description={tl("Quanto contexto de memória tende a entrar por turno.")}
           value={policy.memory_density_target}
           onChange={(event) =>
             onChange({
@@ -128,7 +125,6 @@ export function MemoryPolicyForm({
         />
         <FormInput
           label={tl("Memórias por vez")}
-          description={tl("Quantidade máxima de memórias trazidas em cada recall.")}
           type="number"
           min="1"
           step="1"
@@ -142,7 +138,6 @@ export function MemoryPolicyForm({
         />
         <FormInput
           label={tl("Contexto de memória")}
-          description={tl("Orçamento máximo de contexto vindo da memória.")}
           type="number"
           min="256"
           step="128"
@@ -190,7 +185,6 @@ export function MemoryPolicyForm({
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <FormInput
               label={tl("Itens por extração")}
-              description={tl("Máximo de itens que podem ser aprendidos em um único turno.")}
               type="number"
               min="1"
               step="1"
@@ -207,7 +201,6 @@ export function MemoryPolicyForm({
             />
             <FormInput
               label={tl("Máximo por usuário")}
-              description={tl("Limite de memórias persistidas por usuário.")}
               type="number"
               min="1"
               step="1"
@@ -282,7 +275,6 @@ export function MemoryPolicyForm({
         <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2 xl:grid-cols-3">
           <FormInput
             label={tl("Similaridade mínima")}
-            description={tl("Semelhança mínima para uma memória entrar no recall.")}
             type="number"
             min="0"
             max="1"
@@ -300,7 +292,6 @@ export function MemoryPolicyForm({
           />
           <FormInput
             label={tl("Timeout de recall")}
-            description={tl("Tempo máximo da busca antes de desistir.")}
             type="number"
             min="0.1"
             step="0.1"
@@ -317,7 +308,6 @@ export function MemoryPolicyForm({
           />
           <FormInput
             label={tl("Recall procedural")}
-            description={tl("Quantos procedimentos podem entrar por recall.")}
             type="number"
             min="1"
             step="1"
@@ -407,7 +397,6 @@ export function KnowledgePolicyForm({
         <div className="min-w-[240px] flex-1">
           <ToggleCard
             label={tl("Grounding habilitado")}
-            description={tl("Ativa grounding via recuperação de conhecimento.")}
             checked={policy.enabled}
             onChange={(checked) => onChange({ ...policy, enabled: checked })}
           />
@@ -453,7 +442,6 @@ export function KnowledgePolicyForm({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <FormInput
           label={tl("Trechos por busca")}
-          description={tl("Quantidade máxima de trechos trazidos pelo grounding.")}
           type="number"
           min="1"
           step="1"
@@ -470,7 +458,6 @@ export function KnowledgePolicyForm({
         />
         <FormInput
           label={tl("Contexto de conhecimento")}
-          description={tl("Orçamento máximo de contexto vindo do conhecimento.")}
           type="number"
           min="256"
           step="128"
@@ -487,7 +474,6 @@ export function KnowledgePolicyForm({
         />
         <FormInput
           label={tl("Idade máxima (dias)")}
-          description={tl("Idade máxima aceitável para fontes usadas no contexto.")}
           type="number"
           min="1"
           step="1"
@@ -527,7 +513,6 @@ export function KnowledgePolicyForm({
         <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2 xl:grid-cols-4">
           <FormInput
             label={tl("Similaridade mínima")}
-            description={tl("Similaridade mínima para um hit de conhecimento.")}
             type="number"
             min="0"
             max="1"
@@ -603,6 +588,100 @@ export function KnowledgePolicyForm({
           />
         </div>
       </SectionCollapsible>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Simplified forms (normal mode)                                             */
+/* -------------------------------------------------------------------------- */
+
+export function MemoryPolicyFormSimple({
+  policy,
+  onChange,
+}: {
+  policy: MemoryPolicyData;
+  onChange: (next: MemoryPolicyData) => void;
+}) {
+  const { tl } = useAppI18n();
+
+  function handleToggle(enabled: boolean) {
+    const next = { ...policy, enabled };
+    if (enabled) {
+      next.proactive_enabled = true;
+      next.procedural_enabled = true;
+      next.maintenance_enabled = true;
+      next.digest_enabled = true;
+      next.observed_pattern_requires_review = true;
+    }
+    onChange(next);
+  }
+
+  return (
+    <ToggleCard
+      label={tl("Memória habilitada")}
+      description={tl("O agente retém e usa aprendizados entre conversas.")}
+      checked={policy.enabled}
+      onChange={handleToggle}
+    />
+  );
+}
+
+export function KnowledgePolicyFormSimple({
+  policy,
+  memoryPolicy,
+  onChange,
+  onMemoryChange,
+  providerOptions,
+}: {
+  policy: KnowledgePolicyData;
+  memoryPolicy: MemoryPolicyData;
+  onChange: (next: KnowledgePolicyData) => void;
+  onMemoryChange: (next: MemoryPolicyData) => void;
+  providerOptions: Array<{ value: string; label: string }>;
+}) {
+  const { tl } = useAppI18n();
+
+  function handleToggle(enabled: boolean) {
+    const next = { ...policy, enabled };
+    if (enabled) {
+      next.require_owner_provenance = true;
+      next.require_freshness_provenance = true;
+    }
+    onChange(next);
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <ToggleCard
+        label={tl("Grounding habilitado")}
+        description={tl("O agente busca fontes verificadas antes de responder.")}
+        checked={policy.enabled}
+        onChange={handleToggle}
+      />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <FormSelect
+          label={tl("Provider de extração")}
+          description={tl("Provider usado para extrair aprendizados.")}
+          value={memoryPolicy.extraction_provider}
+          onChange={(event) =>
+            onMemoryChange({ ...memoryPolicy, extraction_provider: event.target.value })
+          }
+          options={[
+            { value: "", label: tl("Herdar do padrão global") },
+            ...providerOptions,
+          ]}
+        />
+        <FormInput
+          label={tl("Modelo de extração")}
+          description={tl("Modelo usado para extrair memória.")}
+          value={memoryPolicy.extraction_model}
+          onChange={(event) =>
+            onMemoryChange({ ...memoryPolicy, extraction_model: event.target.value })
+          }
+          placeholder={tl("Ex: claude-sonnet-4-6")}
+        />
+      </div>
     </div>
   );
 }

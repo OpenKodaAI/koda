@@ -147,6 +147,24 @@ class V2StoreSupport:
     def backend_lifecycle(self) -> KnowledgeBackendLifecycle:
         return self._lifecycle
 
+    def _build_s3_client(self, *, credentials: dict[str, str] | None = None) -> Any:
+        """Build a boto3 S3 client using configured or overridden credentials."""
+        import boto3  # type: ignore[import-not-found]
+
+        creds = credentials or {}
+        client_kwargs: dict[str, str] = {}
+        if KNOWLEDGE_V2_S3_ENDPOINT_URL:
+            client_kwargs["endpoint_url"] = KNOWLEDGE_V2_S3_ENDPOINT_URL
+        if KNOWLEDGE_V2_S3_REGION:
+            client_kwargs["region_name"] = KNOWLEDGE_V2_S3_REGION
+        key_id = creds.get("aws_access_key_id") or KNOWLEDGE_V2_S3_ACCESS_KEY_ID
+        secret_key = creds.get("aws_secret_access_key") or KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY
+        if key_id:
+            client_kwargs["aws_access_key_id"] = key_id
+        if secret_key:
+            client_kwargs["aws_secret_access_key"] = secret_key
+        return boto3.client("s3", **client_kwargs)
+
     def object_store_health(self) -> dict[str, Any]:
         local_ready = self._root.exists() and self._root.is_dir()
         s3_enabled = bool(KNOWLEDGE_V2_S3_BUCKET and self.external_write_enabled())
@@ -165,18 +183,7 @@ class V2StoreSupport:
         }
         if s3_enabled:
             try:
-                import boto3  # type: ignore[import-not-found]
-
-                client_kwargs: dict[str, str] = {}
-                if KNOWLEDGE_V2_S3_ENDPOINT_URL:
-                    client_kwargs["endpoint_url"] = KNOWLEDGE_V2_S3_ENDPOINT_URL
-                if KNOWLEDGE_V2_S3_REGION:
-                    client_kwargs["region_name"] = KNOWLEDGE_V2_S3_REGION
-                if KNOWLEDGE_V2_S3_ACCESS_KEY_ID:
-                    client_kwargs["aws_access_key_id"] = KNOWLEDGE_V2_S3_ACCESS_KEY_ID
-                if KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY:
-                    client_kwargs["aws_secret_access_key"] = KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY
-                client = boto3.client("s3", **client_kwargs)
+                client = self._build_s3_client()
                 client.head_bucket(Bucket=KNOWLEDGE_V2_S3_BUCKET)
                 payload["boto3_available"] = True
                 payload["ready"] = True
@@ -220,42 +227,23 @@ class V2StoreSupport:
         try:
             task = asyncio.create_task(task_coro)
         except RuntimeError:
+            close = getattr(task_coro, "close", None)
+            if callable(close):
+                close()
             return
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
     async def _persist_s3_copy(self, path: Path, *, object_key: str) -> None:
         try:
-            import boto3  # type: ignore[import-not-found]
-
-            client_kwargs: dict[str, str] = {}
-            if KNOWLEDGE_V2_S3_ENDPOINT_URL:
-                client_kwargs["endpoint_url"] = KNOWLEDGE_V2_S3_ENDPOINT_URL
-            if KNOWLEDGE_V2_S3_REGION:
-                client_kwargs["region_name"] = KNOWLEDGE_V2_S3_REGION
-            if KNOWLEDGE_V2_S3_ACCESS_KEY_ID:
-                client_kwargs["aws_access_key_id"] = KNOWLEDGE_V2_S3_ACCESS_KEY_ID
-            if KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY:
-                client_kwargs["aws_secret_access_key"] = KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY
-            client = boto3.client("s3", **client_kwargs)
+            client = self._build_s3_client()
             client.upload_file(str(path), KNOWLEDGE_V2_S3_BUCKET, object_key)
         except Exception:
-            log.debug("knowledge_v2_s3_copy_unavailable", object_key=object_key)
+            log.warning("knowledge_v2_s3_copy_unavailable", object_key=object_key)
 
     async def _persist_s3_payload(self, payload: bytes, *, object_key: str) -> None:
         try:
-            import boto3  # type: ignore[import-not-found]
-
-            client_kwargs: dict[str, str] = {}
-            if KNOWLEDGE_V2_S3_ENDPOINT_URL:
-                client_kwargs["endpoint_url"] = KNOWLEDGE_V2_S3_ENDPOINT_URL
-            if KNOWLEDGE_V2_S3_REGION:
-                client_kwargs["region_name"] = KNOWLEDGE_V2_S3_REGION
-            if KNOWLEDGE_V2_S3_ACCESS_KEY_ID:
-                client_kwargs["aws_access_key_id"] = KNOWLEDGE_V2_S3_ACCESS_KEY_ID
-            if KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY:
-                client_kwargs["aws_secret_access_key"] = KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY
-            client = boto3.client("s3", **client_kwargs)
+            client = self._build_s3_client()
             client.put_object(
                 Bucket=KNOWLEDGE_V2_S3_BUCKET,
                 Key=object_key,
@@ -263,4 +251,4 @@ class V2StoreSupport:
                 ContentType="application/json",
             )
         except Exception:
-            log.debug("knowledge_v2_s3_payload_unavailable", object_key=object_key)
+            log.warning("knowledge_v2_s3_payload_unavailable", object_key=object_key)

@@ -10,20 +10,20 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-white/70 bg-[#f3f3f3] text-[#0f0f10] shadow-[inset_0_1px_0_rgba(255,255,255,0.55),0_10px_26px_rgba(0,0,0,0.22)] hover:border-white hover:bg-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_12px_32px_rgba(0,0,0,0.24)] data-[state=open]:border-white data-[state=open]:bg-white",
+          "border-[color:var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] hover:border-[color:var(--button-primary-hover)] hover:bg-[var(--button-primary-hover)] data-[state=open]:border-[color:var(--button-primary-hover)] data-[state=open]:bg-[var(--button-primary-hover)]",
         mono:
-          "border-zinc-800 bg-zinc-950 text-white shadow-[0_10px_24px_rgba(0,0,0,0.24)] hover:border-zinc-700 hover:bg-zinc-900 dark:border-zinc-300/70 dark:bg-zinc-300 dark:text-black dark:hover:border-zinc-200 dark:hover:bg-zinc-200",
+          "border-[color:var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         destructive:
-          "border-[color-mix(in_srgb,var(--tone-danger-border)_70%,transparent)] bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)] shadow-[0_10px_24px_rgba(0,0,0,0.2)] hover:border-[color-mix(in_srgb,var(--tone-danger-border)_85%,white_8%)] hover:bg-[var(--tone-danger-bg)]",
+          "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)] hover:border-[color:var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]",
         secondary:
-          "border-white/10 bg-white/[0.02] text-[var(--text-secondary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_8px_20px_rgba(0,0,0,0.08)] hover:border-white/18 hover:bg-white/[0.055] hover:text-[var(--text-primary)] hover:shadow-[0_12px_28px_rgba(0,0,0,0.16)] data-[state=open]:border-white/18 data-[state=open]:bg-white/[0.055]",
+          "border-[color:var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)]",
         outline:
-          "border-white/12 bg-white/[0.018] text-[var(--text-secondary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.018),0_6px_18px_rgba(0,0,0,0.06)] hover:border-white/18 hover:bg-white/[0.045] hover:text-[var(--text-primary)]",
+          "border-[color:var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
         dashed:
-          "border border-dashed border-white/12 bg-white/[0.014] text-[var(--text-secondary)] hover:border-white/20 hover:bg-white/[0.04] hover:text-[var(--text-primary)]",
-        ghost: "border-transparent text-[var(--text-secondary)] hover:border-white/10 hover:bg-white/[0.045] hover:text-[var(--text-primary)]",
-        dim: "border-transparent bg-transparent text-muted-foreground shadow-none hover:border-transparent hover:bg-transparent hover:text-foreground",
-        foreground: "border-transparent bg-transparent text-foreground shadow-none hover:border-transparent hover:bg-transparent",
+          "border border-dashed border-[color:var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+        ghost: "border-transparent text-[var(--text-secondary)] hover:border-[color:var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+        dim: "border-transparent bg-transparent text-[var(--text-tertiary)] shadow-none hover:border-transparent hover:bg-transparent hover:text-[var(--text-primary)] dark:text-muted-foreground dark:hover:text-foreground",
+        foreground: "border-transparent bg-transparent text-[var(--text-primary)] shadow-none hover:border-transparent hover:bg-transparent dark:text-foreground",
         inverse: "border-transparent bg-transparent text-inherit shadow-none hover:border-transparent hover:bg-transparent",
       },
       appearance: {
@@ -54,9 +54,9 @@ const buttonVariants = cva(
       },
       mode: {
         default:
-          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-0 active:scale-[0.985]",
-        icon: "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-0 active:scale-[0.985]",
-        link: "h-auto rounded-none border-transparent bg-transparent p-0 text-primary shadow-none hover:bg-transparent",
+          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        icon: "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[var(--text-primary)] shadow-none hover:bg-transparent dark:text-primary",
         input:
           "justify-start font-normal focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/30",
       },
@@ -102,7 +102,7 @@ const buttonVariants = cva(
       {
         variant: "primary",
         appearance: "ghost",
-        className: "border-transparent bg-transparent text-primary hover:bg-primary/8",
+        className: "border-transparent bg-transparent text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
       },
       {
         size: "icon",

@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import mimetypes
+import os
 import re
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from koda.config import CONFLUENCE_URL, IMAGE_TEMP_DIR, JIRA_URL
+from koda.config import AGENT_ID, CONFLUENCE_URL, IMAGE_TEMP_DIR, JIRA_URL
 from koda.logging_config import get_logger
 from koda.services.artifact_ingestion import (
     ArtifactDossier,
@@ -30,6 +32,20 @@ _ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,15}-\d+)\b")
 _BROWSE_RE = re.compile(r"/browse/([A-Z][A-Z0-9]{1,15}-\d+)", re.IGNORECASE)
 _CONFLUENCE_PAGE_RE = re.compile(r"/pages/(\d+)")
 _MAX_URLS = 12
+
+
+def _resolved_atlassian_base_urls() -> tuple[str, str]:
+    jira_url = JIRA_URL
+    confluence_url = CONFLUENCE_URL
+    current_agent = str(os.environ.get("AGENT_ID") or AGENT_ID or "").strip().upper()
+    if current_agent:
+        with suppress(Exception):
+            from koda.services.core_connection_broker import get_core_connection_broker
+
+            urls = get_core_connection_broker().atlassian_base_urls(agent_id=current_agent)
+            jira_url = str(urls.get("jira") or jira_url or "").strip()
+            confluence_url = str(urls.get("confluence") or confluence_url or "").strip()
+    return jira_url, confluence_url
 
 
 @dataclass(slots=True)
@@ -283,7 +299,8 @@ async def _extract_linked_url(
     jira_client: Any,
     confluence_client: Any | None,
 ) -> ExtractedArtifact | None:
-    category = classify_url(url, JIRA_URL, CONFLUENCE_URL)
+    jira_url, confluence_url = _resolved_atlassian_base_urls()
+    category = classify_url(url, jira_url, confluence_url)
     artifact_id = hashlib.sha256(f"{issue_key}:{url}".encode(), usedforsecurity=False).hexdigest()[:16]
     base_ref = ArtifactRef(
         artifact_id=artifact_id,

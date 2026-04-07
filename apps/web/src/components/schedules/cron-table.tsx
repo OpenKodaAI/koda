@@ -1,18 +1,55 @@
 "use client";
 
-import { Clock, FolderTree, TerminalSquare } from "lucide-react";
+import { Clock, FolderTree, Pencil, Play, TerminalSquare } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { CronJob } from "@/lib/types";
 import { getSemanticDotStyle, getSemanticStyle } from "@/lib/theme-semantic";
 import { truncateText } from "@/lib/utils";
 
+type ScheduleLifecycleAction = "pause" | "resume" | "validate";
+
 interface CronTableProps {
   jobs: CronJob[];
   botLabel: string;
   botColor: string;
+  busyJobId?: number | null;
+  onInspect?: (job: CronJob) => void;
+  onEdit?: (job: CronJob) => void;
+  onRun?: (job: CronJob) => void;
+  onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
 }
 
-export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
+function getLifecycleAction(job: CronJob): {
+  action: ScheduleLifecycleAction | null;
+  label: string;
+  disabled: boolean;
+} {
+  switch (job.status) {
+    case "active":
+      return { action: "pause", label: "Pause", disabled: false };
+    case "paused":
+      return { action: "resume", label: "Resume", disabled: false };
+    case "validated":
+      return { action: "resume", label: "Activate", disabled: false };
+    case "failed_open":
+      return { action: "resume", label: "Resume", disabled: false };
+    case "validation_pending":
+      return { action: null, label: "Validation pending", disabled: true };
+    default:
+      return { action: job.enabled === 1 ? "pause" : "resume", label: job.enabled === 1 ? "Pause" : "Activate", disabled: false };
+  }
+}
+
+export function CronTable({
+  jobs,
+  botLabel,
+  botColor,
+  busyJobId = null,
+  onInspect,
+  onEdit,
+  onRun,
+  onLifecycleAction,
+}: CronTableProps) {
   const { t } = useAppI18n();
   if (jobs.length === 0) {
     return (
@@ -37,7 +74,7 @@ export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
               <span className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[11px] text-[var(--text-primary)]">
                 {job.cron_expression}
               </span>
-              <StatusBadge enabled={job.enabled === 1} />
+              <StatusBadge status={job.status} />
             </div>
             <p
               className="mt-3 text-sm font-medium leading-6 text-[var(--text-primary)]"
@@ -61,6 +98,14 @@ export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
                 mono
               />
             </div>
+            <JobActions
+              job={job}
+              busy={busyJobId === job.id}
+              onInspect={onInspect}
+              onEdit={onEdit}
+              onRun={onRun}
+              onLifecycleAction={onLifecycleAction}
+            />
           </article>
         ))}
       </div>
@@ -73,8 +118,10 @@ export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
                 <th>{t("schedules.table.schedule")}</th>
                 <th>{t("schedules.table.routine")}</th>
                 <th>{t("common.summary")}</th>
+                <th>{t("schedules.table.nextRun", { defaultValue: "Next run" })}</th>
                 <th className="text-right">{t("common.status")}</th>
                 <th>{t("schedules.table.scope")}</th>
+                <th className="text-right">{t("common.actions", { defaultValue: "Actions" })}</th>
               </tr>
             </thead>
             <tbody>
@@ -100,13 +147,29 @@ export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
                       {job.description || t("schedules.table.noSummary")}
                     </span>
                   </td>
+                  <td>
+                    <span className="text-[13px] leading-6 text-[var(--text-secondary)]">
+                      {job.next_run_at || "pending validation"}
+                    </span>
+                  </td>
                   <td className="text-right">
-                    <StatusBadge enabled={job.enabled === 1} />
+                    <StatusBadge status={job.status} />
                   </td>
                   <td>
                     <span className="font-mono text-xs text-[var(--text-tertiary)]">
                       {job.work_dir ?? t("schedules.table.noDirectory")}
                     </span>
+                  </td>
+                  <td className="text-right">
+                    <JobActions
+                      job={job}
+                      busy={busyJobId === job.id}
+                      onInspect={onInspect}
+                      onEdit={onEdit}
+                      onRun={onRun}
+                      onLifecycleAction={onLifecycleAction}
+                      compact
+                    />
                   </td>
                 </tr>
               ))}
@@ -118,17 +181,88 @@ export function CronTable({ jobs, botLabel, botColor }: CronTableProps) {
   );
 }
 
-function StatusBadge({ enabled }: { enabled: boolean }) {
+function JobActions({
+  job,
+  busy,
+  onInspect,
+  onEdit,
+  onRun,
+  onLifecycleAction,
+  compact = false,
+}: {
+  job: CronJob;
+  busy: boolean;
+  onInspect?: (job: CronJob) => void;
+  onEdit?: (job: CronJob) => void;
+  onRun?: (job: CronJob) => void;
+  onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
+  compact?: boolean;
+}) {
+  const baseClass =
+    "inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50";
+  const lifecycle = getLifecycleAction(job);
+
+  return (
+    <div className={`mt-4 flex ${compact ? "justify-end" : "flex-wrap"} gap-2`}>
+      <button type="button" className={baseClass} onClick={() => onInspect?.(job)} disabled={busy}>
+        <Clock className="h-3.5 w-3.5" />
+        {compact ? "Inspect" : "Detalhes"}
+      </button>
+      <button type="button" className={baseClass} onClick={() => onEdit?.(job)} disabled={busy}>
+        <Pencil className="h-3.5 w-3.5" />
+        Edit
+      </button>
+      <button type="button" className={baseClass} onClick={() => onRun?.(job)} disabled={busy}>
+        <Play className="h-3.5 w-3.5" />
+        Run
+      </button>
+      <button
+        type="button"
+        className={baseClass}
+        onClick={() => lifecycle.action && onLifecycleAction?.(job, lifecycle.action)}
+        disabled={busy || lifecycle.disabled}
+      >
+        {lifecycle.label}
+      </button>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status?: string | null }) {
   const { t } = useAppI18n();
-  return enabled ? (
-    <span className="inline-flex min-h-[28px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold" style={getSemanticStyle("success")}>
-      <span className="h-1.5 w-1.5 rounded-full" style={getSemanticDotStyle("success")} />
-      {t("common.active")}
-    </span>
-  ) : (
-    <span className="inline-flex min-h-[28px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold" style={getSemanticStyle("neutral")}>
-      <span className="h-1.5 w-1.5 rounded-full" style={getSemanticDotStyle("neutral")} />
-      {t("common.paused")}
+  let tone: Parameters<typeof getSemanticStyle>[0] = "neutral";
+  let label = status || "unknown";
+
+  switch (status ?? "") {
+    case "active":
+      tone = "success";
+      label = t("common.active");
+      break;
+    case "paused":
+      tone = "neutral";
+      label = t("common.paused");
+      break;
+    case "validation_pending":
+      tone = "warning";
+      label = "Validating";
+      break;
+    case "validated":
+      tone = "info";
+      label = "Validated";
+      break;
+    case "failed_open":
+      tone = "danger";
+      label = "Failed open";
+      break;
+  }
+
+  return (
+    <span
+      className="inline-flex min-h-[28px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold"
+      style={getSemanticStyle(tone)}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={getSemanticDotStyle(tone)} />
+      {label}
     </span>
   );
 }

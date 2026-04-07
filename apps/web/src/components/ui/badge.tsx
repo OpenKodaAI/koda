@@ -20,13 +20,13 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground",
-        secondary: "bg-secondary text-secondary-foreground",
-        success: "bg-[var(--color-success-accent,var(--color-green-500))] text-white",
-        warning: "bg-[var(--color-warning-accent,var(--color-yellow-500))] text-white",
-        info: "bg-[var(--color-info-accent,var(--color-violet-500))] text-white",
-        outline: "border border-border bg-transparent text-secondary-foreground",
-        destructive: "bg-destructive text-destructive-foreground",
+        primary: "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]",
+        secondary: "bg-[var(--surface-hover)] text-[var(--text-primary)]",
+        success: "bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)]",
+        warning: "bg-[var(--tone-warning-bg-strong)] text-[var(--tone-warning-text)]",
+        info: "bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
+        outline: "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-secondary)]",
+        destructive: "bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)]",
       },
       appearance: {
         default: "",
@@ -52,32 +52,32 @@ const badgeVariants = cva(
       {
         variant: "primary",
         appearance: "light",
-        className: "bg-[var(--color-primary-soft,var(--color-blue-50))] text-[var(--color-primary-accent,var(--color-blue-700))]",
+        className: "bg-[var(--surface-hover)] text-[var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "light",
-        className: "bg-secondary text-secondary-foreground",
+        className: "bg-[var(--surface-panel-soft)] text-[var(--text-secondary)]",
       },
       {
         variant: "success",
         appearance: "light",
-        className: "bg-[var(--color-success-soft,var(--color-green-100))] text-[var(--color-success-accent,var(--color-green-800))]",
+        className: "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
       },
       {
         variant: "warning",
         appearance: "light",
-        className: "bg-[var(--color-warning-soft,var(--color-yellow-100))] text-[var(--color-warning-accent,var(--color-yellow-700))]",
+        className: "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
       },
       {
         variant: "info",
         appearance: "light",
-        className: "bg-[var(--color-info-soft,var(--color-violet-100))] text-[var(--color-info-accent,var(--color-violet-700))]",
+        className: "bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]",
       },
       {
         variant: "destructive",
         appearance: "light",
-        className: "bg-[var(--color-destructive-soft,var(--color-red-50))] text-[var(--color-destructive-accent,var(--color-red-700))]",
+        className: "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
       },
       {
         appearance: "ghost",
@@ -109,7 +109,7 @@ const badgeVariants = cva(
 );
 
 const badgeButtonVariants = cva(
-  "inline-flex size-3.5 cursor-pointer items-center justify-center rounded-md p-0 leading-none opacity-60 transition-all hover:opacity-100 [&>svg]:size-3.5 [&>svg]:opacity-100!",
+  "inline-flex size-3.5 cursor-pointer items-center justify-center rounded-md border border-transparent p-0 leading-none text-[var(--icon-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)] [&>svg]:size-3.5 [&>svg]:opacity-100!",
   {
     variants: {
       variant: {
@@ -160,7 +160,7 @@ function BadgeDot({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="badge-dot"
-      className={cn("size-1.5 rounded-full bg-[currentColor] opacity-75", className)}
+      className={cn("size-1.5 rounded-full bg-[currentColor]", className)}
       {...props}
     />
   );

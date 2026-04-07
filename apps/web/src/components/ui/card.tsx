@@ -18,9 +18,9 @@ const cardVariants = cva("flex flex-col items-stretch rounded-xl text-card-foreg
   variants: {
     variant: {
       default:
-        "rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] shadow-[inset_0_1px_0_rgba(255,255,255,0.018),0_12px_28px_rgba(0,0,0,0.12)]",
+        "rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)]",
       accent:
-        "rounded-[var(--radius-panel-sm)] bg-[rgba(255,255,255,0.014)] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.014),0_8px_22px_rgba(0,0,0,0.1)]",
+        "rounded-[var(--radius-panel-sm)] bg-[var(--surface-panel-soft)] p-1",
     },
   },
   defaultVariants: {

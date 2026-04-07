@@ -43,7 +43,7 @@ def _clip_text(raw_value: Any, limit: int = 160) -> str | None:
     return text[: limit - 1].rstrip() + "…"
 
 
-def _call_memory_engine_projection(
+async def _async_call_memory_engine_projection(
     agent_id: str,
     *,
     method_name: str,
@@ -51,6 +51,7 @@ def _call_memory_engine_projection(
     subject_id: str | None = None,
     action: str | None = None,
 ) -> dict[str, Any]:
+    """Run the full gRPC lifecycle (start → health → call → stop) in one event loop."""
     capability_by_method = {
         "list_curation_items": "curation",
         "get_memory_map": "memory_map",
@@ -59,7 +60,7 @@ def _call_memory_engine_projection(
     }
     client = build_memory_engine_client(agent_id=agent_id)
     try:
-        run_coro_sync(client.start())
+        await client.start()
         health = dict(client.health() or {})
         if not bool(health.get("ready", False)):
             raise RuntimeError("memory_engine_unavailable")
@@ -76,15 +77,38 @@ def _call_memory_engine_projection(
             kwargs["subject_id"] = subject_id
         if action is not None:
             kwargs["action"] = action
-        result = run_coro_sync(method(**kwargs))
+        result = await method(**kwargs)
         if isinstance(result, dict):
             return cast(dict[str, Any], result)
         raise RuntimeError(f"memory_engine_invalid_{method_name}_response")
-    except Exception as exc:
-        raise RuntimeError(f"memory_engine_projection_failed:{method_name}") from exc
     finally:
         with contextlib.suppress(Exception):
-            run_coro_sync(client.stop())
+            await client.stop()
+
+
+def _call_memory_engine_projection(
+    agent_id: str,
+    *,
+    method_name: str,
+    payload: dict[str, Any],
+    subject_id: str | None = None,
+    action: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return cast(
+            dict[str, Any],
+            run_coro_sync(
+                _async_call_memory_engine_projection(
+                    agent_id,
+                    method_name=method_name,
+                    payload=payload,
+                    subject_id=subject_id,
+                    action=action,
+                )
+            ),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"memory_engine_projection_failed:{method_name}") from exc
 
 
 def _memory_engine_supports(health: Mapping[str, Any], capability: str) -> bool:

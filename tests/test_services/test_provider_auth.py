@@ -1,5 +1,7 @@
 """Tests for provider auth process environment isolation."""
 
+import pytest
+
 from koda.services import provider_auth
 from koda.services.provider_auth import build_provider_process_env
 
@@ -42,12 +44,14 @@ def test_provider_process_env_inherits_ambient_safe_path_when_base_env_is_scoped
         auth_mode="subscription_login",
         base_env={
             "CLAUDE_HOME": "/tmp/claude-home",
+            "CLAUDE_CONFIG_DIR": "/tmp/claude-home/.claude",
         },
     )
 
     assert env["PATH"] == "/ambient/bin:/usr/bin"
     assert env["HOME"] == "/ambient/home"
     assert env["CLAUDE_HOME"] == "/tmp/claude-home"
+    assert env["CLAUDE_CONFIG_DIR"] == "/tmp/claude-home/.claude"
 
 
 def test_provider_login_command_respects_configured_binary_from_scoped_env(monkeypatch):
@@ -116,3 +120,21 @@ def test_ollama_local_process_env_keeps_base_url_without_api_key():
     assert env["OLLAMA_BASE_URL"] == "http://127.0.0.1:11434"
     assert "OLLAMA_API_KEY" not in env
     assert "OPENAI_API_KEY" not in env
+
+
+def test_resolve_provider_command_raises_file_not_found_when_cli_missing(monkeypatch):
+    monkeypatch.setattr(provider_auth.shutil, "which", lambda *a, **kw: None)
+
+    with pytest.raises(FileNotFoundError, match="claude"):
+        provider_auth.resolve_provider_command("claude")
+
+
+def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch):
+    monkeypatch.setattr(provider_auth.shutil, "which", lambda *a, **kw: None)
+
+    with pytest.raises(FileNotFoundError):
+        provider_auth.start_login_process(
+            "claude",
+            project_id="",
+            base_env={"PATH": "/nonexistent"},
+        )

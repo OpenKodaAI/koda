@@ -1,5 +1,8 @@
 """DevOps command handlers: /gh, /glab, /docker."""
 
+import os
+from contextlib import contextmanager, nullcontext
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -18,6 +21,23 @@ from koda.utils.command_helpers import authorized
 from koda.utils.messaging import send_long_message
 
 
+@contextmanager
+def _core_cli_env_context(integration_id: str):
+    current_agent = str(os.environ.get("AGENT_ID") or "").strip().upper()
+    if not current_agent:
+        with nullcontext(None) as env:
+            yield env
+        return
+
+    from koda.services.core_connection_broker import get_core_connection_broker
+
+    with get_core_connection_broker().materialize_cli_environment(integration_id, agent_id=current_agent) as (
+        _resolved,
+        env,
+    ):
+        yield env
+
+
 @authorized
 @with_approval("gh")
 async def cmd_gh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -32,7 +52,12 @@ async def cmd_gh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     work_dir = context.user_data["work_dir"]
-    result = await run_cli_command("gh", args, work_dir, blocked_pattern=BLOCKED_GH_PATTERN)
+    try:
+        with _core_cli_env_context("gh") as env:
+            result = await run_cli_command("gh", args, work_dir, blocked_pattern=BLOCKED_GH_PATTERN, env=env)
+    except RuntimeError as exc:
+        await update.message.reply_text(str(exc))
+        return
     await send_long_message(update, f"```\n{result}\n```")
 
 
@@ -50,7 +75,12 @@ async def cmd_glab(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     work_dir = context.user_data["work_dir"]
-    result = await run_cli_command("glab", args, work_dir, blocked_pattern=BLOCKED_GLAB_PATTERN)
+    try:
+        with _core_cli_env_context("glab") as env:
+            result = await run_cli_command("glab", args, work_dir, blocked_pattern=BLOCKED_GLAB_PATTERN, env=env)
+    except RuntimeError as exc:
+        await update.message.reply_text(str(exc))
+        return
     await send_long_message(update, f"```\n{result}\n```")
 
 

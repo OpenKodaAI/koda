@@ -8,12 +8,13 @@ import {
   ArrowLeft,
   ArrowRight,
   BrainCircuit,
-  CheckCircle2,
+  Check,
   Cpu,
   Database,
   Fingerprint,
   KeyRound,
   Rocket,
+  Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -24,14 +25,17 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { BotEditorProvider, useBotEditor } from "@/hooks/use-bot-editor";
 import { useTabNavigation } from "@/hooks/use-tab-navigation";
+import { requestJson } from "@/lib/http-client";
 import { cn } from "@/lib/utils";
 import type {
   ControlPlaneBot,
   ControlPlaneCompiledPrompt,
   ControlPlaneCoreCapabilities,
+  ControlPlaneCoreIntegrations,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
   ControlPlaneCoreTools,
+  ControlPlaneExecutionPolicyPayload,
   ControlPlaneSystemSettings,
   ControlPlaneWorkspaceTree,
 } from "@/lib/control-plane";
@@ -41,11 +45,13 @@ import { TabInstrucoes } from "./tabs/tab-instrucoes";
 import { TabPerfil } from "./tabs/tab-perfil";
 import { TabPublicacao } from "./tabs/tab-publicacao";
 import { TabRecursos } from "./tabs/tab-recursos";
+import { TabSkills } from "./tabs/tab-skills";
 
 const STEP_KEYS = [
   "identidade",
   "comportamento",
   "recursos",
+  "skills",
   "conhecimento",
   "escopo",
   "publicacao",
@@ -68,53 +74,62 @@ const STEP_DEFINITIONS: StepDefinition[] = [
     label: "Identidade",
     title: "Fundação do agente",
     description:
-      "Defina nome, presença visual, workspace e o endereço base do runtime sem misturar isso com instruções comportamentais.",
-    summary: "Quem é o agente e como ele aparece no catálogo.",
+      "Defina nome, aparência visual e conecte canais de comunicação como Telegram.",
+    summary: "Quem é o agente e como ele se conecta.",
     icon: Fingerprint,
   },
   {
     key: "comportamento",
     label: "Comportamento",
-    title: "Missão, regras e autonomia",
+    title: "Personalidade, instruções e limites",
     description:
-      "Organize missão, padrões de resposta, políticas e guardrails em uma etapa com mais espaço para escrita e governança real.",
-    summary: "Objetivo, qualidade, regras duras e nível de autonomia.",
+      "Configure missão, instruções de operação, formato de resposta e guardrails de segurança em seções objetivas.",
+    summary: "Personalidade, instruções, limites e autonomia.",
     icon: BrainCircuit,
   },
   {
     key: "recursos",
     label: "Recursos",
-    title: "Modelo, tools e capacidades",
+    title: "Modelo e voz",
     description:
-      "Escolha o envelope geral de raciocínio e as capabilities especializadas sem misturar providers gerais com mídia ou voz.",
-    summary: "Envelope de modelos, subset de tools, voz e imagem.",
+      "Escolha o provider e modelo de raciocínio, defina orçamento e configure capacidades de voz.",
+    summary: "Provider, modelo, orçamento e voz.",
     icon: Cpu,
+  },
+  {
+    key: "skills",
+    label: "Skills",
+    title: "Skills especializadas",
+    description:
+      "Configure a política de skills, crie skills customizadas com controle individual de ativação.",
+    summary: "Política de skills e skills customizadas.",
+    icon: Wand2,
   },
   {
     key: "conhecimento",
     label: "Conhecimento",
-    title: "Memória persistente e grounding",
+    title: "Memória e grounding",
     description:
-      "Mantenha a política de memória, RAG e ativos de conhecimento em uma etapa própria, enquanto o knowledge graph e a recuperação híbrida permanecem autônomos no runtime.",
-    summary: "Memória, RAG, assets, templates e skills.",
+      "Configure memória persistente, RAG e revise candidatos de conhecimento e runbooks aprovados.",
+    summary: "Memória, RAG e governança de conhecimento.",
     icon: Database,
   },
   {
     key: "escopo",
     label: "Escopo",
-    title: "Acesso a segredos e variáveis",
+    title: "Integrações, segredos e variáveis",
     description:
-      "Conceda apenas os recursos necessários para o agente operar com segurança, sem espalhar grants e segredos em outras etapas.",
-    summary: "Segredos, variáveis compartilhadas e local env.",
+      "Controle quais integrações o agente pode acessar e conceda segredos e variáveis necessários.",
+    summary: "Integrações, segredos e variáveis.",
     icon: KeyRound,
   },
   {
     key: "publicacao",
     label: "Publicação",
-    title: "Validação e runtime publicado",
+    title: "Salvar e publicar",
     description:
-      "Revise a composição final do agente, rode validações e publique sem sobrecarregar o restante do setup com detalhes operacionais.",
-    summary: "Validação, prompt compilado, pipeline e publicação.",
+      "Revise as alterações pendentes e publique o agente com um único clique.",
+    summary: "Resumo, salvar e publicar.",
     icon: Rocket,
   },
 ];
@@ -123,6 +138,7 @@ const STEP_COMPONENTS: Record<StepKey, ComponentType> = {
   identidade: TabPerfil,
   comportamento: TabInstrucoes,
   recursos: TabRecursos,
+  skills: TabSkills,
   conhecimento: TabConhecimento,
   escopo: TabEscopo,
   publicacao: TabPublicacao,
@@ -135,6 +151,7 @@ function dirtyForStep(step: StepKey, state: ReturnType<typeof useBotEditor>["sta
   if (step === "conhecimento") {
     return state.dirty.collections || state.dirty.agentSpec || state.dirty.documents;
   }
+  if (step === "skills") return state.dirty.agentSpec;
   if (step === "escopo") return state.dirty.agentSpec;
   return false;
 }
@@ -169,6 +186,13 @@ function EditorHeader({
     <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2" {...tourAnchor("editor.header")}>
       <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-3">
+          <Link
+            href="/control-plane"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)] hover:bg-[var(--surface-tint)]"
+            aria-label={tl("Voltar ao catalogo")}
+          >
+            <ArrowLeft size={16} />
+          </Link>
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.7rem]">
             <BotAgentGlyph
               botId={botId}
@@ -218,11 +242,20 @@ function EditorHeader({
               <button
                 type="button"
                 onClick={onNext}
-                className="inline-flex items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] px-3.5 py-2 text-sm text-[var(--text-primary)] shadow-none transition-colors hover:border-[rgba(255,255,255,0.16)] hover:bg-[rgba(255,255,255,0.05)]"
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm shadow-none transition-colors",
+                  nextStep
+                    ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
+                    : "font-semibold text-[var(--interactive-active-text)]",
+                )}
+                style={nextStep ? undefined : {
+                  background: "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
+                  border: "1px solid var(--interactive-active-border)",
+                }}
                 {...tourAnchor("editor.next-step")}
               >
-                {nextStep ? tl("Avançar") : tl("Revisar publicação")}
-                <ArrowRight size={15} />
+                {nextStep ? tl("Avançar") : tl("Salvar e Publicar")}
+                {nextStep ? <ArrowRight size={15} /> : null}
               </button>
               {hasUnsavedChanges ? (
                 <>
@@ -336,6 +369,23 @@ function InnerShell() {
     );
   }
 
+  async function handleSaveAndPublish() {
+    await runAction(
+      "save-editor",
+      async () => {
+        await persistDraft({ includeAgentSpec: true });
+        await requestJson(`/api/control-plane/agents/${state.bot.id}/publish`, {
+          method: "POST",
+        });
+        router.refresh();
+      },
+      {
+        successMessage: tl("Agente publicado com sucesso."),
+        errorMessage: tl("Erro ao publicar."),
+      },
+    );
+  }
+
   return (
     <div
       className="h-full min-h-0 w-full overflow-hidden"
@@ -347,14 +397,14 @@ function InnerShell() {
           nextStep={nextStep}
           hasUnsavedChanges={hasUnsavedChanges}
           onPrevious={() => previousStep && handleStepChange(previousStep.key)}
-          onNext={() => handleStepChange(nextStep ? nextStep.key : "publicacao")}
+          onNext={nextStep ? () => handleStepChange(nextStep.key) : handleSaveAndPublish}
           onDiscard={discardDraft}
           onSave={handleSaveDraft}
           isSaving={isPending("save-editor")}
           saveStatus={getStatus("save-editor")}
         />
 
-        <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[182px_minmax(0,1fr)]">
+        <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[auto_minmax(0,1fr)]">
           <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:border-b-0 lg:border-r" {...tourAnchor("editor.step-rail")}>
             <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
               <div className="mb-2 px-1.5">
@@ -377,68 +427,47 @@ function InnerShell() {
                       data-state={isActive ? "active" : isCompleted ? "completed" : "idle"}
                       {...tourAnchor(`editor.step.${step.key}`)}
                       className={cn(
-                        "group relative flex min-h-[50px] shrink-0 items-center gap-2.5 rounded-[1rem] border px-2 py-2 text-left transition-colors duration-200",
+                        "group relative flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-200",
                         isActive
-                          ? "border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.04)]"
-                          : isCompleted
-                            ? "border-transparent bg-transparent"
-                          : "border-transparent bg-transparent",
+                          ? "bg-[var(--surface-tint)]"
+                          : "bg-transparent hover:bg-[var(--surface-tint)]",
                       )}
                     >
+                      {/* Icon — no border, minimal */}
                       <span
                         className={cn(
-                          "absolute left-0 top-1/2 h-6 w-px -translate-y-1/2 rounded-full transition-opacity",
+                          "inline-flex h-7 w-7 shrink-0 items-center justify-center transition-colors",
                           isActive
-                            ? "bg-[rgba(255,255,255,0.3)] opacity-100"
+                            ? "text-[var(--text-primary)]"
                             : isCompleted
-                              ? "bg-[color-mix(in_srgb,var(--tone-success-border)_72%,transparent)] opacity-90"
-                              : "opacity-0 group-hover:opacity-70 bg-[var(--border-subtle)]",
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.9rem] border transition-colors",
-                          isActive
-                            ? "border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.06)] text-white"
-                            : isCompleted
-                              ? "border-[color-mix(in_srgb,var(--tone-success-border)_58%,transparent)] bg-[color-mix(in_srgb,var(--tone-success-bg)_38%,transparent)] text-[var(--tone-success-text)]"
-                              : "border-[var(--border-subtle)] bg-[rgba(255,255,255,0.02)] text-[var(--text-tertiary)]",
+                              ? "text-[var(--tone-success-dot)]"
+                              : "text-[var(--text-quaternary)]",
                         )}
                       >
-                      {step.completed ? <CheckCircle2 size={16} /> : <Icon size={16} />}
+                        {step.completed ? <Check size={17} /> : <Icon size={17} />}
                       </span>
 
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "text-[10px] font-medium uppercase tracking-[0.18em]",
-                              isCompleted
-                                ? "text-[var(--tone-success-muted)]"
-                                : "text-[var(--text-quaternary)]",
-                            )}
-                          >
-                            {step.index + 1}
-                          </span>
-                          <span
-                            className={cn(
-                              "text-[0.95rem] font-medium tracking-[-0.02em]",
-                              isCompleted
-                                ? "text-[var(--text-primary)]"
-                                : "text-[var(--text-primary)]",
-                            )}
-                          >
-                            {tl(step.label)}
-                          </span>
-                          {step.dirty ? (
-                            <span
-                              className="inline-block h-2 w-2 shrink-0 rounded-full animate-pulse"
-                              style={{ backgroundColor: "rgba(255,255,255,0.52)" }}
-                              aria-label={tl("Alteracoes nao salvas")}
-                            />
-                          ) : null}
-                        </span>
+                      {/* Label */}
+                      <span
+                        className={cn(
+                          "whitespace-nowrap text-sm font-medium",
+                          isActive
+                            ? "text-[var(--text-primary)]"
+                            : isCompleted
+                              ? "text-[var(--text-secondary)]"
+                              : "text-[var(--text-tertiary)]",
+                        )}
+                      >
+                        {tl(step.label)}
                       </span>
+
+                      {step.dirty ? (
+                        <span
+                          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full animate-pulse"
+                          style={{ backgroundColor: "var(--tone-warning-dot)" }}
+                          aria-label={tl("Alteracoes nao salvas")}
+                        />
+                      ) : null}
                     </button>
                   );
                 })}
@@ -460,11 +489,13 @@ function InnerShell() {
 interface BotEditorShellProps {
   bot: ControlPlaneBot;
   compiledPromptPayload?: ControlPlaneCompiledPrompt | null;
+  executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null;
   core: {
     tools: ControlPlaneCoreTools;
     providers: ControlPlaneCoreProviders;
     policies: ControlPlaneCorePolicies;
     capabilities: ControlPlaneCoreCapabilities;
+    integrations?: ControlPlaneCoreIntegrations;
   };
   workspaces: ControlPlaneWorkspaceTree;
   systemSettings: ControlPlaneSystemSettings;
@@ -473,6 +504,7 @@ interface BotEditorShellProps {
 export function BotEditorShell({
   bot,
   compiledPromptPayload,
+  executionPolicyPayload,
   core,
   workspaces,
   systemSettings,
@@ -481,6 +513,7 @@ export function BotEditorShell({
     <BotEditorProvider
       bot={bot}
       compiledPromptPayload={compiledPromptPayload}
+      executionPolicyPayload={executionPolicyPayload}
       core={core}
       workspaces={workspaces}
       systemSettings={systemSettings}

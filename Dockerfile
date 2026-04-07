@@ -1,22 +1,29 @@
-# Multi-stage build: Python + Node (for Claude CLI)
+# Multi-stage build: Python + Node (for provider CLIs)
 FROM node:22-slim AS node-base
 
-# Install Claude CLI globally
-RUN npm install -g @anthropic-ai/claude-code
+# Install provider CLIs globally
+RUN npm install -g \
+    @anthropic-ai/claude-code \
+    @openai/codex \
+    @google/gemini-cli \
+    @googleworkspace/cli
 
 FROM python:3.12-slim
 
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
+ENV RUNNING_IN_DOCKER=true
 
-# Copy Node.js and Claude CLI from node stage
+RUN python -m pip install --no-cache-dir --upgrade pip==26.0
+
+# Copy Node.js, npm helpers, and provider CLIs from node stage
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node-base /usr/local/bin/claude /usr/local/bin/claude
-RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
-
-# Install Google Workspace CLI
-RUN npm install -g @googleworkspace/cli
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && ln -sf /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
+    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini \
+    && ln -sf /usr/local/lib/node_modules/@googleworkspace/cli/run.js /usr/local/bin/gws
 
 # Install system dependencies and CLI tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,11 +32,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     ffmpeg \
     espeak-ng \
-    xvfb \
-    openbox \
-    x11vnc \
-    websockify \
     && rm -rf /var/lib/apt/lists/*
+
+# X11/browser display packages — opt out with --build-arg INSTALL_BROWSER_DEPS=false
+ARG INSTALL_BROWSER_DEPS=true
+RUN if [ "$INSTALL_BROWSER_DEPS" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        xvfb openbox x11vnc websockify && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -92,7 +103,7 @@ PY
 RUN pip install --no-cache-dir playwright && playwright install --with-deps chromium
 
 # Create required directories
-RUN mkdir -p tmp_images data /var/lib/koda/state /var/lib/koda/runtime /var/lib/koda/artifacts \
+RUN mkdir -p tmp_images data /var/lib/koda/state /var/lib/koda/runtime /var/lib/koda/runtime/home /var/lib/koda/artifacts \
     && chown -R botuser:botuser /app /var/lib/koda
 
 USER botuser

@@ -55,6 +55,49 @@ export async function requestJson<T = unknown>(
   return readJsonResponse<T>(response);
 }
 
+/**
+ * Extract field-level validation errors from a 400 response.
+ * NOTE: This consumes the response body. If the body was already read
+ * (e.g. via parseResponseError), pass the parsed payload to avoid a
+ * failed re-read. Use the overload that accepts a pre-parsed object
+ * when the response has already been consumed.
+ */
+export function parseValidationErrors(payload: Record<string, unknown>): {
+  message: string | null;
+  fieldErrors: Record<string, string[]> | null;
+};
+export function parseValidationErrors(response: Response): Promise<{
+  message: string | null;
+  fieldErrors: Record<string, string[]> | null;
+}>;
+export function parseValidationErrors(input: Response | Record<string, unknown>) {
+  if (!(input instanceof Response)) {
+    return {
+      message: "error" in input ? String(input.error) : null,
+      fieldErrors:
+        "fieldErrors" in input
+          ? (input.fieldErrors as Record<string, string[]>)
+          : null,
+    };
+  }
+
+  return _parseValidationErrorsFromResponse(input);
+}
+
+async function _parseValidationErrorsFromResponse(response: Response) {
+  const payload = await response.json().catch(() => null);
+  if (payload && typeof payload === "object") {
+    return {
+      message: "error" in payload ? String(payload.error) : null,
+      fieldErrors:
+        "fieldErrors" in payload
+          ? (payload.fieldErrors as Record<string, string[]>)
+          : null,
+    };
+  }
+  return { message: null, fieldErrors: null };
+}
+
 export async function requestJsonAllowError<T = unknown>(
   path: string,
   init: RequestInit = {},

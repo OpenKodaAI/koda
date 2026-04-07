@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from koda.knowledge.manager import KnowledgeManager
-from koda.knowledge.policy import (
+from koda.knowledge.task_policy_defaults import (
     ExecutionPolicy,
     classify_task_kind,
     default_execution_policy,

@@ -37,21 +37,30 @@ class TestJiraHandler:
     @pytest.mark.asyncio
     async def test_jira_disabled(self, mock_update, mock_context):
         mock_context.args = ["issues", "search", "--jql", "project = PROJ"]
-        with patch("koda.handlers.atlassian.JIRA_ENABLED", False):
+        with (
+            patch("koda.handlers.atlassian.JIRA_ENABLED", False),
+            patch("koda.services.execution_policy.JIRA_ENABLED", False),
+        ):
             await cmd_jira(mock_update, mock_context)
         assert "disabled" in mock_update.message.reply_text.call_args[0][0].lower()
 
     @pytest.mark.asyncio
     async def test_jira_no_args(self, mock_update, mock_context):
         mock_context.args = []
-        with patch("koda.handlers.atlassian.JIRA_ENABLED", True):
+        with (
+            patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
+        ):
             await cmd_jira(mock_update, mock_context)
         assert "Usage" in mock_update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_jira_blocked_pattern(self, mock_update, mock_context):
         mock_context.args = ["projects", "delete", "--key", "PROJ"]
-        with patch("koda.handlers.atlassian.JIRA_ENABLED", True):
+        with (
+            patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
+        ):
             await cmd_jira(mock_update, mock_context)
         assert "blocked" in mock_update.message.reply_text.call_args[0][0].lower()
 
@@ -60,6 +69,7 @@ class TestJiraHandler:
         mock_context.args = ["issues", "search", "--jql", "project = PROJ"]
         with (
             patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
             patch("koda.handlers.atlassian.get_jira_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):
@@ -72,6 +82,7 @@ class TestJiraHandler:
         mock_context.args = ["search", "--jql", "project = PROJ"]
         with (
             patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
             patch("koda.handlers.atlassian.get_jira_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):
@@ -86,6 +97,7 @@ class TestJiraHandler:
         mock_context.args = ["comment_get", "--key", "PROJ-1", "--comment-id", "100"]
         with (
             patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
             patch("koda.handlers.atlassian.get_jira_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):
@@ -100,6 +112,7 @@ class TestJiraHandler:
         mock_context.args = ["list"]
         with (
             patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
             patch("koda.handlers.atlassian.get_jira_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):
@@ -113,6 +126,7 @@ class TestJiraHandler:
         mock_context.args = ["list", "--board-id", "42"]
         with (
             patch("koda.handlers.atlassian.JIRA_ENABLED", True),
+            patch("koda.services.execution_policy.JIRA_ENABLED", True),
             patch("koda.handlers.atlassian.get_jira_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):
@@ -126,21 +140,30 @@ class TestConfluenceHandler:
     @pytest.mark.asyncio
     async def test_confluence_disabled(self, mock_update, mock_context):
         mock_context.args = ["pages", "search", "--cql", "space = DEV"]
-        with patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", False):
+        with (
+            patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", False),
+            patch("koda.services.execution_policy.CONFLUENCE_ENABLED", False),
+        ):
             await cmd_confluence(mock_update, mock_context)
         assert "disabled" in mock_update.message.reply_text.call_args[0][0].lower()
 
     @pytest.mark.asyncio
     async def test_confluence_no_args(self, mock_update, mock_context):
         mock_context.args = []
-        with patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", True):
+        with (
+            patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", True),
+            patch("koda.services.execution_policy.CONFLUENCE_ENABLED", True),
+        ):
             await cmd_confluence(mock_update, mock_context)
         assert "Usage" in mock_update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_confluence_blocked_pattern(self, mock_update, mock_context):
         mock_context.args = ["spaces", "delete", "--key", "DEV"]
-        with patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", True):
+        with (
+            patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", True),
+            patch("koda.services.execution_policy.CONFLUENCE_ENABLED", True),
+        ):
             await cmd_confluence(mock_update, mock_context)
         assert "blocked" in mock_update.message.reply_text.call_args[0][0].lower()
 
@@ -149,6 +172,7 @@ class TestConfluenceHandler:
         mock_context.args = ["pages", "search", "--cql", "space = DEV"]
         with (
             patch("koda.handlers.atlassian.CONFLUENCE_ENABLED", True),
+            patch("koda.services.execution_policy.CONFLUENCE_ENABLED", True),
             patch("koda.handlers.atlassian.get_confluence_service") as mock_svc,
             patch("koda.handlers.atlassian.send_long_message", new_callable=AsyncMock),
         ):

@@ -339,7 +339,7 @@ class KnowledgeV2PostgresBackend:
 
     @asynccontextmanager
     async def _connection(self) -> AsyncIterator[Any]:
-        if not self.bootstrapped:
+        if not self.bootstrapped and not await self.start():
             raise RuntimeError("knowledge_v2_postgres_backend_unavailable")
         await self._ensure_pool()
         if self._pool is not None:
@@ -1139,6 +1139,8 @@ class KnowledgeV2PostgresBackend:
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
                             color TEXT NOT NULL DEFAULT '',
+                            spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
+                            documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL
                         )""",
@@ -1148,6 +1150,8 @@ class KnowledgeV2PostgresBackend:
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
                             color TEXT NOT NULL DEFAULT '',
+                            spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
+                            documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL,
                             UNIQUE (workspace_id, name)
@@ -1296,6 +1300,14 @@ class KnowledgeV2PostgresBackend:
                     f"""CREATE INDEX IF NOT EXISTS idx_cp_agent_definitions_squad
                            ON "{schema}"."cp_agent_definitions"
                            (squad_id)""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS spec_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS documents_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_workspace_squads"
+                           ADD COLUMN IF NOT EXISTS spec_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_workspace_squads"
+                           ADD COLUMN IF NOT EXISTS documents_json TEXT NOT NULL DEFAULT '{{}}'""",
                 ),
             ),
             _Migration(
@@ -1601,6 +1613,378 @@ class KnowledgeV2PostgresBackend:
                     f"""CREATE INDEX IF NOT EXISTS idx_response_cache_expires
                            ON "{schema}"."response_cache"
                            (agent_id, expires_at, is_active)""",
+                ),
+            ),
+            _Migration(
+                "011_mcp_bridge_tables",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_server_catalog" (
+                            server_key TEXT PRIMARY KEY,
+                            display_name TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            transport_type TEXT NOT NULL DEFAULT 'stdio',
+                            command_json TEXT NOT NULL DEFAULT '[]',
+                            url TEXT,
+                            env_schema_json TEXT NOT NULL DEFAULT '[]',
+                            documentation_url TEXT,
+                            logo_key TEXT,
+                            category TEXT NOT NULL DEFAULT 'general',
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_agent_connections" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            transport_override TEXT,
+                            command_override_json TEXT,
+                            url_override TEXT,
+                            env_values_json TEXT NOT NULL DEFAULT '{{}}',
+                            last_connected_at TEXT,
+                            last_error TEXT,
+                            cached_tools_json TEXT,
+                            cached_tools_at TEXT,
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            PRIMARY KEY (agent_id, server_key)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_agent_connections_agent
+                           ON "{schema}"."cp_mcp_agent_connections" (agent_id)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_discovered_tools" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            tool_name TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            input_schema_json TEXT NOT NULL DEFAULT '{{}}',
+                            annotations_json TEXT NOT NULL DEFAULT '{{}}',
+                            risk_level TEXT NOT NULL DEFAULT 'read',
+                            schema_hash TEXT NOT NULL DEFAULT '',
+                            discovered_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            PRIMARY KEY (agent_id, server_key, tool_name)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_discovered_tools_lookup
+                           ON "{schema}"."cp_mcp_discovered_tools" (agent_id, server_key)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_tool_policies" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            tool_name TEXT NOT NULL,
+                            policy TEXT NOT NULL DEFAULT 'auto',
+                            updated_at TEXT NOT NULL,
+                            PRIMARY KEY (agent_id, server_key, tool_name)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_tool_policies_lookup
+                           ON "{schema}"."cp_mcp_tool_policies" (agent_id, server_key)""",
+                ),
+            ),
+            _Migration(
+                "012_mcp_oauth_support",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_oauth_provider_configs" (
+                            server_key TEXT PRIMARY KEY,
+                            oauth_enabled INTEGER NOT NULL DEFAULT 0,
+                            authorization_url TEXT NOT NULL,
+                            token_url TEXT NOT NULL,
+                            client_id TEXT NOT NULL,
+                            client_secret_encrypted TEXT NOT NULL,
+                            scopes TEXT NOT NULL DEFAULT '',
+                            pkce_required INTEGER NOT NULL DEFAULT 0,
+                            token_env_mapping_json TEXT NOT NULL DEFAULT '{{}}',
+                            extra_auth_params_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_oauth_tokens" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            access_token_encrypted TEXT,
+                            refresh_token_encrypted TEXT,
+                            token_type TEXT DEFAULT 'Bearer',
+                            expires_at TIMESTAMPTZ,
+                            scopes_granted TEXT DEFAULT '',
+                            provider_account_id TEXT,
+                            provider_account_label TEXT,
+                            last_refreshed_at TIMESTAMPTZ,
+                            last_error TEXT,
+                            oauth_context_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key)
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_oauth_sessions" (
+                            session_id TEXT PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            state_param TEXT NOT NULL,
+                            code_verifier TEXT,
+                            redirect_uri TEXT NOT NULL,
+                            frontend_callback_uri TEXT NOT NULL DEFAULT '',
+                            oauth_context_json TEXT NOT NULL DEFAULT '{{}}',
+                            status TEXT NOT NULL DEFAULT 'pending',
+                            error_message TEXT,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            expires_at TIMESTAMPTZ NOT NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_oauth_sessions_state
+                           ON "{schema}"."cp_mcp_oauth_sessions" (state_param)""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_agent_connections"
+                           ADD COLUMN IF NOT EXISTS auth_method TEXT NOT NULL DEFAULT 'manual'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS oauth_enabled INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS transport_kind TEXT NOT NULL DEFAULT 'local'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS auth_strategy TEXT NOT NULL DEFAULT 'no_auth'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS official_support_level TEXT NOT NULL DEFAULT 'community_manual'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS oauth_mode TEXT NOT NULL DEFAULT 'none'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS oauth_metadata_url TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS remote_url TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS headers_schema_json TEXT NOT NULL DEFAULT '[]'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS tool_discovery_mode TEXT NOT NULL DEFAULT 'runtime'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS vendor_notes TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS default_policy TEXT NOT NULL DEFAULT 'always_ask'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_sessions"
+                           ADD COLUMN IF NOT EXISTS frontend_callback_uri TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_sessions"
+                           ADD COLUMN IF NOT EXISTS oauth_context_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_sessions"
+                           ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_tokens"
+                           ADD COLUMN IF NOT EXISTS oauth_context_json TEXT NOT NULL DEFAULT '{{}}'""",
+                ),
+            ),
+            _Migration(
+                "013_connection_discovery_history",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_connection_discovery_runs" (
+                            run_id TEXT PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            connection_key TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'succeeded',
+                            tool_count INTEGER NOT NULL DEFAULT 0,
+                            diff_json TEXT NOT NULL DEFAULT '{{}}',
+                            error TEXT NOT NULL DEFAULT '',
+                            discovered_at TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_connection_discovery_runs_lookup
+                           ON "{schema}"."cp_connection_discovery_runs" (agent_id, connection_key, discovered_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_connection_discovery_run_tools" (
+                            run_id TEXT NOT NULL,
+                            tool_name TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            input_schema_json TEXT NOT NULL DEFAULT '{{}}',
+                            annotations_json TEXT NOT NULL DEFAULT '{{}}',
+                            risk_level TEXT NOT NULL DEFAULT 'read',
+                            signature_hash TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            PRIMARY KEY (run_id, tool_name)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_connection_discovery_run_tools_lookup
+                           ON "{schema}"."cp_connection_discovery_run_tools" (run_id)""",
+                ),
+            ),
+            _Migration(
+                "015_operator_auth",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_operator_users" (
+                            id TEXT PRIMARY KEY,
+                            username TEXT NOT NULL UNIQUE,
+                            email TEXT NOT NULL UNIQUE,
+                            display_name TEXT NOT NULL DEFAULT '',
+                            password_hash TEXT NOT NULL,
+                            role TEXT NOT NULL DEFAULT 'owner',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            last_login_at TEXT NOT NULL DEFAULT '',
+                            failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+                            locked_until TEXT NOT NULL DEFAULT '',
+                            disabled INTEGER NOT NULL DEFAULT 0
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_operator_users_lookup
+                           ON "{schema}"."cp_operator_users" (lower(username), lower(email))""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_operator_sessions" (
+                            session_id TEXT PRIMARY KEY,
+                            user_id TEXT,
+                            token_hash TEXT NOT NULL UNIQUE,
+                            subject_type TEXT NOT NULL DEFAULT 'operator',
+                            label TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            last_used_at TEXT NOT NULL,
+                            expires_at TEXT NOT NULL,
+                            revoked_at TEXT NOT NULL DEFAULT '',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}'
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_operator_sessions_lookup
+                           ON "{schema}"."cp_operator_sessions" (user_id, revoked_at, expires_at)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_operator_tokens" (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            token_name TEXT NOT NULL DEFAULT '',
+                            token_hash TEXT NOT NULL UNIQUE,
+                            token_prefix TEXT NOT NULL DEFAULT '',
+                            scopes_json TEXT NOT NULL DEFAULT '[]',
+                            created_at TEXT NOT NULL,
+                            last_used_at TEXT NOT NULL DEFAULT '',
+                            expires_at TEXT NOT NULL DEFAULT '',
+                            revoked_at TEXT NOT NULL DEFAULT '',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}'
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_operator_tokens_lookup
+                           ON "{schema}"."cp_operator_tokens" (user_id, revoked_at, expires_at)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_bootstrap_codes" (
+                            id TEXT PRIMARY KEY,
+                            code_hash TEXT NOT NULL UNIQUE,
+                            code_hint TEXT NOT NULL DEFAULT '',
+                            purpose TEXT NOT NULL DEFAULT 'owner_setup',
+                            created_at TEXT NOT NULL,
+                            expires_at TEXT NOT NULL,
+                            consumed_at TEXT NOT NULL DEFAULT '',
+                            exchange_token_hash TEXT NOT NULL DEFAULT '',
+                            exchange_issued_at TEXT NOT NULL DEFAULT '',
+                            exchange_expires_at TEXT NOT NULL DEFAULT '',
+                            exchange_consumed_at TEXT NOT NULL DEFAULT '',
+                            issued_by TEXT NOT NULL DEFAULT '',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}'
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_bootstrap_codes_expiry
+                           ON "{schema}"."cp_bootstrap_codes" (expires_at, exchange_expires_at)""",
+                ),
+            ),
+            _Migration(
+                "016_agent_core_connections",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_connection_defaults" (
+                            connection_key TEXT PRIMARY KEY,
+                            kind TEXT NOT NULL DEFAULT 'core',
+                            integration_key TEXT NOT NULL,
+                            auth_method TEXT NOT NULL DEFAULT 'none',
+                            configured INTEGER NOT NULL DEFAULT 0,
+                            verified INTEGER NOT NULL DEFAULT 0,
+                            account_label TEXT NOT NULL DEFAULT '',
+                            provider_account_id TEXT NOT NULL DEFAULT '',
+                            expires_at TEXT NOT NULL DEFAULT '',
+                            source_origin TEXT NOT NULL DEFAULT 'system_default',
+                            last_verified_at TEXT NOT NULL DEFAULT '',
+                            last_error TEXT NOT NULL DEFAULT '',
+                            auth_expired INTEGER NOT NULL DEFAULT 0,
+                            checked_via TEXT NOT NULL DEFAULT '',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_connection_defaults_lookup
+                           ON "{schema}"."cp_connection_defaults" (kind, integration_key, updated_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_agent_connections" (
+                            agent_id TEXT NOT NULL,
+                            connection_key TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            integration_key TEXT NOT NULL,
+                            auth_method TEXT NOT NULL DEFAULT 'none',
+                            source_origin TEXT NOT NULL DEFAULT 'agent_binding',
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            configured INTEGER NOT NULL DEFAULT 0,
+                            verified INTEGER NOT NULL DEFAULT 0,
+                            account_label TEXT NOT NULL DEFAULT '',
+                            provider_account_id TEXT NOT NULL DEFAULT '',
+                            expires_at TEXT NOT NULL DEFAULT '',
+                            last_verified_at TEXT NOT NULL DEFAULT '',
+                            last_error TEXT NOT NULL DEFAULT '',
+                            auth_expired INTEGER NOT NULL DEFAULT 0,
+                            checked_via TEXT NOT NULL DEFAULT '',
+                            config_json TEXT NOT NULL DEFAULT '{{}}',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            PRIMARY KEY (agent_id, connection_key)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_agent_connections_lookup
+                           ON "{schema}"."cp_agent_connections" (agent_id, kind, integration_key, updated_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "017_drop_legacy_integration_connections",
+                (
+                    f"""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = '{schema}'
+                              AND table_name = 'cp_integration_connections'
+                        ) THEN
+                            INSERT INTO "{schema}"."cp_connection_defaults" (
+                                connection_key,
+                                kind,
+                                integration_key,
+                                auth_method,
+                                configured,
+                                verified,
+                                account_label,
+                                provider_account_id,
+                                expires_at,
+                                source_origin,
+                                last_verified_at,
+                                last_error,
+                                auth_expired,
+                                checked_via,
+                                metadata_json,
+                                created_at,
+                                updated_at
+                            )
+                            SELECT
+                                'core:' || integration_id,
+                                'core',
+                                integration_id,
+                                auth_mode,
+                                configured,
+                                verified,
+                                account_label,
+                                COALESCE(metadata_json::jsonb ->> 'provider_account_id', ''),
+                                COALESCE(metadata_json::jsonb ->> 'expires_at', ''),
+                                'system_default',
+                                last_verified_at,
+                                last_error,
+                                auth_expired,
+                                checked_via,
+                                metadata_json,
+                                created_at,
+                                updated_at
+                            FROM "{schema}"."cp_integration_connections"
+                            ON CONFLICT (connection_key) DO UPDATE SET
+                                auth_method = EXCLUDED.auth_method,
+                                configured = EXCLUDED.configured,
+                                verified = EXCLUDED.verified,
+                                account_label = EXCLUDED.account_label,
+                                provider_account_id = EXCLUDED.provider_account_id,
+                                expires_at = EXCLUDED.expires_at,
+                                source_origin = EXCLUDED.source_origin,
+                                last_verified_at = EXCLUDED.last_verified_at,
+                                last_error = EXCLUDED.last_error,
+                                auth_expired = EXCLUDED.auth_expired,
+                                checked_via = EXCLUDED.checked_via,
+                                metadata_json = EXCLUDED.metadata_json,
+                                updated_at = EXCLUDED.updated_at;
+
+                            DROP TABLE "{schema}"."cp_integration_connections";
+                        END IF;
+                    END
+                    $$;
+                    """,
                 ),
             ),
         )

@@ -75,21 +75,22 @@ export function CostConversationTable({ rows, className }: CostConversationTable
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[rgba(255,255,255,0.06)] bg-[rgba(8,8,9,0.92)]",
+        "overflow-hidden rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]",
         className
       )}
       style={{
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025), 0 18px 42px rgba(0,0,0,0.18)",
+        boxShadow:
+          "inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent), 0 18px 42px rgba(0,0,0,0.12)",
       }}
     >
-      <div className="flex items-end justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-5 py-4">
+      <div className="flex items-end justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
         <div>
           <p className="eyebrow">{t("costs.ledger.eyebrow")}</p>
           <h3 className="mt-2 text-[1.1rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
             {t("costs.ledger.title")}
           </h3>
         </div>
-        <span className="text-[11px] text-[rgba(255,255,255,0.42)]">
+        <span className="text-[11px] text-[var(--text-tertiary)]">
           {t("costs.ledger.count", { count: rows.length })}
         </span>
       </div>
@@ -103,7 +104,7 @@ export function CostConversationTable({ rows, className }: CostConversationTable
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-[rgba(255,255,255,0.06)]">
+        <div className="divide-y divide-[var(--border-subtle)]">
           {rows.map((row) => {
             const tone = getStatusTone(row.status);
             const toneVars = getSemanticVars(tone);
@@ -147,7 +148,7 @@ export function CostConversationTable({ rows, className }: CostConversationTable
                       t("costs.page.noRecentPreview", { defaultValue: "No recent preview" })}
                   </p>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[rgba(255,255,255,0.46)]">
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-tertiary)]">
                     <span>
                       {row.dominant_model
                         ? truncateText(row.dominant_model, 24)
@@ -175,7 +176,7 @@ export function CostConversationTable({ rows, className }: CostConversationTable
                 </div>
 
                 <div className="text-left lg:text-right">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgba(255,255,255,0.32)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
                     {t("common.cost")}
                   </p>
                   <p className="mt-2 font-mono text-[1.2rem] font-medium text-[var(--text-primary)]">

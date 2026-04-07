@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -236,9 +236,10 @@ class TestCmdProviderModelDbEnvCoverage:
     @pytest.mark.asyncio
     async def test_model_with_arg_does_not_mutate_local_state_when_persist_fails(self, mock_update, mock_context):
         mock_context.user_data["provider"] = "codex"
-        mock_context.user_data["model"] = "o3"
         mock_context.args = ["gpt-5.4"]
         init_user_data(mock_context.user_data)
+        mock_context.user_data["model"] = "o3"
+        mock_context.user_data["manual_models_by_provider"]["codex"] = "o3"
         mock_context.user_data["available_models_by_provider"] = {"codex": ["gpt-5.4", "o3"]}
 
         with patch("koda.handlers.commands.set_agent_general_model", side_effect=ValueError("boom")):
@@ -471,72 +472,12 @@ class TestCmdProviderModelDbEnvCoverage:
         assert mock_context.user_data["tts_voice"] == original_voice
 
     @pytest.mark.asyncio
-    async def test_dbenv_unconfigured_reports_absence(self, mock_update, mock_context):
+    async def test_dbenv_redirects_to_mcp(self, mock_update, mock_context):
         init_user_data(mock_context.user_data)
 
-        with (
-            patch("koda.config.POSTGRES_ENABLED", False),
-            patch(
-                "koda.services.db_manager.DBManager.available_envs",
-                new_callable=PropertyMock,
-                return_value=["prod"],
-            ),
-        ):
-            await cmd_dbenv(mock_update, mock_context)
+        await cmd_dbenv(mock_update, mock_context)
 
-        assert "not configured" in mock_update.message.reply_text.call_args.args[0]
-
-    @pytest.mark.asyncio
-    async def test_dbenv_invalid_env_shows_error(self, mock_update, mock_context):
-        mock_context.args = ["qa"]
-        init_user_data(mock_context.user_data)
-
-        with (
-            patch("koda.config.POSTGRES_ENABLED", True),
-            patch(
-                "koda.services.db_manager.DBManager.available_envs",
-                new_callable=PropertyMock,
-                return_value=["prod", "dev"],
-            ),
-        ):
-            await cmd_dbenv(mock_update, mock_context)
-
-        assert "Unknown env" in mock_update.message.reply_text.call_args.args[0]
-
-    @pytest.mark.asyncio
-    async def test_dbenv_sets_selected_env(self, mock_update, mock_context):
-        mock_context.args = ["dev"]
-        init_user_data(mock_context.user_data)
-
-        with (
-            patch("koda.config.POSTGRES_ENABLED", True),
-            patch(
-                "koda.services.db_manager.DBManager.available_envs",
-                new_callable=PropertyMock,
-                return_value=["prod", "dev"],
-            ),
-        ):
-            await cmd_dbenv(mock_update, mock_context)
-
-        assert mock_context.user_data["postgres_env"] == "dev"
-
-    @pytest.mark.asyncio
-    async def test_dbenv_without_args_shows_keyboard(self, mock_update, mock_context):
-        mock_context.args = []
-        init_user_data(mock_context.user_data)
-
-        with (
-            patch("koda.config.POSTGRES_ENABLED", True),
-            patch(
-                "koda.services.db_manager.DBManager.available_envs",
-                new_callable=PropertyMock,
-                return_value=["prod", "dev"],
-            ),
-        ):
-            await cmd_dbenv(mock_update, mock_context)
-
-        reply_markup = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
-        assert reply_markup.inline_keyboard
+        assert "mcp" in mock_update.message.reply_text.call_args.args[0].lower()
 
 
 class TestCmdTasksTaskCoverage:
@@ -672,6 +613,17 @@ class TestCmdRuntimeCoverage:
 
         mock_run.assert_awaited_once()
         mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shell_rejects_write_command_before_approval(self, mock_update, mock_context):
+        mock_context.args = ["rm", "-rf", "/"]
+        init_user_data(mock_context.user_data)
+
+        with patch("koda.handlers.commands.run_shell_command", new_callable=AsyncMock) as mock_run:
+            await cmd_shell(mock_update, mock_context)
+
+        mock_run.assert_not_awaited()
+        assert "read-only" in mock_update.message.reply_text.call_args.args[0].lower()
 
     @pytest.mark.asyncio
     async def test_git_rejects_disallowed_subcommand(self, mock_update, mock_context):

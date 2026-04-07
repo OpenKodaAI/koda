@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
@@ -69,34 +68,21 @@ export function ConfirmationDialog({
   }
 
   return createPortal(
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="app-overlay-backdrop z-[70]"
-            onClick={onCancel}
-            aria-hidden="true"
-          />
+    open ? (
+      <>
+        <div
+          className="app-overlay-backdrop z-[70]"
+          onClick={onCancel}
+          aria-hidden="true"
+        />
 
-          {/* Dialog */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="app-modal-frame z-[80] overflow-y-auto px-4 py-6 sm:px-6"
-          >
+        <div className="app-modal-frame z-[80] overflow-y-auto px-4 py-6 sm:px-6">
             <div
               role="alertdialog"
               aria-modal="true"
               aria-labelledby="confirm-dialog-title"
               aria-describedby="confirm-dialog-message"
-              className="app-modal-panel relative z-10 w-full max-w-[34rem] p-5 sm:p-6"
+              className="app-modal-panel relative w-full max-w-[34rem] p-5 sm:p-6"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="mb-5 flex items-start justify-between gap-4">
@@ -164,11 +150,9 @@ export function ConfirmationDialog({
                 </div>
               </div>
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-    ,
+          </div>
+      </>
+      ) : null,
     document.body
   );
 }

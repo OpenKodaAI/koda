@@ -5,13 +5,16 @@ import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 
-export function useBotStats(botId?: string, refreshInterval: number = 10000) {
+export function useBotStats(botId?: string) {
   const query = useControlPlaneQuery<BotStats[]>({
     tier: "live",
     queryKey: botId
       ? queryKeys.dashboard.botStatsDetail(botId)
       : queryKeys.dashboard.botStatsSummary(),
-    refetchInterval: refreshInterval,
+    refetchInterval: (query) => {
+      const hasActive = (query.state.data ?? []).some((s) => s.activeTasks > 0);
+      return hasActive ? 8_000 : 30_000;
+    },
     queryFn: async ({ signal }) => {
       if (botId) {
         const item = await fetchControlPlaneDashboardJson<BotStats>(

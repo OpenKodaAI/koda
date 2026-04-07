@@ -12,6 +12,7 @@ type ExecutionFilters = {
   botIds?: string[];
   status?: string;
   search?: string;
+  sessionId?: string;
   limit?: number;
 };
 
@@ -83,10 +84,14 @@ export const queryKeys = {
       ] as const,
     sessionDetail: (botId: string, sessionId: string) =>
       ["dashboard", "sessions", botId, sessionId] as const,
+    botSchedules: (botId: string) =>
+      ["dashboard", "bots", botId, "schedules"] as const,
   },
   runtime: {
     overview: (botId: string, language?: string) =>
       ["runtime", "overview", botId, language ?? ""] as const,
+    task: (botId: string, taskId: number) =>
+      ["runtime", "task", botId, taskId] as const,
   },
 };
 

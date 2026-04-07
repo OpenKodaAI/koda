@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from koda import config
 from koda.internal_rpc.common import (
     EngineSelection,
+    create_grpc_channel,
     ensure_generated_proto_path,
     normalize_internal_service_probe,
     resolve_grpc_target,
@@ -125,8 +126,6 @@ class GrpcRetrievalEngineClient:
 
     async def start(self) -> None:
         try:
-            import grpc
-
             ensure_generated_proto_path()
             from common.v1 import metadata_pb2
             from retrieval.v1 import retrieval_pb2, retrieval_pb2_grpc
@@ -139,7 +138,7 @@ class GrpcRetrievalEngineClient:
             }
             raise RuntimeError("grpc_retrieval_engine_client_requires_retrieval_stubs") from exc
 
-        self._channel = grpc.insecure_channel(self._target)
+        self._channel = create_grpc_channel(self._target)
         self._metadata_pb2 = metadata_pb2
         self._retrieval_pb2 = retrieval_pb2
         self._stub = retrieval_pb2_grpc.RetrievalEngineServiceStub(self._channel)

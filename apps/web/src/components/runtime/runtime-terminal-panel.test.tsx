@@ -11,6 +11,8 @@ const mockTerminal = {
   reset: vi.fn(),
   write: vi.fn(),
   dispose: vi.fn(),
+  refresh: vi.fn(),
+  options: {},
   unicode: { activeVersion: "6" },
 };
 
@@ -177,5 +179,46 @@ describe("RuntimeTerminalPanel", () => {
 
     await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
     expect(mutate.mock.calls[0]?.[1]?.searchParams.get("terminal_id")).toBe("11");
+  });
+
+  it("builds the terminal theme from css variables", async () => {
+    const { buildRuntimeTerminalTheme } = await import(
+      "@/components/runtime/runtime-terminal-panel"
+    );
+
+    const theme = buildRuntimeTerminalTheme((propertyName) => {
+      const values: Record<string, string> = {
+        "--terminal-background": "#fffefb",
+        "--terminal-foreground": "#101010",
+        "--terminal-cursor": "#ff4a00",
+        "--terminal-cursor-accent": "#fffefb",
+        "--terminal-selection-background": "rgba(255, 74, 0, 0.14)",
+        "--terminal-selection-foreground": "#101010",
+        "--terminal-black": "#101010",
+        "--terminal-red": "#c2410c",
+        "--terminal-green": "#4f8a61",
+        "--terminal-yellow": "#b45309",
+        "--terminal-blue": "#0a59d2",
+        "--terminal-magenta": "#8f6ccf",
+        "--terminal-cyan": "#0f766e",
+        "--terminal-white": "#57534e",
+        "--terminal-bright-black": "#939084",
+        "--terminal-bright-red": "#ea580c",
+        "--terminal-bright-green": "#22c55e",
+        "--terminal-bright-yellow": "#f59e0b",
+        "--terminal-bright-blue": "#2563eb",
+        "--terminal-bright-magenta": "#a855f7",
+        "--terminal-bright-cyan": "#14b8a6",
+        "--terminal-bright-white": "#101010",
+      };
+
+      return values[propertyName] ?? "";
+    });
+
+    expect(theme.background).toBe("#fffefb");
+    expect(theme.foreground).toBe("#101010");
+    expect(theme.cursor).toBe("#ff4a00");
+    expect(theme.selectionBackground).toBe("rgba(255, 74, 0, 0.14)");
+    expect(theme.green).toBe("#4f8a61");
   });
 });

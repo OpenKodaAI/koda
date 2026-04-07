@@ -1,6 +1,7 @@
 """Telegram command handlers."""
 
 import contextlib
+import json
 import os
 import tempfile
 from datetime import datetime
@@ -12,6 +13,7 @@ from telegram.constants import ParseMode
 
 from koda.auth import auth_check, reject_unauthorized
 from koda.config import (
+    AGENT_ID,
     AGENT_NAME,
     ALLOWED_GIT_CMDS,
     AVAILABLE_AGENT_MODES,
@@ -45,6 +47,7 @@ from koda.services.queue_manager import (
     get_queue_depth,
     get_task_info,
     is_process_running,
+    requeue_dlq_entry,
 )
 from koda.services.shell_runner import run_shell_command
 from koda.services.templates import (
@@ -58,7 +61,6 @@ from koda.state.history_store import (
     delete_bookmark,
     dlq_get_dict,
     dlq_list,
-    dlq_mark_retried,
     get_bookmarks,
     get_full_history,
     get_history,
@@ -82,7 +84,7 @@ from koda.state.knowledge_governance_store import (
 )
 from koda.telegram_types import BotContext
 from koda.telegram_types import MessageUpdate as Update
-from koda.utils.approval import reset_approval_state, with_approval
+from koda.utils.approval import rotate_session_approval_state, with_approval
 from koda.utils.command_helpers import (
     authorized,
     available_provider_models,
@@ -364,12 +366,13 @@ async def cmd_newsession(update: Update, context: BotContext) -> None:
         return await reject_unauthorized(update)
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-    context.user_data["session_id"] = None
-    context.user_data["provider_sessions"] = {}
-    context.user_data["_supervised_session_id"] = None
-    context.user_data["_supervised_provider"] = None
-    reset_approval_state(context.user_data)
-    await update.message.reply_text("Session cleared. Next message starts a new conversation.")
+    _previous_session_id, new_session_id = await rotate_session_approval_state(
+        user_data=context.user_data,
+        user_id=update.effective_user.id,
+        chat_id=update.effective_chat.id if getattr(update, "effective_chat", None) else None,
+        agent_id=AGENT_ID or "default",
+    )
+    await update.message.reply_text(f"Session rotated to {new_session_id}. Next message starts a new conversation.")
 
 
 async def cmd_setdir(update: Update, context: BotContext) -> None:
@@ -688,38 +691,8 @@ async def cmd_dbenv(update: Update, context: BotContext) -> None:
         return await reject_unauthorized(update)
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-
-    from koda.config import POSTGRES_ENABLED
-    from koda.services.db_manager import db_manager
-
-    if not POSTGRES_ENABLED or len(db_manager.available_envs) <= 1:
-        await update.message.reply_text("Database environments not configured.")
-        return
-
-    available = db_manager.available_envs
-    args = context.args
-    if args:
-        env = args[0].lower()
-        if env not in available:
-            await update.message.reply_text(f"Unknown env. Available: {', '.join(available)}")
-            return
-        context.user_data["postgres_env"] = env
-        await update.message.reply_text(f"Database env: <code>{escape_html(env)}</code>", parse_mode=ParseMode.HTML)
-        return
-
-    current = context.user_data.get("postgres_env") or "prod"
-    buttons = [
-        [
-            InlineKeyboardButton(
-                f"{'> ' if e == current else ''}{e}",
-                callback_data=f"dbenv:{e}",
-            )
-        ]
-        for e in available
-    ]
     await update.message.reply_text(
-        f"Current env: <code>{escape_html(current)}</code>\nSelect database environment:",
-        reply_markup=InlineKeyboardMarkup(buttons),
+        ("Native database environment switching was removed. Configure a database MCP server instead."),
         parse_mode=ParseMode.HTML,
     )
 
@@ -1618,26 +1591,11 @@ async def cmd_remind(update: Update, context: BotContext) -> None:
     try:
         msg = await schedule_reminder(cast(Any, context), chat_id, user_id, delta, text)
     except Exception:
-        job_queue = getattr(context, "job_queue", None)
-        if job_queue is None:
-            raise
-
-        async def _deliver_reminder(job_context: Any) -> None:
-            job = getattr(job_context, "job", None)
-            payload = getattr(job, "data", {}) if job is not None else {}
-            await job_context.bot.send_message(
-                chat_id=int(payload.get("chat_id") or chat_id),
-                text=f"Reminder: {payload.get('text') or text}",
-            )
-
-        job_queue.run_once(
-            _deliver_reminder,
-            when=delta.total_seconds(),
-            data={"chat_id": chat_id, "text": text},
-            name=f"reminder:{user_id}:{text[:32]}",
+        log.exception("reminder_scheduler_create_failed", user_id=user_id, chat_id=chat_id)
+        await update.message.reply_text(
+            "Nao consegui persistir esse lembrete no scheduler canonico agora. Tente novamente em instantes."
         )
-        log.warning("reminder_scheduler_fallback", user_id=user_id, chat_id=chat_id, exc_info=True)
-        msg = f"Reminder set for {time_str}."
+        return
     await update.message.reply_text(msg)
 
 
@@ -2792,6 +2750,13 @@ async def cmd_dlq(update: Update, context: BotContext) -> None:
     if not auth_check(update):
         return await reject_unauthorized(update)
 
+    def _load_metadata(raw_json: str | None) -> dict[str, Any]:
+        with contextlib.suppress(TypeError, ValueError):
+            loaded = json.loads(raw_json or "{}")
+            if isinstance(loaded, dict):
+                return loaded
+        return {}
+
     from koda.utils.formatting import escape_html
 
     arg = context.args[0] if context.args else ""
@@ -2809,29 +2774,19 @@ async def cmd_dlq(update: Update, context: BotContext) -> None:
         if not entry["retry_eligible"]:
             await update.message.reply_text(f"DLQ #{dlq_id} is not eligible for retry.")
             return
-        dlq_mark_retried(dlq_id)
-        # Re-enqueue targeting the original user's chat, not the admin's
-        import asyncio
-
-        from koda.services.queue_manager import (
-            _get_worker_lock,
-            _process_queue,
-            _queue_workers,
-            get_queue,
+        application = getattr(context, "application", None)
+        if application is None:
+            await update.message.reply_text("DLQ retry is unavailable because the application context is missing.")
+            return
+        new_task_id = await requeue_dlq_entry(
+            entry,
+            application=application,
+            actor=update.effective_user.id,
+            bot_override=context.bot,
         )
-
-        original_user_id = entry["user_id"]
-        original_chat_id = entry["chat_id"]
-        original_query = entry["query_text"]
-        queue = get_queue(original_user_id)
-        await queue.put({"_link_analysis": True, "chat_id": original_chat_id, "query_text": original_query})
-
-        lock = _get_worker_lock(original_user_id)
-        async with lock:
-            if original_user_id not in _queue_workers or _queue_workers[original_user_id].done():
-                _queue_workers[original_user_id] = asyncio.create_task(_process_queue(original_user_id, context))
-
-        await update.message.reply_text(f"DLQ #{dlq_id} re-queued for user {original_user_id}.")
+        await update.message.reply_text(
+            f"DLQ #{dlq_id} reprocessada com sucesso para o usuario {entry['user_id']} como tarefa #{new_task_id}."
+        )
         return
 
     if arg == "inspect" and len(context.args) >= 2:
@@ -2844,6 +2799,8 @@ async def cmd_dlq(update: Update, context: BotContext) -> None:
         if not entry:
             await update.message.reply_text(f"DLQ entry #{dlq_id} not found.")
             return
+        metadata = _load_metadata(entry.get("metadata_json"))
+        history = list(metadata.get("history") or [])
         lines = [
             f"<b>DLQ #{entry['id']}</b>",
             f"Task: #{entry['task_id']}",
@@ -2855,6 +2812,17 @@ async def cmd_dlq(update: Update, context: BotContext) -> None:
             f"Failed: {entry['failed_at']}",
             f"Retry eligible: {'yes' if entry['retry_eligible'] else 'no'}",
         ]
+        if metadata.get("last_reprocessed_task_id"):
+            lines.append(f"Last reprocess task: #{metadata['last_reprocessed_task_id']}")
+        if metadata.get("last_reprocessed_at"):
+            lines.append(f"Last reprocess at: {metadata['last_reprocessed_at']}")
+        if history:
+            lines.append(f"History events: {len(history)}")
+            latest = history[-1]
+            if isinstance(latest, dict):
+                latest_event = escape_html(str(latest.get("event") or "unknown"))
+                latest_time = escape_html(str(latest.get("at") or ""))
+                lines.append(f"Latest event: {latest_event} {latest_time}".strip())
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
 

@@ -135,27 +135,22 @@ export function LanguageSwitcher({ className }: { className?: string }) {
               {open ? (
                 <motion.div
                   ref={panelRef}
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
                   transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
                   className="app-floating-panel language-switcher__menu"
                   role="listbox"
                   aria-label={t("language.label")}
                   {...tourAnchor("shell.topbar.language-switcher.menu")}
-              style={{
-                position: "fixed",
-                zIndex: 80,
-                top: panelPosition?.top ?? 0,
-                left: panelPosition?.left ?? 0,
-                width: panelPosition?.width,
-                background:
-                  "linear-gradient(180deg, rgba(24, 24, 28, 0.16) 0%, rgba(10, 10, 12, 0.24) 100%), rgba(8, 8, 10, 0.08)",
-                backdropFilter: "blur(52px) saturate(168%) brightness(1.08)",
-                WebkitBackdropFilter:
-                  "blur(52px) saturate(168%) brightness(1.08)",
-                visibility: panelPosition ? "visible" : "hidden",
-              }}
+                  style={{
+                    position: "fixed",
+                    zIndex: 80,
+                    top: panelPosition?.top ?? 0,
+                    left: panelPosition?.left ?? 0,
+                    width: panelPosition?.width,
+                    visibility: panelPosition ? "visible" : "hidden",
+                  }}
                 >
                   <div className="language-switcher__menu-list">
                     {options.map((option) => {

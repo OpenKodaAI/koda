@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 interface SessionChatComposerProps {
   botId?: string | null;
   onBotChange?: (botId: string | undefined) => void;
+  lockedBot?: boolean;
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
@@ -24,6 +25,7 @@ const MAX_TEXTAREA_HEIGHT = 240;
 export function SessionChatComposer({
   botId,
   onBotChange,
+  lockedBot = false,
   value,
   onChange,
   onSubmit,
@@ -47,22 +49,29 @@ export function SessionChatComposer({
   return (
     <div className="px-4 py-4 sm:px-6">
       <div className="mx-auto max-w-[52rem]">
-        <div className="rounded-[1.5rem] border border-[rgba(255,255,255,0.08)] bg-[#111318] px-4 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <BotSwitcher
-              activeBotId={botId ?? undefined}
-              onBotChange={onBotChange}
-              showAll
-              variant="action-button"
-              menuPlacement="top-start"
-              className="max-w-full"
-            />
-            {submitting ? (
-              <span className="truncate text-[11px] font-medium text-[var(--text-tertiary)]">
-                {t("sessions.composer.sendingMessage")}
-              </span>
-            ) : null}
-          </div>
+        <div className="rounded-[1.5rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-4 py-4">
+          {!lockedBot || submitting ? (
+            <div className="mb-3 flex items-center justify-between gap-3">
+              {!lockedBot ? (
+              <BotSwitcher
+                activeBotId={botId ?? undefined}
+                onBotChange={onBotChange}
+                showAll={false}
+                placeholder={t("sessions.composer.selectBot", {
+                  defaultValue: "Select bot",
+                })}
+                variant="session-chip"
+                menuPlacement="bottom-start"
+                className="w-full max-w-[13.5rem]"
+              />
+              ) : <span />}
+              {submitting ? (
+                <span className="truncate text-[11px] font-medium text-[var(--text-tertiary)]">
+                  {t("sessions.composer.sendingMessage")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="flex items-end gap-3">
             <textarea
@@ -96,10 +105,10 @@ export function SessionChatComposer({
               onClick={() => onSubmit?.()}
               disabled={!canSubmit}
               className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] border transition-all",
+                "button-shell button-shell--icon h-11 w-11 shrink-0 rounded-[1rem] transition-all",
                 canSubmit
-                  ? "border-[rgba(130,140,255,0.28)] bg-[rgba(110,120,255,0.14)] text-[var(--text-primary)] hover:bg-[rgba(110,120,255,0.2)]"
-                  : "border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] text-[var(--text-quaternary)]"
+                  ? "button-shell--primary"
+                  : "button-shell--secondary text-[var(--text-quaternary)]"
               )}
               aria-label={t("sessions.composer.send")}
             >

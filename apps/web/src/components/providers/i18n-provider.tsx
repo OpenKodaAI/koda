@@ -48,20 +48,29 @@ export function I18nProvider({
   const fallbackLanguage = normalizeLanguage(initialLanguage);
   setCurrentLanguage(fallbackLanguage);
   const i18n = getI18nInstance();
-  const [language, setLanguageState] = useState<AppLanguage>(() => {
-    const persistedStorageValue = safeLocalStorageGet(localeStorageCodec.key);
-    const persistedCookieValue = readDocumentCookie(LOCALE_COOKIE_KEY);
+  // Use the server-provided language for initial render to avoid hydration mismatch.
+  // localStorage/cookie preferences are applied in the useEffect below (client-only).
+  const [language, setLanguageState] = useState<AppLanguage>(fallbackLanguage);
 
-    if (persistedStorageValue) {
-      return localeStorageCodec.parse(persistedStorageValue);
+  // On mount (client-only), apply persisted language preference from storage
+  useEffect(() => {
+    const persisted = safeLocalStorageGet(localeStorageCodec.key);
+    if (persisted) {
+      const parsed = localeStorageCodec.parse(persisted);
+      if (parsed !== fallbackLanguage) {
+        setLanguageState(parsed);
+        return; // The next effect will handle syncing
+      }
     }
-
-    if (persistedCookieValue) {
-      return normalizeLanguage(persistedCookieValue);
+    const cookie = readDocumentCookie(LOCALE_COOKIE_KEY);
+    if (cookie) {
+      const normalized = normalizeLanguage(cookie);
+      if (normalized !== fallbackLanguage) {
+        setLanguageState(normalized);
+      }
     }
-
-    return fallbackLanguage;
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setCurrentLanguage(language);

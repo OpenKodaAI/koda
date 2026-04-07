@@ -153,28 +153,15 @@ function StatusIcon({
         ) : isInProgress(status) ? (
           <>
             {!prefersReducedMotion && animate && (
-              <>
-                <motion.span
-                  className="absolute inset-[-4px] rounded-lg border"
-                  style={{ borderColor: "rgba(120, 166, 255, 0.24)" }}
-                  animate={{ scale: [0.8, 1.32], opacity: [0.55, 0] }}
-                  transition={{
-                    repeat: Number.POSITIVE_INFINITY,
-                    duration: 1.5,
-                    ease: "easeOut",
-                  }}
-                />
-                <motion.span
-                  className="absolute inset-[-8px] rounded-lg blur-md"
-                  style={{ backgroundColor: "rgba(120, 166, 255, 0.14)" }}
-                  animate={{ opacity: [0.24, 0.44, 0.24], scale: [0.94, 1.06, 0.94] }}
-                  transition={{
-                    repeat: Number.POSITIVE_INFINITY,
-                    duration: 1.8,
-                    ease: "easeInOut",
-                  }}
-                />
-              </>
+              <motion.span
+                className="absolute inset-[-4px] rounded-lg border border-[var(--tone-info-border)]"
+                animate={{ scale: [0.82, 1.28], opacity: [0.6, 0] }}
+                transition={{
+                  repeat: Number.POSITIVE_INFINITY,
+                  duration: 1.5,
+                  ease: "easeOut",
+                }}
+              />
             )}
             <motion.div
               animate={prefersReducedMotion || !animate ? undefined : { rotate: 360 }}
@@ -509,7 +496,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
     return (
       <motion.div
         className={cn(
-          "overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[linear-gradient(180deg,rgba(18,18,18,0.94),rgba(10,10,10,0.98))] px-4 py-4 shadow-[var(--shadow-panel)] sm:px-5 sm:py-5",
+          "overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-4 py-4 sm:px-5 sm:py-5",
           className
         )}
         initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 8 }}
@@ -522,8 +509,8 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
           },
         }}
       >
-        <div className="flex min-h-[132px] flex-col items-center justify-center rounded-lg border border-dashed border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.018)] px-5 py-8 text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-[0.95rem] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] text-[var(--text-tertiary)]">
+        <div className="flex min-h-[132px] flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-5 py-8 text-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[0.95rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-tertiary)]">
             <Activity className="h-5 w-5" />
           </div>
           <p className="mt-4 text-sm font-medium text-[var(--text-primary)]">
@@ -540,7 +527,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
   return (
     <motion.div
       className={cn(
-        "overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[linear-gradient(180deg,rgba(18,18,18,0.94),rgba(10,10,10,0.98))] px-4 py-4 shadow-[var(--shadow-panel)] sm:px-5 sm:py-5",
+        "overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-4 py-4 sm:px-5 sm:py-5",
         className
       )}
       initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 8 }}
@@ -568,41 +555,13 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                   variants={taskVariants}
                 >
                   <motion.div
-                    className="group relative overflow-hidden rounded-lg px-3 py-2.5 transition-colors duration-150 hover:bg-[var(--surface-hover)]"
-                    animate={
-                      isInProgress(task.status) && !prefersReducedMotion
-                        ? {
-                            boxShadow: [
-                              "inset 0 0 0 1px rgba(120, 166, 255, 0.18)",
-                              "inset 0 0 0 1px rgba(120, 166, 255, 0.38)",
-                              "inset 0 0 0 1px rgba(120, 166, 255, 0.18)",
-                            ],
-                          }
-                        : undefined
-                    }
-                    transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+                    className={cn(
+                      "group relative overflow-hidden rounded-lg border px-3 py-2.5 transition-colors duration-150",
+                      isInProgress(task.status)
+                        ? "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)]"
+                        : "border-transparent hover:bg-[var(--surface-hover)]",
+                    )}
                   >
-                    <AnimatePresence initial={false}>
-                      {isInProgress(task.status) && !prefersReducedMotion && (
-                        <motion.div
-                          key={`${task.id}-loading`}
-                          className="pointer-events-none absolute inset-0 rounded-lg"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                        >
-                          <motion.div
-                            className="absolute inset-y-0 -left-1/3 w-1/3 bg-[linear-gradient(90deg,transparent,rgba(120,166,255,0.12),transparent)] blur-xl"
-                            animate={{ x: ["0%", "360%"] }}
-                            transition={{
-                              repeat: Number.POSITIVE_INFINITY,
-                              duration: 2.2,
-                              ease: "easeInOut",
-                            }}
-                          />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
 
                     <div
                       className="relative z-[1] flex cursor-pointer items-start gap-3"
@@ -677,33 +636,17 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                             return (
                               <motion.li
                                 key={subtask.id}
-                                className="relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.018)] px-3 py-2"
+                                className={cn(
+                                  "relative overflow-hidden rounded-lg border px-3 py-2",
+                                  isInProgress(subtask.status)
+                                    ? "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)]"
+                                    : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]",
+                                )}
                                 variants={subtaskVariants}
                                 initial="hidden"
                                 animate="visible"
                                 exit="exit"
                               >
-                                <AnimatePresence initial={false}>
-                                  {isInProgress(subtask.status) && !prefersReducedMotion && (
-                                    <motion.div
-                                      key={`${subtask.id}-loading`}
-                                      className="pointer-events-none absolute inset-0 rounded-lg"
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                    >
-                                      <motion.div
-                                        className="absolute inset-y-0 -left-1/3 w-1/3 bg-[linear-gradient(90deg,transparent,rgba(120,166,255,0.1),transparent)] blur-lg"
-                                        animate={{ x: ["0%", "340%"] }}
-                                        transition={{
-                                          repeat: Number.POSITIVE_INFINITY,
-                                          duration: 2,
-                                          ease: "easeInOut",
-                                        }}
-                                      />
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
                                 <div
                                   className="relative z-[1] flex cursor-pointer items-start gap-2.5"
                                   onClick={() => toggleSubtaskExpansion(task.id, subtask.id)}

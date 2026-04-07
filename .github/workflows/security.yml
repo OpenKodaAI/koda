@@ -1,0 +1,250 @@
+name: security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.10.7"
+
+jobs:
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Review dependency manifest changes
+        run: |
+          python3 scripts/review_dependency_changes.py \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --head-ref "${{ github.event.pull_request.head.sha }}"
+
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Python dependency audit
+        run: uv run pip-audit --strict
+      - name: Node dependency audit
+        run: pnpm audit --audit-level=high
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Rust dependency audit
+        run: cargo audit --file rust/Cargo.lock
+
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Bandit SAST scan
+        run: |
+          set +e
+          mkdir -p artifacts/security
+          uv run bandit -r koda/ -lll -iii --skip B101 -f json -o artifacts/security/bandit.json
+          bandit_status=$?
+          set -e
+          python3 scripts/convert_bandit_json_to_sarif.py artifacts/security/bandit.json artifacts/security/bandit.sarif
+          exit "${bandit_status}"
+      - name: Upload Bandit SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/bandit.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/bandit.sarif
+          category: bandit
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) ASSET="gitleaks_${VERSION}_linux_x64.tar.gz" ;;
+            aarch64|arm64) ASSET="gitleaks_${VERSION}_linux_arm64.tar.gz" ;;
+            *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+          esac
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/${ASSET}"
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_checksums.txt"
+          grep " ${ASSET}$" "gitleaks_${VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${ASSET}" gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+      - name: Run Gitleaks
+        run: |
+          mkdir -p artifacts/security
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --report-format sarif \
+            --report-path artifacts/security/gitleaks.sarif \
+            --redact \
+            --exit-code 1
+      - name: Upload Gitleaks SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/gitleaks.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/gitleaks.sarif
+          category: gitleaks
+      - name: Upload SAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: sast-artifacts
+          path: artifacts/security/
+          if-no-files-found: ignore
+          retention-days: 21
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.35.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4.35.1
+        with:
+          category: /language:${{ matrix.language }}
+          upload: ${{ github.event_name == 'pull_request' && 'never' || 'always' }}
+
+  container-scan:
+    name: container-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Build container images
+        run: |
+          docker build -t koda:ci .
+          docker build -f apps/web/Dockerfile -t koda-web:ci .
+          docker build -f Dockerfile.memory -t koda-memory:ci .
+          docker build -f Dockerfile.security -t koda-security:ci .
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          VERSION=0.69.3
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) ASSET="trivy_${VERSION}_Linux-64bit.tar.gz" ;;
+            aarch64|arm64) ASSET="trivy_${VERSION}_Linux-ARM64.tar.gz" ;;
+            *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+          esac
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/${ASSET}"
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_checksums.txt"
+          grep " ${ASSET}$" "trivy_${VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${ASSET}" trivy
+          sudo install trivy /usr/local/bin/trivy
+      - name: Scan container images with Trivy
+        run: |
+          mkdir -p artifacts/security/trivy
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
+      - name: Upload Trivy SARIF for koda
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda.sarif
+          category: trivy-koda
+      - name: Upload Trivy SARIF for koda-web
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-web.sarif
+          category: trivy-koda-web
+      - name: Upload Trivy SARIF for koda-memory
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-memory.sarif
+          category: trivy-koda-memory
+      - name: Upload Trivy SARIF for koda-security
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-security.sarif
+          category: trivy-koda-security
+      - name: Upload container scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: container-scan-artifacts
+          path: artifacts/security/trivy/
+          if-no-files-found: ignore
+          retention-days: 21

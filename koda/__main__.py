@@ -148,12 +148,32 @@ def main() -> None:
             "Complete setup in the control-plane onboarding first."
         )
     if not ALLOWED_USER_IDS:
-        raise RuntimeError(
-            "ALLOWED_USER_IDS is not configured for this agent runtime. "
-            "Complete setup in the control-plane onboarding first."
+        log.warning(
+            "allowed_user_ids_empty",
+            msg="ALLOWED_USER_IDS is not configured — bot will reject all messages until allowed user IDs are set "
+            "in the channel settings.",
         )
 
     IMAGE_TEMP_DIR.mkdir(exist_ok=True)
+
+    # Reset any asyncpg pools that were created on transient event loops
+    # during module import / bootstrap. The Telegram Application.run_polling()
+    # will start the real event loop, and the bridge thread will create fresh
+    # pool connections bound to its own persistent loop.
+    try:
+        from koda.knowledge.v2 import common as _k2c
+
+        _k2c._SHARED_POSTGRES_BACKENDS.clear()
+    except Exception:
+        pass
+    try:
+        import koda.state_primary as _sp
+
+        _sp._BRIDGE_LOOP = None
+        _sp._BRIDGE_THREAD = None
+    except Exception:
+        pass
+
     builder = Application.builder().token(AGENT_TOKEN)
     log.info("telegram_runtime_stateless_bootstrap", state_backend=STATE_BACKEND)
 
@@ -372,6 +392,14 @@ def main() -> None:
         except Exception:
             log.exception("knowledge_runtime_supervisor_stop_error")
 
+        # Close shared HTTP client session
+        try:
+            from koda.services.http_client import close_session
+
+            await close_session()
+        except Exception:
+            log.exception("http_session_close_error")
+
         # Stop database pool if running
         if POSTGRES_ENABLED:
             from koda.services.db_manager import db_manager
@@ -446,19 +474,18 @@ def main() -> None:
         with contextlib.suppress(Exception):
             await app.bot.set_my_commands(commands)
 
-        from koda.state.history_store import mark_stale_tasks_failed
-
-        stale = mark_stale_tasks_failed()
-        if stale:
-            log.info("stale_tasks_marked_failed", count=stale)
         loop_supervisor = get_background_loop_supervisor()
         critical_startup_issues: list[str] = []
         noncritical_startup_issues: list[str] = []
 
         try:
+            from koda.services.queue_manager import recover_pending_tasks
             from koda.services.runtime import get_runtime_controller
 
             await get_runtime_controller().start(app)
+            recovery_summary = await recover_pending_tasks(app)
+            if any(recovery_summary.values()):
+                log.info("queue_recovery_completed", **recovery_summary)
         except Exception:
             critical_startup_issues.append("runtime_start_error")
             log.exception("runtime_start_error")
@@ -582,6 +609,22 @@ def main() -> None:
         except Exception:
             noncritical_startup_issues.append("cache_script_init_error")
             log.exception("cache_script_init_error")
+
+        # --- MCP Bridge Bootstrap ---
+        from koda.config import MCP_ENABLED
+
+        if MCP_ENABLED:
+            try:
+                from koda.services.mcp_bootstrap import bootstrap_mcp_for_agent
+
+                _mcp_agent_id = os.environ.get("AGENT_ID", "")
+                if _mcp_agent_id:
+                    _mcp_result = await bootstrap_mcp_for_agent(_mcp_agent_id)
+                    if _mcp_result.get("errors"):
+                        for _err in _mcp_result["errors"]:
+                            noncritical_startup_issues.append(f"MCP: {_err}")
+            except Exception as _mcp_exc:
+                noncritical_startup_issues.append(f"MCP bootstrap: {_mcp_exc}")
 
         try:
             from koda.services.llm_runner import warm_provider_capabilities

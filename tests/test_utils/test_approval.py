@@ -6,18 +6,25 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from koda.agent_contract import ActionEnvelope
+from koda.services.execution_policy import ApprovalScope
 from koda.utils.approval import (
+    _APPROVAL_GRANTS,
     _PENDING_AGENT_CMD_OPS,
     _PENDING_OPS,
     APPROVAL_TIMEOUT,
     _execution_approved,
+    _issue_agent_approval_grants,
     cleanup_agent_cmd_op,
+    consume_agent_approval_grant,
     dispatch_approved_operation,
     get_agent_cmd_decision,
     is_write_operation,
+    match_agent_approval_grant,
     request_agent_cmd_approval,
     reset_approval_state,
     resolve_agent_cmd_approval,
+    revoke_scoped_approval_state,
     with_approval,
 )
 
@@ -26,7 +33,9 @@ from koda.utils.approval import (
 def _reset_contextvar():
     """Reset the contextvar to False for approval-specific tests."""
     token = _execution_approved.set(False)
+    _APPROVAL_GRANTS.clear()
     yield
+    _APPROVAL_GRANTS.clear()
     _execution_approved.reset(token)
 
 
@@ -237,6 +246,17 @@ class TestIsWriteOperation:
 class TestWithApprovalDecorator:
     """Test the @with_approval decorator behavior."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_operational_grants(self, monkeypatch):
+        policy = {
+            "integration_grants": {
+                "fileops": {"allow_actions": ["fileops.*"]},
+                "shell": {"allow_actions": ["shell.*"]},
+            }
+        }
+        monkeypatch.setattr("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy)
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", policy)
+
     def _make_update_context(self, args=None):
         update = MagicMock()
         update.effective_user = MagicMock()
@@ -245,7 +265,7 @@ class TestWithApprovalDecorator:
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
-        context.user_data = {"_approve_all": False}
+        context.user_data = {}
         context.args = args or []
 
         return update, context
@@ -305,8 +325,8 @@ class TestWithApprovalDecorator:
         _PENDING_OPS.clear()
 
     @pytest.mark.asyncio
-    async def test_write_with_approve_all_passes_through(self):
-        """WRITE operations with _approve_all should execute directly."""
+    async def test_operational_command_honors_central_policy_and_requests_approval(self):
+        """Operational commands should not bypass require_approval from the central gate."""
         call_log = []
 
         async def handler(update, context):
@@ -314,11 +334,15 @@ class TestWithApprovalDecorator:
 
         decorated = with_approval("rm")(handler)
         update, context = self._make_update_context(["test.txt"])
-        context.user_data["_approve_all"] = True
 
-        await decorated(update, context)
+        _PENDING_OPS.clear()
+        result = await decorated(update, context)
 
-        assert len(call_log) == 1
+        assert result is None
+        assert len(call_log) == 0
+        update.message.reply_text.assert_called_once()
+        assert "Confirmacao necessaria" in update.message.reply_text.call_args.args[0]
+        _PENDING_OPS.clear()
 
     @pytest.mark.asyncio
     async def test_write_with_approved_flag_passes_through(self):
@@ -348,7 +372,7 @@ class TestWithApprovalDecorator:
 
         decorated = with_approval("rm")(handler)
         update, context = self._make_update_context(["test.txt"])
-        context.user_data["_approve_all"] = True
+        context.user_data["_approved"] = True
 
         await decorated(update, context)
 
@@ -372,6 +396,8 @@ class TestWithApprovalDecorator:
         op = next(iter(_PENDING_OPS.values()))
         assert op["cmd_name"] == "rm"
         assert op["args"] == "test.txt"
+        assert isinstance(op.get("session_id"), str)
+        assert op.get("requests")
         _PENDING_OPS.clear()
 
 
@@ -439,6 +465,55 @@ class TestDispatchApprovedOperation:
         assert recorded is True
         assert _execution_approved.get() is False
 
+    @pytest.mark.asyncio
+    async def test_dispatch_does_not_consume_grant_on_failure(self):
+        handler = AsyncMock(side_effect=RuntimeError("boom"))
+        update = MagicMock()
+        context = MagicMock()
+        context.user_data = {"session_id": "session-1"}
+
+        envelope = ActionEnvelope(
+            tool_id="file_delete",
+            integration_id="fileops",
+            action_id="file_delete",
+            transport="internal",
+            access_level="destructive",
+            risk_class="destructive",
+            resource_scope_fingerprint="scope-fp",
+            params_fingerprint="params-fp",
+        )
+        scope = ApprovalScope(kind="scope", ttl_seconds=900, max_uses=10)
+        grants = _issue_agent_approval_grants(
+            user_id=111,
+            agent_id="default",
+            session_id="session-1",
+            chat_id=111,
+            requests=[{"envelope": envelope, "approval_scope": scope}],
+            decision="approved_scope",
+        )
+
+        op_id = "test_op_failure"
+        _PENDING_OPS[op_id] = {
+            "handler": handler,
+            "update": update,
+            "context": context,
+            "args": "test.txt",
+            "cmd_name": "rm",
+            "timestamp": time.time(),
+            "user_id": 111,
+            "agent_id": "default",
+            "session_id": "session-1",
+            "chat_id": 111,
+            "requests": [{"envelope": envelope, "approval_scope": scope}],
+            "grants": grants,
+        }
+
+        with pytest.raises(RuntimeError):
+            await dispatch_approved_operation(op_id)
+
+        assert _PENDING_OPS.get(op_id) is None
+        assert any(grant["grant_id"] in _APPROVAL_GRANTS for grant in grants)
+
 
 # ---------------------------------------------------------------------------
 # TestResetApprovalState
@@ -448,23 +523,71 @@ class TestDispatchApprovedOperation:
 class TestResetApprovalState:
     def test_reset_clears_all_keys(self):
         user_data = {
-            "_approve_all": True,
             "_approved": True,
             "_pending_op_id": "some_id",
-            "_approve_all_agent_tools": True,
             "work_dir": "/tmp",
         }
         reset_approval_state(user_data)
-        assert "_approve_all" not in user_data
         assert "_approved" not in user_data
         assert "_pending_op_id" not in user_data
-        assert "_approve_all_agent_tools" not in user_data
         assert user_data["work_dir"] == "/tmp"
 
     def test_reset_no_keys_present(self):
         user_data = {"work_dir": "/tmp"}
         reset_approval_state(user_data)  # Should not raise
         assert user_data == {"work_dir": "/tmp"}
+
+
+class TestScopedApprovalRevocation:
+    @pytest.mark.asyncio
+    async def test_revoke_scoped_state_removes_matching_ops_and_grants(self):
+        envelope = ActionEnvelope(
+            tool_id="file_delete",
+            integration_id="fileops",
+            action_id="file_delete",
+            transport="internal",
+            access_level="destructive",
+            risk_class="destructive",
+            resource_scope_fingerprint="scope-fp",
+            params_fingerprint="params-fp",
+        )
+        scope = ApprovalScope(kind="scope", ttl_seconds=900, max_uses=10)
+        grants = _issue_agent_approval_grants(
+            user_id=111,
+            agent_id="agent-a",
+            session_id="session-1",
+            chat_id=111,
+            requests=[{"envelope": envelope, "approval_scope": scope}],
+            decision="approved_scope",
+        )
+        _PENDING_OPS["op-1"] = {
+            "user_id": 111,
+            "agent_id": "agent-a",
+            "session_id": "session-1",
+            "chat_id": 111,
+            "timestamp": time.time(),
+        }
+        _PENDING_AGENT_CMD_OPS["op-2"] = {
+            "user_id": 111,
+            "agent_id": "agent-a",
+            "session_id": "session-1",
+            "chat_id": 111,
+            "timestamp": time.time(),
+            "event": asyncio.Event(),
+            "decision": None,
+        }
+
+        await revoke_scoped_approval_state(
+            user_id=111,
+            agent_id="agent-a",
+            session_id="session-1",
+            chat_id=111,
+        )
+
+        assert "op-1" not in _PENDING_OPS
+        assert "op-2" not in _PENDING_AGENT_CMD_OPS
+        for grant in grants:
+            assert grant["grant_id"] not in _APPROVAL_GRANTS
 
 
 # ---------------------------------------------------------------------------
@@ -642,10 +765,18 @@ class TestAgentCmdApproval:
     async def test_request_returns_op_id(self):
         telegram_bot = AsyncMock()
         telegram_bot.send_message = AsyncMock()
-        op_id = await request_agent_cmd_approval(telegram_bot, chat_id=111, user_id=222, description="jira transition")
+        op_id = await request_agent_cmd_approval(
+            telegram_bot,
+            chat_id=111,
+            user_id=222,
+            description="jira transition",
+            session_id="session-1",
+        )
         assert isinstance(op_id, str)
         assert len(op_id) > 0
         assert op_id in _PENDING_AGENT_CMD_OPS
+        assert _PENDING_AGENT_CMD_OPS[op_id]["session_id"] == "session-1"
+        assert _PENDING_AGENT_CMD_OPS[op_id]["chat_id"] == 111
         telegram_bot.send_message.assert_called_once()
 
     @pytest.mark.asyncio
@@ -669,7 +800,7 @@ class TestAgentCmdApproval:
 
         resolve_agent_cmd_approval(op_id, "denied")
 
-        assert get_agent_cmd_decision(op_id) == "denied"
+        assert get_agent_cmd_decision(op_id) == {"decision": "denied", "grants": []}
 
     @pytest.mark.asyncio
     async def test_get_decision_nonexistent(self):
@@ -713,9 +844,105 @@ class TestAgentCmdApproval:
         telegram_bot.send_message = AsyncMock()
         op_id = await request_agent_cmd_approval(telegram_bot, chat_id=111, user_id=222, description="test")
 
-        # Longest prefix: "acmd:all:" = 9 chars
-        callback_data = f"acmd:all:{op_id}"
+        # Longest prefix currently emitted: "acmd:scope:" = 11 chars
+        callback_data = f"acmd:scope:{op_id}"
         assert len(callback_data.encode("utf-8")) <= 64
+
+    def test_issue_scope_grant_has_ttl_and_usage_metadata(self):
+        envelope = ActionEnvelope(
+            tool_id="file_delete",
+            integration_id="fileops",
+            action_id="file_delete",
+            transport="internal",
+            access_level="destructive",
+            risk_class="destructive",
+            resource_scope_fingerprint="scope-fp",
+            params_fingerprint="params-fp",
+        )
+        scope = ApprovalScope(kind="scope", ttl_seconds=900, max_uses=10)
+
+        grants = _issue_agent_approval_grants(
+            user_id=222,
+            agent_id="agent-a",
+            session_id="session-1",
+            chat_id=111,
+            requests=[{"envelope": envelope, "approval_scope": scope}],
+            decision="approved_scope",
+            issued_by_op_id="op-1",
+        )
+
+        assert len(grants) == 1
+        grant = grants[0]
+        assert grant["kind"] == "approve_scope"
+        assert grant["max_uses"] == 10
+        assert grant["remaining_uses"] == 10
+        assert grant["expires_at"] > grant["created_at"]
+        assert grant["issued_by_op_id"] == "op-1"
+        assert grant["resource_scope_fingerprint"] == "scope-fp"
+        assert grant["params_fingerprint"] == "params-fp"
+        assert grant["session_id"] == "session-1"
+        assert grant["chat_id"] == 111
+
+    def test_scope_grant_matches_and_consumes_by_scope(self):
+        envelope = ActionEnvelope(
+            tool_id="file_delete",
+            integration_id="fileops",
+            action_id="file_delete",
+            transport="internal",
+            access_level="destructive",
+            risk_class="destructive",
+            resource_scope_fingerprint="scope-fp",
+            params_fingerprint="params-fp",
+        )
+        scope = ApprovalScope(kind="scope", ttl_seconds=900, max_uses=2)
+        grant = _issue_agent_approval_grants(
+            user_id=222,
+            agent_id="agent-a",
+            session_id="session-1",
+            chat_id=111,
+            requests=[{"envelope": envelope, "approval_scope": scope}],
+            decision="approved_scope",
+        )[0]
+
+        assert (
+            match_agent_approval_grant(
+                [grant],
+                envelope=envelope,
+                approval_scope=scope,
+                session_id="session-1",
+                chat_id=111,
+            )
+            is not None
+        )
+
+        first = consume_agent_approval_grant(
+            user_id=222,
+            agent_id="agent-a",
+            envelope=envelope,
+            approval_scope=scope,
+            session_id="session-1",
+            chat_id=111,
+        )
+        second = consume_agent_approval_grant(
+            user_id=222,
+            agent_id="agent-a",
+            envelope=envelope,
+            approval_scope=scope,
+            session_id="session-1",
+            chat_id=111,
+        )
+        third = consume_agent_approval_grant(
+            user_id=222,
+            agent_id="agent-a",
+            envelope=envelope,
+            approval_scope=scope,
+            session_id="session-1",
+            chat_id=111,
+        )
+
+        assert first is not None
+        assert second is not None
+        assert third is None
 
 
 # ---------------------------------------------------------------------------
@@ -751,3 +978,95 @@ async def test_periodic_cleanup_removes_stale_ops():
 
     assert "stale_test" not in _PENDING_OPS
     assert "stale_agent_test" not in _PENDING_AGENT_CMD_OPS
+
+
+# ---------------------------------------------------------------------------
+# TestApprovalEdgeCases — race conditions, timeout, cross-user
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalEdgeCases:
+    """Edge cases: double dispatch, approval after timeout, cross-user resolve."""
+
+    @pytest.mark.asyncio
+    async def test_double_dispatch_same_op_id(self):
+        """Dispatching the same op_id twice should execute once; second is a no-op."""
+        handler = AsyncMock()
+        update = MagicMock()
+        context = MagicMock()
+        context.user_data = {}
+
+        op_id = "race_test_1"
+        _PENDING_OPS[op_id] = {
+            "handler": handler,
+            "update": update,
+            "context": context,
+            "args": "test.txt",
+            "cmd_name": "rm",
+            "timestamp": time.time(),
+        }
+
+        await dispatch_approved_operation(op_id)
+        await dispatch_approved_operation(op_id)
+
+        handler.assert_called_once()
+        assert op_id not in _PENDING_OPS
+
+    @pytest.mark.asyncio
+    async def test_dispatch_after_timeout_is_noop(self):
+        """An op that was cleaned up due to timeout should not execute on late dispatch."""
+        from koda.utils.approval import _cleanup_stale_ops
+
+        handler = AsyncMock()
+        update = MagicMock()
+        context = MagicMock()
+        context.user_data = {}
+
+        op_id = "timeout_test_1"
+        _PENDING_OPS[op_id] = {
+            "handler": handler,
+            "update": update,
+            "context": context,
+            "args": "test.txt",
+            "cmd_name": "rm",
+            "user_id": 111,
+            "timestamp": time.time() - APPROVAL_TIMEOUT - 10,
+        }
+
+        _cleanup_stale_ops()
+        assert op_id not in _PENDING_OPS
+
+        await dispatch_approved_operation(op_id)
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_agent_cmd_resolve_wrong_op_id_is_noop(self):
+        """Resolving an op_id that doesn't exist should not raise or affect other ops."""
+        telegram_bot = AsyncMock()
+        telegram_bot.send_message = AsyncMock()
+        op_id = await request_agent_cmd_approval(telegram_bot, chat_id=111, user_id=222, description="real op")
+
+        resolve_agent_cmd_approval("nonexistent_op", "approved")
+
+        op = _PENDING_AGENT_CMD_OPS[op_id]
+        assert not op["event"].is_set()
+        assert op["decision"] is None
+
+    @pytest.mark.asyncio
+    async def test_agent_cmd_timeout_sets_decision(self):
+        """Stale agent-cmd ops should have decision='timeout' after cleanup."""
+        from koda.utils.approval import _cleanup_stale_agent_cmd_ops
+
+        event = asyncio.Event()
+        _PENDING_AGENT_CMD_OPS["timeout_agent_1"] = {
+            "user_id": 111,
+            "timestamp": time.time() - APPROVAL_TIMEOUT - 10,
+            "event": event,
+            "decision": None,
+            "description": "test",
+        }
+
+        _cleanup_stale_agent_cmd_ops()
+
+        assert event.is_set()
+        assert "timeout_agent_1" not in _PENDING_AGENT_CMD_OPS

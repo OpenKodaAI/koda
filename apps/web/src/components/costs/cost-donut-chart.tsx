@@ -48,7 +48,7 @@ function buildChartItems(
       label: tl("Outros"),
       value: overflow.reduce((sum, item) => sum + item.value, 0),
       share: overflow.reduce((sum, item) => sum + item.share, 0),
-      color: "rgba(255,255,255,0.28)",
+      color: "color-mix(in srgb, var(--text-primary) 28%, transparent)",
       meta: tl("{{count}} origens consolidadas", { count: overflow.length }),
     });
   }
@@ -106,7 +106,7 @@ export function CostDonutChart({
           <span>
             {t("costs.page.allocationDominant", { defaultValue: "Dominant:" })}{" "}
             <span className="font-medium text-[var(--text-primary)]">{activeItem.label}</span>{" "}
-            <span className="text-[rgba(255,255,255,0.5)]">· {activeItem.share.toFixed(1)}%</span>
+            <span className="text-[var(--text-tertiary)]">· {activeItem.share.toFixed(1)}%</span>
           </span>
         ) : (
           t("costs.page.noDominantAllocation", { defaultValue: "No dominant concentration" })

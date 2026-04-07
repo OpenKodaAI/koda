@@ -29,7 +29,7 @@ function buildModelItems(
   tl: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
-    insights?.by_model.map((entry, index) => ({
+    insights?.by_model?.map((entry, index) => ({
       id: entry.model,
       label: entry.model,
       value: entry.cost_usd,
@@ -52,7 +52,7 @@ function buildBotItems(
   tl: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
-    insights?.by_bot.map((entry) => ({
+    insights?.by_bot?.map((entry) => ({
       id: entry.bot_id,
       label: getBotLabel(entry.bot_id),
       value: entry.cost_usd,
@@ -71,7 +71,7 @@ function buildTaskItems(
   tl: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
-    insights?.by_task_type.map((entry, index) => ({
+    insights?.by_task_type?.map((entry, index) => ({
       id: entry.task_type,
       label: entry.label,
       value: entry.cost_usd,
@@ -181,13 +181,13 @@ export default function CostsPage() {
     insightsQuery.error?.message ??
     null;
   const effectiveModelFilter =
-    insights && modelFilter !== "all" && !insights.available_models.includes(modelFilter)
+    insights && modelFilter !== "all" && !insights.available_models?.includes(modelFilter)
       ? "all"
       : modelFilter;
   const effectiveTaskTypeFilter =
     insights &&
     taskTypeFilter !== "all" &&
-    !insights.available_task_types.some((item) => item.value === taskTypeFilter)
+    !insights.available_task_types?.some((item) => item.value === taskTypeFilter)
       ? "all"
       : taskTypeFilter;
 
@@ -203,12 +203,11 @@ export default function CostsPage() {
   }, [allocationMode, byBotItems, byModelItems, byTaskItems]);
 
   const allocationRange = useMemo(() => {
-    const firstPoint = insights?.time_series[0];
-    const lastPoint = insights?.time_series[insights.time_series.length - 1];
-
+    const series = insights?.time_series;
+    if (!series?.length) return { start: null, end: null };
     return {
-      start: firstPoint?.label ?? null,
-      end: lastPoint?.label ?? null,
+      start: series[0]?.label ?? null,
+      end: series[series.length - 1]?.label ?? null,
     };
   }, [insights]);
 
@@ -265,7 +264,7 @@ export default function CostsPage() {
             onChange={(event) => setModelFilter(event.target.value)}
           >
             <option value="all">{t("common.allModels")}</option>
-            {insights.available_models.map((model) => (
+            {(insights.available_models ?? []).map((model) => (
               <option key={model} value={model}>
                 {model}
               </option>
@@ -282,7 +281,7 @@ export default function CostsPage() {
             onChange={(event) => setTaskTypeFilter(event.target.value)}
           >
             <option value="all">{t("common.allTypes")}</option>
-            {insights.available_task_types.map((type) => (
+            {(insights.available_task_types ?? []).map((type) => (
               <option key={type.value} value={type.value}>
                 {type.label}
               </option>
@@ -294,13 +293,13 @@ export default function CostsPage() {
       <section className="space-y-4">
         <CostKpiRail
           overview={overview}
-          comparison={insights.comparison}
-          peakBucket={insights.peak_bucket}
+          comparison={insights.comparison ?? null}
+          peakBucket={insights.peak_bucket ?? null}
         />
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.92fr)] xl:items-start">
           <CostTimeChart
-            points={insights.time_series}
+            points={insights.time_series ?? []}
             mode={timelineMode}
             onModeChange={setTimelineMode}
           />
@@ -342,7 +341,7 @@ export default function CostsPage() {
       </section>
 
       <section>
-        <CostConversationTable rows={insights.conversation_rows} />
+        <CostConversationTable rows={insights.conversation_rows ?? []} />
       </section>
 
       {error ? (

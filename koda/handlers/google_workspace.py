@@ -1,10 +1,13 @@
 """Google Workspace command handlers: /gws, /gmail, /gcal, /gdrive, /gsheets."""
 
 import json
+import os
+from contextlib import contextmanager
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from koda.agent_contract import canonicalize_gws_command_args
 from koda.config import (
     BLOCKED_GWS_PATTERN,
     GWS_CREDENTIALS_FILE,
@@ -17,11 +20,44 @@ from koda.utils.command_helpers import authorized
 from koda.utils.messaging import send_long_message
 
 
-def _gws_env() -> dict[str, str] | None:
+def _legacy_gws_env() -> dict[str, str] | None:
     """Return env dict with credentials path, or None."""
     if GWS_CREDENTIALS_FILE:
-        return {"GOOGLE_APPLICATION_CREDENTIALS": GWS_CREDENTIALS_FILE}
+        return {
+            "GOOGLE_APPLICATION_CREDENTIALS": GWS_CREDENTIALS_FILE,
+            "GWS_CREDENTIALS_FILE": GWS_CREDENTIALS_FILE,
+        }
+    key_content = os.environ.get("GWS_SERVICE_ACCOUNT_KEY", "")
+    if key_content:
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, prefix="gws_sa_")  # noqa: SIM115
+        tmp.write(key_content)
+        tmp.close()
+        return {
+            "GOOGLE_APPLICATION_CREDENTIALS": tmp.name,
+            "GWS_CREDENTIALS_FILE": tmp.name,
+        }
     return None
+
+
+def _gws_env() -> dict[str, str] | None:
+    return _legacy_gws_env()
+
+
+@contextmanager
+def _gws_env_context():
+    current_agent = str(os.environ.get("AGENT_ID") or "").strip().upper()
+    if current_agent:
+        from koda.services.core_connection_broker import get_core_connection_broker
+
+        with get_core_connection_broker().materialize_cli_environment(
+            "gws",
+            agent_id=current_agent,
+        ) as (_resolved, env):
+            yield env
+        return
+    yield _legacy_gws_env()
 
 
 def _format_gws_output(raw: str) -> str:
@@ -49,6 +85,8 @@ async def _run_gws(
     context: ContextTypes.DEFAULT_TYPE,
     args: str,
     usage_hint: str,
+    *,
+    service: str | None = None,
 ) -> None:
     """Shared logic for all GWS commands."""
     if not GWS_ENABLED:
@@ -60,14 +98,20 @@ async def _run_gws(
         return
 
     work_dir = context.user_data["work_dir"]
-    result = await run_cli_command(
-        "gws",
-        args,
-        work_dir,
-        blocked_pattern=BLOCKED_GWS_PATTERN,
-        timeout=GWS_TIMEOUT,
-        env=_gws_env(),
-    )
+    command_args = canonicalize_gws_command_args(service, args) if service else args
+    try:
+        with _gws_env_context() as env:
+            result = await run_cli_command(
+                "gws",
+                command_args,
+                work_dir,
+                blocked_pattern=BLOCKED_GWS_PATTERN,
+                timeout=GWS_TIMEOUT,
+                env=env,
+            )
+    except RuntimeError as exc:
+        await update.message.reply_text(str(exc))
+        return
     formatted = _format_gws_output(result)
     await send_long_message(update, f"```\n{formatted}\n```")
 
@@ -85,7 +129,13 @@ async def cmd_gws(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Gmail shortcut: /gmail ... -> gws gmail ..."""
     args = " ".join(context.args) if context.args else ""
-    await _run_gws(update, context, f"gmail {args}" if args else "", "/gmail <resource.method> [--params ...]")
+    await _run_gws(
+        update,
+        context,
+        args,
+        "/gmail <resource.method> [--params ...]",
+        service="gmail",
+    )
 
 
 @authorized
@@ -93,7 +143,13 @@ async def cmd_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_gcal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Calendar shortcut: /gcal ... -> gws calendar ..."""
     args = " ".join(context.args) if context.args else ""
-    await _run_gws(update, context, f"calendar {args}" if args else "", "/gcal <resource.method> [--params ...]")
+    await _run_gws(
+        update,
+        context,
+        args,
+        "/gcal <resource.method> [--params ...]",
+        service="calendar",
+    )
 
 
 @authorized
@@ -101,7 +157,13 @@ async def cmd_gcal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_gdrive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Drive shortcut: /gdrive ... -> gws drive ..."""
     args = " ".join(context.args) if context.args else ""
-    await _run_gws(update, context, f"drive {args}" if args else "", "/gdrive <resource.method> [--params ...]")
+    await _run_gws(
+        update,
+        context,
+        args,
+        "/gdrive <resource.method> [--params ...]",
+        service="drive",
+    )
 
 
 @authorized
@@ -109,4 +171,10 @@ async def cmd_gdrive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_gsheets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sheets shortcut: /gsheets ... -> gws sheets ..."""
     args = " ".join(context.args) if context.args else ""
-    await _run_gws(update, context, f"sheets {args}" if args else "", "/gsheets <resource.method> [--params ...]")
+    await _run_gws(
+        update,
+        context,
+        args,
+        "/gsheets <resource.method> [--params ...]",
+        service="sheets",
+    )

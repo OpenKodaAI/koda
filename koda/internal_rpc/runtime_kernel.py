@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from koda import config
 from koda.internal_rpc.common import (
+    create_grpc_channel,
     ensure_generated_proto_path,
     normalize_internal_service_probe,
     parse_boolish,
@@ -281,8 +282,6 @@ class GrpcRuntimeKernelClient:
         if self._started and self._stub is not None and self._channel is not None:
             return
         try:
-            import grpc.aio as grpc_aio
-
             ensure_generated_proto_path()
             from common.v1 import metadata_pb2
             from runtime.v1 import runtime_pb2, runtime_pb2_grpc
@@ -295,7 +294,7 @@ class GrpcRuntimeKernelClient:
             }
             raise RuntimeError("grpc_runtime_kernel_client_requires_runtime_stubs") from exc
 
-        self._channel = grpc_aio.insecure_channel(self._target)
+        self._channel = create_grpc_channel(self._target, async_channel=True)
         self._metadata_pb2 = metadata_pb2
         self._runtime_pb2 = runtime_pb2
         self._stub = runtime_pb2_grpc.RuntimeKernelServiceStub(self._channel)

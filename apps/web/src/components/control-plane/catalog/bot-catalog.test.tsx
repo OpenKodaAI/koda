@@ -314,14 +314,26 @@ describe("BotCatalog organization board", () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    expect(screen.getByRole("tab", { name: /Produto/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Operacoes/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Sem espa/i })).toBeInTheDocument();
+    // Workspace selector trigger is rendered with the active workspace name
+    const selectorTrigger = screen.getByRole("button", { name: /Selecionar espa/i });
+    expect(selectorTrigger).toBeInTheDocument();
+    expect(selectorTrigger).toHaveTextContent(/Produto/i);
+
     expect(
       screen.getByRole("heading", { name: "Produto" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "ATLAS" })).toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 4.6").length).toBeGreaterThan(0);
+
+    // Open the workspace selector and verify options
+    await user.click(selectorTrigger);
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /Produto/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /Operacoes/i })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /Sem espa/i })).toBeInTheDocument();
+    });
+    // Close the selector by clicking outside
+    await user.click(document.body);
 
     await user.type(
       screen.getByLabelText(/Buscar bots por nome, ID/i),
@@ -346,10 +358,19 @@ describe("BotCatalog organization board", () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await user.click(screen.getByRole("button", { name: /Novo espa/i }));
+    // Open the + popover and click Workspace ("Espaço de trabalho" in pt-BR)
+    const createBtn = screen.getByRole("button", { name: /^Criar$/i });
+    await user.click(createBtn);
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: /spa.o de trabalho/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("menuitem", { name: /spa.o de trabalho/i }));
+
     await user.type(screen.getByLabelText(/Nome do espa/i), "Pesquisa");
     await user.type(screen.getByLabelText(/Descri/i), "Workspace novo");
-    await user.click(screen.getByRole("button", { name: /^Criar$/i }));
+    // The form submit button (not the + popover trigger)
+    const submitButtons = screen.getAllByRole("button", { name: /^Criar$/i });
+    await user.click(submitButtons[submitButtons.length - 1]);
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -365,7 +386,13 @@ describe("BotCatalog organization board", () => {
 
     const dataTransfer = createDataTransfer();
     fireEvent.dragStart(screen.getByTestId("bot-card-ATLAS"), { dataTransfer });
-    await user.click(screen.getByRole("tab", { name: /Operacoes/i }));
+
+    // Switch to Operacoes workspace via the selector dropdown
+    await user.click(screen.getByRole("button", { name: /Selecionar espa/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /Operacoes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("option", { name: /Operacoes/i }));
     await waitFor(() => {
       expect(
         screen.getByTestId("lane-workspace-ops-no-squad"),

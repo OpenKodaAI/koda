@@ -76,8 +76,8 @@ class DBManager:
         ctx = ssl.create_default_context()
 
         if config.ssl_mode == "require":
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
         elif config.ssl_mode == "verify-ca":
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_REQUIRED
@@ -91,6 +91,8 @@ class DBManager:
             ctx.load_cert_chain(config.ssl_client_cert, config.ssl_client_key)
 
         return ctx
+
+    _PEM_PRIVATE_KEY_RE = re.compile(r"-----BEGIN\s+(RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----")
 
     @staticmethod
     def _read_ssh_key(path: str) -> str:
@@ -106,7 +108,10 @@ class DBManager:
                 lines.append(line)
                 if "PRIVATE KEY-----" in line and line.strip().startswith("-----END"):
                     break
-        return "".join(lines)
+        content = "".join(lines)
+        if not DBManager._PEM_PRIVATE_KEY_RE.search(content):
+            raise ValueError(f"File does not appear to contain a valid private key: {path}")
+        return content
 
     @staticmethod
     async def _start_ssh_tunnel(config: PostgresEnvConfig, pg_host: str, pg_port: int) -> tuple[Any, Any, int]:
@@ -116,7 +121,6 @@ class DBManager:
             "host": config.ssh_host,
             "port": config.ssh_port,
             "username": config.ssh_user,
-            "known_hosts": None,
         }
         if config.ssh_key_file:
             key_data = DBManager._read_ssh_key(config.ssh_key_file)
@@ -167,7 +171,9 @@ class DBManager:
 
             import asyncpg
 
-            pool_kwargs: dict[str, Any] = {"min_size": 1, "max_size": 5}
+            from koda.config import DB_POOL_MAX_SIZE
+
+            pool_kwargs: dict[str, Any] = {"min_size": 1, "max_size": DB_POOL_MAX_SIZE}
             if ssl_ctx is not None:
                 pool_kwargs["ssl"] = ssl_ctx
 
@@ -336,8 +342,15 @@ class DBManager:
 
         return "\n".join(lines)
 
-    async def get_schema(self, table: str | None = None, env: str | None = None) -> str:
+    async def get_schema(
+        self,
+        table: str | None = None,
+        env: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
         """List tables or show columns for a specific table."""
+        if timeout is None:
+            timeout = 10
         try:
             env_name, pool = self._get_pool(env)
         except ValueError as e:
@@ -353,7 +366,7 @@ class DBManager:
                         "FROM information_schema.tables "
                         "WHERE table_schema = 'public' "
                         "ORDER BY table_name",
-                        timeout=10,
+                        timeout=timeout,
                     )
                     if not rows:
                         return f"{env_label}No tables found in public schema."
@@ -369,7 +382,7 @@ class DBManager:
                         "WHERE table_schema = 'public' AND table_name = $1 "
                         "ORDER BY ordinal_position",
                         table,
-                        timeout=10,
+                        timeout=timeout,
                     )
                     if not rows:
                         return f"{env_label}Table '{table}' not found or has no columns."
@@ -383,8 +396,16 @@ class DBManager:
         except Exception as e:
             return f"Error: {e}"
 
-    async def explain(self, sql: str, analyze: bool = False, env: str | None = None) -> str:
+    async def explain(
+        self,
+        sql: str,
+        analyze: bool = False,
+        env: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
         """Run EXPLAIN on a query and return the plan."""
+        if timeout is None:
+            timeout = 30
         try:
             env_name, pool = self._get_pool(env)
         except ValueError as e:
@@ -408,12 +429,206 @@ class DBManager:
 
         try:
             async with pool.acquire() as conn:
-                rows = await conn.fetch(explain_sql, timeout=30)
+                rows = await conn.fetch(explain_sql, timeout=timeout)
                 plan_lines = [str(row[0]) for row in rows]
                 header = "EXPLAIN ANALYZE" if analyze else "EXPLAIN"
                 return f"{env_label}{header}:\n" + "\n".join(plan_lines)
         except Exception as e:
             return f"Error: {e}"
+
+    # ------------------------------------------------------------------
+    # Write support
+    # ------------------------------------------------------------------
+
+    async def execute_write(self, sql: str, params: list | None = None, env: str | None = None) -> dict:
+        """Execute a write SQL statement. Returns dict with affected_rows, etc."""
+        from koda.config import (
+            POSTGRES_WRITE_ENABLED,
+            POSTGRES_WRITE_ENVS,
+            POSTGRES_WRITE_REQUIRE_WHERE,
+        )
+
+        if not POSTGRES_WRITE_ENABLED:
+            return {"error": "Database write operations are not enabled. Set POSTGRES_WRITE_ENABLED=true."}
+
+        resolved_env, pool = self._resolve_write_env(env, POSTGRES_WRITE_ENVS)
+        if isinstance(resolved_env, dict):
+            return resolved_env  # error dict
+
+        validation_error = _validate_write_query(sql)
+        if validation_error:
+            return {"error": validation_error}
+
+        if POSTGRES_WRITE_REQUIRE_WHERE:
+            where_error = _check_where_required(sql)
+            if where_error:
+                return {"error": where_error}
+
+        try:
+            async with pool.acquire() as conn:
+                # Capture plan for diagnostics
+                try:
+                    explain_result = await conn.fetch(f"EXPLAIN {sql}")
+                    plan_text = "\n".join(r[0] for r in explain_result)
+                except Exception:
+                    plan_text = "(plan unavailable)"
+
+                # Execute in a transaction
+                async with conn.transaction():
+                    if params:
+                        result = await conn.execute(sql, *params)
+                    else:
+                        result = await conn.execute(sql)
+
+                    affected = _parse_affected_rows(result)
+
+                    return {
+                        "success": True,
+                        "affected_rows": affected,
+                        "command": result,
+                        "env": resolved_env,
+                        "plan": plan_text,
+                    }
+        except Exception as e:
+            return {"error": f"Execution failed: {e}"}
+
+    async def explain_write(self, sql: str, env: str | None = None) -> dict:
+        """EXPLAIN a write SQL statement (dry-run, no execution)."""
+        from koda.config import POSTGRES_WRITE_ENABLED
+
+        if not POSTGRES_WRITE_ENABLED:
+            return {"error": "Database write operations are not enabled."}
+
+        validation_error = _validate_write_query(sql)
+        if validation_error:
+            return {"error": validation_error}
+
+        try:
+            env_name, pool = self._get_pool(env)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(f"EXPLAIN {sql}")
+                plan = "\n".join(r[0] for r in rows)
+                return {"success": True, "plan": plan, "env": env_name}
+        except Exception as e:
+            return {"error": f"EXPLAIN failed: {e}"}
+
+    async def execute_transaction(self, statements: list[dict], env: str | None = None) -> dict:
+        """Execute multiple write statements in a single transaction."""
+        from koda.config import (
+            POSTGRES_WRITE_ENABLED,
+            POSTGRES_WRITE_ENVS,
+            POSTGRES_WRITE_REQUIRE_WHERE,
+        )
+
+        if not POSTGRES_WRITE_ENABLED:
+            return {"error": "Database write operations are not enabled."}
+
+        resolved_env, pool = self._resolve_write_env(env, POSTGRES_WRITE_ENVS)
+        if isinstance(resolved_env, dict):
+            return resolved_env  # error dict
+
+        if not statements:
+            return {"error": "No statements provided."}
+        if len(statements) > 20:
+            return {"error": "Maximum 20 statements per transaction."}
+
+        # Validate all statements first
+        for i, stmt in enumerate(statements):
+            sql = stmt.get("sql", "")
+            err = _validate_write_query(sql)
+            if err:
+                return {"error": f"Statement {i}: {err}"}
+            if POSTGRES_WRITE_REQUIRE_WHERE:
+                where_err = _check_where_required(sql)
+                if where_err:
+                    return {"error": f"Statement {i}: {where_err}"}
+
+        try:
+            results = []
+            async with pool.acquire() as conn, conn.transaction():
+                for stmt in statements:
+                    sql = stmt["sql"]
+                    params = stmt.get("params")
+                    if params:
+                        result = await conn.execute(sql, *params)
+                    else:
+                        result = await conn.execute(sql)
+                    affected = _parse_affected_rows(result)
+                    results.append({"sql": sql[:200], "affected_rows": affected, "command": result})
+
+            total = sum(r["affected_rows"] for r in results)
+            return {
+                "success": True,
+                "results": results,
+                "total_affected_rows": total,
+                "env": resolved_env,
+            }
+        except Exception as e:
+            return {"error": f"Transaction failed (rolled back): {e}"}
+
+    def _resolve_write_env(self, env: str | None, allowed_envs: list[str]) -> tuple[str, Any] | dict:
+        """Resolve environment for write operations. Returns (env_name, pool) or error dict."""
+        try:
+            env_name, pool = self._get_pool(env)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        if env_name not in allowed_envs:
+            allowed = ", ".join(allowed_envs)
+            return {"error": f"Write operations are not allowed on environment '{env_name}'. Allowed: {allowed}"}
+        return env_name, pool
+
+
+# ---------------------------------------------------------------------------
+# Write query validation (module-level)
+# ---------------------------------------------------------------------------
+
+_ALLOWED_WRITE_RE = re.compile(r"^\s*(INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
+_BLOCKED_DDL_RE = re.compile(r"\b(DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|VACUUM|REINDEX|CLUSTER)\b", re.IGNORECASE)
+
+
+def _validate_write_query(sql: str) -> str:
+    """Validate a write SQL statement. Returns error string or empty string."""
+    stripped = sql.strip()
+    if not stripped:
+        return "Empty SQL statement."
+    if not _ALLOWED_WRITE_RE.match(stripped):
+        return "Only INSERT, UPDATE, DELETE statements are allowed."
+    if _BLOCKED_DDL_RE.search(stripped):
+        return "DDL operations (DROP, ALTER, CREATE, etc.) are not allowed."
+    # Block multi-statement
+    if ";" in stripped.rstrip(";"):
+        return "Multi-statement execution is not allowed. Use db_transaction for batches."
+    # Block comment injection
+    if "--" in stripped or "/*" in stripped:
+        return "SQL comments are not allowed in write statements."
+    return ""
+
+
+def _check_where_required(sql: str) -> str | None:
+    """Check if UPDATE/DELETE has a WHERE clause. Returns error or None."""
+    stripped = sql.strip().upper()
+    if (stripped.startswith("UPDATE") or stripped.startswith("DELETE")) and " WHERE " not in stripped:
+        return (
+            "UPDATE/DELETE without WHERE clause is blocked. "
+            "Add a WHERE clause or set POSTGRES_WRITE_REQUIRE_WHERE=false."
+        )
+    return None
+
+
+def _parse_affected_rows(result: str | None) -> int:
+    """Parse affected rows from asyncpg result string (e.g. 'INSERT 0 5', 'UPDATE 3')."""
+    if not result:
+        return 0
+    parts = result.split()
+    for p in reversed(parts):
+        if p.isdigit():
+            return int(p)
+    return 0
 
 
 db_manager = DBManager()

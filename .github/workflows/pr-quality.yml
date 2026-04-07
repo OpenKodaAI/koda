@@ -1,0 +1,237 @@
+name: pr-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.10.7"
+
+jobs:
+  workflow-quality:
+    name: workflow-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1.7.12
+
+  python-quality:
+    name: python-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy type check
+        run: uv run mypy koda/ --ignore-missing-imports
+
+  python-tests:
+    name: python-tests-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Run tests with coverage
+        run: |
+          mkdir -p artifacts/python/${{ matrix.python-version }}
+          uv run pytest \
+            --cov=koda \
+            --cov-report=term-missing \
+            --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.python-version }}/pytest.xml
+        env:
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
+      - name: Upload pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: python-tests-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.python-version }}/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  web-quality:
+    name: web-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint web
+        run: pnpm lint:web
+      - name: Test web with JUnit output
+        run: |
+          mkdir -p artifacts/web
+          pnpm test:web -- --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml
+      - name: Build web
+        run: pnpm build:web
+      - name: Upload web test artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: web-quality-artifacts
+          path: artifacts/web/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  repo-hygiene:
+    name: repo-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Check repo-map drift
+        run: uv run python3 scripts/generate_repo_map.py --check
+      - name: Validate AI docs and open source hygiene
+        run: |
+          uv run pytest -q \
+            tests/test_ai_docs.py \
+            tests/test_repo_map.py \
+            tests/test_open_source_hygiene.py \
+            tests/test_public_docs.py \
+            tests/test_installation_assets.py
+        env:
+          KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
+
+  rust-quality:
+    name: rust-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Rust format check
+        run: cargo +stable fmt --check
+      - name: Rust clippy
+        run: cargo +stable clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo +stable test --workspace
+
+  docker-smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - workflow-quality
+      - python-quality
+      - python-tests
+      - web-quality
+      - repo-hygiene
+      - rust-quality
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Build primary Docker image
+        run: docker build -t koda:ci .
+      - name: Bring up stack and smoke test
+        run: |
+          wait_for_url() {
+            local name="$1"
+            local url="$2"
+            for ((attempt = 0; attempt < 90; attempt++)); do
+              if curl -fsS "$url" >/dev/null; then
+                return 0
+              fi
+              sleep 2
+            done
+            echo "Timed out waiting for ${name} at ${url}" >&2
+            return 1
+          }
+
+          cp .env.example .env
+          docker compose config -q
+          docker compose up -d --build
+          wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
+          wait_for_url "web health" "http://127.0.0.1:3000/api/health"
+          wait_for_url "dashboard root" "http://127.0.0.1:3000/"
+          wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"
+          wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"
+          curl -fsS http://127.0.0.1:8090/health
+          curl -fsS http://127.0.0.1:3000/api/health >/dev/null
+          curl -fsS http://127.0.0.1:3000/ >/dev/null
+          curl -fsS http://127.0.0.1:3000/control-plane/setup >/dev/null
+          curl -fsS http://127.0.0.1:3000/control-plane >/dev/null
+          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
+      - name: Capture docker logs
+        if: failure()
+        run: |
+          mkdir -p artifacts/docker
+          docker compose ps > artifacts/docker/compose-ps.txt
+          docker compose logs --no-color > artifacts/docker/compose.log
+      - name: Upload docker smoke artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docker-smoke-artifacts
+          path: artifacts/docker/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v

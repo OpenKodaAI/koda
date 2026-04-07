@@ -38,7 +38,7 @@ function getDetailsObject(entry: AuditEntry): Record<string, unknown> {
 
 export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
   const { t } = useAppI18n();
-  const presence = useAnimatedPresence(Boolean(entry), { entry }, { duration: 300 });
+  const presence = useAnimatedPresence(Boolean(entry), { entry }, { duration: 180 });
   const renderedEntry = presence.renderedValue.entry;
 
   useBodyScrollLock(presence.shouldRender);
@@ -56,17 +56,17 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
     <>
       <div
         className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "app-overlay-backdrop",
           presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
       />
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full max-w-[720px] will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "fixed inset-y-0 right-0 z-[70] w-full max-w-[720px] transition-opacity duration-150 ease-out",
           presence.isVisible
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         role="dialog"
         aria-modal="true"
@@ -87,7 +87,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
                 <div className="space-y-2.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs text-[var(--text-tertiary)]">#{renderedEntry.id}</span>
-                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
                       {renderedEntry.event_type}
                     </span>
                   </div>
@@ -129,7 +129,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
                   </div>
                   <button
                     onClick={() => copyText(renderedEntry.details_json)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                    className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
                   >
                     <Copy className="h-3.5 w-3.5" />
                     {t("audit.detail.copyJson")}
@@ -139,14 +139,14 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
               </div>
 
               {renderedEntry.trace_id && (
-                <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-5">
+                <div className="app-code-panel p-4 sm:p-5">
                   <div className="mb-3 flex items-center justify-between gap-4">
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
                       {t("audit.detail.traceability")}
-                      </span>
+                    </span>
                     <button
                       onClick={() => copyText(renderedEntry.trace_id)}
-                      className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                      className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       {t("common.copy")}
@@ -167,7 +167,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
 
 function DrawerMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+    <div className="app-kpi-card">
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
         {label}
       </p>

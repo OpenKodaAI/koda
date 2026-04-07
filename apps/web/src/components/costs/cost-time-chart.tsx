@@ -188,7 +188,7 @@ export function CostTimeChart({
     return (
       <div
         className={cn(
-          "flex min-h-[360px] items-center justify-center rounded-[18px] border border-dashed border-[rgba(255,255,255,0.08)] bg-[rgba(12,12,12,0.9)] text-sm text-[var(--text-tertiary)]",
+          "flex min-h-[360px] items-center justify-center rounded-[18px] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm text-[var(--text-tertiary)]",
         className
       )}
     >
@@ -207,14 +207,11 @@ export function CostTimeChart({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[rgba(255,255,255,0.06)] bg-[#0d0d0e] p-5 sm:p-6",
+        "overflow-hidden rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-5 sm:p-6",
         className
       )}
-      style={{
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 46px rgba(0,0,0,0.18)",
-      }}
     >
-      <div className="flex flex-col gap-4 border-b border-[rgba(255,255,255,0.06)] pb-4">
+      <div className="flex flex-col gap-4 border-b border-[var(--border-subtle)] pb-4">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div className="min-w-0">
             <p className="eyebrow">{t("costs.chart.eyebrow")}</p>
@@ -223,27 +220,29 @@ export function CostTimeChart({
             </h3>
             <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--text-secondary)]">
               <span className="inline-flex items-center gap-2">
-                <span className="text-[rgba(255,255,255,0.44)]">{t("costs.page.timeChart.peak", { defaultValue: "Peak:" })}</span>
+                <span className="text-[var(--text-tertiary)]">{t("costs.page.timeChart.peak", { defaultValue: "Peak:" })}</span>
                 <span className="font-medium text-[var(--text-primary)]">
                   {peakDatum ? formatCost(peakDatum.total) : "—"}
                 </span>
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="text-[rgba(255,255,255,0.44)]">{t("costs.page.timeChart.base", { defaultValue: "Base:" })}</span>
+                <span className="text-[var(--text-tertiary)]">{t("costs.page.timeChart.base", { defaultValue: "Base:" })}</span>
                 <span className="font-medium text-[var(--text-primary)]">
                   {lowDatum ? formatCost(lowDatum.total) : "—"}
                 </span>
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="text-[rgba(255,255,255,0.44)]">{t("costs.page.timeChart.buckets", { defaultValue: "Buckets:" })}</span>
+                <span className="text-[var(--text-tertiary)]">{t("costs.page.timeChart.buckets", { defaultValue: "Buckets:" })}</span>
                 <span className="font-medium text-[var(--text-primary)]">{data.length}</span>
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="text-[rgba(255,255,255,0.44)]">{t("costs.page.timeChart.variation", { defaultValue: "Variation:" })}</span>
+                <span className="text-[var(--text-tertiary)]">{t("costs.page.timeChart.variation", { defaultValue: "Variation:" })}</span>
                 <span
                   className={cn(
                     "font-medium",
-                    totalDelta != null && totalDelta >= 0 ? "text-[#9be7b3]" : "text-[#ffab8e]"
+                    totalDelta != null && totalDelta >= 0
+                      ? "text-[var(--tone-success-dot)]"
+                      : "text-[var(--tone-warning-dot)]"
                   )}
                 >
                   {totalDelta == null ? "—" : `${totalDelta > 0 ? "+" : ""}${totalDelta.toFixed(1)}%`}
@@ -253,7 +252,7 @@ export function CostTimeChart({
           </div>
 
           <div className="flex flex-wrap items-start justify-start gap-2 xl:justify-end">
-            <div className="rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.026)] px-3.5 py-2.5 text-right">
+            <div className="rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3.5 py-2.5 text-right">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-quaternary)]">
                 {activeDatum?.label ?? t("costs.page.timeChart.noBucket", { defaultValue: "No bucket" })}
               </p>
@@ -300,10 +299,13 @@ export function CostTimeChart({
                 onBlur={() => setHoveredSeriesKey(null)}
                 className="inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[11px] font-medium transition-all"
                 style={{
-                  opacity: isDimmed ? 0.42 : 1,
-                  borderColor: `${item.color}33`,
-                  background: `linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,
-                  color: "var(--text-primary)",
+                  borderColor: isDimmed
+                    ? "var(--border-subtle)"
+                    : `color-mix(in srgb, ${item.color} 42%, var(--border-subtle) 58%)`,
+                  background: isDimmed
+                    ? "var(--surface-panel-soft)"
+                    : `color-mix(in srgb, ${item.color} 10%, var(--surface-panel-soft) 90%)`,
+                  color: isDimmed ? "var(--text-secondary)" : "var(--text-primary)",
                 }}
               >
                 <span className="h-2.5 w-2.5 rounded-[2px]" style={{ backgroundColor: item.color }} />
@@ -342,14 +344,13 @@ export function CostTimeChart({
                 <stop offset="100%" stopColor={primaryColor} stopOpacity={0} />
               </linearGradient>
               <pattern id="costDotGrid" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-                <circle cx="10" cy="10" r="1" fill="rgba(255,255,255,0.1)" />
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="1"
+                  fill="color-mix(in srgb, var(--text-primary) 10%, transparent)"
+                />
               </pattern>
-              <filter id="costLineShadow" x="-100%" y="-100%" width="300%" height="300%">
-                <feDropShadow dx="4" dy="6" stdDeviation="18" floodColor={primaryColor} floodOpacity="0.5" />
-              </filter>
-              <filter id="costDotShadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="2" dy="3" stdDeviation="4" floodColor="rgba(0,0,0,0.75)" />
-              </filter>
             </defs>
 
             <rect x="0" y="0" width="100%" height="100%" fill="url(#costDotGrid)" style={{ pointerEvents: "none" }} />
@@ -367,7 +368,7 @@ export function CostTimeChart({
               dataKey="label"
               axisLine={false}
               tickLine={false}
-              tick={{ fontSize: 12, fill: "rgba(255,255,255,0.42)" }}
+              tick={{ fontSize: 12, fill: "var(--text-tertiary)" }}
               tickMargin={14}
               interval="preserveStartEnd"
               minTickGap={24}
@@ -378,13 +379,17 @@ export function CostTimeChart({
               axisLine={false}
               tickLine={false}
               width={48}
-              tick={{ fontSize: 12, fill: "rgba(255,255,255,0.42)" }}
+              tick={{ fontSize: 12, fill: "var(--text-tertiary)" }}
               tickMargin={12}
               tickFormatter={formatAxisValue}
             />
 
             <ChartTooltip
-              cursor={{ strokeDasharray: "3 3", stroke: "rgba(255,255,255,0.24)", strokeOpacity: 0.5 }}
+              cursor={{
+                strokeDasharray: "3 3",
+                stroke: "color-mix(in srgb, var(--text-primary) 20%, transparent)",
+                strokeOpacity: 0.5,
+              }}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const datum = payload[0]?.payload as CostChartDatum | undefined;
@@ -403,13 +408,13 @@ export function CostTimeChart({
                   : [];
 
                 return (
-                  <div className="min-w-[min(220px,calc(100vw-3rem))] max-w-[calc(100vw-3rem)] rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(17,17,18,0.84)] px-3.5 py-3 shadow-2xl backdrop-blur-2xl">
-                    <p className="text-[11px] font-medium text-[rgba(255,255,255,0.54)]">{datum.label}</p>
+                  <div className="min-w-[min(220px,calc(100vw-3rem))] max-w-[calc(100vw-3rem)] rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3.5 py-3">
+                    <p className="text-[11px] font-medium text-[var(--text-tertiary)]">{datum.label}</p>
                     <div className="mt-2 flex items-center gap-2">
                       <p className="font-mono text-[1rem] font-semibold text-[var(--text-primary)]">
                         {formatCost(datum.total)}
                       </p>
-                      <span className="inline-flex items-center gap-1 text-[11px] text-[#9be7b3]">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-[var(--tone-success-dot)]">
                         <TrendingUp className="h-3.5 w-3.5" />
                         {datum.driverLabel ?? "Sem driver"}
                       </span>
@@ -421,7 +426,7 @@ export function CostTimeChart({
                           <div key={item.key} className="flex items-center justify-between gap-3 text-[12px]">
                             <div className="flex min-w-0 items-center gap-2">
                               <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span className="truncate text-[rgba(255,255,255,0.7)]">{item.label}</span>
+                              <span className="truncate text-[var(--text-secondary)]">{item.label}</span>
                             </div>
                             <span className="font-mono text-[var(--text-primary)]">{formatCost(item.value)}</span>
                           </div>
@@ -471,27 +476,24 @@ export function CostTimeChart({
                     cy={cy}
                     r={5.5}
                     fill={primaryColor}
-                    stroke="white"
+                    stroke="var(--surface-elevated)"
                     strokeWidth={2}
-                    filter="url(#costDotShadow)"
                   />
                 );
               }}
               activeDot={{
                 r: 6,
                 fill: primaryColor,
-                stroke: "white",
+                stroke: "var(--surface-elevated)",
                 strokeWidth: 2,
-                filter: "url(#costDotShadow)",
               }}
-              filter="url(#costLineShadow)"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
               </ComposedChart>
             </div>
           ) : (
-            <div className="h-full w-full rounded-[18px] border border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.015)]" />
+            <div className="h-full w-full rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]" />
           )}
         </div>
       </div>

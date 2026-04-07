@@ -1,100 +1,119 @@
-import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
+export const dynamic = "force-dynamic";
+
+import { notFound, redirect } from "next/navigation";
 import { BotEditorShell } from "@/components/control-plane/editor/bot-editor-shell";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
 import {
   ControlPlaneRequestError,
   getControlPlaneBot,
+  getControlPlaneExecutionPolicy,
   getControlPlaneCompiledPrompt,
   getControlPlaneCoreCapabilities,
+  getControlPlaneCoreIntegrations,
   getControlPlaneCorePolicies,
   getControlPlaneCoreProviders,
   getControlPlaneSystemSettings,
   getControlPlaneCoreTools,
   getControlPlaneWorkspaces,
 } from "@/lib/control-plane";
-import { LOCALE_COOKIE_KEY, translateForLanguage } from "@/lib/i18n";
+import {
+  buildControlPlaneSetupHref,
+  resolveControlPlaneDashboardAccess,
+} from "@/lib/control-plane-dashboard-access";
 
 export default async function ControlPlaneBotPage({
   params,
 }: {
   params: Promise<{ botId: string }>;
 }) {
-  const cookieStore = await cookies();
-  const language = cookieStore.get(LOCALE_COOKIE_KEY)?.value;
   const { botId } = await params;
+  const access = await resolveControlPlaneDashboardAccess();
+
+  if (access.status === "setup_required") {
+    return redirect(buildControlPlaneSetupHref(`/control-plane/bots/${encodeURIComponent(botId)}`));
+  }
+
+  if (access.status === "unavailable") {
+    return <ControlPlaneUnavailable />;
+  }
+
   let payload:
       | {
         bot: Awaited<ReturnType<typeof getControlPlaneBot>>;
         compiledPromptPayload: Awaited<ReturnType<typeof getControlPlaneCompiledPrompt>> | null;
+        executionPolicyPayload: Awaited<ReturnType<typeof getControlPlaneExecutionPolicy>> | null;
         systemSettings: Awaited<ReturnType<typeof getControlPlaneSystemSettings>>;
         coreTools: Awaited<ReturnType<typeof getControlPlaneCoreTools>>;
         coreProviders: Awaited<ReturnType<typeof getControlPlaneCoreProviders>>;
         corePolicies: Awaited<ReturnType<typeof getControlPlaneCorePolicies>>;
         coreCapabilities: Awaited<ReturnType<typeof getControlPlaneCoreCapabilities>>;
+        coreIntegrations: Awaited<ReturnType<typeof getControlPlaneCoreIntegrations>>;
         workspaces: Awaited<ReturnType<typeof getControlPlaneWorkspaces>>;
       }
     | null = null;
 
   try {
-    const [bot, systemSettings, coreTools, coreProviders, corePolicies, coreCapabilities, workspaces] = await Promise.all([
+    const [
+      bot,
+      systemSettings,
+      coreTools,
+      coreProviders,
+      corePolicies,
+      coreCapabilities,
+      coreIntegrations,
+      workspaces,
+      executionPolicyPayload,
+    ] = await Promise.all([
       getControlPlaneBot(botId),
       getControlPlaneSystemSettings(),
       getControlPlaneCoreTools(),
       getControlPlaneCoreProviders(),
       getControlPlaneCorePolicies(),
       getControlPlaneCoreCapabilities(),
+      getControlPlaneCoreIntegrations(),
       getControlPlaneWorkspaces(),
+      getControlPlaneExecutionPolicy(botId).catch(() => null),
     ]);
     const compiledPromptPayload = await getControlPlaneCompiledPrompt(botId).catch(() => null);
-    payload = { bot, compiledPromptPayload, systemSettings, coreTools, coreProviders, corePolicies, coreCapabilities, workspaces };
+    payload = {
+      bot,
+      compiledPromptPayload,
+      executionPolicyPayload,
+      systemSettings,
+      coreTools,
+      coreProviders,
+      corePolicies,
+      coreCapabilities,
+      coreIntegrations,
+      workspaces,
+    };
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 404) {
-      notFound();
+      return notFound();
     }
 
-    const description =
-      error instanceof Error
-        ? error.message
-        : translateForLanguage(language, "controlPlane.bot.loadDescription", {
-            defaultValue: "Could not load the configuration for bot {{botId}}.",
-            botId,
-          });
-    return (
-      <ControlPlaneUnavailable
-        title={translateForLanguage(language, "controlPlane.bot.loadTitle", {
-          defaultValue: "Failed to load {{botId}}",
-          botId,
-        })}
-        description={description}
-      />
-    );
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      return redirect(buildControlPlaneSetupHref(`/control-plane/bots/${encodeURIComponent(botId)}`));
+    }
+
+    return <ControlPlaneUnavailable />;
   }
 
   if (!payload) {
-    return (
-      <ControlPlaneUnavailable
-        title={translateForLanguage(language, "controlPlane.bot.loadTitle", {
-          defaultValue: "Failed to load {{botId}}",
-          botId,
-        })}
-        description={translateForLanguage(language, "controlPlane.bot.loadDescription", {
-          defaultValue: "Could not load the configuration for bot {{botId}}.",
-          botId,
-        })}
-      />
-    );
+    return <ControlPlaneUnavailable />;
   }
 
   return (
     <BotEditorShell
       bot={payload.bot}
       compiledPromptPayload={payload.compiledPromptPayload}
+      executionPolicyPayload={payload.executionPolicyPayload}
       core={{
         tools: payload.coreTools,
         providers: payload.coreProviders,
         policies: payload.corePolicies,
         capabilities: payload.coreCapabilities,
+        integrations: payload.coreIntegrations,
       }}
       workspaces={payload.workspaces}
       systemSettings={payload.systemSettings}

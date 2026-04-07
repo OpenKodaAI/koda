@@ -30,7 +30,7 @@ export function SessionDetailDrawer({
   const presence = useAnimatedPresence(
     isOpen && (Boolean(detail) || loading || Boolean(error)),
     { detail, loading, error },
-    { duration: 300 }
+    { duration: 180 }
   );
 
   useBodyScrollLock(presence.shouldRender);
@@ -48,17 +48,17 @@ export function SessionDetailDrawer({
     <>
       <div
         className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "app-overlay-backdrop",
           presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
       />
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "fixed inset-y-0 right-0 z-[70] w-full transition-opacity duration-150 ease-out",
           presence.isVisible
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         role="dialog"
         aria-modal="true"

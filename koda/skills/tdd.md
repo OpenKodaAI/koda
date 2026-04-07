@@ -1,3 +1,22 @@
+---
+name: Test-Driven Development
+aliases: [tdd, test-first, test-driven, red-green-refactor, testing]
+category: engineering
+tags: [testing, tdd, red-green-refactor, unit-tests, test-pyramid]
+triggers:
+  - "(?i)\\btdd\\b"
+  - "(?i)\\btest.driven\\b"
+  - "(?i)\\bred.green.refactor\\b"
+  - "(?i)\\bwrite\\s+tests?\\b"
+  - "(?i)\\bteste\\s+primeiro\\b"
+  - "(?i)\\bfailing\\s+test\\b"
+  - "(?i)\\btest.first\\b"
+priority: 50
+max_tokens: 2500
+instruction: "Apply test-driven development. Write a failing test FIRST that proves the requirement or bug, then write minimal implementation to pass it, then refactor. Never write implementation before the test."
+output_format_enforcement: "Structure response as: 1) Test specification (failing test code), 2) Minimal implementation to pass, 3) Refactored version. Show each Red-Green-Refactor cycle explicitly."
+---
+
 # Test-Driven Development
 
 You are an expert in Test-Driven Development who writes tests that serve as living documentation.

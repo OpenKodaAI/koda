@@ -97,7 +97,9 @@ export function MemoryCurationRow({
     <div
       className={cn(
         "group flex items-start gap-3 px-4 py-3.5 transition-colors sm:px-5",
-        selected ? "bg-[rgba(255,255,255,0.026)]" : "hover:bg-[rgba(255,255,255,0.014)]"
+        selected
+          ? "bg-[color-mix(in_srgb,var(--text-primary)_4%,transparent)]"
+          : "hover:bg-[color-mix(in_srgb,var(--text-primary)_2%,transparent)]"
       )}
       style={selected ? { boxShadow: `inset 2px 0 0 ${botColor}` } : undefined}
     >

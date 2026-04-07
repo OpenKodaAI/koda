@@ -51,11 +51,20 @@ Run these checks after code changes and before considering the task complete:
 - `ruff format --check .`
 - `mypy koda/ --ignore-missing-imports`
 - `pytest --cov=koda --cov-report=term-missing`
+- `pnpm lint:web`
+- `pnpm test:web`
+- `pnpm build:web`
 
 When the task only changes the AI-friendly documentation layer, also run:
 
 - `python3 scripts/generate_repo_map.py --check`
-- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py`
+- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py`
+
+When the task touches the Rust workspace, also run:
+
+- `cargo fmt --check --manifest-path rust/Cargo.toml`
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
+- `cargo test --manifest-path rust/Cargo.toml --workspace`
 
 ## Common Decision Points
 

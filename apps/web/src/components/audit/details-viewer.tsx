@@ -83,8 +83,8 @@ export function DetailsViewer({ data }: DetailsViewerProps) {
   const entries = Object.entries(data);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[linear-gradient(180deg,rgba(16,16,16,0.92)_0%,rgba(11,11,11,0.96)_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.015)]">
-      <div className="flex items-center justify-between border-b border-[rgba(236,236,236,0.06)] px-4 py-2.5">
+    <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
           {tl("JSON")}
         </span>

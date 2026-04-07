@@ -214,47 +214,28 @@ def reschedule_embedding_job(
 
 def claim_embedding_jobs(agent_id: str | None, limit: int = 16) -> list[EmbeddingJob]:
     scope = _require_primary(agent_id)
-    now = datetime.now()
-    now_iso = now.isoformat()
+    now_iso = datetime.now().isoformat()
+    # _fetch_rows delegates to asyncpg's conn.fetch() which supports DML with
+    # RETURNING in autocommit mode — the UPDATE is committed automatically.
     rows = _fetch_rows(
         """
-        SELECT id, memory_id, agent_id, status, attempt_count, last_error, next_retry_at,
-               last_attempt_at, claimed_at, created_at, updated_at
-        FROM memory_embedding_jobs
-        WHERE agent_id = ?
-          AND status IN ('pending', 'failed')
-          AND (next_retry_at IS NULL OR next_retry_at <= ?)
-        ORDER BY COALESCE(next_retry_at, created_at) ASC, id ASC
-        LIMIT ?
-        """,
-        (scope, now_iso, limit),
-        agent_id=scope,
-    )
-    if not rows:
-        return []
-    ids = [int(cast(int | str, row["id"] if isinstance(row, dict) else row[0])) for row in rows]
-    placeholders = ",".join("?" for _ in ids)
-    _write(
-        f"""
         UPDATE memory_embedding_jobs
         SET status = 'processing', claimed_at = ?, last_attempt_at = ?, updated_at = ?
-        WHERE id IN ({placeholders})
+        WHERE id IN (
+            SELECT id FROM memory_embedding_jobs
+            WHERE agent_id = ?
+              AND status IN ('pending', 'failed')
+              AND (next_retry_at IS NULL OR next_retry_at <= ?)
+            ORDER BY COALESCE(next_retry_at, created_at) ASC, id ASC
+            LIMIT ?
+        )
+        RETURNING id, memory_id, agent_id, status, attempt_count, last_error,
+                  next_retry_at, last_attempt_at, claimed_at, created_at, updated_at
         """,
-        (now_iso, now_iso, now_iso, *ids),
+        (now_iso, now_iso, now_iso, scope, now_iso, limit),
         agent_id=scope,
     )
-    claimed_rows = _fetch_rows(
-        f"""
-        SELECT id, memory_id, agent_id, status, attempt_count, last_error, next_retry_at,
-               last_attempt_at, claimed_at, created_at, updated_at
-        FROM memory_embedding_jobs
-        WHERE id IN ({placeholders})
-        ORDER BY id ASC
-        """,
-        ids,
-        agent_id=scope,
-    )
-    return [_row_to_job(row) for row in claimed_rows]
+    return [_row_to_job(row) for row in rows]
 
 
 def get_embedding_job_stats(agent_id: str | None = None) -> dict[str, int]:

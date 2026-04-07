@@ -69,7 +69,13 @@ export default function ExecutionsPage() {
       search: debouncedSearch,
       limit: 100,
     }),
-    refetchInterval: 10_000,
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      const hasActive = items.some((e) =>
+        ["running", "queued", "retrying"].includes(e.status),
+      );
+      return hasActive ? 10_000 : 45_000;
+    },
     queryFn: async ({ signal }) => {
       const response = await fetchControlPlaneDashboardJsonAllowError<ExecutionSummary[]>(
         "/executions",
@@ -115,7 +121,12 @@ export default function ExecutionsPage() {
           language,
         )
       : ["dashboard", "executions", "detail", "idle"],
-    refetchInterval: selectedExecution ? 10_000 : false,
+    refetchInterval: (query) => {
+      if (!selectedExecution) return false;
+      const status = query.state.data?.status;
+      const isActive = ["running", "queued", "retrying"].includes(status ?? "");
+      return isActive ? 5_000 : 30_000;
+    },
     queryFn: async ({ signal }) => {
       if (!selectedExecution) {
         throw new Error(t("executions.page.noSelection"));

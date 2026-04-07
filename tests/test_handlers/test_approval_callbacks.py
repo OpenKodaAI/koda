@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from koda.utils.approval import _PENDING_AGENT_CMD_OPS, _PENDING_OPS, APPROVAL_TIMEOUT
+from koda.utils.approval import _APPROVAL_GRANTS, _PENDING_AGENT_CMD_OPS, _PENDING_OPS, APPROVAL_TIMEOUT
 
 
 @pytest.fixture(autouse=True)
@@ -13,9 +13,11 @@ def clear_pending_ops():
     """Clear pending operations before each test."""
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
+    _APPROVAL_GRANTS.clear()
     yield
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
+    _APPROVAL_GRANTS.clear()
 
 
 def _make_callback_update(data: str, user_id: int = 111):
@@ -53,6 +55,26 @@ def _add_pending_op(op_id, handler=None, timestamp=None):
         "args": "test.txt",
         "cmd_name": "rm",
         "timestamp": timestamp or time.time(),
+        "user_id": 111,
+        "agent_id": "agent-a",
+        "session_id": "session-1",
+        "chat_id": 111,
+        "requests": [
+            {
+                "envelope": {
+                    "tool_id": "file_delete",
+                    "integration_id": "fileops",
+                    "action_id": "file_delete",
+                    "transport": "internal",
+                    "access_level": "destructive",
+                    "risk_class": "destructive",
+                    "resource_scope_fingerprint": "scope-fp",
+                    "params_fingerprint": "params-fp",
+                },
+                "approval_scope": {"kind": "scope", "ttl_seconds": 900, "max_uses": 10},
+            }
+        ],
+        "grants": [],
     }
 
 
@@ -84,7 +106,7 @@ class TestCallbackApproval:
         assert op_id not in _PENDING_OPS
 
     @pytest.mark.asyncio
-    async def test_approve_all_sets_flag_and_executes(self):
+    async def test_approve_scope_issues_grants_and_executes(self):
         from koda.handlers.callbacks import callback_approval
 
         handler = AsyncMock()
@@ -97,15 +119,37 @@ class TestCallbackApproval:
             "args": "test.txt",
             "cmd_name": "rm",
             "timestamp": time.time(),
+            "user_id": 111,
+            "agent_id": "agent-a",
+            "session_id": "session-1",
+            "chat_id": 111,
+            "requests": [
+                {
+                    "envelope": {
+                        "tool_id": "file_delete",
+                        "integration_id": "fileops",
+                        "action_id": "file_delete",
+                        "transport": "internal",
+                        "access_level": "destructive",
+                        "risk_class": "destructive",
+                        "resource_scope_fingerprint": "scope-fp",
+                        "params_fingerprint": "params-fp",
+                    },
+                    "approval_scope": {"kind": "scope", "ttl_seconds": 900, "max_uses": 10},
+                }
+            ],
+            "grants": [],
         }
 
-        update = _make_callback_update(f"approve:all:{op_id}")
+        update = _make_callback_update(f"approve:scope:{op_id}")
         context = _make_context()
 
         await callback_approval(update, context)
 
         handler.assert_called_once()
-        assert context.user_data.get("_approve_all") is True
+        assert op_id not in _PENDING_OPS
+        msg = update.callback_query.edit_message_text.call_args[0][0]
+        assert "Aprovado" in msg
 
     @pytest.mark.asyncio
     async def test_deny_does_not_execute(self):
@@ -188,7 +232,7 @@ class TestCallbackApproval:
 # ---------------------------------------------------------------------------
 
 
-def _add_agent_cmd_op(op_id, user_id=111, timestamp=None):
+def _add_agent_cmd_op(op_id, user_id=111, timestamp=None, requests=None):
     """Helper to add a pending agent-cmd operation."""
     import asyncio
 
@@ -199,6 +243,12 @@ def _add_agent_cmd_op(op_id, user_id=111, timestamp=None):
         "event": event,
         "decision": None,
         "description": "jira transition",
+        "agent_id": "agent-a",
+        "session_id": "session-1",
+        "chat_id": 111,
+        "requests": list(requests or []),
+        "grants": [],
+        "preview_text": "",
     }
     return event
 
@@ -225,22 +275,42 @@ class TestCallbackAgentCmdApproval:
         assert "Aprovado" in msg
 
     @pytest.mark.asyncio
-    async def test_approve_all_sets_flag_and_decision(self):
+    async def test_approve_scope_sets_scoped_decision(self):
         from koda.handlers.callbacks import callback_agent_cmd_approval
 
         op_id = "test_acmd_2"
-        event = _add_agent_cmd_op(op_id)
+        event = _add_agent_cmd_op(
+            op_id,
+            requests=[
+                {
+                    "envelope": {
+                        "tool_id": "file_delete",
+                        "integration_id": "fileops",
+                        "action_id": "file_delete",
+                        "transport": "internal",
+                        "access_level": "destructive",
+                        "risk_class": "destructive",
+                        "resource_scope_fingerprint": "scope-fp",
+                        "params_fingerprint": "params-fp",
+                    },
+                    "approval_scope": {"kind": "scope", "ttl_seconds": 900, "max_uses": 10},
+                }
+            ],
+        )
 
-        update = _make_callback_update(f"acmd:all:{op_id}")
+        update = _make_callback_update(f"acmd:scope:{op_id}")
         context = _make_context()
 
         await callback_agent_cmd_approval(update, context)
 
         assert event.is_set()
-        assert _PENDING_AGENT_CMD_OPS[op_id]["decision"] == "approved_all"
-        assert context.user_data.get("_approve_all_agent_tools") is True
+        assert _PENDING_AGENT_CMD_OPS[op_id]["decision"] == "approved_scope"
+        assert _PENDING_AGENT_CMD_OPS[op_id]["grants"][0]["kind"] == "approve_scope"
+        assert _PENDING_AGENT_CMD_OPS[op_id]["grants"][0]["max_uses"] == 10
+        assert _PENDING_AGENT_CMD_OPS[op_id]["grants"][0]["session_id"] == "session-1"
+        assert _PENDING_AGENT_CMD_OPS[op_id]["grants"][0]["chat_id"] == 111
         msg = update.callback_query.edit_message_text.call_args[0][0]
-        assert "todos" in msg.lower()
+        assert "escopo" in msg.lower()
 
     @pytest.mark.asyncio
     async def test_deny_sets_decision(self):

@@ -5,9 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from koda.agent_contract import resolve_action_envelope, resolve_integration_action
+from koda.services import tool_dispatcher as tool_dispatcher_module
 from koda.services.tool_dispatcher import (
     AgentToolCall,
     AgentToolResult,
+    PolicyEvaluation,
     ToolContext,
     _is_write_tool,
     execute_tool,
@@ -37,6 +40,52 @@ def _make_ctx(**overrides) -> ToolContext:
     )
     defaults.update(overrides)
     return ToolContext(**defaults)
+
+
+@pytest.fixture(autouse=True)
+def _reset_tool_rate_windows():
+    tool_dispatcher_module._tool_rate_windows.clear()
+    yield
+    tool_dispatcher_module._tool_rate_windows.clear()
+
+
+@pytest.fixture(autouse=True)
+def _compat_resource_grants():
+    with patch(
+        "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+        {
+            "integration_grants": {
+                "scheduler": {"allow_actions": ["*"]},
+                "web": {"allow_actions": ["*"]},
+                "browser": {"allow_actions": ["*"]},
+                "agent_runtime": {"allow_actions": ["*"]},
+            }
+        },
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _dispatcher_policy_stub(request: pytest.FixtureRequest):
+    if request.node.get_closest_marker("real_policy_gate"):
+        yield
+        return
+
+    def _allow_policy(tool_id: str, params: dict | None = None, **kwargs):
+        envelope, _ = resolve_action_envelope(
+            tool_id,
+            params or {},
+            kwargs.get("resource_access_policy"),
+        )
+        return PolicyEvaluation(
+            decision="allow",
+            reason_code="test_stub_allow",
+            reason="Dispatcher unit tests stub the central policy gate unless explicitly requested.",
+            envelope=envelope,
+        )
+
+    with patch("koda.services.tool_dispatcher.evaluate_execution_policy", side_effect=_allow_policy):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +226,7 @@ class TestBrowserScope:
             result = await execute_tool(call, ctx)
 
         assert result.success
-        navigate.assert_awaited_once_with(987, "https://example.com")
+        navigate.assert_awaited_once_with(987, "https://example.com", allow_private=False)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +239,13 @@ class TestFeatureFlags:
     async def test_gws_disabled(self):
         ctx = _make_ctx()
         call = AgentToolCall(tool="gws", params={"args": "gmail users.messages.list"}, raw_match="")
-        with patch("koda.services.tool_dispatcher.GWS_ENABLED", False):
+        with (
+            patch("koda.services.tool_dispatcher.GWS_ENABLED", False),
+            patch(
+                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+                {"integration_grants": {"gws": {"allow_actions": ["*"]}}},
+            ),
+        ):
             result = await execute_tool(call, ctx)
         assert not result.success
         assert "not enabled" in result.output
@@ -199,7 +254,13 @@ class TestFeatureFlags:
     async def test_jira_disabled(self):
         ctx = _make_ctx()
         call = AgentToolCall(tool="jira", params={"args": "issues search --jql test"}, raw_match="")
-        with patch("koda.services.tool_dispatcher.JIRA_ENABLED", False):
+        with (
+            patch("koda.services.tool_dispatcher.JIRA_ENABLED", False),
+            patch(
+                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+                {"integration_grants": {"jira": {"allow_actions": ["*"]}}},
+            ),
+        ):
             result = await execute_tool(call, ctx)
         assert not result.success
         assert "not enabled" in result.output
@@ -208,7 +269,13 @@ class TestFeatureFlags:
     async def test_confluence_disabled(self):
         ctx = _make_ctx()
         call = AgentToolCall(tool="confluence", params={"args": "pages search --cql test"}, raw_match="")
-        with patch("koda.services.tool_dispatcher.CONFLUENCE_ENABLED", False):
+        with (
+            patch("koda.services.tool_dispatcher.CONFLUENCE_ENABLED", False),
+            patch(
+                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+                {"integration_grants": {"confluence": {"allow_actions": ["*"]}}},
+            ),
+        ):
             result = await execute_tool(call, ctx)
         assert not result.success
         assert "not enabled" in result.output
@@ -680,308 +747,32 @@ class TestBrowserTools:
 
 class TestDBTools:
     @pytest.mark.asyncio
-    async def test_db_query_disabled(self):
+    @pytest.mark.parametrize(
+        "tool_name, params",
+        [
+            ("sqlite_query", {"sql": "SELECT 1", "db_path": "/tmp/test.db"}),
+            ("sqlite_schema", {"db_path": "/tmp/test.db"}),
+            ("mongo_query", {"database": "app", "collection": "users"}),
+            ("db_query", {"sql": "SELECT 1"}),
+            ("db_schema", {}),
+            ("db_explain", {"sql": "SELECT 1"}),
+            ("db_switch_env", {"env": "dev"}),
+            ("db_execute", {"sql": "DELETE FROM users"}),
+            ("db_execute_plan", {"sql": "DELETE FROM users"}),
+            ("db_transaction", {"statements": ["DELETE FROM users"]}),
+            ("mysql_query", {"sql": "SELECT 1"}),
+            ("mysql_schema", {}),
+            ("redis_query", {"command": "GET", "args": ["key"]}),
+        ],
+    )
+    async def test_native_database_tools_are_removed(self, tool_name, params):
         ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
-        with patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", False):
-            result = await execute_tool(call, ctx)
+        call = AgentToolCall(tool=tool_name, params=params, raw_match="")
+        result = await execute_tool(call, ctx)
         assert not result.success
-        assert "disabled" in result.output.lower()
-
-    @pytest.mark.asyncio
-    async def test_db_query_not_connected(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = False
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "not connected" in result.output.lower()
-
-    @pytest.mark.asyncio
-    async def test_db_query_missing_sql(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "sql" in result.output.lower()
-
-    @pytest.mark.asyncio
-    async def test_db_query_success(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.query = AsyncMock(return_value="Rows: 1 (0.001s)\n\n| ?column? |\n|----------|\n| 1        |")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        assert "Rows: 1" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_schema_success(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_schema", params={}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.get_schema = AsyncMock(return_value="Tables in public schema:\n\n  users (BASE TABLE)")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        assert "users" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_schema_with_table(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_schema", params={"table": "users"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.get_schema = AsyncMock(return_value="Columns of users:\n\n  id: integer NOT NULL")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.get_schema.assert_awaited_with("users", env=None)
-
-    @pytest.mark.asyncio
-    async def test_db_explain_success(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_explain", params={"sql": "SELECT * FROM users"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.explain = AsyncMock(return_value="EXPLAIN:\nSeq Scan on users")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        assert "Seq Scan" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_explain_missing_sql(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_explain", params={}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "sql" in result.output.lower()
-
-    @pytest.mark.asyncio
-    async def test_db_explain_with_analyze(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_explain", params={"sql": "SELECT 1", "analyze": True}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.explain = AsyncMock(return_value="EXPLAIN ANALYZE:\nResult (actual time=0.001..0.001 rows=1)")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.explain.assert_awaited_with("SELECT 1", analyze=True, env=None)
-
-    @pytest.mark.asyncio
-    async def test_db_switch_env_success(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_switch_env", params={"env": "dev"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.available_envs = ["dev", "prod"]
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        assert ctx.user_data["postgres_env"] == "dev"
-        assert "Switched to dev" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_switch_env_invalid(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_switch_env", params={"env": "staging"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.available_envs = ["dev", "prod"]
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "Unknown env" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_switch_env_disabled(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_switch_env", params={"env": "dev"}, raw_match="")
-        with patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", False):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "disabled" in result.output.lower()
-
-    @pytest.mark.asyncio
-    async def test_db_switch_env_supervised_passes_through(self):
-        """db_switch_env now passes through in supervised mode (approval in agent loop)."""
-        ctx = _make_ctx(agent_mode="supervised")
-        call = AgentToolCall(tool="db_switch_env", params={"env": "dev"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.available_envs = {"dev", "prod"}
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        assert ctx.user_data["postgres_env"] == "dev"
-
-    @pytest.mark.asyncio
-    async def test_db_query_with_max_rows(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": 500}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.query = AsyncMock(return_value="Rows: 1")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.query.assert_awaited_with("SELECT 1", max_rows=500, env=None)
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_invalid(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": "abc"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "integer" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_zero(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": 0}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "at least 1" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_negative(self):
-        """Negative max_rows is rejected (caught by < 1 check)."""
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": -5}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "at least 1" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_string_coercion(self):
-        """String-encoded integer is coerced to int correctly."""
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": "500"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.query = AsyncMock(return_value="Rows: 1")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.query.assert_awaited_with("SELECT 1", max_rows=500, env=None)
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_exceeds_cap(self):
-        """max_rows above POSTGRES_MAX_ROWS_CAP is rejected."""
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": 10001}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.tool_dispatcher.POSTGRES_MAX_ROWS_CAP", 10000),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "cannot exceed" in result.output
-
-    @pytest.mark.asyncio
-    async def test_db_query_max_rows_at_cap(self):
-        """max_rows exactly at POSTGRES_MAX_ROWS_CAP is accepted."""
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1", "max_rows": 10000}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.query = AsyncMock(return_value="Rows: 1")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.tool_dispatcher.POSTGRES_MAX_ROWS_CAP", 10000),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.query.assert_awaited_with("SELECT 1", max_rows=10000, env=None)
-
-    @pytest.mark.asyncio
-    async def test_db_query_without_max_rows_uses_default(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
-        mock_dbm = MagicMock()
-        mock_dbm.is_available = True
-        mock_dbm.query = AsyncMock(return_value="Rows: 1")
-        with (
-            patch("koda.services.tool_dispatcher.POSTGRES_ENABLED", True),
-            patch("koda.services.db_manager.db_manager", mock_dbm),
-        ):
-            result = await execute_tool(call, ctx)
-        assert result.success
-        mock_dbm.query.assert_awaited_with("SELECT 1", max_rows=None, env=None)
+        assert "removed from koda" in result.output.lower()
+        assert "mcp" in result.output.lower()
+        assert result.metadata["mcp_only"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1066,11 +857,29 @@ class TestIsWriteTool:
     def test_gws_get_is_read(self):
         assert _is_write_tool("gws", {"args": "gmail users.messages.get --id abc"}) is False
 
+    def test_gws_action_resolution_for_list(self):
+        resolution = resolve_integration_action("gws", {"args": "gmail users.messages.list"})
+        assert resolution.action_id == "gmail.list"
+        assert resolution.resource_method == "users.messages.list"
+        assert resolution.access_level == "read"
+
     def test_gws_send_is_write(self):
         assert _is_write_tool("gws", {"args": "gmail users.messages.send"}) is True
 
     def test_gws_create_event_is_write(self):
         assert _is_write_tool("gws", {"args": "gcal events.insert"}) is True
+
+    def test_gws_drive_delete_is_destructive(self):
+        resolution = resolve_integration_action("gws", {"args": "drive files.delete"})
+        assert resolution.action_id == "drive.delete"
+        assert resolution.resource_method == "files.delete"
+        assert resolution.access_level == "destructive"
+
+    def test_gws_admin_insert_is_admin(self):
+        resolution = resolve_integration_action("gws", {"args": "admin directory.users.insert"})
+        assert resolution.action_id == "admin.insert"
+        assert resolution.resource_method == "directory.users.insert"
+        assert resolution.access_level == "admin"
 
     def test_cron_add_is_write(self):
         assert _is_write_tool("cron_add", {}) is True
@@ -1352,6 +1161,99 @@ class TestJobTools:
         queue_validation.assert_called_once_with(21, user_id=111, activate_on_success=False)
 
     @pytest.mark.asyncio
+    async def test_reminder_job_create_supports_recurring_trigger(self):
+        from koda.services.tool_dispatcher import _handle_job_create
+
+        with patch("koda.services.scheduled_jobs.create_reminder_job", return_value=66) as create_job:
+            result = await _handle_job_create(
+                {
+                    "job_type": "reminder",
+                    "trigger_type": "interval",
+                    "schedule_expr": "7200",
+                    "text": "Check the incident timeline",
+                    "auto_activate_after_validation": False,
+                },
+                _make_ctx(),
+            )
+
+        assert result.success
+        assert "Reminder job #66" in result.output
+        assert "Run /jobs activate 66 after validation." in result.output
+        assert create_job.call_args.kwargs["trigger_type"] == "interval"
+        assert create_job.call_args.kwargs["schedule_expr"] == "7200"
+        assert create_job.call_args.kwargs["auto_activate_after_validation"] is False
+
+    @pytest.mark.asyncio
+    async def test_job_get_includes_runs_and_events_metadata(self):
+        from koda.services.tool_dispatcher import _handle_job_get
+
+        detail = {
+            "job": {
+                "id": 17,
+                "job_type": "agent_query",
+                "trigger_type": "interval",
+                "status": "active",
+                "schedule_expr": "3600",
+                "timezone": "UTC",
+                "provider_preference": "claude",
+                "model_preference": "claude-sonnet-4-6",
+                "config_version": 4,
+                "notification_policy": {"mode": "summary_complete"},
+                "verification_policy": {"mode": "post_write_if_any"},
+                "payload": {"query": "Check deploy health"},
+            },
+            "runs": [{"id": 101, "status": "succeeded"}],
+            "events": [{"id": 201, "event_type": "job.updated"}],
+        }
+        with patch("koda.services.scheduled_jobs.get_job_detail", return_value=detail):
+            result = await _handle_job_get({"job_id": 17}, _make_ctx())
+
+        assert result.success
+        assert "config_version=4" in result.output
+        assert result.metadata["job"]["id"] == 17
+        assert result.metadata["runs"][0]["id"] == 101
+        assert result.metadata["events"][0]["event_type"] == "job.updated"
+
+    @pytest.mark.asyncio
+    async def test_job_update_passes_patch_and_returns_metadata(self):
+        from koda.services.tool_dispatcher import _handle_job_update
+
+        with patch(
+            "koda.services.scheduled_jobs.update_job",
+            return_value={
+                "ok": True,
+                "message": "Job updated.",
+                "config_version": 8,
+                "validation_required": True,
+                "validation_run_id": 55,
+            },
+        ) as update_job:
+            result = await _handle_job_update(
+                {
+                    "job_id": 44,
+                    "patch": {"schedule_expr": "10800", "trigger_type": "interval"},
+                    "expected_config_version": 7,
+                    "reason": "reduce cadence",
+                },
+                _make_ctx(),
+            )
+
+        assert result.success
+        assert result.output == "Job updated."
+        assert result.metadata["config_version"] == 8
+        update_job.assert_called_once_with(
+            44,
+            user_id=111,
+            patch={"schedule_expr": "10800", "trigger_type": "interval"},
+            expected_config_version=7,
+            actor_type="agent",
+            actor_id="111",
+            source="agent_tool",
+            reason="reduce cadence",
+            evidence=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_job_create_rejects_invalid_workdir(self):
         from koda.services.tool_dispatcher import _handle_job_create
 
@@ -1371,6 +1273,7 @@ class TestJobTools:
 
 
 @pytest.mark.asyncio
+@pytest.mark.real_policy_gate
 async def test_execute_tool_blocks_disallowed_tool_by_policy():
     ctx = _make_ctx()
     call = AgentToolCall(
@@ -1379,12 +1282,534 @@ async def test_execute_tool_blocks_disallowed_tool_by_policy():
         raw_match="",
     )
 
+    with patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["web_search"]}):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert "secure default tool subset" in result.output.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_integration_action_outside_grant():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="gws",
+        params={"args": "gmail users.messages.send"},
+        raw_match="",
+    )
+
     with (
-        patch("koda.services.tool_dispatcher.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["web_search"]}),
-        patch("koda.services.tool_dispatcher.AGENT_ALLOWED_TOOLS", set()),
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "gws": {
+                        "allow_actions": ["gmail.list"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-gws",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["gws"]},
+                    }
+                ],
+            },
+        ),
     ):
         result = await execute_tool(call, ctx)
 
     assert result.success is False
     assert result.metadata["policy_blocked"] is True
-    assert "not enabled" in result.output.lower()
+    assert result.metadata["integration_id"] == "gws"
+    assert result.metadata["action_id"] == "gmail.send"
+    assert result.metadata["resource_method"] == "users.messages.send"
+    assert "outside the granted scope" in result.output.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_allows_gws_list_under_grant():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="gws",
+        params={"args": "gmail users.messages.list"},
+        raw_match="",
+    )
+
+    mock_cli_result = MagicMock(
+        text='Exit 0:\n{"messages": []}',
+        binary="gws",
+        args=["gmail", "users.messages.list"],
+        exit_code=0,
+        timed_out=False,
+        truncated=False,
+    )
+
+    with (
+        patch("koda.services.tool_dispatcher.GWS_ENABLED", True),
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "gws": {
+                        "allow_actions": ["gmail.list"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-gws",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["gws"]},
+                    }
+                ],
+            },
+        ),
+        patch(
+            "koda.services.cli_runner.run_cli_command_detailed", new_callable=AsyncMock, return_value=mock_cli_result
+        ),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is True
+    assert result.metadata["integration_id"] == "gws"
+    assert result.metadata["action_id"] == "gmail.list"
+    assert result.metadata["resource_method"] == "users.messages.list"
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_gws_drive_delete_outside_grant():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="gws",
+        params={"args": "drive files.delete"},
+        raw_match="",
+    )
+
+    with (
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "gws": {
+                        "allow_actions": ["gmail.list"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-gws",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["gws"]},
+                    }
+                ],
+            },
+        ),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert result.metadata["action_id"] == "drive.delete"
+    assert result.metadata["resource_method"] == "files.delete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_gws_admin_outside_grant():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="gws",
+        params={"args": "admin directory.users.insert"},
+        raw_match="",
+    )
+
+    with (
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "gws": {
+                        "allow_actions": ["gmail.list"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-gws",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["gws"]},
+                    }
+                ],
+            },
+        ),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert result.metadata["action_id"] == "admin.insert"
+    assert result.metadata["resource_method"] == "directory.users.insert"
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_private_network_without_explicit_grant():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="browser_navigate",
+        params={"url": "http://127.0.0.1:3000"},
+        raw_match="",
+    )
+
+    with patch(
+        "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+        {
+            "integration_grants": {
+                "browser": {
+                    "allow_actions": ["navigate"],
+                }
+            }
+        },
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert result.metadata["grant_reason"] == "private_network_not_granted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_browser_action_when_session_domain_unknown():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="browser_click",
+        params={"selector": "Submit"},
+        raw_match="",
+    )
+
+    with (
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "browser": {
+                        "allow_actions": ["click"],
+                        "allowed_domains": ["example.com"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-browser-click",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["browser_click"]},
+                    }
+                ],
+            },
+        ),
+        patch("koda.services.browser_manager.browser_manager.get_session_snapshot", return_value=None),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert result.metadata["grant_reason"] == "domain_unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_uses_browser_session_domain_for_grants():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="browser_click",
+        params={"selector": "Submit"},
+        raw_match="",
+    )
+    mock_bm = MagicMock()
+    mock_bm.ensure_started = AsyncMock(return_value=True)
+    mock_bm.smart_click = AsyncMock(return_value="Clicked successfully.")
+    mock_bm.get_session_snapshot.return_value = {
+        "url": "https://example.com/dashboard",
+        "domain": "example.com",
+    }
+
+    with (
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "browser": {
+                        "allow_actions": ["click"],
+                        "allowed_domains": ["example.com"],
+                    }
+                }
+            },
+        ),
+        patch(
+            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "id": "allow-browser-click",
+                        "decision": "allow",
+                        "selectors": {"tool_id": ["browser_click"]},
+                    }
+                ],
+            },
+        ),
+        patch("koda.services.browser_manager.browser_manager", mock_bm),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["approval_required"] is True
+    assert result.metadata["grant_decision"] == "allowed"
+    mock_bm.smart_click.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_passes_allow_private_to_fetch_url():
+    ctx = _make_ctx()
+    call = AgentToolCall(
+        tool="fetch_url",
+        params={"url": "http://127.0.0.1:3000"},
+        raw_match="",
+    )
+
+    with (
+        patch(
+            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+            {
+                "integration_grants": {
+                    "web": {
+                        "allow_actions": ["fetch_url"],
+                        "allow_private_network": True,
+                    }
+                }
+            },
+        ),
+        patch("koda.services.http_client.fetch_url", new_callable=AsyncMock, return_value="ok") as mock_fetch,
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is True
+    mock_fetch.assert_awaited_once_with("http://127.0.0.1:3000", allow_private=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_native_database_tools_even_with_grants():
+    ctx = _make_ctx()
+    call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
+
+    with patch(
+        "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
+        {"integration_grants": {"postgres": {"allow_actions": ["query"]}}},
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert "mcp" in result.output.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.real_policy_gate
+async def test_execute_tool_blocks_mcp_tool_via_central_gate_without_queue_manager_injection():
+    ctx = _make_ctx()
+    call = AgentToolCall(tool="mcp_github__create_issue", params={"title": "Bug"}, raw_match="")
+    handler = AsyncMock(return_value=AgentToolResult(tool=call.tool, success=True, output="created"))
+    manager = MagicMock()
+    manager.list_mcp_tool_policies.return_value = [{"tool_name": "create_issue", "policy": "blocked"}]
+
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=manager),
+        patch.dict("koda.services.tool_dispatcher._TOOL_HANDLERS", {call.tool: handler}, clear=False),
+    ):
+        result = await execute_tool(call, ctx)
+
+    assert result.success is False
+    assert result.metadata["policy_blocked"] is True
+    assert result.metadata["policy_reason_code"] == "mcp_blocked"
+    handler.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# request_skill tests
+# ---------------------------------------------------------------------------
+
+
+class TestRequestSkill:
+    """Tests for the request_skill agent tool handler."""
+
+    def _make_skill(self, skill_id="tdd", name="TDD", aliases=("test-driven",), content="# TDD Skill"):
+        from koda.skills._registry import SkillDefinition
+
+        return SkillDefinition(
+            id=skill_id,
+            name=name,
+            aliases=aliases,
+            full_content=content,
+        )
+
+    @pytest.mark.asyncio
+    async def test_request_skill_by_name(self):
+        """Exact skill ID match returns skill content."""
+        skill = self._make_skill()
+        mock_registry = MagicMock()
+        mock_registry.resolve_alias.return_value = None
+        mock_registry.get.side_effect = lambda sid: skill if sid == "tdd" else None
+        mock_registry.get_all.return_value = {"tdd": skill}
+
+        ctx = _make_ctx()
+        call = AgentToolCall(tool="request_skill", params={"query": "tdd"}, raw_match="")
+
+        with (
+            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
+            patch("koda.skills._telemetry.emit_skill_invocation"),
+        ):
+            from koda.services.tool_dispatcher import _handle_request_skill
+
+            result = await _handle_request_skill(call.params, ctx)
+
+        assert result.success is True
+        assert "# TDD Skill" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_by_alias(self):
+        """Alias match resolves to the correct skill."""
+        skill = self._make_skill()
+        mock_registry = MagicMock()
+        mock_registry.resolve_alias.side_effect = lambda q: "tdd" if "test-driven" in q else None
+        mock_registry.get.side_effect = lambda sid: skill if sid == "tdd" else None
+
+        ctx = _make_ctx()
+        call = AgentToolCall(tool="request_skill", params={"query": "test-driven"}, raw_match="")
+
+        with (
+            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
+            patch("koda.skills._telemetry.emit_skill_invocation"),
+        ):
+            from koda.services.tool_dispatcher import _handle_request_skill
+
+            result = await _handle_request_skill(call.params, ctx)
+
+        assert result.success is True
+        assert "# TDD Skill" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_by_query(self):
+        """Semantic fallback returns a matching skill."""
+        skill = self._make_skill()
+        mock_registry = MagicMock()
+        mock_registry.resolve_alias.return_value = None
+        mock_registry.get.return_value = None
+
+        from koda.skills._selector import SkillMatch
+
+        mock_match = SkillMatch(
+            skill=skill,
+            semantic_score=0.8,
+            trigger_matched=False,
+            alias_matched=False,
+            composite_score=0.8,
+            selection_reason="semantic",
+        )
+        mock_selector = MagicMock()
+        mock_selector.select.return_value = [mock_match]
+
+        ctx = _make_ctx()
+        call = AgentToolCall(tool="request_skill", params={"query": "how to write tests"}, raw_match="")
+
+        with (
+            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
+            patch("koda.skills._selector.get_shared_selector", return_value=mock_selector),
+            patch("koda.skills._telemetry.emit_skill_invocation"),
+        ):
+            from koda.services.tool_dispatcher import _handle_request_skill
+
+            result = await _handle_request_skill(call.params, ctx)
+
+        assert result.success is True
+        assert "# TDD Skill" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_not_found(self):
+        """Unmatched query returns helpful error with available skills."""
+        mock_registry = MagicMock()
+        mock_registry.resolve_alias.return_value = None
+        mock_registry.get.return_value = None
+        mock_registry.get_all.return_value = {
+            "tdd": self._make_skill(),
+            "security": self._make_skill(skill_id="security"),
+        }
+
+        mock_selector = MagicMock()
+        mock_selector.select.return_value = []
+
+        ctx = _make_ctx()
+        call = AgentToolCall(tool="request_skill", params={"query": "nonexistent_xyz"}, raw_match="")
+
+        with (
+            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
+            patch("koda.skills._selector.get_shared_selector", return_value=mock_selector),
+        ):
+            from koda.services.tool_dispatcher import _handle_request_skill
+
+            result = await _handle_request_skill(call.params, ctx)
+
+        assert result.success is False
+        assert "No matching skill found" in result.output
+        assert "nonexistent_xyz" in result.output
+        assert "tdd" in result.output
+        assert "security" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_empty(self):
+        """Empty query returns usage hint."""
+        ctx = _make_ctx()
+
+        from koda.services.tool_dispatcher import _handle_request_skill
+
+        result = await _handle_request_skill({"query": ""}, ctx)
+
+        assert result.success is False
+        assert "specify a skill" in result.output.lower()
+
+    @pytest.mark.asyncio
+    async def test_request_skill_is_read_only(self):
+        """request_skill must be classified as a read-only tool."""
+        assert not _is_write_tool("request_skill", {})

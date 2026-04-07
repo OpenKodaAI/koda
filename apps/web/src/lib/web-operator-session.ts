@@ -4,9 +4,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
-
-const WEB_OPERATOR_SESSION_COOKIE = "koda_operator_session";
-const WEB_OPERATOR_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
+import {
+  WEB_OPERATOR_SESSION_COOKIE,
+  WEB_OPERATOR_SESSION_MAX_AGE_SECONDS,
+} from "@/lib/web-operator-session-constants";
 
 type SessionSecretState = {
   key: Buffer;
@@ -20,6 +21,21 @@ function getSessionSecret(): Buffer {
   const configuredSecret = process.env.WEB_OPERATOR_SESSION_SECRET?.trim();
   if (configuredSecret) {
     return createHash("sha256").update(configuredSecret).digest();
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    return createHash("sha256").update("koda-test-web-operator-session").digest();
+  }
+
+  const allowEphemeralSessionSecret =
+    process.env.NODE_ENV !== "production" &&
+    String(process.env.ALLOW_INSECURE_WEB_OPERATOR_SESSION_SECRET)
+      .trim()
+      .toLowerCase() === "true";
+  if (!allowEphemeralSessionSecret) {
+    throw new Error(
+      "WEB_OPERATOR_SESSION_SECRET must be configured. To allow an ephemeral dev-only secret, set ALLOW_INSECURE_WEB_OPERATOR_SESSION_SECRET=true outside production.",
+    );
   }
 
   if (!globalThis.__kodaWebOperatorSessionSecret) {
@@ -70,15 +86,25 @@ export async function getWebOperatorTokenFromCookie(): Promise<string | null> {
   return unsealWebOperatorToken(sealed);
 }
 
+const ALLOW_INSECURE_COOKIES =
+  process.env.NODE_ENV !== "production" &&
+  String(process.env.ALLOW_INSECURE_COOKIES).trim().toLowerCase() === "true";
+const SECURE_COOKIES =
+  !ALLOW_INSECURE_COOKIES &&
+  (
+    process.env.NODE_ENV === "production" ||
+    String(process.env.SECURE_COOKIES).trim().toLowerCase() === "true"
+  );
+
 export function setWebOperatorSessionCookie(response: NextResponse, token: string): void {
   response.cookies.set({
     name: WEB_OPERATOR_SESSION_COOKIE,
     value: sealWebOperatorToken(token),
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     maxAge: WEB_OPERATOR_SESSION_MAX_AGE_SECONDS,
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIES,
   });
 }
 
@@ -87,9 +113,9 @@ export function clearWebOperatorSessionCookie(response: NextResponse): void {
     name: WEB_OPERATOR_SESSION_COOKIE,
     value: "",
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     maxAge: 0,
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIES,
   });
 }

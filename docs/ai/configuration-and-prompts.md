@@ -57,6 +57,7 @@ The runtime is now provider-neutral at the orchestration level.
 - `MODEL_PRICING_USD` optionally maps model names to per-million-token pricing so usage-only providers can still participate in cost reporting.
 - `MEMORY_EXTRACTION_PROVIDER` and `MEMORY_EXTRACTION_MODEL` decouple memory extraction from the main interactive provider.
 - `SCHEDULER_ENABLED`, `SCHEDULER_POLL_INTERVAL_SECONDS`, `SCHEDULER_LEASE_SECONDS`, `SCHEDULER_MAX_CATCHUP_PER_CYCLE`, `SCHEDULER_MAX_DISPATCH_PER_CYCLE`, `SCHEDULER_CATCHUP_WINDOW_HOURS`, `SCHEDULER_RUN_MAX_ATTEMPTS`, `SCHEDULER_RETRY_BASE_DELAY`, `SCHEDULER_RETRY_MAX_DELAY`, `SCHEDULER_NOTIFICATION_MODE`, and `SCHEDULER_DEFAULT_TIMEZONE` control the unified scheduler dispatcher, retry policy, catch-up window, and notifications.
+- `MAX_QUEUED_TASKS_PER_USER` and `QUEUE_MAX_RECOVERY_ATTEMPTS` control queue admission pressure for one user plus how many startup recoveries a persisted queue item can attempt before it is escalated to the DLQ instead of looping indefinitely.
 - `JIRA_DEEP_CONTEXT_ENABLED` and `JIRA_DEEP_CONTEXT_MAX_ISSUES` control proactive Jira dossier construction during queue preparation.
 - `ARTIFACT_EXTRACTION_TIMEOUT` and `ARTIFACT_EXTRACTION_VERSION` control artifact extraction time-bounds and cache invalidation for PDFs, DOCX, spreadsheets, OCR, audio, and video analysis.
 - `KNOWLEDGE_GRAPH_ENABLED` and `KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED` control whether graph-aware retrieval with multimodal evidence persistence is enabled.
@@ -77,7 +78,7 @@ The dynamic control plane is the versioned source of truth for agent definitions
 - `launcher.py` now starts the control-plane supervisor instead of a hardcoded agent list.
 - Workers still run through [`../../koda/__main__.py`](../../koda/__main__.py), but their effective runtime configuration is injected from the published control-plane snapshot before the normal runtime imports occur.
 - `CONTROL_PLANE_RUNTIME_DIR`, `CONTROL_PLANE_BIND`, `CONTROL_PLANE_PORT`, `CONTROL_PLANE_POLL_INTERVAL_SECONDS`, `CONTROL_PLANE_RESTART_GRACE_SECONDS`, and `CONTROL_PLANE_STARTUP_GRACE_SECONDS` configure the supervisor and its snapshot/bootstrap behavior.
-- `CONTROL_PLANE_API_TOKEN` is required to access `/api/control-plane/*`; the dashboard exchanges it for an HTTP-only browser session through `/api/control-plane/web-auth`.
+- `CONTROL_PLANE_API_TOKEN` is the break-glass/bootstrap credential. The preferred browser path is setup-code exchange, local owner login, and an HTTP-only session; `/api/control-plane/web-auth` remains a temporary compatibility bridge for legacy token-based installs.
 - Secrets stay encrypted at rest and are masked in list-style API responses. If a raw secret is needed for server-to-server runtime access, resolve it through the applied control-plane snapshot rather than rediscovering it from `.env`.
 - Agent identity and instruction layers are first-class control-plane documents: `identity_md`, `soul_md`, `system_prompt_md`, `instructions_md`, `rules_md`, `voice_prompt_md`, `image_prompt_md`, and `memory_extraction_prompt_md`.
 - The operational runtime contract is the compiled prompt generated from those documents and exposed through `/api/control-plane/agents/{agent_id}/compiled-prompt`. Repository prompt files are not part of the live source of truth for agent behavior.
@@ -126,6 +127,8 @@ Global system settings can now define a default provider/model per functionality
 - `music` for music and soundtrack generation
 
 Each agent can still override those defaults through `model_policy.functional_defaults` inside `AGENT_MODEL_POLICY_JSON` or the control-plane AgentSpec editor. Agent-local overrides must remain isolated from the global system settings; if an agent sets its own `functional_defaults`, those values win only inside that agent's materialized runtime.
+
+Per-agent tool scope still uses `AGENT_TOOL_POLICY_JSON` and `AGENT_ALLOWED_TOOLS` for coarse tool selection, while granular integration scope is materialized through `AGENT_RESOURCE_ACCESS_POLICY_JSON`. The runtime must treat `resource_access_policy.integration_grants` as the source of truth for per-integration actions, domains, database environments, shared env keys, and secret grants.
 
 ### Per-Query Prompt Assembly
 

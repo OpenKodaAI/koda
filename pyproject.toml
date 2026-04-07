@@ -8,43 +8,61 @@ version = "1.0.0"
 description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot[job-queue]>=22.0",
-    "python-dotenv>=1.0.0",
-    "structlog>=24.0",
-    "tenacity>=8.2",
-    "aiohttp>=3.9",
-    "aiolimiter>=1.1",
-    "playwright>=1.40",
-    "croniter>=2.0",
-    "beautifulsoup4>=4.12",
-    "boto3>=1.35",
-    "atlassian-python-api>=3.41",
-    "asyncpg>=0.30.0",
-    "asyncssh>=2.14.0",
-    "PyMuPDF>=1.24",
-    "kokoro-onnx>=0.4",
-    "openpyxl>=3.1",
-    "pillow>=10.0",
-    "soundfile>=0.12",
-    "python-docx>=1.1",
-    "PyYAML>=6.0",
-    "rapidocr-onnxruntime>=1.2.3",
-    "chromadb>=0.5.0",
-    "langgraph>=0.2",
-    "sentence-transformers>=3.0",
-    "prometheus_client>=0.20",
-    "pybreaker>=1.0",
-    "cryptography>=43.0",
-    "grpcio>=1.74",
+    "python-telegram-bot[job-queue]>=22.0,<23.0",
+    "python-dotenv>=1.0.0,<2.0",
+    "structlog>=24.0,<25.0",
+    "tenacity>=8.2,<9.0",
+    "aiohttp>=3.13.4,<4.0",
+    "aiolimiter>=1.1,<2.0",
+    "playwright>=1.40,<2.0",
+    "croniter>=2.0,<3.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "boto3>=1.35,<2.0",
+    "atlassian-python-api>=3.41,<4.0",
+    "asyncpg>=0.30.0,<1.0",
+    "asyncssh>=2.14.0,<3.0",
+    "argon2-cffi>=23.1,<24.0",
+    "PyMuPDF>=1.24,<2.0",
+    "kokoro-onnx>=0.4,<1.0",
+    "openpyxl>=3.1,<4.0",
+    "pillow>=12.1.1,<13.0",
+    "soundfile>=0.12,<1.0",
+    "python-docx>=1.1,<2.0",
+    "PyYAML>=6.0,<7.0",
+    "rapidocr-onnxruntime>=1.2.3,<2.0",
+    "requests>=2.33.0,<3.0",
+    "sentence-transformers>=3.0,<4.0",
+    "prometheus_client>=0.20,<1.0",
+    "pybreaker>=1.0,<2.0",
+    "cryptography>=46.0.6,<47.0",
+    "grpcio>=1.74,<2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=4.0",
-    "ruff>=0.3",
-    "mypy>=1.8",
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.23,<1.0",
+    "pytest-cov>=4.0,<5.0",
+    "ruff>=0.3,<1.0",
+    "mypy>=1.8,<2.0",
+    "types-PyYAML>=6.0.12,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.7,<3.0",
+    "bandit>=1.7,<2.0",
+    "watchfiles>=1.1,<2.0",
+]
+whatsapp = ["pywa>=1.0,<2.0"]
+discord = ["discord.py>=2.3,<3.0"]
+slack = ["slack-bolt[async]>=1.18,<2.0"]
+teams = ["botbuilder-core>=4.14,<5.0", "botbuilder-integration-aiohttp>=4.14,<5.0"]
+line = ["line-bot-sdk>=3.0,<4.0"]
+channels-all = [
+    "pywa>=1.0,<2.0",
+    "discord.py>=2.3,<3.0",
+    "slack-bolt[async]>=1.18,<2.0",
+    "botbuilder-core>=4.14,<5.0",
+    "botbuilder-integration-aiohttp>=4.14,<5.0",
+    "line-bot-sdk>=3.0,<4.0",
 ]
 
 [project.scripts]
@@ -59,9 +77,16 @@ include = ["koda*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --tb=short"
-filterwarnings = [
-    "ignore:'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction\\(\\) instead:DeprecationWarning:chromadb\\.telemetry\\.opentelemetry",
+filterwarnings = []
+markers = [
+    "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
 ]
+
+[tool.coverage.report]
+# Repo-wide coverage is still climbing while large runtime/control-plane modules are
+# being brought under test. Keep this gate aligned with the measured baseline so
+# the suite fails on regressions instead of on a stale target.
+fail_under = 53.5
 
 [tool.ruff]
 target-version = "py311"
@@ -98,11 +123,45 @@ module = [
 ]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = [
+    "telegram.*",
+    "boto3.*",
+    "botocore.*",
+    "atlassian.*",
+    "playwright.*",
+    "psycopg2.*",
+    "psycopg.*",
+    "aiohttp.*",
+    "grpc.*",
+    "grpc_aio.*",
+    "google.*",
+    "asyncssh.*",
+    "qdrant_client.*",
+    "chromadb.*",
+    "langgraph.*",
+    "langchain_core.*",
+    "elevenlabs.*",
+    "openai.*",
+    "anthropic.*",
+    "prost.*",
+    "tonic.*",
+    "dotenv.*",
+    "yaml.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
+
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=4.0",
-    "ruff>=0.3",
-    "mypy>=1.8",
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.23,<1.0",
+    "pytest-cov>=4.0,<5.0",
+    "ruff>=0.3,<1.0",
+    "mypy>=1.8,<2.0",
+    "types-PyYAML>=6.0.12,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.7,<3.0",
+    "bandit>=1.7,<2.0",
+    "watchfiles>=1.1,<2.0",
 ]

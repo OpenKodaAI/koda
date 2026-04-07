@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -48,7 +48,7 @@ interface CustomTooltipProps {
   label?: string;
 }
 
-function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload?.length) return null;
 
   return (
@@ -77,12 +77,12 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
       ))}
     </div>
   );
-}
+});
 
-export function CostChart({ data, className }: CostChartProps) {
-  const mergedData = mergeDailyCosts(data);
-  const series = data.filter((entry) => entry.dailyCosts.length > 0);
-  const botIds = series.map((entry) => entry.botId);
+export const CostChart = memo(function CostChart({ data, className }: CostChartProps) {
+  const mergedData = useMemo(() => mergeDailyCosts(data), [data]);
+  const series = useMemo(() => data.filter((entry) => entry.dailyCosts.length > 0), [data]);
+  const botIds = useMemo(() => series.map((entry) => entry.botId), [series]);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -188,4 +188,4 @@ export function CostChart({ data, className }: CostChartProps) {
       </div>
     </div>
   );
-}
+});

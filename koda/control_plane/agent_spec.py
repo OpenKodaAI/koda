@@ -10,14 +10,17 @@ from typing import Any
 from koda.agent_contract import (
     APPROVAL_MODES,
     AUTONOMY_TIERS,
+    CORE_INTEGRATION_CATALOG,
     CORE_PROVIDER_CATALOG,
     CORE_PROVIDER_IDS,
     CORE_TOOL_CATALOG,
     PROMOTION_MODES,
+    normalize_integration_grants,
     normalize_string_list,
     resolve_allowed_tool_ids,
     tool_subset_summary,
 )
+from koda.control_plane.execution_policy import normalize_execution_policy, validate_execution_policy
 from koda.control_plane.settings import looks_like_secret_key
 from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog
 
@@ -48,6 +51,69 @@ _DOCUMENT_KINDS: tuple[str, ...] = (
     "image_prompt_md",
     "memory_extraction_prompt_md",
 )
+_SCOPE_PROMPT_DOCUMENT_KIND = "system_prompt_md"
+_SCOPE_LEGACY_DOCUMENT_TITLES: dict[str, str] = {
+    "workspace_md": "Workspace Context",
+    "squad_md": "Squad Context",
+    "identity_md": "Identity Notes",
+    "soul_md": "Style Notes",
+    "instructions_md": "Imported Instructions",
+    "rules_md": "Imported Rules",
+    "voice_prompt_md": "Voice Notes",
+    "image_prompt_md": "Image Notes",
+    "memory_extraction_prompt_md": "Memory Notes",
+}
+_SCOPE_SPEC_SECTION_LAYOUTS: dict[str, tuple[tuple[str, str, tuple[str, ...]], ...]] = {
+    "workspace": (
+        (
+            "hard_rules",
+            "Workspace Hard Rules",
+            ("non_negotiables", "forbidden_actions", "security_rules"),
+        ),
+        (
+            "response_policy",
+            "Workspace Response Policy",
+            ("language", "citation_policy", "quality_bar"),
+        ),
+        (
+            "model_policy",
+            "Workspace Model Policy",
+            ("allowed_providers", "max_budget_usd", "max_total_budget_usd"),
+        ),
+        (
+            "resource_access_policy",
+            "Workspace Resource Access Policy",
+            ("integration_grants",),
+        ),
+    ),
+    "squad": (
+        (
+            "operating_instructions",
+            "Squad Operating Instructions",
+            ("default_workflow", "execution_heuristics", "handoff_expectations"),
+        ),
+        (
+            "interaction_style",
+            "Squad Interaction Style",
+            ("tone", "collaboration_style", "writing_style"),
+        ),
+        (
+            "tool_policy",
+            "Squad Tool Policy",
+            ("allowed_categories", "allowed_tool_ids"),
+        ),
+        (
+            "knowledge_policy",
+            "Squad Knowledge Policy",
+            (),
+        ),
+        (
+            "hard_rules",
+            "Squad Hard Rules",
+            ("approval_requirements",),
+        ),
+    ),
+}
 _RESERVED_PROMPT_TAG_RE = re.compile(r"</?agent(?:_[a-z0-9_]+)+\s*>", re.IGNORECASE)
 _BOOLEAN_MEMORY_POLICY_FIELDS = frozenset(
     {
@@ -99,6 +165,7 @@ _RESOURCE_ACCESS_POLICY_KEYS = frozenset(
     {
         "allowed_global_secret_keys",
         "allowed_shared_env_keys",
+        "integration_grants",
         "local_env",
     }
 )
@@ -129,6 +196,56 @@ def _safe_json_list(value: Any) -> list[Any]:
 
 def _trimmed(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _slugify_identifier(value: Any) -> str:
+    text = _trimmed(value).lower()
+    if not text:
+        return ""
+    chunks: list[str] = []
+    last_was_dash = False
+    for char in text:
+        if char in string.ascii_lowercase or char.isdigit():
+            chunks.append(char)
+            last_was_dash = False
+            continue
+        if char in {" ", "-", "_", ".", "/"} and not last_was_dash:
+            chunks.append("-")
+            last_was_dash = True
+    return "".join(chunks).strip("-")
+
+
+def normalize_custom_skills(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        name = _trimmed(item.get("name") or item.get("id"))
+        content = _trimmed(item.get("content"))
+        if not name or not content:
+            continue
+
+        skill_id = _slugify_identifier(item.get("id") or name)
+        if not skill_id:
+            continue
+
+        normalized.append(
+            {
+                "id": skill_id,
+                "name": name,
+                "content": content,
+                "instruction": _trimmed(item.get("instruction")),
+                "category": _trimmed(item.get("category")) or "general",
+                "aliases": normalize_string_list(item.get("aliases")),
+                "tags": normalize_string_list(item.get("tags")),
+                "output_format_enforcement": _trimmed(item.get("output_format_enforcement")),
+            }
+        )
+    return normalized
 
 
 def _escape_reserved_prompt_tags(value: Any) -> str:
@@ -403,6 +520,75 @@ def compose_agent_prompt(documents: dict[str, Any]) -> str:
     return "\n\n".join([*header, *blocks]).strip()
 
 
+def _scope_document_title(kind: str) -> str:
+    mapped = _SCOPE_LEGACY_DOCUMENT_TITLES.get(kind)
+    if mapped:
+        return mapped
+    return kind.replace("_", " ").replace(" md", "").strip().title()
+
+
+def render_scope_spec_markdown(scope: str, spec: dict[str, Any] | None) -> str:
+    """Render legacy workspace/squad structured settings into one markdown block."""
+    normalized_scope = _trimmed(scope).lower()
+    layouts = _SCOPE_SPEC_SECTION_LAYOUTS.get(normalized_scope, ())
+    if normalized_scope == "workspace":
+        normalized_spec = normalize_workspace_spec(_safe_json_object(spec))
+    elif normalized_scope == "squad":
+        normalized_spec = normalize_squad_spec(_safe_json_object(spec))
+    else:
+        normalized_spec = _safe_json_object(spec)
+    parts: list[str] = []
+    for section_key, title, order in layouts:
+        payload = _safe_json_object(normalized_spec.get(section_key))
+        if not payload:
+            continue
+        parts.append(_render_section(title, payload, order=order))
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def resolve_scope_system_prompt(
+    scope: str,
+    spec: dict[str, Any] | None,
+    documents: dict[str, Any] | None,
+) -> str:
+    """Collapse legacy scope config into a single markdown system prompt."""
+    payload = _safe_json_object(documents)
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    def add_part(value: Any) -> None:
+        content = _normalize_markdown_block(value)
+        if not content or content in seen:
+            return
+        seen.add(content)
+        parts.append(content)
+
+    add_part(payload.get(_SCOPE_PROMPT_DOCUMENT_KIND))
+
+    for kind, value in payload.items():
+        if kind == _SCOPE_PROMPT_DOCUMENT_KIND:
+            continue
+        content = _normalize_markdown_block(value)
+        if not content:
+            continue
+        add_part(f"## {_scope_document_title(kind)}\n{content}")
+
+    add_part(render_scope_spec_markdown(scope, spec))
+    return "\n\n".join(parts).strip()
+
+
+def resolve_scope_documents(
+    scope: str,
+    spec: dict[str, Any] | None,
+    documents: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Return the normalized one-field document payload for a scope."""
+    prompt = resolve_scope_system_prompt(scope, spec, documents)
+    if not prompt:
+        return {}
+    return {_SCOPE_PROMPT_DOCUMENT_KIND: prompt}
+
+
 def _normalize_provider_models(value: Any) -> dict[str, list[str]]:
     payload = _safe_json_object(value)
     normalized: dict[str, list[str]] = {}
@@ -646,6 +832,7 @@ def normalize_resource_access_policy(policy: dict[str, Any] | None) -> dict[str,
 
     allowed_global_secret_keys = _normalize_env_key_list(raw.get("allowed_global_secret_keys"))
     allowed_shared_env_keys = _normalize_env_key_list(raw.get("allowed_shared_env_keys"))
+    integration_grants = normalize_integration_grants(raw.get("integration_grants"))
     local_env = _normalize_env_mapping(raw.get("local_env"))
 
     normalized: dict[str, Any] = {}
@@ -653,6 +840,10 @@ def normalize_resource_access_policy(policy: dict[str, Any] | None) -> dict[str,
         normalized["allowed_global_secret_keys"] = allowed_global_secret_keys
     if allowed_shared_env_keys:
         normalized["allowed_shared_env_keys"] = allowed_shared_env_keys
+    if integration_grants:
+        integration_grants.pop("postgres", None)
+        if integration_grants:
+            normalized["integration_grants"] = integration_grants
     if local_env:
         normalized["local_env"] = local_env
     return normalized
@@ -672,12 +863,14 @@ def normalize_agent_spec(agent_spec: dict[str, Any]) -> dict[str, Any]:
         "memory_policy": normalize_memory_policy(_safe_json_object(agent_spec.get("memory_policy"))),
         "knowledge_policy": normalize_knowledge_policy(_safe_json_object(agent_spec.get("knowledge_policy"))),
         "autonomy_policy": normalize_autonomy_policy(_safe_json_object(agent_spec.get("autonomy_policy"))),
+        "execution_policy": normalize_execution_policy(_safe_json_object(agent_spec.get("execution_policy"))),
         "resource_access_policy": normalize_resource_access_policy(
             _safe_json_object(agent_spec.get("resource_access_policy"))
         ),
         "voice_policy": _compact_mapping(_safe_json_object(agent_spec.get("voice_policy"))),
         "image_analysis_policy": _compact_mapping(_safe_json_object(agent_spec.get("image_analysis_policy"))),
         "memory_extraction_schema": _compact_mapping(_safe_json_object(agent_spec.get("memory_extraction_schema"))),
+        "custom_skills": normalize_custom_skills(agent_spec.get("custom_skills")),
         "documents": {
             kind: _normalize_markdown_block(value)
             for kind, value in _safe_json_object(agent_spec.get("documents")).items()
@@ -716,6 +909,7 @@ def build_agent_spec_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "memory_policy": _safe_json_object(memory.get("policy")) or _safe_json_object(memory.get("profile")),
             "knowledge_policy": _safe_json_object(knowledge.get("policy")) or knowledge,
             "autonomy_policy": _safe_json_object(runtime.get("autonomy_policy")),
+            "execution_policy": _safe_json_object(runtime.get("execution_policy")),
             "voice_policy": _safe_json_object(prompting.get("voice_policy")),
             "image_analysis_policy": _safe_json_object(prompting.get("image_analysis_policy")),
             "memory_extraction_schema": _safe_json_object(memory.get("memory_extraction_schema")),
@@ -917,6 +1111,12 @@ def validate_agent_spec(
             if candidate_tier and candidate_tier not in AUTONOMY_TIERS:
                 errors.append(f"autonomy_policy.task_overrides.{task_kind}.autonomy_tier is invalid: {candidate_tier}")
 
+    execution_policy = _safe_json_object(agent_spec.get("execution_policy"))
+    if execution_policy:
+        exec_errors, exec_warnings = validate_execution_policy(execution_policy)
+        errors.extend(exec_errors)
+        warnings.extend(exec_warnings)
+
     if memory_policy:
         extraction_provider = _trimmed(memory_policy.get("extraction_provider")).lower()
         if extraction_provider and extraction_provider not in CORE_PROVIDER_IDS:
@@ -983,6 +1183,16 @@ def validate_agent_spec(
             warnings.append(
                 "resource_access_policy contains unsupported keys that will be ignored: " + ", ".join(unexpected_keys)
             )
+        unknown_integrations = sorted(
+            integration_id
+            for integration_id in normalize_integration_grants(resource_access_policy.get("integration_grants"))
+            if integration_id not in CORE_INTEGRATION_CATALOG
+        )
+        if unknown_integrations:
+            errors.append(
+                "resource_access_policy.integration_grants contains unknown integrations: "
+                + ", ".join(unknown_integrations)
+            )
         for list_key in ("allowed_global_secret_keys", "allowed_shared_env_keys"):
             invalid_keys = [
                 key for key in _normalize_env_key_list(resource_access_policy.get(list_key)) if not key[:1].isalpha()
@@ -1001,6 +1211,15 @@ def validate_agent_spec(
                 )
             if env_key.startswith(_RESERVED_LOCAL_ENV_PREFIXES):
                 errors.append(f"resource_access_policy.local_env.{env_key} uses a reserved core/provider prefix.")
+        integration_grants = normalize_integration_grants(resource_access_policy.get("integration_grants"))
+        unknown_integrations = sorted(
+            integration_id for integration_id in integration_grants if integration_id not in CORE_INTEGRATION_CATALOG
+        )
+        if unknown_integrations:
+            errors.append(
+                "resource_access_policy.integration_grants contains unknown integrations: "
+                + ", ".join(unknown_integrations)
+            )
 
     if memory_extraction_schema:
         template = _trimmed(
@@ -1052,6 +1271,18 @@ def validate_agent_spec(
             "allowed_tool_ids": allowed_tool_ids,
             **tool_subset_summary(allowed_tool_ids),
         },
+        "execution_policy_summary": {
+            "source": _trimmed(_safe_json_object(normalized_spec.get("execution_policy")).get("source"))
+            or ("explicit" if _safe_json_object(normalized_spec.get("execution_policy")) else "compiled_legacy"),
+            "rule_count": len(_safe_json_list(_safe_json_object(normalized_spec.get("execution_policy")).get("rules"))),
+            "decision_values": sorted(
+                set(
+                    _trimmed(rule.get("decision")).lower()
+                    for rule in _safe_json_list(_safe_json_object(normalized_spec.get("execution_policy")).get("rules"))
+                    if isinstance(rule, dict) and _trimmed(rule.get("decision")).lower()
+                )
+            ),
+        },
         "sections_present": sections_present,
         "document_lengths": {kind: len(content) for kind, content in documents.items()},
         "agent_spec": normalized_spec,
@@ -1067,3 +1298,200 @@ def parse_json_env_value(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical prompt spec: Workspace -> Squad -> Agent
+# ---------------------------------------------------------------------------
+
+WORKSPACE_SPEC_FIELDS: dict[str, set[str] | None] = {
+    "hard_rules": {"non_negotiables", "forbidden_actions", "security_rules"},
+    "response_policy": {"language", "citation_policy", "quality_bar"},
+    "model_policy": {"allowed_providers", "max_budget_usd", "max_total_budget_usd"},
+    "resource_access_policy": {"integration_grants"},
+}
+
+SQUAD_SPEC_FIELDS: dict[str, set[str] | None] = {
+    "operating_instructions": {"default_workflow", "execution_heuristics", "handoff_expectations"},
+    "interaction_style": {"tone", "collaboration_style", "writing_style"},
+    "tool_policy": {"allowed_categories", "allowed_tool_ids"},
+    "knowledge_policy": None,  # all fields allowed
+    "hard_rules": {"approval_requirements"},
+}
+
+
+def _filter_spec_fields(
+    spec: dict[str, Any],
+    allowed_fields: dict[str, set[str] | None],
+) -> dict[str, Any]:
+    """Keep only sections and sub-fields that appear in *allowed_fields*."""
+    result: dict[str, Any] = {}
+    for section, permitted in allowed_fields.items():
+        raw = _safe_json_object(spec.get(section))
+        if not raw:
+            continue
+        if permitted is None:
+            # all fields allowed for this section
+            result[section] = _compact_mapping(raw)
+        else:
+            filtered: dict[str, Any] = {}
+            for key in permitted:
+                value = raw.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, list):
+                    normalized = normalize_string_list(value)
+                    if normalized:
+                        filtered[key] = normalized
+                elif isinstance(value, dict):
+                    compacted = _compact_mapping(value)
+                    if compacted:
+                        filtered[key] = compacted
+                elif isinstance(value, str):
+                    trimmed = _trimmed(value)
+                    if trimmed:
+                        filtered[key] = trimmed
+                else:
+                    filtered[key] = value
+            if filtered:
+                result[section] = filtered
+    return _compact_mapping(result)
+
+
+def normalize_workspace_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and filter a workspace spec to only allowed fields."""
+    return _filter_spec_fields(_safe_json_object(spec), WORKSPACE_SPEC_FIELDS)
+
+
+def normalize_squad_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and filter a squad spec to only allowed fields."""
+    return _filter_spec_fields(_safe_json_object(spec), SQUAD_SPEC_FIELDS)
+
+
+def _deep_merge_value(base: Any, override: Any) -> Any:
+    """Merge two values: lists concatenate, dicts merge recursively, scalars prefer override."""
+    if isinstance(base, list) and isinstance(override, list):
+        # Concatenate, preserving order (base items first)
+        seen: list[Any] = []
+        for item in base:
+            if item not in seen:
+                seen.append(item)
+        for item in override:
+            if item not in seen:
+                seen.append(item)
+        return seen
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            if key in merged:
+                merged[key] = _deep_merge_value(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    # Scalar: most-specific wins (override)
+    if override in (None, "", []):
+        return base
+    return override
+
+
+def merge_hierarchical_spec(
+    workspace_spec: dict[str, Any] | None,
+    squad_spec: dict[str, Any] | None,
+    agent_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge specs with hierarchy: agent > squad > workspace.
+
+    Lists concatenate (workspace + squad + agent).
+    Scalars use most-specific-wins (agent > squad > workspace).
+    Documents merge separately via merge_hierarchical_documents.
+    """
+    import copy
+
+    merged = copy.deepcopy(agent_spec)
+    # Collect all section keys that exist across the three levels
+    all_sections: set[str] = set(merged.keys())
+    if workspace_spec:
+        all_sections.update(workspace_spec.keys())
+    if squad_spec:
+        all_sections.update(squad_spec.keys())
+
+    # Skip non-mergeable metadata keys
+    skip_keys = {
+        "agent_id",
+        "documents",
+        "document_projections",
+        "document_overrides",
+        "document_sources",
+        "compiled_prompt",
+        "effective_usage",
+    }
+
+    for section in all_sections:
+        if section in skip_keys:
+            continue
+        ws_value = _safe_json_object(workspace_spec).get(section) if workspace_spec else None
+        sq_value = _safe_json_object(squad_spec).get(section) if squad_spec else None
+        ag_value = merged.get(section)
+
+        # Build layered merge: workspace -> squad -> agent
+        base: Any = ws_value
+        if base is None:
+            base = sq_value
+        elif sq_value is not None:
+            base = _deep_merge_value(base, sq_value)
+        if base is None:
+            continue  # agent value already in merged
+        if ag_value is None:
+            merged[section] = base
+        else:
+            merged[section] = _deep_merge_value(base, ag_value)
+
+    return _compact_mapping(merged)
+
+
+def merge_hierarchical_documents(
+    workspace_documents: dict[str, str] | None,
+    squad_documents: dict[str, str] | None,
+    agent_documents: dict[str, str],
+) -> dict[str, str]:
+    """Merge documents from all levels with origin markers.
+
+    For each document kind in ``_AGENT_DOCUMENT_LAYOUT``, the content from each
+    level is concatenated with origin headers.  Free documents are included with
+    a namespace prefix.
+    """
+    merged: dict[str, str] = {}
+    ws_docs = _safe_json_object(workspace_documents) if workspace_documents else {}
+    sq_docs = _safe_json_object(squad_documents) if squad_documents else {}
+    ag_docs = _safe_json_object(agent_documents)
+
+    layout_kinds = {kind for kind, _ in _AGENT_DOCUMENT_LAYOUT}
+    all_kinds = set(ag_docs.keys()) | set(ws_docs.keys()) | set(sq_docs.keys())
+
+    for kind in all_kinds:
+        parts: list[str] = []
+        ws_content = _trimmed(ws_docs.get(kind))
+        sq_content = _trimmed(sq_docs.get(kind))
+        ag_content = _trimmed(ag_docs.get(kind))
+
+        if kind in layout_kinds:
+            # Prompt-affecting documents: concatenate with origin markers
+            if ws_content:
+                parts.append(f"<!-- origin:workspace -->\n{ws_content}")
+            if sq_content:
+                parts.append(f"<!-- origin:squad -->\n{sq_content}")
+            if ag_content:
+                parts.append(f"<!-- origin:agent -->\n{ag_content}")
+        else:
+            # Non-layout documents: simple concatenation
+            if ws_content:
+                parts.append(ws_content)
+            if sq_content:
+                parts.append(sq_content)
+            if ag_content:
+                parts.append(ag_content)
+
+        if parts:
+            merged[kind] = "\n\n".join(parts)
+
+    return merged

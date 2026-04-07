@@ -57,7 +57,7 @@ describe("control-plane fetch tiers", () => {
     );
   });
 
-  it("uses detail caching for bot configuration pages", async () => {
+  it("uses live fetching for bot configuration pages", async () => {
     const { getControlPlaneBot } = await import("@/lib/control-plane");
 
     await getControlPlaneBot("ATLAS");
@@ -65,11 +65,7 @@ describe("control-plane fetch tiers", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.any(URL),
       expect.objectContaining({
-        cache: "force-cache",
-        next: expect.objectContaining({
-          revalidate: 5,
-          tags: expect.arrayContaining(["control-plane:bot:ATLAS"]),
-        }),
+        cache: "no-store",
       }),
     );
   });
@@ -192,24 +188,6 @@ describe("control-plane fetch tiers", () => {
                   value_present: true,
                 },
               ],
-              integration_credentials: {
-                jira: {
-                  title: "Jira",
-                  description: "credentials",
-                  fields: [
-                    {
-                      key: "api_key",
-                      label: "API key",
-                      input_type: "password",
-                      storage: "secret",
-                      required: true,
-                      value: "jira-secret",
-                      preview: "jira-...",
-                      value_present: true,
-                    },
-                  ],
-                },
-              },
               provider_connections: {
                 openai: {
                   provider_id: "openai",
@@ -262,8 +240,6 @@ describe("control-plane fetch tiers", () => {
 
     expect(payload.values.variables[0].value).toBe("");
     expect(payload.values.variables[0].preview).toBe("");
-    expect(payload.values.integration_credentials.jira.fields[0].value).toBe("");
-    expect(payload.values.integration_credentials.jira.fields[0].preview).toBe("");
     expect(payload.values.provider_connections.openai.api_key_preview).toBe("");
   });
 
@@ -318,5 +294,140 @@ describe("control-plane fetch tiers", () => {
         value: "",
       }),
     );
+  });
+
+  it("strips decrypted value from include_value secret responses proxied to browser", async () => {
+    // When the backend returns a secret with include_value=true (decrypted value present),
+    // the sanitizer must blank the value before it reaches the browser through the proxy.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 42,
+            scope: "agent",
+            secret_key: "DISCORD_BOT_TOKEN",
+            preview: "Bot****",
+            value: "real-discord-token-should-be-stripped",
+            updated_at: "2026-04-04T00:00:00Z",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    const { controlPlaneFetchJson } = await import("@/lib/control-plane");
+    const payload = await controlPlaneFetchJson<Record<string, unknown>>(
+      "/api/control-plane/agents/agent-1/secrets/DISCORD_BOT_TOKEN",
+    );
+
+    expect(payload.secret_key).toBe("DISCORD_BOT_TOKEN");
+    expect(payload.value).toBe("");
+    expect(payload.preview).toBe("");
+  });
+
+  it("derives core integrations from the canonical catalog and defaults endpoints", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/api/control-plane/connections/catalog")) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                connection_key: "core:browser",
+                kind: "core",
+                integration_key: "browser",
+                display_name: "Browser",
+                description: "Governed browser automation",
+                category: "productivity",
+                transport_kind: "browser",
+                auth_capabilities: { modes: ["none"] },
+                auth_strategy_default: "none",
+                enabled: true,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (url.includes("/api/control-plane/connections/defaults")) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                connection_key: "core:browser",
+                kind: "core",
+                integration_key: "browser",
+                status: "verified",
+                auth_strategy: "none",
+                auth_method: "none",
+                source_origin: "system_default",
+                account_label: "runtime managed",
+                provider_account_id: null,
+                expires_at: null,
+                last_verified_at: "2026-03-30T10:00:00Z",
+                last_error: "",
+                tool_count: 3,
+                connected: true,
+                enabled: true,
+                metadata: {
+                  checked_via: "browser_runtime",
+                  health_probe: "browser_manager",
+                  supports_persistence: true,
+                  session_scope: "task",
+                },
+                fields: [],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getControlPlaneCoreIntegrations } = await import("@/lib/control-plane");
+    const payload = await getControlPlaneCoreIntegrations();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({
+        cache: "force-cache",
+        next: expect.objectContaining({
+          revalidate: 15,
+          tags: expect.arrayContaining(["control-plane:core"]),
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({
+        cache: "force-cache",
+        next: expect.objectContaining({
+          revalidate: 5,
+          tags: expect.arrayContaining(["control-plane:core"]),
+        }),
+      }),
+    );
+    expect(payload.items[0].connection?.integration_id).toBe("browser");
+    expect(payload.items[0].connection?.checked_via).toBe("browser_runtime");
+    expect(payload.items[0].connection_status).toBe("verified");
+    expect(payload.governance?.source_of_truth).toBe("connections_catalog_and_defaults");
   });
 });

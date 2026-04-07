@@ -34,7 +34,14 @@ export class AppError extends Error {
 }
 
 export class ValidationError extends AppError {
-  constructor(message: string, options: Omit<AppErrorOptions, "code" | "status"> = {}) {
+  fieldErrors?: Record<string, string[]>;
+
+  constructor(
+    message: string,
+    options: Omit<AppErrorOptions, "code" | "status"> & {
+      fieldErrors?: Record<string, string[]>;
+    } = {},
+  ) {
     super(message, {
       ...options,
       code: "VALIDATION_ERROR",
@@ -42,6 +49,7 @@ export class ValidationError extends AppError {
       exposeMessage: true,
     });
     this.name = "ValidationError";
+    this.fieldErrors = options.fieldErrors;
   }
 }
 

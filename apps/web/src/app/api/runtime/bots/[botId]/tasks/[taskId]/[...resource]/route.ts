@@ -17,6 +17,8 @@ import {
   toAbsoluteUpstreamWsUrl,
 } from "@/lib/runtime-relay";
 import type { RuntimeMutationResult } from "@/lib/runtime-types";
+import { isTrustedDashboardRequest } from "@/lib/request-origin";
+import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,6 +35,43 @@ const ATTACH_BROWSER_TIMEOUT_MS = Number.parseInt(
     "30000",
   10,
 );
+
+function unauthorizedResponse() {
+  return NextResponse.json(
+    { error: "Operator session is required." },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+function forbiddenMutationResponse() {
+  return NextResponse.json(
+    { error: "Cross-site dashboard mutations are blocked." },
+    {
+      status: 403,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+function sanitizeAttachPayload(payload: Record<string, unknown>) {
+  const sanitized = { ...payload };
+  const attach = payload.attach as Record<string, unknown> | undefined;
+  if (attach) {
+    const nextAttach = { ...attach };
+    delete nextAttach.token;
+    sanitized.attach = nextAttach;
+  }
+  delete sanitized.ws_url;
+  delete sanitized.novnc_url;
+  return sanitized;
+}
 
 function joinResourcePath(segments: string[]) {
   return segments.join("/");
@@ -103,14 +142,16 @@ async function buildTerminalAttachResponse(
   botId: string,
   taskId: number,
   payload: Record<string, unknown>,
+  sessionToken?: string,
 ) {
   const bot = await requireRuntimeBotConfig(botId);
   const attach = payload.attach as Record<string, unknown> | undefined;
   const terminal = payload.terminal as Record<string, unknown> | undefined;
   const upstreamWs = typeof payload.ws_url === "string" ? payload.ws_url : null;
+  const attachToken = typeof attach?.token === "string" ? attach.token : null;
 
   if (!attach || !upstreamWs) {
-    return NextResponse.json(payload, { status: 200 });
+    return NextResponse.json(sanitizeAttachPayload(payload), { status: 200 });
   }
 
   const relay = await createRuntimeRelayDescriptor({
@@ -119,13 +160,18 @@ async function buildTerminalAttachResponse(
     taskId,
     terminalId: terminal?.id ? Number(terminal.id) : null,
     upstreamUrl: toAbsoluteUpstreamWsUrl(bot.runtimeBaseUrl, upstreamWs),
+    upstreamHeaders: attachToken
+      ? {
+          "X-Koda-Attach-Token": attachToken,
+        }
+      : undefined,
     expiresAt: String(
       attach.expires_at || new Date(Date.now() + 5 * 60_000).toISOString(),
     ),
-  });
+  }, sessionToken);
 
   return NextResponse.json({
-    ...payload,
+    ...sanitizeAttachPayload(payload),
     relay_path: getRuntimeRelayPath(relay.id),
   });
 }
@@ -134,6 +180,7 @@ async function buildBrowserAttachResponse(
   botId: string,
   taskId: number,
   payload: Record<string, unknown>,
+  sessionToken?: string,
 ) {
   const bot = await requireRuntimeBotConfig(botId);
   const attach = payload.attach as Record<string, unknown> | undefined;
@@ -141,6 +188,7 @@ async function buildBrowserAttachResponse(
     typeof payload.ws_url === "string" ? payload.ws_url : null;
   const upstreamNovncWs =
     typeof payload.novnc_url === "string" ? payload.novnc_url : null;
+  const attachToken = typeof attach?.token === "string" ? attach.token : null;
   const expiresAt = String(
     attach?.expires_at || new Date(Date.now() + 5 * 60_000).toISOString(),
   );
@@ -154,8 +202,13 @@ async function buildBrowserAttachResponse(
           bot.runtimeBaseUrl,
           upstreamSnapshotWs,
         ),
+        upstreamHeaders: attachToken
+          ? {
+              "X-Koda-Attach-Token": attachToken,
+            }
+          : undefined,
         expiresAt,
-      })
+      }, sessionToken)
     : null;
 
   const relayNovnc = upstreamNovncWs
@@ -168,11 +221,11 @@ async function buildBrowserAttachResponse(
           upstreamNovncWs,
         ),
         expiresAt,
-      })
+      }, sessionToken)
     : null;
 
   return NextResponse.json({
-    ...payload,
+    ...sanitizeAttachPayload(payload),
     relay_snapshot_path: relaySnapshot
       ? getRuntimeRelayPath(relaySnapshot.id)
       : null,
@@ -188,6 +241,11 @@ export async function GET(
     params: Promise<{ botId: string; taskId: string; resource: string[] }>;
   },
 ) {
+  const operatorToken = await getWebOperatorTokenFromCookie();
+  if (!operatorToken) {
+    return unauthorizedResponse();
+  }
+
   let botId: string;
   let numericTaskId: number;
   let resource: string[];
@@ -242,6 +300,14 @@ export async function POST(
     params: Promise<{ botId: string; taskId: string; resource: string[] }>;
   },
 ) {
+  const operatorToken = await getWebOperatorTokenFromCookie();
+  if (!operatorToken) {
+    return unauthorizedResponse();
+  }
+  if (!isTrustedDashboardRequest(request)) {
+    return forbiddenMutationResponse();
+  }
+
   let botId: string;
   let numericTaskId: number;
   let resource: string[];
@@ -275,7 +341,7 @@ export async function POST(
         );
       }
 
-      return buildTerminalAttachResponse(botId, numericTaskId, response.data);
+      return buildTerminalAttachResponse(botId, numericTaskId, response.data, operatorToken);
     }
 
     if (resourcePath === "attach/browser") {
@@ -294,7 +360,7 @@ export async function POST(
         );
       }
 
-      return buildBrowserAttachResponse(botId, numericTaskId, response.data);
+      return buildBrowserAttachResponse(botId, numericTaskId, response.data, operatorToken);
     }
 
     const contentType = request.headers.get("content-type");

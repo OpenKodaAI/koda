@@ -175,11 +175,11 @@ function SessionMessageBubble({
             "rounded-[1.1rem] border px-4 py-3.5 text-left",
             isImmersive
               ? isAssistant
-                ? "border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.026)] shadow-[0_18px_48px_rgba(0,0,0,0.18)]"
-                : "border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.055)] shadow-[0_18px_48px_rgba(0,0,0,0.22)]"
+                ? "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]"
+                : "border-[color-mix(in_srgb,var(--tone-info-border)_68%,var(--border-subtle))] bg-[color-mix(in_srgb,var(--tone-info-bg)_60%,var(--surface-panel-soft))]"
               : isAssistant
-                ? "border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.014)]"
-                : "border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.03)]"
+                ? "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]"
+                : "border-[color-mix(in_srgb,var(--tone-info-border)_64%,var(--border-subtle))] bg-[color-mix(in_srgb,var(--tone-info-bg)_52%,var(--surface-panel-soft))]"
           )}
         >
           <SessionRichText
@@ -368,7 +368,7 @@ export function SessionDetailView({
       ) : null}
       <div
         ref={bodyRef}
-        className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.015)_0%,transparent_26%)] px-5 py-6 sm:px-6"
+        className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top_left,color-mix(in_srgb,var(--text-primary)_2%,transparent)_0%,transparent_26%)] px-5 py-6 sm:px-6"
         onScroll={(event) => {
           const element = event.currentTarget;
           const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -386,7 +386,7 @@ export function SessionDetailView({
             <div className="app-card-row">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="app-card-row__eyebrow">{t("sessions.detail.conversation")}</span>
-                <span className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.018)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-secondary)]">
+                <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-secondary)]">
                   {getBotLabel(detail.summary.bot_id)}
                 </span>
               </div>

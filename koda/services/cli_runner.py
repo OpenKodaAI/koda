@@ -74,10 +74,16 @@ async def run_cli_command_detailed(
 
     first_token = args.split()[0]
     if allowed_cmds and first_token not in allowed_cmds:
+        log.warning(
+            "cli_subcommand_blocked",
+            binary=binary,
+            subcommand=first_token,
+            allowed=", ".join(sorted(allowed_cmds)),
+        )
         return CliCommandResult(
             binary=binary,
             args=args,
-            text=f"Subcommand `{first_token}` is not allowed.\nAllowed: {', '.join(sorted(allowed_cmds))}",
+            text=f"Subcommand `{first_token}` is not allowed.",
             blocked=True,
         )
 

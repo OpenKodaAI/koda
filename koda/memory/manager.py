@@ -12,7 +12,7 @@ from koda.knowledge.config import (
     KNOWLEDGE_CANDIDATE_MIN_CONFIDENCE,
     KNOWLEDGE_CANDIDATE_SUCCESS_THRESHOLD,
 )
-from koda.knowledge.policy import classify_task_kind
+from koda.knowledge.task_policy_defaults import classify_task_kind
 from koda.logging_config import get_logger
 from koda.memory.config import (
     MEMORY_ENABLED,

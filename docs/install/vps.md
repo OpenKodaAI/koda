@@ -14,19 +14,23 @@ The recommended bundled storage path uses:
 ## Recommended Flow
 
 ```bash
-git clone <your-fork-or-repo-url> /opt/koda
-cd /opt/koda
-./scripts/install.sh
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+npm install -g @openkodaai/koda
+koda install --headless
 ```
+
+For source-based administration or contributor workflows you can still use the repository wrapper,
+which installs the npm CLI locally and stages the release bundle into `.koda-release/`.
+That wrapper only automates dependency installation on apt-based Linux with `sudo`.
 
 ## Reverse Proxy
 
 The default production overlay keeps both the dashboard and the control plane bound to localhost. A reverse proxy should:
 
 - publish `/` to the Koda web UI
+- publish `/control-plane/setup` to the dedicated onboarding surface
+- publish `/control-plane` to the control-plane home and operator surface
 - terminate TLS
-- publish `/setup`
+- optionally keep `/setup` only as a compatibility redirect
 - publish `/api/control-plane/*`
 - publish `/api/runtime/*`
 - publish `/openapi/control-plane.json`
@@ -50,6 +54,13 @@ Koda is intentionally decoupled from the outer delivery layer. A VPS provider pa
 Providers, agents, secrets, and integrations remain part of the Koda product layer, not the hosting layer.
 Product configuration stays inside the control-plane UI and API.
 
+The expected post-bootstrap flow is:
+
+1. connect and verify providers
+2. connect and verify integrations
+3. inspect `connection_status`, `checked_via`, and recent integration health when something is degraded
+4. grant integrations per bot in the agent editor instead of assuming system-level configuration is enough
+
 ## Restart And Boot Persistence
 
 Use the provided systemd template:
@@ -64,6 +75,7 @@ Adjust `WorkingDirectory`, install it as a real unit, and enable it after the co
 - store `.env` and any bootstrap secret files with root or service-user-only permissions
 - avoid exposing internal storage or database ports publicly
 - use managed TLS at the reverse-proxy layer
+- set and rotate `WEB_OPERATOR_SESSION_SECRET` so dashboard operator sessions remain stable across restarts
 - keep Docker volumes persistent across restarts
 
 ## Post-Install Validation
@@ -71,18 +83,22 @@ Adjust `WorkingDirectory`, install it as a real unit, and enable it after the co
 Run:
 
 ```bash
-python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
+koda doctor
 ```
 
-Then finish product configuration through `/setup`.
+Then finish product configuration through `/control-plane/setup` in the dashboard.
 
 ## Upgrade Path
 
-- pull the new version of the repository
-- review updated docs and config notes
-- rebuild and restart the stack with Docker Compose
-- rerun the doctor command
-- verify control-plane health and setup status
+Choose one update path:
+
+- global install path:
+  `npm install -g @openkodaai/koda && koda update`
+- one-off path without a global upgrade:
+  `npx @openkodaai/koda@latest update`
+
+In both cases the CLI runs doctor checks and rolls back automatically if the new bundle is unhealthy.
+Afterward, verify control-plane health and setup status.
 
 ## Existing Bundled Object-Storage Installs
 

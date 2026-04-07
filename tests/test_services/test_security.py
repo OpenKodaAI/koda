@@ -1,8 +1,15 @@
-"""Security tests: shell metacharacters, env exfiltration, newline injection."""
+"""Security tests: shell metacharacters, env exfiltration, newline injection, integration blocked patterns."""
 
 import pytest
 
-from koda.config import BLOCKED_SHELL_PATTERN, GIT_META_CHARS
+from koda.config import (
+    BLOCKED_CONFLUENCE_PATTERN,
+    BLOCKED_DOCKER_PATTERN,
+    BLOCKED_GWS_PATTERN,
+    BLOCKED_JIRA_PATTERN,
+    BLOCKED_SHELL_PATTERN,
+    GIT_META_CHARS,
+)
 
 
 class TestGitMetaChars:
@@ -100,7 +107,7 @@ class TestShellRunnerNewlineDefense:
 
         result = await run_shell_command("echo safe\nrm -rf /", "/tmp")
         assert "Blocked" in result
-        assert "newline" in result.lower()
+        assert "not allowed" in result.lower()
 
     @pytest.mark.asyncio
     async def test_carriage_return_blocked(self):
@@ -195,3 +202,236 @@ class TestCliRunnerUsesExec:
 
         result = await run_cli_command("gh", "pr list\nrm -rf /", "/tmp")
         assert "meta-characters" in result.lower()
+
+
+class TestBlockedDockerPattern:
+    """Test BLOCKED_DOCKER_PATTERN blocks dangerous Docker flags."""
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "run --privileged myimage",
+            "run --net=host myimage",
+            "run --pid=host myimage",
+            "-v /:/host myimage",
+            "run -v /:/mnt myimage",
+        ],
+    )
+    def test_dangerous_docker_flags_blocked(self, cmd):
+        assert BLOCKED_DOCKER_PATTERN is not None
+        assert BLOCKED_DOCKER_PATTERN.search(cmd), f"Docker flag not blocked: {cmd}"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ps",
+            "logs my-container",
+            "inspect my-container",
+            "images",
+            "stats",
+            "pull nginx",
+            "build -t app .",
+        ],
+    )
+    def test_safe_docker_commands_pass(self, cmd):
+        assert BLOCKED_DOCKER_PATTERN is not None
+        assert BLOCKED_DOCKER_PATTERN.search(cmd) is None, f"Safe docker command blocked: {cmd}"
+
+    def test_case_insensitive(self):
+        assert BLOCKED_DOCKER_PATTERN is not None
+        assert BLOCKED_DOCKER_PATTERN.search("run --PRIVILEGED myimage")
+        assert BLOCKED_DOCKER_PATTERN.search("run --Net=Host myimage")
+
+
+class TestBlockedJiraPattern:
+    """Test BLOCKED_JIRA_PATTERN blocks destructive Jira operations."""
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "projects delete PROJ",
+            "projects create",
+            "permissions get",
+            "schemes delete 123",
+            "scheme create",
+            "webhooks delete 456",
+            "webhook create",
+            "bulk delete",
+            "users delete john",
+            "groups delete admins",
+            "roles delete role1",
+            "workflows delete flow1",
+            "fields delete customfield",
+            "global settings",
+            "reindex",
+        ],
+    )
+    def test_destructive_jira_blocked(self, cmd):
+        assert BLOCKED_JIRA_PATTERN is not None
+        assert BLOCKED_JIRA_PATTERN.search(cmd), f"Jira command not blocked: {cmd}"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "issues search JQL",
+            "issues get PROJ-123",
+            "issues list",
+            "issue transition PROJ-123",
+        ],
+    )
+    def test_safe_jira_commands_pass(self, cmd):
+        assert BLOCKED_JIRA_PATTERN is not None
+        assert BLOCKED_JIRA_PATTERN.search(cmd) is None, f"Safe Jira command blocked: {cmd}"
+
+    def test_case_insensitive(self):
+        assert BLOCKED_JIRA_PATTERN is not None
+        assert BLOCKED_JIRA_PATTERN.search("PROJECTS DELETE PROJ")
+        assert BLOCKED_JIRA_PATTERN.search("Bulk Delete")
+
+
+class TestBlockedConfluencePattern:
+    """Test BLOCKED_CONFLUENCE_PATTERN blocks destructive Confluence operations."""
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "spaces delete MYSPACE",
+            "spaces create",
+            "spaces permissions",
+            "users create john",
+            "users delete john",
+            "groups delete admins",
+            "group create team",
+            "bulk delete",
+            "templates delete 123",
+            "global settings",
+        ],
+    )
+    def test_destructive_confluence_blocked(self, cmd):
+        assert BLOCKED_CONFLUENCE_PATTERN is not None
+        assert BLOCKED_CONFLUENCE_PATTERN.search(cmd), f"Confluence command not blocked: {cmd}"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "pages get 12345",
+            "pages list",
+            "pages search query",
+            "content get 789",
+        ],
+    )
+    def test_safe_confluence_commands_pass(self, cmd):
+        assert BLOCKED_CONFLUENCE_PATTERN is not None
+        assert BLOCKED_CONFLUENCE_PATTERN.search(cmd) is None, f"Safe Confluence command blocked: {cmd}"
+
+    def test_case_insensitive(self):
+        assert BLOCKED_CONFLUENCE_PATTERN is not None
+        assert BLOCKED_CONFLUENCE_PATTERN.search("SPACES DELETE MYSPACE")
+        assert BLOCKED_CONFLUENCE_PATTERN.search("Bulk Delete")
+
+
+class TestBlockedGwsPattern:
+    """Test BLOCKED_GWS_PATTERN blocks dangerous Google Workspace operations."""
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "admin directory.users.delete user@example.com",
+            "admin directory.users.insert",
+            "admin directory.users.update",
+            "admin directory.users.makeAdmin",
+            "admin directory.orgunits.delete",
+            "admin directory.groups.delete",
+            "admin directory.members.delete",
+            "admin directory.domains",
+            "admin directory.customers",
+            "admin directory.schemas",
+            "admin roles",
+            "admin datatransfer",
+            "gmail users.settings.delegates",
+            "gmail users.settings.forwardingAddresses",
+            "gmail users.settings.sendAs.create",
+            "gmail users.settings.sendAs.update",
+            "drive drives.delete",
+            "drive files.emptyTrash",
+            "chat spaces.delete",
+        ],
+    )
+    def test_dangerous_gws_blocked(self, cmd):
+        assert BLOCKED_GWS_PATTERN is not None
+        assert BLOCKED_GWS_PATTERN.search(cmd), f"GWS command not blocked: {cmd}"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "gmail users.messages.list",
+            "gmail users.messages.get",
+            "drive files.list",
+            "drive files.get",
+            "calendar events.list",
+            "chat spaces.list",
+        ],
+    )
+    def test_safe_gws_commands_pass(self, cmd):
+        assert BLOCKED_GWS_PATTERN is not None
+        assert BLOCKED_GWS_PATTERN.search(cmd) is None, f"Safe GWS command blocked: {cmd}"
+
+    def test_case_insensitive(self):
+        assert BLOCKED_GWS_PATTERN is not None
+        assert BLOCKED_GWS_PATTERN.search("ADMIN DIRECTORY.USERS.DELETE user@example.com")
+        assert BLOCKED_GWS_PATTERN.search("Drive Drives.Delete")
+
+
+class TestInformationDisclosure:
+    """SEC-6: Verify that user-facing error messages do not leak internal details."""
+
+    @pytest.mark.asyncio
+    async def test_blocked_shell_returns_generic_error(self):
+        """Blocked shell commands must return a generic message, not the specific reason."""
+        from unittest.mock import patch
+
+        from koda.services.shell_runner import run_shell_command
+
+        with patch(
+            "koda.services.shell_runner.validate_shell_command",
+            side_effect=ValueError("command matched BLOCKED_SHELL_PATTERN: rm -rf"),
+        ):
+            result = await run_shell_command("rm -rf /", "/tmp")
+
+        assert "Blocked" in result
+        assert "not allowed" in result.lower()
+        # The specific pattern name or internal reason must not leak
+        assert "BLOCKED_SHELL_PATTERN" not in result
+        assert "rm -rf" not in result
+
+    @pytest.mark.asyncio
+    async def test_blocked_cli_subcommand_hides_allowed_list(self):
+        """Blocked CLI subcommands must NOT enumerate the allowed set."""
+        from koda.services.cli_runner import run_cli_command
+
+        result = await run_cli_command(
+            "gh",
+            "evil-cmd foo",
+            "/tmp",
+            allowed_cmds={"pr", "issue", "repo"},
+        )
+        assert "not allowed" in result.lower()
+        assert "Allowed:" not in result
+        assert "pr" not in result
+        assert "issue" not in result
+        assert "repo" not in result
+
+    @pytest.mark.asyncio
+    async def test_blocked_cli_subcommand_detailed_hides_allowed_list(self):
+        """run_cli_command_detailed must also hide the allowed set."""
+        from koda.services.cli_runner import run_cli_command_detailed
+
+        result = await run_cli_command_detailed(
+            "gh",
+            "evil-cmd foo",
+            "/tmp",
+            allowed_cmds={"pr", "issue", "repo"},
+        )
+        assert result.blocked is True
+        assert "Allowed:" not in result.text
+        assert "pr" not in result.text

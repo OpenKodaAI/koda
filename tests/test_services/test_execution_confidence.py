@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from koda.knowledge.policy import default_execution_policy
+from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.memory.profile import MemoryProfile
 from koda.services.execution_confidence import ActionPlan, evaluate_write_confidence
 

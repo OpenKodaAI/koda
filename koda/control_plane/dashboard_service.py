@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from statistics import median
@@ -56,6 +57,18 @@ def _iso(value: Any) -> str | None:
     if value in {None, ""}:
         return None
     return str(value)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {str(key): item for key, item in value.items()}
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _duration_ms(*, started_at: Any, completed_at: Any, fallback: float | None = None) -> float | None:
@@ -417,7 +430,7 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
         )
         or {}
     )
-    today = _now_utc().date().isoformat()
+    today = _now_utc().date()
     today_cost = (
         _fetch_one(
             """
@@ -438,7 +451,7 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
       GROUP BY DATE(timestamp)
       ORDER BY DATE(timestamp) ASC
         """,
-        (agent_id, (_now_utc() - timedelta(days=30)).date().isoformat()),
+        (agent_id, (_now_utc() - timedelta(days=30)).date()),
         agent_ids=[agent_id],
     )
     recent_tasks = [_serialize_task(task) for task in _fetch_task_rows(agent_ids=[agent_id], limit=5, offset=0)]
@@ -476,10 +489,15 @@ def get_dashboard_agent_stats(agent_id: str) -> dict[str, Any]:
 def _session_rows(agent_id: str) -> list[dict[str, Any]]:
     return _fetch_all(
         """
-        SELECT session_id, name, user_id, created_at, last_used
-          FROM sessions
-         WHERE agent_id = ?
-      ORDER BY COALESCE(last_used, created_at) DESC
+        SELECT session_id,
+               NULL AS name,
+               MAX(user_id) AS user_id,
+               MIN(timestamp) AS created_at,
+               MAX(timestamp) AS last_used
+          FROM query_history
+         WHERE agent_id = ? AND session_id IS NOT NULL
+      GROUP BY session_id
+      ORDER BY MAX(timestamp) DESC
         """,
         (agent_id,),
         agent_ids=[agent_id],
@@ -581,6 +599,7 @@ def list_dashboard_session_summaries(
             total_cost = float(task_agg.get("total_cost_usd") or query_agg.get("total_cost_usd") or 0.0)
             item = {
                 "agent_id": agent_id,
+                "bot_id": agent_id,
                 "session_id": session_id,
                 "name": str(session.get("name") or "") or None,
                 "user_id": session.get("user_id") or latest_query.get("user_id"),
@@ -781,31 +800,50 @@ def list_dashboard_schedules(agent_ids: list[str] | None = None) -> list[dict[st
         return []
     rows = _fetch_all(
         f"""
-        SELECT id, user_id, chat_id, agent_id, schedule_expr, payload_json, status, work_dir, created_at
+        SELECT id, user_id, chat_id, agent_id, job_type, trigger_type, schedule_expr, timezone,
+               payload_json, status, work_dir, provider_preference, model_preference,
+               next_run_at, last_run_at, last_success_at, last_failure_at, config_version,
+               verification_policy_json, notification_policy_json, dry_run_required,
+               created_at, updated_at
           FROM scheduled_jobs
          WHERE agent_id IN ({_placeholders(len(resolved))})
-      ORDER BY created_at DESC, id DESC
+      ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
         """,
         tuple(resolved),
         agent_ids=resolved,
     )
     items: list[dict[str, Any]] = []
     for row in rows:
-        raw_payload = row.get("payload_json")
-        payload = raw_payload if isinstance(raw_payload, dict) else {}
+        payload = _json_object(row.get("payload_json"))
         items.append(
             {
                 "id": int(row["id"]),
+                "bot_id": str(row.get("agent_id") or "") or None,
                 "user_id": int(row.get("user_id") or 0),
                 "chat_id": int(row.get("chat_id") or 0),
+                "job_type": str(row.get("job_type") or ""),
+                "trigger_type": str(row.get("trigger_type") or ""),
+                "schedule_expr": str(row.get("schedule_expr") or ""),
                 "cron_expression": str(row.get("schedule_expr") or ""),
-                "command": str(payload.get("query_text") or payload.get("prompt") or payload.get("command") or ""),
+                "timezone": str(row.get("timezone") or ""),
+                "payload": payload,
+                "command": str(payload.get("query") or payload.get("text") or payload.get("command") or ""),
                 "description": str(payload.get("description") or payload.get("title") or ""),
                 "created_at": _iso(row.get("created_at")),
-                "enabled": 1 if str(row.get("status") or "").lower() in {"active", "ready", "scheduled"} else 0,
+                "updated_at": _iso(row.get("updated_at")),
+                "enabled": 1 if str(row.get("status") or "").lower() == "active" else 0,
                 "work_dir": str(row.get("work_dir") or "") or None,
-                "agent_id": str(row.get("agent_id") or "") or None,
                 "status": str(row.get("status") or ""),
+                "provider_preference": str(row.get("provider_preference") or "") or None,
+                "model_preference": str(row.get("model_preference") or "") or None,
+                "next_run_at": _iso(row.get("next_run_at")),
+                "last_run_at": _iso(row.get("last_run_at")),
+                "last_success_at": _iso(row.get("last_success_at")),
+                "last_failure_at": _iso(row.get("last_failure_at")),
+                "config_version": int(row.get("config_version") or 1),
+                "verification_policy": _json_object(row.get("verification_policy_json")),
+                "notification_policy": _json_object(row.get("notification_policy_json")),
+                "dry_run_required": bool(row.get("dry_run_required")),
             }
         )
     return items
@@ -965,19 +1003,22 @@ def get_dashboard_cost_insights(
                 "group_by": effective_group_by,
             },
         }
-    params: list[Any] = list(resolved_agent_ids) + [start.isoformat(), end.isoformat()]
-    rows = _fetch_all(
-        f"""
-        SELECT id, agent_id, user_id, timestamp, query_text, response_text, cost_usd, model, session_id, error
-          FROM query_history
-         WHERE agent_id IN ({_placeholders(len(resolved_agent_ids))})
-           AND timestamp >= ?
-           AND timestamp < ?
-      ORDER BY timestamp ASC, id ASC
-        """,
-        tuple(params),
-        agent_ids=resolved_agent_ids,
-    )
+    params: list[Any] = list(resolved_agent_ids) + [start, end]
+    try:
+        rows = _fetch_all(
+            f"""
+            SELECT id, agent_id, user_id, timestamp, query_text, response_text, cost_usd, model, session_id, error
+              FROM query_history
+             WHERE agent_id IN ({_placeholders(len(resolved_agent_ids))})
+               AND timestamp >= ?
+               AND timestamp < ?
+          ORDER BY timestamp ASC, id ASC
+            """,
+            tuple(params),
+            agent_ids=resolved_agent_ids,
+        )
+    except Exception:
+        rows = []
     events: list[dict[str, Any]] = []
     for row in rows:
         item_task_type = _classify_task_type(row.get("query_text"), row.get("response_text"), row.get("model"))

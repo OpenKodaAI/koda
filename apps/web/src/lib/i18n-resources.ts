@@ -18,6 +18,15 @@ export const resources = {
           "es-ES": "Español",
         },
       },
+      theme: {
+        label: "Theme",
+        placeholder: "Theme",
+        options: {
+          system: "System",
+          light: "Light",
+          dark: "Dark",
+        },
+      },
       common: {
         loading: "Loading",
         ready: "Ready",
@@ -548,7 +557,7 @@ export const resources = {
         sections: {
           general: {
             label: "General",
-            description: "Owner identity, directories, and timezone.",
+            description: "Timezone and regional preferences.",
           },
           models: {
             label: "Models & Providers",
@@ -556,11 +565,23 @@ export const resources = {
           },
           integrations: {
             label: "Integrations",
-            description: "External services like Jira, Google, and databases.",
+            description: "External services and MCP servers like Jira, Google, databases, and curated tool bridges.",
+          },
+          providers: {
+            label: "Providers",
+            description: "AI providers for language models, voice, and media.",
+          },
+          mcp: {
+            label: "MCP Servers",
+            description: "Model Context Protocol servers for extending agent tools.",
           },
           intelligence: {
             label: "Intelligence",
-            description: "Memory, knowledge, and global variables.",
+            description: "Memory, knowledge, and autonomy governance.",
+          },
+          variables: {
+            label: "Variables & Secrets",
+            description: "System variables and secrets for agent operations.",
           },
         },
       },
@@ -581,6 +602,15 @@ export const resources = {
           "en-US": "English (US)",
           "pt-BR": "Português (Brasil)",
           "es-ES": "Español",
+        },
+      },
+      theme: {
+        label: "Tema",
+        placeholder: "Tema",
+        options: {
+          system: "Sistema",
+          light: "Claro",
+          dark: "Escuro",
         },
       },
       common: {
@@ -1111,7 +1141,7 @@ export const resources = {
         sections: {
           general: {
             label: "Geral",
-            description: "Identidade operacional, diretórios e timezone.",
+            description: "Timezone e preferências regionais.",
           },
           models: {
             label: "Modelos e Providers",
@@ -1119,11 +1149,23 @@ export const resources = {
           },
           integrations: {
             label: "Integrações",
-            description: "Serviços externos como Jira, Google e bancos de dados.",
+            description: "Serviços externos e servidores MCP como Jira, Google, bancos de dados e bridges curadas.",
+          },
+          providers: {
+            label: "Provedores",
+            description: "Provedores de IA para modelos de linguagem, voz e mídia.",
+          },
+          mcp: {
+            label: "Servidores MCP",
+            description: "Servidores do Model Context Protocol para estender ferramentas dos agentes.",
           },
           intelligence: {
             label: "Inteligência",
-            description: "Memória, conhecimento e variáveis globais.",
+            description: "Memória, conhecimento e governança de autonomia.",
+          },
+          variables: {
+            label: "Variáveis e Segredos",
+            description: "Variáveis de sistema e segredos para operação dos agentes.",
           },
         },
       },
@@ -1144,6 +1186,15 @@ export const resources = {
           "en-US": "English (US)",
           "pt-BR": "Português (Brasil)",
           "es-ES": "Español",
+        },
+      },
+      theme: {
+        label: "Tema",
+        placeholder: "Tema",
+        options: {
+          system: "Sistema",
+          light: "Claro",
+          dark: "Oscuro",
         },
       },
       common: {
@@ -1674,7 +1725,7 @@ export const resources = {
         sections: {
           general: {
             label: "General",
-            description: "Identidad operacional, directorios y timezone.",
+            description: "Timezone y preferencias regionales.",
           },
           models: {
             label: "Modelos y Providers",
@@ -1682,11 +1733,23 @@ export const resources = {
           },
           integrations: {
             label: "Integraciones",
-            description: "Servicios externos como Jira, Google y bases de datos.",
+            description: "Servicios externos y servidores MCP como Jira, Google, bases de datos y bridges curadas.",
+          },
+          providers: {
+            label: "Proveedores",
+            description: "Proveedores de IA para modelos de lenguaje, voz y medios.",
+          },
+          mcp: {
+            label: "Servidores MCP",
+            description: "Servidores del Model Context Protocol para extender herramientas de agentes.",
           },
           intelligence: {
             label: "Inteligencia",
-            description: "Memoria, conocimiento y variables globales.",
+            description: "Memoria, conocimiento y gobernanza de autonomía.",
+          },
+          variables: {
+            label: "Variables y Secretos",
+            description: "Variables de sistema y secretos para operación de agentes.",
           },
         },
       },
@@ -3606,7 +3669,10 @@ mutableResources["en-US"].translation.sessions.thread = {
   newConversation: "New conversation",
   lastActive: "Last activity {{value}}",
   chooseBot: "Choose a bot",
+  activeBot: "Conversation bot",
+  modelUnknown: "Model not informed",
   waitingForReply: "Waiting for the bot reply...",
+  loadingOlder: "Loading older messages...",
   pending: "Pending",
   failed: "Failed to send",
   retry: "Retry",
@@ -3622,7 +3688,10 @@ mutableResources["pt-BR"].translation.sessions.thread = {
   newConversation: "Nova conversa",
   lastActive: "Última atividade {{value}}",
   chooseBot: "Escolha um bot",
+  activeBot: "Bot da conversa",
+  modelUnknown: "Modelo não informado",
   waitingForReply: "Aguardando a resposta do bot...",
+  loadingOlder: "Carregando mensagens anteriores...",
   pending: "Pendente",
   failed: "Falha no envio",
   retry: "Tentar novamente",
@@ -3638,7 +3707,10 @@ mutableResources["es-ES"].translation.sessions.thread = {
   newConversation: "Nueva conversación",
   lastActive: "Última actividad {{value}}",
   chooseBot: "Elige un bot",
+  activeBot: "Bot de la conversación",
+  modelUnknown: "Modelo no informado",
   waitingForReply: "Esperando la respuesta del bot...",
+  loadingOlder: "Cargando mensajes anteriores...",
   pending: "Pendiente",
   failed: "No se pudo enviar",
   retry: "Reintentar",

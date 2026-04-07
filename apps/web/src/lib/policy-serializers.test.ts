@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeModelPolicyForCore,
+  parseExecutionPolicy,
   parseKnowledgePolicy,
   parseMemoryPolicy,
   parseModelPolicy,
   parseResourceAccessPolicy,
   parseToolPolicy,
+  serializeExecutionPolicy,
   serializeKnowledgePolicy,
   serializeMemoryPolicy,
   serializeModelPolicy,
@@ -157,11 +159,55 @@ describe("policy serializers", () => {
     ).toEqual(["canonical_policy", "approved_runbook"]);
   });
 
+  it("serializes execution policy rules and preserves extra keys", () => {
+    const serialized = JSON.parse(
+      serializeExecutionPolicy({
+        version: 1,
+        source: "explicit",
+        defaults: { default_approval_mode: "guarded" },
+        rules: [
+          {
+            name: "allow-web-search",
+            priority: 10,
+            match: { tool_id: "web_search" },
+            decision: "allow",
+          },
+        ],
+        _extra: { note: "keep-me" },
+      }),
+    );
+
+    expect(serialized.version).toBe(1);
+    expect(serialized.defaults.default_approval_mode).toBe("guarded");
+    expect(serialized.rules[0].decision).toBe("allow");
+    expect(serialized.note).toBe("keep-me");
+
+    const parsed = parseExecutionPolicy(JSON.stringify(serialized));
+    expect(parsed.source).toBe("explicit");
+    expect(parsed.rules[0].match.tool_id).toBe("web_search");
+  });
+
   it("serializes resource access policy for explicit grants", () => {
     const serialized = JSON.parse(
       serializeResourceAccessPolicy({
         allowed_global_secret_keys: ["OPENAI_API_KEY"],
         allowed_shared_env_keys: ["TEAM_NAME"],
+        integration_grants: {
+          gws: {
+            allow_actions: ["gmail.list"],
+            allowed_domains: ["googleapis.com"],
+            shared_env_keys: ["TEAM_NAME"],
+            secret_keys: ["OPENAI_API_KEY"],
+          },
+          browser: {
+            enabled: true,
+            allow_actions: ["navigate"],
+            allowed_domains: ["example.com"],
+            allowed_paths: ["/workspace/demo"],
+            allowed_db_envs: ["staging"],
+            allow_private_network: true,
+          },
+        },
         local_env: { BOT_CONTEXT_LABEL: "sales" },
         _extra: {},
       }),
@@ -169,11 +215,43 @@ describe("policy serializers", () => {
 
     expect(serialized.allowed_global_secret_keys).toEqual(["OPENAI_API_KEY"]);
     expect(serialized.allowed_shared_env_keys).toEqual(["TEAM_NAME"]);
+    expect(serialized.integration_grants).toEqual({
+      gws: {
+        allow_actions: ["gmail.list"],
+        allowed_domains: ["googleapis.com"],
+        shared_env_keys: ["TEAM_NAME"],
+        secret_keys: ["OPENAI_API_KEY"],
+      },
+      browser: {
+        enabled: true,
+        allow_actions: ["navigate"],
+        allowed_domains: ["example.com"],
+        allowed_paths: ["/workspace/demo"],
+        allowed_db_envs: ["staging"],
+        allow_private_network: true,
+      },
+    });
     expect(serialized.local_env).toEqual({ BOT_CONTEXT_LABEL: "sales" });
 
     expect(parseResourceAccessPolicy(JSON.stringify(serialized))).toMatchObject({
       allowed_global_secret_keys: ["OPENAI_API_KEY"],
       allowed_shared_env_keys: ["TEAM_NAME"],
+      integration_grants: {
+        gws: {
+          allow_actions: ["gmail.list"],
+          allowed_domains: ["googleapis.com"],
+          shared_env_keys: ["TEAM_NAME"],
+          secret_keys: ["OPENAI_API_KEY"],
+        },
+        browser: {
+          enabled: true,
+          allow_actions: ["navigate"],
+          allowed_domains: ["example.com"],
+          allowed_paths: ["/workspace/demo"],
+          allowed_db_envs: ["staging"],
+          allow_private_network: true,
+        },
+      },
       local_env: { BOT_CONTEXT_LABEL: "sales" },
     });
   });

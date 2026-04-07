@@ -2,12 +2,16 @@
 .github
 .claude
 .env
+.env.*
+!.env.example
 .mypy_cache
 .pytest_cache
 .ruff_cache
 .venv
 venv
 __pycache__
+.playwright-cli
+.pnpm-store
 node_modules
 apps/web/.next
 apps/web/output

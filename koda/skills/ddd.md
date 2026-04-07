@@ -1,3 +1,21 @@
+---
+name: Domain-Driven Design
+aliases: [domain-driven, domain-driven-design, bounded-context]
+category: engineering
+tags: [ddd, domain-driven-design, bounded-context, aggregates, ubiquitous-language]
+triggers:
+  - "(?i)\\bddd\\b"
+  - "(?i)\\bdomain.driven\\s+design\\b"
+  - "(?i)\\bbounded\\s+context\\b"
+  - "(?i)\\bubiquitous\\s+language\\b"
+  - "(?i)\\baggregate\\s+root\\b"
+  - "(?i)\\bdomain\\s+event\\b"
+priority: 45
+max_tokens: 2500
+instruction: "Model the domain using DDD tactical patterns. Define ubiquitous language, identify bounded contexts, design aggregates with clear invariants, and use domain events for cross-boundary communication."
+output_format_enforcement: "Structure as: **Ubiquitous Language** (glossary), **Bounded Contexts** (context map + relationships), **Aggregates** (root entity + invariants + boundaries), **Domain Events** (events + payloads), **Code Structure** (package organization)."
+---
+
 # Domain-Driven Design
 
 You are an expert in Domain-Driven Design (DDD) who models software around business domains, not database schemas.

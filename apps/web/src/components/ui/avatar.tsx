@@ -5,22 +5,31 @@ import * as AvatarPrimitive from "@radix-ui/react-avatar";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-const avatarStatusVariants = cva("flex size-2 items-center rounded-full border-2 border-background", {
-  variants: {
-    variant: {
-      online: "bg-green-600",
-      offline: "bg-zinc-600 dark:bg-zinc-300",
-      busy: "bg-yellow-600",
-      away: "bg-blue-600",
+const avatarStatusVariants = cva(
+  "flex size-2 items-center rounded-full border-2 border-background",
+  {
+    variants: {
+      variant: {
+        online: "bg-green-600",
+        offline: "bg-[var(--text-quaternary)]",
+        busy: "bg-yellow-600",
+        away: "bg-blue-600",
+      },
     },
-  },
-  defaultVariants: {
-    variant: "online",
-  },
-});
+    defaultVariants: {
+      variant: "online",
+    },
+  }
+);
 
 function Avatar({ className, ...props }: React.ComponentProps<typeof AvatarPrimitive.Root>) {
-  return <AvatarPrimitive.Root data-slot="avatar" className={cn("relative flex size-10 shrink-0", className)} {...props} />;
+  return (
+    <AvatarPrimitive.Root
+      data-slot="avatar"
+      className={cn("relative flex size-10 shrink-0", className)}
+      {...props}
+    />
+  );
 }
 
 function AvatarImage({ className, ...props }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
@@ -45,7 +54,13 @@ function AvatarFallback({ className, ...props }: React.ComponentProps<typeof Ava
 }
 
 function AvatarIndicator({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div data-slot="avatar-indicator" className={cn("absolute flex size-6 items-center justify-center", className)} {...props} />;
+  return (
+    <div
+      data-slot="avatar-indicator"
+      className={cn("absolute flex size-6 items-center justify-center", className)}
+      {...props}
+    />
+  );
 }
 
 function AvatarStatus({

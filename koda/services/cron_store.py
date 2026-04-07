@@ -2,27 +2,23 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
-from datetime import UTC, datetime
 from typing import Any
 
-from koda.config import (
-    DEFAULT_WORK_DIR,
-    SCHEDULER_DEFAULT_TIMEZONE,
-)
+from koda.config import DEFAULT_WORK_DIR
 from koda.logging_config import get_logger
 from koda.services.scheduled_jobs import (
     JOB_STATUS_ACTIVE,
     JOB_STATUS_ARCHIVED,
     JOB_STATUS_PAUSED,
     _get_job,
-    _touch_job,
-    compute_next_run,
     create_shell_command_job,
+    delete_job,
     is_read_only_shell_command,
     list_jobs,
+    pause_job,
     queue_validation_run,
+    resume_job,
     wake_dispatcher,
 )
 from koda.state.scheduler_store import get_scheduler_store
@@ -130,14 +126,12 @@ def delete_cron_job(user_id: int, job_id: int) -> bool:
         or str(job.get("status") or "") == JOB_STATUS_ARCHIVED
     ):
         return False
-    _touch_job(job_id, status=JOB_STATUS_ARCHIVED)
-    wake_dispatcher()
-    return True
+    ok, _ = delete_job(job_id, user_id)
+    return ok
 
 
 def toggle_cron_job(user_id: int, job_id: int, enabled: bool) -> bool:
     """Enable or disable a cron job."""
-    now = datetime.now(UTC)
     existing = _get_job(job_id, user_id)
     if (
         not existing
@@ -145,22 +139,11 @@ def toggle_cron_job(user_id: int, job_id: int, enabled: bool) -> bool:
         or str(existing.get("status") or "") == JOB_STATUS_ARCHIVED
     ):
         return False
-    next_run = None
     if enabled:
-        with contextlib.suppress(Exception):
-            next_run = compute_next_run(
-                trigger_type="cron",
-                schedule_expr=str(existing["schedule_expr"]),
-                timezone_name=SCHEDULER_DEFAULT_TIMEZONE,
-                after=now,
-            )
-    _touch_job(
-        job_id,
-        status=_status_from_enabled(enabled),
-        next_run_at=next_run.isoformat() if next_run else None,
-    )
-    wake_dispatcher()
-    return True
+        ok, _ = resume_job(job_id, user_id)
+        return ok
+    ok, _ = pause_job(job_id, user_id)
+    return ok
 
 
 def get_all_enabled_jobs() -> list[tuple]:

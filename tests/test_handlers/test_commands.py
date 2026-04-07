@@ -66,8 +66,16 @@ class TestCmdNewsession:
     async def test_clears_session(self, mock_update, mock_context):
         mock_context.user_data["session_id"] = "old-session"
         mock_context.user_data["provider_sessions"] = {"claude": "native-old"}
-        await cmd_newsession(mock_update, mock_context)
-        assert mock_context.user_data["session_id"] is None
+        with patch("koda.utils.approval.revoke_scoped_approval_state", new=AsyncMock()) as mock_revoke:
+            await cmd_newsession(mock_update, mock_context)
+        mock_revoke.assert_awaited_once()
+        kwargs = mock_revoke.await_args.kwargs
+        assert kwargs["session_id"] == "old-session"
+        assert kwargs["user_id"] == 111
+        assert kwargs["chat_id"] == 111
+        assert isinstance(mock_context.user_data["session_id"], str)
+        assert mock_context.user_data["session_id"].startswith("session-")
+        assert mock_context.user_data["session_id"] != "old-session"
         assert mock_context.user_data["provider_sessions"] == {}
 
 

@@ -1,87 +1,17 @@
-name: CI
+name: legacy-ci-transition
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  python-lint:
+  legacy-ci-transition:
+    name: legacy-ci-transition
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install ".[dev]"
-      - name: Ruff lint
-        run: ruff check .
-      - name: Ruff format check
-        run: ruff format --check .
-      - name: Mypy type check
-        run: mypy koda/ --ignore-missing-imports
-
-  python-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install ".[dev]"
-      - name: Run tests
-        run: pytest --cov=koda --cov-report=term-missing
-        env:
-          AGENT_TOKEN: "test-token"
-          ALLOWED_USER_IDS: "123456789"
-
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.26.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "pnpm"
-      - name: Install web dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Lint web
-        run: pnpm lint:web
-      - name: Test web
-        run: pnpm test:web
-      - name: Build web
-        run: pnpm build:web
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: [python-lint, python-test, web]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t koda .
-      - name: Quickstart smoke
+      - name: Explain transition
         run: |
-          cp .env.example .env
-          docker compose up -d --build
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8090/health >/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          curl -fsS http://127.0.0.1:8090/health
-          curl -fsS http://127.0.0.1:3000 >/dev/null
-          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
-          docker compose down -v
+          echo "The legacy monolithic CI workflow is kept only as a transition marker."
+          echo "Use pr-quality and security for automated validation on pull requests and main."

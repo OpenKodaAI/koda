@@ -1,5 +1,7 @@
 """Tests for subprocess environment sanitization helpers."""
 
+import pytest
+
 from koda.services.provider_env import build_llm_subprocess_env, build_tool_subprocess_env
 
 
@@ -46,6 +48,18 @@ def test_gemini_llm_subprocess_env_keeps_project_only_for_active_provider():
     assert "OPENAI_API_KEY" not in env
 
 
+def test_llm_subprocess_env_includes_provider_credentials_from_process_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GEMINI_AUTH_MODE", "api_key")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "control-plane")
+
+    env = build_llm_subprocess_env(provider="gemini")
+
+    assert env["GEMINI_AUTH_MODE"] == "api_key"
+    assert env["GEMINI_API_KEY"] == "gemini-secret"
+    assert env["GOOGLE_CLOUD_PROJECT"] == "control-plane"
+
+
 def test_tool_subprocess_env_keeps_only_safe_base_env_plus_explicit_overrides():
     env = build_tool_subprocess_env(
         {
@@ -58,8 +72,8 @@ def test_tool_subprocess_env_keeps_only_safe_base_env_plus_explicit_overrides():
     )
 
     assert env["PATH"] == "/usr/bin"
-    assert env["HOME"] == "/tmp/home"
     assert env["LOCAL_FLAG"] == "enabled"
     assert env["GWS_CREDENTIALS_FILE"] == "/tmp/creds.json"
+    assert "HOME" not in env
     assert "OPENAI_API_KEY" not in env
     assert "AGENT_TOKEN" not in env

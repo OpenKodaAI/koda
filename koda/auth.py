@@ -2,13 +2,22 @@
 
 from telegram import Update
 
-from koda.config import ALLOWED_USER_IDS
+from koda.config import ADMIN_USER_IDS, ALLOWED_USER_IDS
 
 
 def auth_check(update: Update) -> bool:
-    """Return True if user is allowed."""
+    """Return True if user is allowed. Empty ALLOWED_USER_IDS denies all access."""
     user = update.effective_user
-    return bool(user and user.id in ALLOWED_USER_IDS)
+    if not user:
+        return False
+    if not ALLOWED_USER_IDS:
+        return False
+    return user.id in ALLOWED_USER_IDS
+
+
+def is_admin(user_id: int) -> bool:
+    """Return True if *user_id* belongs to an admin."""
+    return user_id in ADMIN_USER_IDS
 
 
 async def reject_unauthorized(update: Update) -> None:

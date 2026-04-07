@@ -13,7 +13,7 @@ export function KodaMark({ className, title }: KodaMarkProps) {
       alt={title ?? "Koda"}
       width={40}
       height={40}
-      className={cn("object-contain", className)}
+      className={cn("koda-mark object-contain", className)}
       priority
     />
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -131,8 +131,8 @@ function AnimatedStatValue({ value }: { value: string | number }) {
   );
 }
 
-function MiniSparkline({ data, color }: { data: number[]; color: string }) {
-  const chartData = data.map((value) => ({ value }));
+const MiniSparkline = memo(function MiniSparkline({ data, color }: { data: number[]; color: string }) {
+  const chartData = useMemo(() => data.map((value) => ({ value })), [data]);
   const gradientId = `sparkline-${color.replace(/[^a-z0-9]/gi, "")}`;
 
   return (
@@ -158,9 +158,9 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
       </ResponsiveContainer>
     </div>
   );
-}
+});
 
-export function StatsGrid({ stats, className }: StatsGridProps) {
+export const StatsGrid = memo(function StatsGrid({ stats, className }: StatsGridProps) {
   const hasExtendedGrid = stats.length > 4;
 
   return (
@@ -200,4 +200,4 @@ export function StatsGrid({ stats, className }: StatsGridProps) {
       ))}
     </div>
   );
-}
+});

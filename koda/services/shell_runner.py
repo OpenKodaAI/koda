@@ -62,7 +62,7 @@ async def run_shell_command(
         return f"Exit {exit_code}:\n{output}" if output else f"Exit {exit_code}: (no output)"
     except ValueError as e:
         log.warning("shell_command_blocked", command=command[:100], reason=str(e))
-        return f"Blocked: {e}"
+        return "Blocked: this command is not allowed for safety reasons."
     except Exception as e:
         log.exception("shell_error", command=command[:100])
         return f"Error: {e}"

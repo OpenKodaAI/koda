@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
-import secrets
+import os
+import urllib.parse
+import urllib.request
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from aiohttp import ContentTypeError, web
+
+from koda.logging_config import get_logger
+from koda.services.http_client import inspect_url
+from koda.services.link_analyzer import fetch_link_metadata
 
 from .dashboard_memory import (
     apply_memory_curation_action,
@@ -22,15 +28,23 @@ from .dashboard_service import (
     list_dashboard_dlq,
     list_dashboard_execution_summaries,
     list_dashboard_schedules,
-    list_dashboard_session_summaries,
 )
 from .manager import get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec, render_setup_page
-from .settings import AGENT_SECTIONS, CONTROL_PLANE_API_TOKEN, DOCUMENT_KINDS
+from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
+from .settings import (
+    AGENT_SECTIONS,
+    CONTROL_PLANE_AUTH_MODE,
+    DOCUMENT_KINDS,
+)
 
 
 def _manager() -> Any:
     return get_control_plane_manager()
+
+
+def _auth_service() -> OperatorAuthService:
+    return get_operator_auth_service()
 
 
 async def _json_payload(request: web.Request) -> dict[str, Any]:
@@ -55,20 +69,131 @@ def _bounded_int(raw_value: str | None, *, name: str, default: int, minimum: int
     return value
 
 
-def _authorize_request(request: web.Request) -> web.Response | None:
-    token = CONTROL_PLANE_API_TOKEN.strip()
-    if not token:
-        return web.json_response(
-            {"error": "control plane token is not configured"},
-            status=500,
-        )
+def _clip_preview_text(value: Any, *, limit: int) -> str | None:
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    existing = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    for key, value in params.items():
+        existing.append((key, value))
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(existing)))
+
+
+def _oauth_relay_completion_page(*, success: bool) -> str:
+    title = "Authentication complete" if success else "Authentication failed"
+    detail = (
+        "You can return to the Koda dashboard and continue."
+        if success
+        else "Return to the Koda dashboard and try the sign-in flow again."
+    )
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #08111a;
+        color: #f4f7fb;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        padding: 24px;
+      }}
+      main {{
+        width: min(560px, 100%);
+        border-radius: 24px;
+        padding: 28px;
+        background: rgba(11, 22, 34, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+      }}
+      h1 {{ margin: 0 0 12px; font-size: 2rem; }}
+      p {{ margin: 0; color: #b9c4d0; line-height: 1.6; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>{title}</h1>
+      <p>{detail}</p>
+    </main>
+  </body>
+</html>"""
+
+
+_PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
+    "/api/control-plane/onboarding/status",
+    "/api/control-plane/auth/status",
+    "/api/control-plane/auth/bootstrap/exchange",
+    "/api/control-plane/auth/login",
+    "/api/control-plane/auth/register-owner",
+    "/api/control-plane/auth/legacy/exchange",
+)
+
+
+def _is_public_control_plane_api_path(path: str) -> bool:
+    return any(path == candidate or path.startswith(f"{candidate}/") for candidate in _PUBLIC_CONTROL_PLANE_API_PATHS)
+
+
+def _development_auth_enabled() -> bool:
+    return CONTROL_PLANE_AUTH_MODE == "development" and os.environ.get("NODE_ENV", "").strip().lower() != "production"
+
+
+def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
     auth_header = request.headers.get("Authorization", "").strip()
     if not auth_header.startswith("Bearer "):
-        return web.json_response({"error": "missing control plane token"}, status=401)
+        return None
     request_token = auth_header.removeprefix("Bearer ").strip()
-    if not secrets.compare_digest(request_token, token):
-        return web.json_response({"error": "invalid control plane token"}, status=403)
+    if not request_token:
+        return None
+    return _auth_service().resolve_bearer_token(request_token)
+
+
+def _authorize_request(request: web.Request) -> web.Response | None:
+    if CONTROL_PLANE_AUTH_MODE == "open" or _development_auth_enabled():
+        request["operator_auth"] = OperatorAuthContext(
+            auth_kind="development",
+            subject_type="development",
+            user_id=None,
+            username="dev",
+            email=None,
+            display_name="Development Operator",
+        )
+        return None
+    if CONTROL_PLANE_AUTH_MODE != "token":
+        return None
+    context = _optional_auth_context(request)
+    if context is None:
+        return web.json_response({"error": "operator session is required"}, status=401)
+    request["operator_auth"] = context
     return None
+
+
+def _request_auth_context(request: web.Request) -> OperatorAuthContext | None:
+    cached = request.get("operator_auth")
+    if isinstance(cached, OperatorAuthContext):
+        return cached
+    context = _optional_auth_context(request)
+    if context is not None:
+        request["operator_auth"] = context
+    return context
+
+
+def _require_auth_context(request: web.Request) -> OperatorAuthContext:
+    context = _request_auth_context(request)
+    if context is None:
+        raise ValueError("operator session is required")
+    return context
 
 
 def _query_agent_ids(request: web.Request) -> list[str]:
@@ -111,6 +236,11 @@ async def control_plane_auth_middleware(
     handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
 ) -> web.StreamResponse:
     if request.path.startswith("/api/control-plane/"):
+        if _is_public_control_plane_api_path(request.path):
+            context = _optional_auth_context(request)
+            if context is not None:
+                request["operator_auth"] = context
+            return await handler(request)
         response = _authorize_request(request)
         if response is not None:
             return response
@@ -157,12 +287,108 @@ async def setup_page(request: web.Request) -> web.Response:
 
 
 async def onboarding_status(request: web.Request) -> web.Response:
-    return web.json_response(_manager().get_onboarding_status())
+    payload = dict(_manager().get_onboarding_status())
+    payload.update(_auth_service().onboarding_payload())
+    return web.json_response(payload)
 
 
 async def onboarding_bootstrap(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     return web.json_response(_manager().complete_onboarding(payload))
+
+
+async def auth_status(request: web.Request) -> web.Response:
+    return web.json_response(_auth_service().auth_status(_request_auth_context(request)))
+
+
+async def auth_bootstrap_exchange(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_auth_service().exchange_bootstrap_code(str(payload.get("code") or "")))
+
+
+async def auth_register_owner(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _auth_service().register_owner(
+            registration_token=str(payload.get("registration_token") or ""),
+            username=str(payload.get("username") or ""),
+            email=str(payload.get("email") or ""),
+            password=str(payload.get("password") or ""),
+            display_name=str(payload.get("display_name") or ""),
+        ),
+        status=201,
+    )
+
+
+async def auth_login(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _auth_service().login(
+            identifier=str(payload.get("identifier") or ""),
+            password=str(payload.get("password") or ""),
+        )
+    )
+
+
+async def auth_logout(request: web.Request) -> web.Response:
+    auth_header = request.headers.get("Authorization", "").strip()
+    token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+    return web.json_response(_auth_service().logout(token))
+
+
+async def auth_issue_bootstrap_code(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    context = _request_auth_context(request)
+    return web.json_response(
+        _auth_service().issue_bootstrap_code(
+            label=str(payload.get("label") or "cli"),
+            actor=context.user_id if context and context.user_id else context.display_name if context else None,
+        ),
+        status=201,
+    )
+
+
+async def auth_legacy_exchange(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_auth_service().exchange_legacy_token(str(payload.get("token") or "")))
+
+
+async def auth_list_tokens(request: web.Request) -> web.Response:
+    return web.json_response(_auth_service().list_personal_tokens(_require_auth_context(request)))
+
+
+async def auth_create_token(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    raw_scopes = payload.get("scopes")
+    scopes = [str(item).strip() for item in raw_scopes] if isinstance(raw_scopes, list) else None
+    return web.json_response(
+        _auth_service().issue_personal_token(
+            _require_auth_context(request),
+            token_name=str(payload.get("token_name") or payload.get("name") or "CLI token"),
+            expires_in_days=int(payload.get("expires_in_days") or 0) or None,
+            scopes=scopes,
+        ),
+        status=201,
+    )
+
+
+async def auth_delete_token(request: web.Request) -> web.Response:
+    return web.json_response(
+        _auth_service().revoke_personal_token(_require_auth_context(request), request.match_info["token_id"])
+    )
+
+
+async def auth_list_sessions(request: web.Request) -> web.Response:
+    return web.json_response(_auth_service().list_sessions(_require_auth_context(request)))
+
+
+async def auth_delete_session(request: web.Request) -> web.Response:
+    return web.json_response(
+        _auth_service().revoke_session(
+            _require_auth_context(request),
+            request.match_info["session_id"],
+        )
+    )
 
 
 async def control_plane_openapi(request: web.Request) -> web.Response:
@@ -217,6 +443,35 @@ async def patch_squad(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     return web.json_response(
         _manager().update_workspace_squad(
+            request.match_info["workspace_id"],
+            request.match_info["squad_id"],
+            payload,
+        )
+    )
+
+
+async def get_workspace_spec(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_workspace_spec(request.match_info["workspace_id"]))
+
+
+async def put_workspace_spec(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().update_workspace_spec(request.match_info["workspace_id"], payload))
+
+
+async def get_squad_spec(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().get_squad_spec(
+            request.match_info["workspace_id"],
+            request.match_info["squad_id"],
+        )
+    )
+
+
+async def put_squad_spec(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _manager().update_squad_spec(
             request.match_info["workspace_id"],
             request.match_info["squad_id"],
             payload,
@@ -317,6 +572,37 @@ async def get_dashboard_execution_detail_route(request: web.Request) -> web.Resp
     return web.json_response(payload)
 
 
+async def get_dashboard_link_preview_route(request: web.Request) -> web.Response:
+    raw_url = str(request.query.get("url") or "").strip()
+    if not raw_url:
+        return web.json_response({"error": "url is required"}, status=400)
+
+    metadata = await inspect_url(raw_url)
+    if isinstance(metadata, str):
+        status = 400 if metadata.startswith("Error:") else 502
+        return web.json_response({"error": metadata.removeprefix("Error: ").strip()}, status=status)
+
+    preview = await fetch_link_metadata(metadata.final_url)
+    parsed = urllib.parse.urlparse(metadata.final_url)
+    return web.json_response(
+        {
+            "url": raw_url,
+            "final_url": metadata.final_url,
+            "domain": parsed.hostname or None,
+            "status": metadata.status,
+            "content_type": metadata.content_type or None,
+            "content_length": metadata.content_length,
+            "title": _clip_preview_text(preview.title, limit=180),
+            "description": _clip_preview_text(preview.description, limit=320),
+            "site_name": _clip_preview_text(preview.site_name, limit=120),
+            "image_url": str(preview.thumbnail_url or "").strip() or None,
+            "link_type": getattr(preview.link_type, "value", str(preview.link_type or "article")),
+            "duration": str(preview.duration or "").strip() or None,
+            "has_transcript": bool(preview.has_transcript),
+        }
+    )
+
+
 async def list_dashboard_agent_sessions_route(request: web.Request) -> web.Response:
     try:
         limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
@@ -341,7 +627,7 @@ async def list_dashboard_sessions_route(request: web.Request) -> web.Response:
     offset = _bounded_int(request.query.get("offset"), name="offset", default=0, minimum=0)
     try:
         return web.json_response(
-            list_dashboard_session_summaries(
+            _manager().list_dashboard_session_summaries(
                 agent_ids=agent_ids,
                 limit=limit,
                 offset=offset,
@@ -354,9 +640,13 @@ async def list_dashboard_sessions_route(request: web.Request) -> web.Response:
 
 async def get_dashboard_session_detail_route(request: web.Request) -> web.Response:
     try:
+        limit_param = request.query.get("limit")
+        limit = _bounded_int(limit_param, name="limit", default=40, minimum=1) if limit_param is not None else None
         payload = _manager().get_dashboard_session(
             request.match_info["agent_id"],
             request.match_info["session_id"],
+            limit=limit,
+            before=request.query.get("before") or None,
         )
     except RuntimeError as exc:
         return _service_unavailable(exc)
@@ -425,8 +715,8 @@ async def list_dashboard_costs_route(request: web.Request) -> web.Response:
                 to_date=request.query.get("to") or None,
             )
         )
-    except RuntimeError as exc:
-        return _service_unavailable(exc)
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
 
 
 async def get_dashboard_agent_costs_route(request: web.Request) -> web.Response:
@@ -516,6 +806,66 @@ async def put_system_settings(request: web.Request) -> web.Response:
     return web.json_response(_manager().put_system_settings(payload))
 
 
+async def oauth_relay_handler(request: web.Request) -> web.Response:
+    """Proxy an OAuth callback from the host browser to the CLI subprocess inside Docker.
+
+    The CLI starts a local HTTP server on a random port. The browser redirects to
+    localhost:PORT which doesn't reach the container. This relay receives the callback
+    on the control plane port (exposed) and forwards it to the CLI's internal server.
+    """
+    session_id = request.match_info["session_id"]
+
+    from koda.services.provider_auth import clear_oauth_relay_target, get_oauth_relay_target
+
+    target = get_oauth_relay_target(session_id)
+    if not target:
+        return web.Response(
+            status=404,
+            text="OAuth relay session not found or expired.",
+            content_type="text/plain",
+        )
+
+    # Forward all query parameters to the internal callback
+    internal_url = target
+    if request.query_string:
+        separator = "&" if "?" in internal_url else "?"
+        internal_url = f"{internal_url}{separator}{request.query_string}"
+
+    try:
+        import aiohttp as aio
+
+        async with (
+            aio.ClientSession() as session,
+            session.get(internal_url, timeout=aio.ClientTimeout(total=10)) as resp,
+        ):
+            await resp.read()
+            clear_oauth_relay_target(session_id)
+            if 200 <= resp.status < 300:
+                return web.Response(
+                    status=200,
+                    text=_oauth_relay_completion_page(success=True),
+                    content_type="text/html",
+                )
+            get_logger(__name__).warning(
+                "oauth_relay_cli_callback_unexpected_status",
+                session_id=session_id,
+                status=resp.status,
+                content_type=resp.content_type or "",
+            )
+            return web.Response(
+                status=502,
+                text=_oauth_relay_completion_page(success=False),
+                content_type="text/html",
+            )
+    except Exception:
+        get_logger(__name__).exception("oauth_relay_cli_callback_failed", session_id=session_id)
+        return web.Response(
+            status=502,
+            text="Failed to reach CLI auth server.",
+            content_type="text/plain",
+        )
+
+
 async def get_general_system_settings(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_general_system_settings())
 
@@ -553,12 +903,37 @@ async def get_provider_login_session(request: web.Request) -> web.Response:
     )
 
 
+async def submit_provider_login_code(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _manager().submit_provider_login_code(
+            request.match_info["provider_id"],
+            request.match_info["session_id"],
+            payload,
+        )
+    )
+
+
 async def verify_provider_connection(request: web.Request) -> web.Response:
     return web.json_response(_manager().verify_provider_connection(request.match_info["provider_id"]))
 
 
+async def get_integration_health(request: web.Request) -> web.Response:
+    return web.json_response(_manager().verify_connection_default(f"core:{request.match_info['integration_id']}"))
+
+
 async def disconnect_provider_connection(request: web.Request) -> web.Response:
     return web.json_response(_manager().disconnect_provider_connection(request.match_info["provider_id"]))
+
+
+async def set_integration_system_enabled(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _manager().set_integration_system_enabled(
+            request.match_info["integration_id"],
+            bool(payload.get("enabled")),
+        )
+    )
 
 
 async def get_global_secret(request: web.Request) -> web.Response:
@@ -681,15 +1056,24 @@ async def delete_skill(request: web.Request) -> web.Response:
 
 async def get_secret(request: web.Request) -> web.Response:
     scope = request.query.get("scope", "agent")
-    secret = _manager().get_secret_asset(request.match_info["agent_id"], request.match_info["secret_key"], scope=scope)
+    include_value = request.query.get("include_value", "").lower() == "true"
+    agent_id = request.match_info["agent_id"]
+    secret_key = request.match_info["secret_key"]
+    secret = _manager().get_secret_asset(agent_id, secret_key, scope=scope)
     if secret is None:
         return web.json_response(
             {
                 "scope": scope,
-                "secret_key": request.match_info["secret_key"],
+                "secret_key": secret_key,
                 "preview": "",
             }
         )
+    if include_value:
+        # get_decrypted_secret_value always uses the agent scope_id; this is
+        # safe because get_secret_asset above already rejects non-agent scopes.
+        decrypted = _manager().get_decrypted_secret_value(agent_id, secret_key)
+        if decrypted is not None:
+            secret = {**secret, "value": decrypted}
     return web.json_response(secret)
 
 
@@ -704,6 +1088,56 @@ async def put_secret(request: web.Request) -> web.Response:
             scope=scope,
         )
     )
+
+
+async def get_telegram_bot_info(request: web.Request) -> web.Response:
+    """Return Telegram bot info (username, name) by decrypting the AGENT_TOKEN and calling getMe."""
+
+    agent_id = request.match_info["agent_id"]
+    manager = _manager()
+    token = manager.get_decrypted_secret_value(agent_id, "AGENT_TOKEN")
+    if not token:
+        return web.json_response({"ok": False, "error": "no_token"}, status=404)
+
+    bot_info: dict[str, Any] = {"ok": False}
+    try:
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            data = json.loads(resp.read().decode())
+            if data.get("ok") and data.get("result"):
+                bot_info = {
+                    "ok": True,
+                    "bot_username": data["result"].get("username", ""),
+                    "bot_name": data["result"].get("first_name", ""),
+                }
+    except Exception:
+        return web.json_response({"ok": False, "error": "telegram_unreachable"}, status=502)
+
+    if not bot_info.get("ok"):
+        return web.json_response({"ok": False, "error": "telegram_unreachable"}, status=502)
+
+    # Resolve allowed user IDs to Telegram usernames
+    allowed_raw = manager.get_decrypted_secret_value(agent_id, "ALLOWED_USER_IDS") or ""
+    user_ids = [uid.strip() for uid in allowed_raw.split(",") if uid.strip()]
+    allowed_users: list[dict[str, str]] = []
+    for uid in user_ids:
+        user_entry: dict[str, str] = {"id": uid, "name": ""}
+        try:
+            chat_req = urllib.request.Request(f"https://api.telegram.org/bot{token}/getChat?chat_id={uid}")
+            with urllib.request.urlopen(chat_req, timeout=5) as chat_resp:  # noqa: S310
+                chat_data = json.loads(chat_resp.read().decode())
+                if chat_data.get("ok") and chat_data.get("result"):
+                    result = chat_data["result"]
+                    parts = [result.get("first_name", ""), result.get("last_name", "")]
+                    display = " ".join(p for p in parts if p) or uid
+                    username = result.get("username", "")
+                    user_entry["name"] = f"@{username}" if username else display
+        except Exception:
+            pass
+        allowed_users.append(user_entry)
+
+    bot_info["allowed_users"] = allowed_users
+    return web.json_response(bot_info)
 
 
 async def delete_secret(request: web.Request) -> web.Response:
@@ -789,6 +1223,24 @@ async def get_autonomy_policy(request: web.Request) -> web.Response:
 async def put_autonomy_policy(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     return web.json_response(_manager().put_autonomy_policy(request.match_info["agent_id"], payload))
+
+
+async def get_execution_policy(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_execution_policy(request.match_info["agent_id"]))
+
+
+async def put_execution_policy(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().put_execution_policy(request.match_info["agent_id"], payload))
+
+
+async def get_execution_policy_catalog(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_execution_policy_catalog(request.match_info["agent_id"]))
+
+
+async def evaluate_execution_policy(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().evaluate_execution_policy(request.match_info["agent_id"], payload))
 
 
 async def list_knowledge_candidates(request: web.Request) -> web.Response:
@@ -1095,6 +1547,311 @@ async def get_provider_download_job(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+# ------------------------------------------------------------------ #
+#  MCP Server Catalog / Agent Connections / Tool Policies              #
+# ------------------------------------------------------------------ #
+
+
+async def list_mcp_catalog(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_mcp_catalog())
+
+
+async def get_mcp_catalog_entry(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_mcp_catalog_entry(request.match_info["server_key"]))
+
+
+async def put_mcp_catalog_entry(request: web.Request) -> web.Response:
+    payload = await request.json()
+    return web.json_response(_manager().upsert_mcp_catalog_entry(request.match_info["server_key"], payload))
+
+
+async def delete_mcp_catalog_entry(request: web.Request) -> web.Response:
+    return web.json_response(_manager().delete_mcp_catalog_entry(request.match_info["server_key"]))
+
+
+async def list_mcp_connections(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_mcp_agent_connections(request.match_info["agent_id"]))
+
+
+def _mcp_connection_key(request: web.Request) -> str:
+    raw = request.match_info.get("server_key") or request.match_info["connection_key"]
+    return raw.removeprefix("mcp:") if raw.startswith("mcp:") else raw
+
+
+async def list_connection_catalog(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_connection_catalog())
+
+
+async def list_connection_defaults_route(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_connection_defaults())
+
+
+async def get_connection_default_route(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_connection_default(request.match_info["connection_key"]))
+
+
+async def put_connection_default_route(request: web.Request) -> web.Response:
+    payload = await request.json()
+    return web.json_response(
+        _manager().put_connection_default(
+            request.match_info["connection_key"],
+            payload,
+        )
+    )
+
+
+async def delete_connection_default_route(request: web.Request) -> web.Response:
+    return web.json_response(_manager().delete_connection_default(request.match_info["connection_key"]))
+
+
+async def verify_connection_default_route(request: web.Request) -> web.Response:
+    return web.json_response(_manager().verify_connection_default(request.match_info["connection_key"]))
+
+
+async def list_agent_connections_route(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_agent_connections(request.match_info["agent_id"]))
+
+
+async def get_agent_connection_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().get_agent_connection(request.match_info["agent_id"], request.match_info["connection_key"])
+    )
+
+
+async def put_agent_connection_route(request: web.Request) -> web.Response:
+    payload = await request.json()
+    return web.json_response(
+        _manager().put_agent_connection(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+            payload,
+        )
+    )
+
+
+async def delete_agent_connection_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().delete_agent_connection(request.match_info["agent_id"], request.match_info["connection_key"])
+    )
+
+
+async def verify_agent_connection_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().verify_agent_connection(request.match_info["agent_id"], request.match_info["connection_key"])
+    )
+
+
+async def get_agent_connection_tools_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().get_agent_connection_tools(request.match_info["agent_id"], request.match_info["connection_key"])
+    )
+
+
+async def discover_agent_connection_tools_route(request: web.Request) -> web.Response:
+    try:
+        payload = _manager().discover_agent_connection_tools(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+        )
+    except ValueError as exc:
+        return web.json_response({"success": False, "error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def import_agent_connection_default_route(request: web.Request) -> web.Response:
+    try:
+        payload = _manager().import_agent_connection_default(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def list_agent_connection_tool_policies_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().list_agent_connection_tool_policies(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+        )
+    )
+
+
+async def put_agent_connection_tool_policy_route(request: web.Request) -> web.Response:
+    payload = await request.json()
+    policy = str(payload.get("policy", "auto"))
+    try:
+        result = _manager().upsert_agent_connection_tool_policy(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+            request.match_info["tool_name"],
+            policy,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
+async def delete_agent_connection_tool_policy_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().delete_agent_connection_tool_policy(
+            request.match_info["agent_id"],
+            request.match_info["connection_key"],
+            request.match_info["tool_name"],
+        )
+    )
+
+
+async def get_mcp_connection(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().get_mcp_agent_connection(request.match_info["agent_id"], _mcp_connection_key(request))
+    )
+
+
+async def put_mcp_connection(request: web.Request) -> web.Response:
+    payload = await request.json()
+    return web.json_response(
+        _manager().upsert_mcp_agent_connection(request.match_info["agent_id"], _mcp_connection_key(request), payload)
+    )
+
+
+async def delete_mcp_connection(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().delete_mcp_agent_connection(request.match_info["agent_id"], _mcp_connection_key(request))
+    )
+
+
+async def test_mcp_connection_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().test_mcp_connection(request.match_info["agent_id"], _mcp_connection_key(request))
+    )
+
+
+async def discover_mcp_tools_route(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().discover_mcp_tools(request.match_info["agent_id"], _mcp_connection_key(request))
+    )
+
+
+async def list_mcp_tool_policies(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().list_mcp_tool_policies(request.match_info["agent_id"], _mcp_connection_key(request))
+    )
+
+
+async def put_mcp_tool_policy(request: web.Request) -> web.Response:
+    payload = await request.json()
+    policy = str(payload.get("policy", "auto"))
+    return web.json_response(
+        _manager().upsert_mcp_tool_policy(
+            request.match_info["agent_id"],
+            _mcp_connection_key(request),
+            request.match_info["tool_name"],
+            policy,
+        )
+    )
+
+
+async def delete_mcp_tool_policy(request: web.Request) -> web.Response:
+    return web.json_response(
+        _manager().delete_mcp_tool_policy(
+            request.match_info["agent_id"],
+            _mcp_connection_key(request),
+            request.match_info["tool_name"],
+        )
+    )
+
+
+# ------------------------------------------------------------------ #
+#  MCP OAuth                                                           #
+# ------------------------------------------------------------------ #
+
+
+async def start_oauth_flow_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    payload = await request.json()
+    from koda.services.mcp_oauth import start_oauth_flow
+
+    frontend_callback_uri = str(payload.get("frontend_callback_uri") or payload.get("redirect_uri") or "")
+    redirect_uri = str(payload.get("redirect_uri") or frontend_callback_uri)
+    result = await start_oauth_flow(
+        agent_id,
+        server_key,
+        frontend_callback_uri=frontend_callback_uri,
+        redirect_uri=redirect_uri,
+    )
+    return web.json_response(result, status=201)
+
+
+async def handle_oauth_callback_route(request: web.Request) -> web.Response:
+    state = request.query.get("state", "")
+    code = request.query.get("code", "")
+    error = request.query.get("error", "")
+    from koda.services.mcp_oauth import _validate_frontend_callback_uri, handle_oauth_callback
+
+    result = await handle_oauth_callback(state, code, error=error or None)
+    wants_json = request.query.get("mode") == "json" or "application/json" in request.headers.get("Accept", "")
+    if wants_json:
+        status = 200 if result.get("success") else 400
+        return web.json_response(result, status=status)
+
+    frontend_target = str(
+        result.get("frontend_callback_uri") or request.query.get("frontend_callback_uri") or ""
+    ).strip()
+    if not frontend_target:
+        return web.json_response(result, status=200 if result.get("success") else 400)
+    try:
+        frontend_target = _validate_frontend_callback_uri(frontend_target)
+    except ValueError:
+        return web.json_response(result, status=200 if result.get("success") else 400)
+    if result.get("success"):
+        raise web.HTTPFound(
+            _append_query_params(
+                frontend_target,
+                {
+                    "status": "success",
+                    "server_key": str(result["server_key"]),
+                    "agent_id": str(result["agent_id"]),
+                },
+            )
+        )
+    raise web.HTTPFound(
+        _append_query_params(
+            frontend_target,
+            {
+                "status": "error",
+                "error": str(result.get("error", "token_exchange_failed")),
+            },
+        )
+    )
+
+
+async def refresh_oauth_token_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    from koda.services.mcp_oauth import refresh_oauth_token
+
+    result = await refresh_oauth_token(agent_id, server_key)
+    return web.json_response(result)
+
+
+async def revoke_oauth_token_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    from koda.services.mcp_oauth import revoke_oauth_token
+
+    result = await revoke_oauth_token(agent_id, server_key)
+    return web.json_response(result)
+
+
+async def get_oauth_status_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response(_manager().get_oauth_token_status(agent_id, server_key))
+
+
 def register_legacy_bot_aliases(app: web.Application) -> None:
     """Keep legacy /bots surfaces working while /agents remains canonical."""
 
@@ -1162,6 +1919,14 @@ def register_legacy_bot_aliases(app: web.Application) -> None:
         ("put", "/api/control-plane/bots/{agent_id}/model-policy", put_model_policy),
         ("get", "/api/control-plane/bots/{agent_id}/autonomy-policy", get_autonomy_policy),
         ("put", "/api/control-plane/bots/{agent_id}/autonomy-policy", put_autonomy_policy),
+        ("get", "/api/control-plane/bots/{agent_id}/execution-policy", get_execution_policy),
+        ("put", "/api/control-plane/bots/{agent_id}/execution-policy", put_execution_policy),
+        ("get", "/api/control-plane/bots/{agent_id}/policy-catalog", get_execution_policy_catalog),
+        (
+            "post",
+            "/api/control-plane/bots/{agent_id}/execution-policy/evaluate",
+            evaluate_execution_policy,
+        ),
         ("get", "/api/control-plane/bots/{agent_id}/knowledge-candidates", list_knowledge_candidates),
         (
             "post",
@@ -1212,19 +1977,37 @@ def register_legacy_bot_aliases(app: web.Application) -> None:
 
 
 def setup_control_plane_routes(app: web.Application) -> None:
+    # OAuth relay for CLI-based provider auth inside Docker
+    app.router.add_get("/api/control-plane/oauth-relay/{session_id}", oauth_relay_handler)
+
     app.router.add_get("/", setup_landing)
     app.router.add_get("/setup", setup_page)
     app.router.add_get("/openapi/control-plane.json", control_plane_openapi)
     app.router.add_get("/api/control-plane/onboarding/status", onboarding_status)
     app.router.add_post("/api/control-plane/onboarding/bootstrap", onboarding_bootstrap)
+    app.router.add_get("/api/control-plane/auth/status", auth_status)
+    app.router.add_post("/api/control-plane/auth/bootstrap/exchange", auth_bootstrap_exchange)
+    app.router.add_post("/api/control-plane/auth/bootstrap/codes", auth_issue_bootstrap_code)
+    app.router.add_post("/api/control-plane/auth/register-owner", auth_register_owner)
+    app.router.add_post("/api/control-plane/auth/login", auth_login)
+    app.router.add_post("/api/control-plane/auth/logout", auth_logout)
+    app.router.add_post("/api/control-plane/auth/legacy/exchange", auth_legacy_exchange)
+    app.router.add_get("/api/control-plane/auth/tokens", auth_list_tokens)
+    app.router.add_post("/api/control-plane/auth/tokens", auth_create_token)
+    app.router.add_delete("/api/control-plane/auth/tokens/{token_id}", auth_delete_token)
+    app.router.add_get("/api/control-plane/auth/sessions", auth_list_sessions)
+    app.router.add_delete("/api/control-plane/auth/sessions/{session_id}", auth_delete_session)
     app.router.add_get("/api/control-plane/core/providers", get_core_providers)
     app.router.add_get("/api/control-plane/core/tools", get_core_tools)
+    app.router.add_post("/api/control-plane/integrations/{integration_id}/system", set_integration_system_enabled)
+    app.router.add_get("/api/control-plane/integrations/{integration_id}/health", get_integration_health)
     app.router.add_get("/api/control-plane/core/policies", get_core_policies)
     app.router.add_get("/api/control-plane/core/capabilities", get_core_capabilities)
     app.router.add_get("/api/control-plane/dashboard/agents/summary", list_dashboard_agent_summaries_route)
     app.router.add_get("/api/control-plane/dashboard/agents/{agent_id}/summary", get_dashboard_agent_summary_route)
     app.router.add_get("/api/control-plane/dashboard/agents/{agent_id}/stats", get_dashboard_agent_stats_route)
     app.router.add_get("/api/control-plane/dashboard/executions", list_dashboard_executions_route)
+    app.router.add_get("/api/control-plane/dashboard/link-preview", get_dashboard_link_preview_route)
     app.router.add_get(
         "/api/control-plane/dashboard/agents/{agent_id}/executions", list_dashboard_agent_executions_route
     )
@@ -1280,6 +2063,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_post("/api/control-plane/workspaces/{workspace_id}/squads", create_squad)
     app.router.add_patch("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}", patch_squad)
     app.router.add_delete("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}", delete_squad)
+    app.router.add_get("/api/control-plane/workspaces/{workspace_id}/spec", get_workspace_spec)
+    app.router.add_put("/api/control-plane/workspaces/{workspace_id}/spec", put_workspace_spec)
+    app.router.add_get("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/spec", get_squad_spec)
+    app.router.add_put("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/spec", put_squad_spec)
     app.router.add_post("/api/control-plane/agents/{agent_id}/clone", clone_agent)
     app.router.add_post("/api/control-plane/agents/{agent_id}/publish", publish_agent)
     app.router.add_post("/api/control-plane/agents/{agent_id}/activate", activate_agent)
@@ -1296,6 +2083,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/agents/{agent_id}/model-policy", put_model_policy)
     app.router.add_get("/api/control-plane/agents/{agent_id}/autonomy-policy", get_autonomy_policy)
     app.router.add_put("/api/control-plane/agents/{agent_id}/autonomy-policy", put_autonomy_policy)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/execution-policy", get_execution_policy)
+    app.router.add_put("/api/control-plane/agents/{agent_id}/execution-policy", put_execution_policy)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/policy-catalog", get_execution_policy_catalog)
+    app.router.add_post("/api/control-plane/agents/{agent_id}/execution-policy/evaluate", evaluate_execution_policy)
     app.router.add_get("/api/control-plane/agents/{agent_id}/knowledge-candidates", list_knowledge_candidates)
     app.router.add_post(
         "/api/control-plane/agents/{agent_id}/knowledge-candidates/{candidate_id}/approve",
@@ -1339,6 +2130,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/providers/{provider_id}/connection/login/{session_id}",
         get_provider_login_session,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/{provider_id}/connection/login/{session_id}/code",
+        submit_provider_login_code,
     )
     app.router.add_post(
         "/api/control-plane/providers/{provider_id}/connection/verify",
@@ -1389,5 +2184,124 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get("/api/control-plane/agents/{agent_id}/secrets/{secret_key}", get_secret)
     app.router.add_put("/api/control-plane/agents/{agent_id}/secrets/{secret_key}", put_secret)
     app.router.add_delete("/api/control-plane/agents/{agent_id}/secrets/{secret_key}", delete_secret)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/telegram/bot-info", get_telegram_bot_info)
+
+    # --- Unified Agent Connections ---
+    app.router.add_get("/api/control-plane/connections/catalog", list_connection_catalog)
+    app.router.add_get("/api/control-plane/connections/defaults", list_connection_defaults_route)
+    app.router.add_get(
+        "/api/control-plane/connections/defaults/{connection_key}",
+        get_connection_default_route,
+    )
+    app.router.add_put(
+        "/api/control-plane/connections/defaults/{connection_key}",
+        put_connection_default_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/connections/defaults/{connection_key}",
+        delete_connection_default_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/connections/defaults/{connection_key}/verify",
+        verify_connection_default_route,
+    )
+    app.router.add_get("/api/control-plane/agents/{agent_id}/connections", list_agent_connections_route)
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}",
+        get_agent_connection_route,
+    )
+    app.router.add_put(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}",
+        put_agent_connection_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}",
+        delete_agent_connection_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/verify",
+        verify_agent_connection_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/tools",
+        get_agent_connection_tools_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/discover-tools",
+        discover_agent_connection_tools_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/import-default",
+        import_agent_connection_default_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/policies",
+        list_agent_connection_tool_policies_route,
+    )
+    app.router.add_put(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/policies/{tool_name}",
+        put_agent_connection_tool_policy_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/policies/{tool_name}",
+        delete_agent_connection_tool_policy_route,
+    )
+
+    # --- MCP Server Catalog ---
+    app.router.add_get("/api/control-plane/mcp/catalog", list_mcp_catalog)
+    app.router.add_get("/api/control-plane/mcp/catalog/{server_key}", get_mcp_catalog_entry)
+    app.router.add_put("/api/control-plane/mcp/catalog/{server_key}", put_mcp_catalog_entry)
+    app.router.add_delete("/api/control-plane/mcp/catalog/{server_key}", delete_mcp_catalog_entry)
+
+    # --- MCP Agent Connections ---
+    app.router.add_get("/api/control-plane/agents/{agent_id}/mcp/connections", list_mcp_connections)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}", get_mcp_connection)
+    app.router.add_put("/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}", put_mcp_connection)
+    app.router.add_delete("/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}", delete_mcp_connection)
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/test", test_mcp_connection_route
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/discover", discover_mcp_tools_route
+    )
+
+    # --- MCP Tool Policies ---
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/policies", list_mcp_tool_policies
+    )
+    app.router.add_put(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/policies/{tool_name}", put_mcp_tool_policy
+    )
+    app.router.add_delete(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/policies/{tool_name}", delete_mcp_tool_policy
+    )
+
+    # --- MCP OAuth ---
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/oauth/start", start_oauth_flow_route
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/start", start_oauth_flow_route
+    )
+    app.router.add_get("/api/control-plane/mcp/oauth/callback", handle_oauth_callback_route)
+    app.router.add_get("/api/control-plane/connections/oauth/callback", handle_oauth_callback_route)
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/oauth/refresh", refresh_oauth_token_route
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/refresh", refresh_oauth_token_route
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/oauth/revoke", revoke_oauth_token_route
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/revoke", revoke_oauth_token_route
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/oauth/status", get_oauth_status_route
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/status", get_oauth_status_route
+    )
 
     register_legacy_bot_aliases(app)

@@ -1090,9 +1090,13 @@ def test_object_store_health_requires_s3_probe_when_bucket_is_enabled(tmp_path: 
 
 def test_object_store_health_is_not_ready_without_any_sink_in_primary(tmp_path: Path):
     clear_shared_postgres_backends()
-    store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
+    with (
+        patch("koda.knowledge.v2.common.KNOWLEDGE_V2_S3_BUCKET", ""),
+        patch("koda.knowledge.v2.common.KNOWLEDGE_V2_S3_ENDPOINT_URL", ""),
+    ):
+        store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
 
-    health = store.object_store_health()
+        health = store.object_store_health()
 
     assert health["enabled"] is False
     assert health["mode"] == "disabled"

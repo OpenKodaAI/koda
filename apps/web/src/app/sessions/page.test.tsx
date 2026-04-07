@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SessionsPage from "@/app/sessions/page";
 import { BotCatalogProvider } from "@/components/providers/bot-catalog-provider";
@@ -96,8 +97,69 @@ const sessionsByBot: Record<string, SessionSummary[]> = {
       latest_response_preview: "Here is the beta summary.",
       latest_message_preview: "Here is the beta summary.",
     },
+    {
+      bot_id: "ATLAS",
+      session_id: "session-gamma",
+      name: null,
+      user_id: 101,
+      created_at: "2026-03-28T08:40:00.000Z",
+      last_used: "2026-03-28T08:42:00.000Z",
+      last_activity_at: "2026-03-28T08:42:00.000Z",
+      query_count: 0,
+      execution_count: 3,
+      total_cost_usd: 0.09,
+      running_count: 0,
+      failed_count: 0,
+      latest_status: "completed",
+      latest_query_preview: "Bom dia.",
+      latest_response_preview: null,
+      latest_message_preview: "Bom dia.",
+    },
+    {
+      bot_id: "ATLAS",
+      session_id: "session-fragment",
+      name: null,
+      user_id: 101,
+      created_at: "2026-03-28T08:20:00.000Z",
+      last_used: "2026-03-28T08:21:00.000Z",
+      last_activity_at: "2026-03-28T08:21:00.000Z",
+      query_count: 0,
+      execution_count: 1,
+      total_cost_usd: 0.01,
+      running_count: 0,
+      failed_count: 0,
+      latest_status: "completed",
+      latest_query_preview: "Transient fragment",
+      latest_response_preview: null,
+      latest_message_preview: "Transient fragment",
+    },
+  ],
+  NOVA: [
+    {
+      bot_id: "NOVA",
+      session_id: "session-nova",
+      name: "Nova review",
+      user_id: 101,
+      created_at: "2026-03-28T08:00:00.000Z",
+      last_used: "2026-03-28T08:15:00.000Z",
+      last_activity_at: "2026-03-28T08:15:00.000Z",
+      query_count: 2,
+      execution_count: 1,
+      total_cost_usd: 0.22,
+      running_count: 0,
+      failed_count: 0,
+      latest_status: "completed",
+      latest_query_preview: "Need Nova help",
+      latest_response_preview: "Nova already reviewed the notes.",
+      latest_message_preview: "Nova already reviewed the notes.",
+    },
   ],
 };
+
+const allSessions: SessionSummary[] = [
+  ...sessionsByBot.ATLAS,
+  ...sessionsByBot.NOVA,
+];
 
 const sessionDetails: Record<string, SessionDetail> = {
   "session-alpha": {
@@ -133,6 +195,12 @@ const sessionDetails: Record<string, SessionDetail> = {
       tools: 0,
       cost_usd: 0.42,
     },
+    page: {
+      limit: 2,
+      returned: 1,
+      next_cursor: null,
+      has_more: false,
+    },
   },
   "session-beta": {
     summary: sessionsByBot.ATLAS[1],
@@ -167,6 +235,41 @@ const sessionDetails: Record<string, SessionDetail> = {
       tools: 0,
       cost_usd: 0.16,
     },
+    page: {
+      limit: 2,
+      returned: 1,
+      next_cursor: null,
+      has_more: false,
+    },
+  },
+  "session-gamma": {
+    summary: sessionsByBot.ATLAS[2],
+    messages: [
+      {
+        id: "gamma-1",
+        role: "user",
+        text: "Bom dia.",
+        timestamp: "2026-03-28T08:42:00.000Z",
+        model: null,
+        cost_usd: null,
+        query_id: -7,
+        session_id: "session-gamma",
+        error: false,
+      },
+    ],
+    orphan_executions: [],
+    totals: {
+      messages: 1,
+      executions: 1,
+      tools: 0,
+      cost_usd: 0.09,
+    },
+    page: {
+      limit: 1,
+      returned: 1,
+      next_cursor: null,
+      has_more: false,
+    },
   },
   "session-new": {
     summary: {
@@ -184,22 +287,36 @@ const sessionDetails: Record<string, SessionDetail> = {
       tools: 0,
       cost_usd: 0,
     },
+    page: {
+      limit: 0,
+      returned: 0,
+      next_cursor: null,
+      has_more: false,
+    },
   },
 };
 
 function renderSessionsPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
+
   return render(
-    <I18nProvider initialLanguage="en-US">
-      <AppTourProvider
-        pathname="/sessions"
-        mobileNavOpen={false}
-        onMobileNavOpenChange={() => undefined}
-      >
-        <BotCatalogProvider initialBots={botCatalog}>
-          <SessionsPage />
-        </BotCatalogProvider>
-      </AppTourProvider>
-    </I18nProvider>,
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider initialLanguage="en-US">
+        <AppTourProvider
+          pathname="/sessions"
+          mobileNavOpen={false}
+          onMobileNavOpenChange={() => undefined}
+        >
+          <BotCatalogProvider initialBots={botCatalog}>
+            <SessionsPage />
+          </BotCatalogProvider>
+        </AppTourProvider>
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -246,6 +363,20 @@ describe("SessionsPage", () => {
         });
       }
 
+      if (url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-gamma")) {
+        return new Response(JSON.stringify(sessionDetails["session-gamma"]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/api/control-plane/dashboard/agents/ATLAS/executions")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       if (url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions")) {
         return new Response(JSON.stringify(sessionsByBot.ATLAS), {
           status: 200,
@@ -254,7 +385,7 @@ describe("SessionsPage", () => {
       }
 
       if (url.includes("/api/control-plane/dashboard/sessions")) {
-        return new Response(JSON.stringify(sessionsByBot.ATLAS), {
+        return new Response(JSON.stringify(allSessions), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -274,7 +405,7 @@ describe("SessionsPage", () => {
 
     expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Beta sync/i }));
+    await user.click(screen.getByRole("button", { name: /Here is the beta summary\./i }));
     expect((await screen.findAllByText("Here is the beta summary.")).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /New chat/i }));
@@ -282,7 +413,7 @@ describe("SessionsPage", () => {
     await user.type(composer, "Hello from web");
     await user.click(screen.getByRole("button", { name: /Send/i }));
 
-    expect(await screen.findByText("Hello from web")).toBeInTheDocument();
+    expect((await screen.findAllByText("Hello from web")).length).toBeGreaterThan(0);
 
     await waitFor(() => {
       const postCall = vi.mocked(global.fetch).mock.calls.find(([url, init]) => {
@@ -300,17 +431,53 @@ describe("SessionsPage", () => {
     });
   }, 10_000);
 
-  it("keeps the composer disabled when browsing with all bots selected", async () => {
+  it("keeps the last session bot preselected when starting a new chat from all bots", async () => {
     currentQueryString = "";
     currentSearchParams = new URLSearchParams(currentQueryString);
+    const user = userEvent.setup();
     renderSessionsPage();
 
     expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Select a specific bot here to start a chat.")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Select a bot to chat" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /New chat/i }));
+
+    expect(screen.getByPlaceholderText(/Write your message/i)).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Select bot" })).toHaveTextContent("ATLAS");
   });
 
-  it("allows selecting a bot from the composer switcher when browsing all bots", async () => {
+  it("moves the selected session bot context to the thread header and hides the composer switcher", async () => {
+    renderSessionsPage();
+
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select bot" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Conversation bot")).toHaveTextContent("ATLAS");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Conversation bot")).toHaveTextContent("claude-opus-4-6");
+    });
+  });
+
+  it("loads execution-backed transcript sessions instead of showing the new-conversation empty state", async () => {
+    const user = userEvent.setup();
+    renderSessionsPage();
+
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Bom dia\./i }));
+
+    await waitFor(async () => {
+      expect((await screen.findAllByText("Bom dia.")).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Start a new conversation")).not.toBeInTheDocument();
+  });
+
+  it("hides low-signal execution fragments from the default rail", async () => {
+    renderSessionsPage();
+
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Transient fragment/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("allows selecting a bot from the composer switcher without filtering the session rail", async () => {
     currentQueryString = "";
     currentSearchParams = new URLSearchParams(currentQueryString);
     const user = userEvent.setup();
@@ -318,14 +485,19 @@ describe("SessionsPage", () => {
     renderSessionsPage();
 
     expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /New chat/i }));
 
-    await user.click(screen.getByRole("button", { name: "Select a bot to chat" }));
+    await user.click(screen.getByRole("button", { name: "Select bot" }));
 
     const menu = await screen.findByRole("dialog", { name: "Select bot" });
-    await user.click(within(menu).getByRole("button", { name: /ATLAS/i }));
+    await user.click(within(menu).getByRole("button", { name: /Nova/i }));
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/Write your message/i)).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Select bot" })).toHaveTextContent("Nova");
     });
+
+    expect(screen.getByPlaceholderText(/Write your message/i)).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /Alpha conversation/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Transient fragment/i })).not.toBeInTheDocument();
   });
 });

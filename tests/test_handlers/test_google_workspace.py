@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from koda.agent_contract import canonicalize_gws_command_args
 from koda.handlers.google_workspace import (
     _format_gws_output,
     _gws_env,
@@ -20,7 +21,10 @@ class TestGwsEnv:
     def test_with_credentials(self):
         with patch("koda.handlers.google_workspace.GWS_CREDENTIALS_FILE", "/path/to/creds.json"):
             result = _gws_env()
-        assert result == {"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json"}
+        assert result == {
+            "GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",
+            "GWS_CREDENTIALS_FILE": "/path/to/creds.json",
+        }
 
     def test_without_credentials(self):
         with patch("koda.handlers.google_workspace.GWS_CREDENTIALS_FILE", None):
@@ -47,6 +51,12 @@ class TestFormatGwsOutput:
         result = _format_gws_output(raw)
         assert "truncated" in result
         assert len(result) < 4000
+
+
+class TestCanonicalGwsArgs:
+    def test_shortcut_args_are_canonicalized(self):
+        assert canonicalize_gws_command_args("gmail", "users.messages.list") == "gmail users.messages.list"
+        assert canonicalize_gws_command_args("calendar", "calendar events.list") == "calendar events.list"
 
 
 class TestGwsHandler:
@@ -140,7 +150,10 @@ class TestGwsHandler:
             mock_run.return_value = "Exit 0:\n{}"
             await cmd_gws(mock_update, mock_context)
             call_kwargs = mock_run.call_args.kwargs
-            assert call_kwargs["env"] == {"GOOGLE_APPLICATION_CREDENTIALS": "/creds.json"}
+            assert call_kwargs["env"] == {
+                "GOOGLE_APPLICATION_CREDENTIALS": "/creds.json",
+                "GWS_CREDENTIALS_FILE": "/creds.json",
+            }
 
     @pytest.mark.asyncio
     async def test_gws_passes_timeout(self, mock_update, mock_context):

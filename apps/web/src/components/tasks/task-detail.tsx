@@ -37,8 +37,9 @@ function copyText(value: string | null | undefined) {
 
 export function TaskDetail({ task, onClose }: TaskDetailProps) {
   const { t, tl } = useAppI18n();
-  const presence = useAnimatedPresence(Boolean(task), { task }, { duration: 300 });
+  const presence = useAnimatedPresence(Boolean(task), { task }, { duration: 180 });
   const renderedTask = presence.renderedValue.task;
+  const botColor = renderedTask?.botId ? getBotColor(renderedTask.botId) : null;
 
   useBodyScrollLock(presence.shouldRender);
   useEscapeToClose(presence.shouldRender, onClose);
@@ -51,17 +52,17 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
     <>
       <div
         className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "app-overlay-backdrop",
           presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
       />
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full max-w-[720px] will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "fixed inset-y-0 right-0 z-[70] w-full max-w-[720px] transition-opacity duration-150 ease-out",
           presence.isVisible
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         role="dialog"
         aria-modal="true"
@@ -76,17 +77,7 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
           <X className="h-4 w-4" />
         </button>
 
-        <div
-          className="app-drawer-panel h-full overflow-y-auto p-5 lg:p-6"
-          style={
-            renderedTask?.botId
-              ? {
-                  borderTop: `1px solid ${getBotColor(renderedTask.botId)}28`,
-                  boxShadow: `-24px 0 80px rgba(0,0,0,0.34), inset 0 1px 0 ${getBotColor(renderedTask.botId)}10`,
-                }
-              : undefined
-          }
-        >
+        <div className="app-drawer-panel h-full overflow-y-auto p-5 lg:p-6">
           <div className="flex flex-col gap-5">
             <div className="flex items-start gap-4 pr-14 sm:pr-16">
               <div className="space-y-3">
@@ -97,12 +88,16 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                     <span
                       className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em]"
                       style={{
-                        backgroundColor: `${getBotColor(renderedTask.botId)}12`,
-                        color: getBotColor(renderedTask.botId),
-                        borderColor: `${getBotColor(renderedTask.botId)}22`,
+                        backgroundColor: botColor
+                          ? `color-mix(in srgb, ${botColor} 18%, var(--surface-panel-soft))`
+                          : "var(--surface-panel-soft)",
+                        color: botColor ?? "var(--text-secondary)",
+                        borderColor: botColor
+                          ? `color-mix(in srgb, ${botColor} 36%, var(--border-subtle))`
+                          : "var(--border-subtle)",
                       }}
                     >
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: getBotColor(renderedTask.botId) }} />
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: botColor ?? "var(--text-secondary)" }} />
                       {renderedTask.botId}
                     </span>
                   )}
@@ -115,12 +110,12 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                   </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                  <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                  <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
                     {renderedTask.model ?? t("tasks.table.noModel")}
                   </span>
                   <span>{formatRelativeTime(renderedTask.created_at)}</span>
                   {renderedTask.session_id && (
-                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-quaternary)]">
+                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-quaternary)]">
                       {t("tasks.table.session", { value: truncateText(renderedTask.session_id, 18) })}
                     </span>
                   )}

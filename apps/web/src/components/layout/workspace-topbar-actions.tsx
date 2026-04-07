@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowUpRight,
   ChevronRight,
@@ -394,18 +393,12 @@ export function WorkspaceTopbarActions() {
           onClick={() => setOpenPanel((current) => (current === "notifications" ? null : "notifications"))}
         />
 
-        {typeof document !== "undefined"
+        {typeof document !== "undefined" && openPanel
           ? createPortal(
-              <AnimatePresence initial={false}>
-                {openPanel ? (
-                  <motion.div
+                  <div
                     key={openPanel}
                     ref={panelRef}
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                    className={cn("workspace-topbar__panel", activePanelWidthClass)}
+                    className={cn("app-floating-panel workspace-topbar__panel app-overlay-fade-in", activePanelWidthClass)}
                     role="dialog"
                     aria-label={openPanel ?? undefined}
                     {...tourAnchor(`shell.topbar.actions.panel.${openPanel}`)}
@@ -415,11 +408,6 @@ export function WorkspaceTopbarActions() {
                       left: panelPosition?.left ?? 0,
                       width: panelPosition?.width,
                       maxHeight: panelPosition?.maxHeight,
-                      background:
-                        "linear-gradient(180deg, rgba(24, 24, 28, 0.16), rgba(10, 10, 12, 0.24)), rgba(8, 8, 10, 0.08)",
-                      backdropFilter: "blur(52px) saturate(168%) brightness(1.08)",
-                      WebkitBackdropFilter:
-                        "blur(52px) saturate(168%) brightness(1.08)",
                       visibility: panelPosition ? "visible" : "hidden",
                     }}
                   >
@@ -610,9 +598,7 @@ export function WorkspaceTopbarActions() {
                   </div>
                 </div>
               ) : null}
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>,
+                  </div>,
               document.body,
             )
           : null}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from typing import Any, cast
@@ -10,11 +11,14 @@ from koda.internal_rpc.security_guard import get_security_guard_client
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
+    PROVIDER_AUTH_TOKEN_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
     PROVIDER_PROJECT_ENV_KEYS,
     PROVIDER_VERIFIED_ENV_KEYS,
     ProviderId,
 )
+
+_log = logging.getLogger(__name__)
 
 
 def validate_shell_command(command: str) -> str:
@@ -71,9 +75,53 @@ def _provider_allowed_keys(provider: str, source: Mapping[str, str]) -> frozense
         allowed.add(PROVIDER_API_KEY_ENV_KEYS[provider_id])
     if normalized == "claude":
         allowed.update({"CLAUDE_HOME", "CLAUDE_CONFIG_DIR"})
+    auth_token_key = PROVIDER_AUTH_TOKEN_ENV_KEYS.get(normalized)
+    if auth_token_key:
+        allowed.add(auth_token_key)
     if normalized == "codex":
         allowed.add("CODEX_HOME")
     return frozenset(allowed)
+
+
+_SAFE_TOOL_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "TZ",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+    }
+)
+_SAFE_LLM_ENV_KEYS = frozenset({*_SAFE_TOOL_ENV_KEYS, "HOME"})
+
+
+def _minimal_safe_env(
+    source: dict[str, str],
+    allowed_provider_keys: frozenset[str],
+    overrides: dict[str, str],
+    *,
+    safe_env_keys: frozenset[str],
+) -> dict[str, str]:
+    """Return a restrictive environment subset when the security RPC is unavailable."""
+    safe = {}
+    for key in safe_env_keys:
+        if key in source:
+            safe[key] = source[key]
+    for key in allowed_provider_keys:
+        if key in source:
+            safe[key] = source[key]
+    safe.update(overrides)
+    return safe
 
 
 def _sanitize_env(
@@ -81,14 +129,27 @@ def _sanitize_env(
     *,
     allowed_provider_keys: frozenset[str] = frozenset(),
     env_overrides: Mapping[str, str] | None = None,
+    safe_env_keys: frozenset[str],
 ) -> dict[str, str]:
-    source = {str(key): str(value) for key, value in dict(base_env or os.environ).items()}
+    source = {}
+    for key in safe_env_keys:
+        value = os.environ.get(key)
+        if value is not None:
+            source[key] = value
+    if base_env is not None:
+        source.update({str(key): str(value) for key, value in dict(base_env).items()})
     overrides = {str(key): str(value) for key, value in dict(env_overrides or {}).items()}
-    return get_security_guard_client().sanitize_environment(
-        base_env=source,
-        allowed_provider_keys=sorted(allowed_provider_keys),
-        env_overrides=overrides,
-    )
+    try:
+        return get_security_guard_client().sanitize_environment(
+            base_env=source,
+            allowed_provider_keys=sorted(allowed_provider_keys),
+            env_overrides=overrides,
+        )
+    except Exception:
+        # Fail-safe: return minimal environment on RPC failure
+        # Never fall through to unsanitized os.environ
+        _log.warning("security_guard_rpc_unavailable: falling back to minimal safe environment")
+        return _minimal_safe_env(source, allowed_provider_keys, overrides, safe_env_keys=safe_env_keys)
 
 
 def build_llm_subprocess_env(
@@ -97,11 +158,27 @@ def build_llm_subprocess_env(
     provider: str,
 ) -> dict[str, str]:
     """Return a minimal, provider-scoped environment for one LLM subprocess."""
-    source = {str(key): str(value) for key, value in dict(base_env or os.environ).items()}
-    return _sanitize_env(
+    source = {}
+    for key in _SAFE_LLM_ENV_KEYS:
+        value = os.environ.get(key)
+        if value is not None:
+            source[key] = value
+    provider_keys_from_env = _provider_allowed_keys(provider, os.environ)
+    for key in provider_keys_from_env:
+        value = os.environ.get(key)
+        if value is not None:
+            source[key] = value
+    if base_env is not None:
+        source.update({str(key): str(value) for key, value in dict(base_env).items()})
+    env = _sanitize_env(
         source,
         allowed_provider_keys=_provider_allowed_keys(provider, source),
+        safe_env_keys=_SAFE_LLM_ENV_KEYS,
     )
+    home = source.get("HOME")
+    if home and "HOME" not in env:
+        env["HOME"] = home
+    return env
 
 
 def build_tool_subprocess_env(
@@ -110,4 +187,7 @@ def build_tool_subprocess_env(
     env_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Return a tool-safe environment with only explicit overrides added back."""
-    return _sanitize_env(base_env, env_overrides=env_overrides)
+    env = _sanitize_env(base_env, env_overrides=env_overrides, safe_env_keys=_SAFE_TOOL_ENV_KEYS)
+    if not dict(env_overrides or {}).get("HOME"):
+        env.pop("HOME", None)
+    return env

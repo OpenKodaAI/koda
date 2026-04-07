@@ -66,7 +66,7 @@ def build_execution_memories(
     source_episode_id: int | None = None,
 ) -> list[Memory]:
     """Create procedural memories from an execution outcome."""
-    from koda.knowledge.policy import classify_task_kind
+    from koda.knowledge.task_policy_defaults import classify_task_kind
 
     task_kind = task_kind or classify_task_kind(query)
     validation_summary = infer_validation_summary(tool_uses)

@@ -42,35 +42,26 @@ export function PolicyCard({
         aria-expanded={isOpen}
       >
         {Icon && (
-          <span
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.8rem]"
-            style={{
-              backgroundColor: isOpen
-                ? "rgba(76, 127, 209, 0.08)"
-                : "var(--surface-tint)",
-              border: `1px solid ${isOpen ? "var(--tone-info-border)" : "var(--border-subtle)"}`,
-              transition: "all 300ms",
-            }}
-          >
-            <Icon
-              size={15}
-              style={{
-                color: isOpen
-                  ? "var(--tone-info-dot)"
-                  : "var(--text-tertiary)",
-                transition: "color 300ms",
-              }}
-            />
+          <span className="inline-flex shrink-0 items-center justify-center text-[var(--text-secondary)]">
+            <Icon size={16} />
           </span>
         )}
 
         <div className="flex flex-col flex-1 min-w-0">
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
-            {tl(title)}
-          </span>
-          <span className="text-base font-semibold leading-6 text-[var(--text-primary)]">
-            {tl(description || title)}
-          </span>
+          {description ? (
+            <>
+              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+                {tl(title)}
+              </span>
+              <span className="text-base font-semibold leading-6 text-[var(--text-primary)]">
+                {tl(description)}
+              </span>
+            </>
+          ) : (
+            <span className="text-sm font-semibold leading-6 text-[var(--text-primary)]">
+              {tl(title)}
+            </span>
+          )}
         </div>
 
         <motion.span

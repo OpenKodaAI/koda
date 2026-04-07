@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "product": "koda",
+  "version": "1.0.0",
+  "published_at": "2026-04-05T00:00:00Z",
+  "distribution": {
+    "npm_package": "@openkodaai/koda",
+    "npm_bin": "koda",
+    "github_release_tag": "v1.0.0",
+    "release_bundle_archive": "koda-1.0.0.tar.gz"
+  },
+  "bundle": {
+    "compose_file": "bundle/docker-compose.release.yml",
+    "env_template": "bundle/.env.bootstrap",
+    "migration_notes": "bundle/MIGRATION.md",
+    "sbom": "bundle/sbom.spdx.json",
+    "proxy_templates": [
+      "bundle/proxy/nginx.conf"
+    ],
+    "checksums_file": "CHECKSUMS.txt"
+  },
+  "images": {
+    "app": "ghcr.io/openkodaai/koda-app:1.0.0",
+    "web": "ghcr.io/openkodaai/koda-web:1.0.0",
+    "memory": "ghcr.io/openkodaai/koda-memory:1.0.0",
+    "security": "ghcr.io/openkodaai/koda-security:1.0.0",
+    "postgres": "pgvector/pgvector:pg16",
+    "seaweedfs": "chrislusf/seaweedfs:4.05",
+    "awscli": "amazon/aws-cli:2.27.41"
+  }
+}

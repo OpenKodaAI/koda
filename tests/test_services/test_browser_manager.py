@@ -81,12 +81,47 @@ async def test_navigate_runtime_scope_allows_localhost_url(bm_with_page):
     page.url = "http://127.0.0.1:3004"
     bm._runtime_live_scopes[111] = {"runtime_dir": "/tmp/runtime-browser"}
 
-    result = await bm.navigate(111, "http://127.0.0.1:3004")
+    with patch("koda.config.BROWSER_ALLOW_PRIVATE_NETWORK", True):
+        result = await bm.navigate(111, "http://127.0.0.1:3004")
 
     assert "Navigated to: Local App" in result
     snapshot = bm.get_session_snapshot(111)
     assert snapshot is not None
     assert snapshot["url"] == "http://127.0.0.1:3004"
+
+
+@pytest.mark.asyncio
+async def test_navigate_runtime_scope_blocks_private_url_when_flag_disabled(bm_with_page):
+    """Private network access is blocked for runtime live scopes when BROWSER_ALLOW_PRIVATE_NETWORK is False."""
+    bm, page, _ = bm_with_page
+    bm._runtime_live_scopes[111] = {"runtime_dir": "/tmp/runtime-browser"}
+
+    with patch("koda.config.BROWSER_ALLOW_PRIVATE_NETWORK", False):
+        result = await bm.navigate(111, "http://127.0.0.1:3004")
+
+    assert result == "Error: Blocked: URL resolves to a private/reserved IP address."
+
+
+@pytest.mark.asyncio
+async def test_navigate_explicit_allow_private_false_blocks_private_url(bm_with_page):
+    bm, page, _ = bm_with_page
+    bm._runtime_live_scopes[111] = {"runtime_dir": "/tmp/runtime-browser"}
+
+    with patch("koda.config.BROWSER_ALLOW_PRIVATE_NETWORK", True):
+        result = await bm.navigate(111, "http://127.0.0.1:3004", allow_private=False)
+
+    assert result == "Error: Blocked: URL resolves to a private/reserved IP address."
+
+
+@pytest.mark.asyncio
+async def test_navigate_explicit_allow_private_true_respects_kill_switch(bm_with_page):
+    bm, page, _ = bm_with_page
+    bm._runtime_live_scopes[111] = {"runtime_dir": "/tmp/runtime-browser"}
+
+    with patch("koda.config.BROWSER_ALLOW_PRIVATE_NETWORK", False):
+        result = await bm.navigate(111, "http://127.0.0.1:3004", allow_private=True)
+
+    assert result == "Error: Blocked: URL resolves to a private/reserved IP address."
 
 
 @pytest.mark.asyncio
@@ -218,6 +253,10 @@ async def test_screenshot_to_file_updates_session_snapshot_metadata(bm_with_page
     assert snapshot is not None
     assert snapshot["last_screenshot_path"] == result
     assert snapshot["url"] == "https://example.com"
+    assert snapshot["origin"] == "https://example.com"
+    assert snapshot["hostname"] == "example.com"
+    assert snapshot["domain"] == "example.com"
+    assert snapshot["scheme"] == "https"
     assert snapshot["last_title"] == "Example"
 
 
@@ -237,8 +276,24 @@ def test_get_session_snapshot_falls_back_to_last_url():
     snapshot = bm.get_session_snapshot(111)
     assert snapshot is not None
     assert snapshot["url"] == "http://localhost:3004"
+    assert snapshot["origin"] == "http://localhost:3004"
+    assert snapshot["hostname"] == "localhost"
+    assert snapshot["domain"] == "localhost"
+    assert snapshot["scheme"] == "http"
     assert snapshot["last_title"] == "Local App"
     assert snapshot["last_screenshot_path"] == "/tmp/browser.png"
+
+
+@pytest.mark.asyncio
+async def test_set_cookie_allows_private_domain_when_explicit_and_runtime_live(bm_with_page):
+    bm, page, context = bm_with_page
+    bm._runtime_live_scopes[111] = {"runtime_dir": "/tmp/runtime-browser"}
+
+    with patch("koda.config.BROWSER_ALLOW_PRIVATE_NETWORK", True):
+        result = await bm.set_cookie(111, "session", "abc123", domain="localhost", allow_private=True)
+
+    assert result == "Cookie 'session' set."
+    context.add_cookies.assert_awaited_once()
 
 
 @pytest.mark.asyncio

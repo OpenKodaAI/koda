@@ -48,10 +48,10 @@ export function ExecutionDetailPanel({
     <div className="hidden h-[calc(100vh-4.5rem)] overflow-hidden xl:block">
       <aside
         className={cn(
-          "glass-card sticky top-6 relative flex h-[calc(100vh-4.5rem)] w-[488px] flex-col overflow-hidden will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "glass-card sticky top-6 relative flex h-[calc(100vh-4.5rem)] w-[488px] flex-col overflow-hidden transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
           isOpen
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
       >
         <button

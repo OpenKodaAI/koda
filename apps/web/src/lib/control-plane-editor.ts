@@ -159,10 +159,13 @@ export function buildAgentSpecPayload(input: {
   memoryPolicyJson: string;
   knowledgePolicyJson: string;
   autonomyPolicyJson: string;
+  executionPolicyJson?: string | null;
   resourceAccessPolicyJson: string;
   voicePolicyJson: string;
   imageAnalysisPolicyJson: string;
   memoryExtractionSchemaJson: string;
+  skillPolicyJson?: string;
+  customSkillsJson?: string;
 }) {
   return {
     mission_profile: parseJsonObject(
@@ -196,6 +199,14 @@ export function buildAgentSpecPayload(input: {
       "Autonomy policy JSON",
       input.autonomyPolicyJson,
     ),
+    ...(input.executionPolicyJson != null
+      ? {
+          execution_policy: parseJsonObject(
+            "Execution policy JSON",
+            input.executionPolicyJson ?? "",
+          ),
+        }
+      : {}),
     resource_access_policy: parseJsonObject(
       "Resource access policy JSON",
       input.resourceAccessPolicyJson,
@@ -208,6 +219,14 @@ export function buildAgentSpecPayload(input: {
     memory_extraction_schema: parseJsonObject(
       "Memory extraction schema JSON",
       input.memoryExtractionSchemaJson,
+    ),
+    skill_policy: parseJsonObject(
+      "Skill policy JSON",
+      input.skillPolicyJson ?? "{}",
+    ),
+    custom_skills: parseJsonArray(
+      "Custom skills JSON",
+      input.customSkillsJson ?? "[]",
     ),
   };
 }

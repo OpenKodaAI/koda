@@ -22,8 +22,15 @@ export function parseSchemaOrThrow<T>(
 ) {
   const result = schema.safeParse(input);
   if (!result.success) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const path = issue.path.join(".") || "_root";
+      if (!fieldErrors[path]) fieldErrors[path] = [];
+      fieldErrors[path].push(issue.message);
+    }
     throw new ValidationError(message, {
       cause: result.error,
+      fieldErrors,
     });
   }
 
@@ -45,15 +52,16 @@ export function jsonErrorResponse(
       ? toPublicErrorMessage(appError, fallbackMessage)
       : fallbackMessage;
 
-  return NextResponse.json(
-    {
-      error: publicMessage,
+  const body: Record<string, unknown> = { error: publicMessage };
+
+  if (appError instanceof ValidationError && appError.fieldErrors) {
+    body.fieldErrors = appError.fieldErrors;
+  }
+
+  return NextResponse.json(body, {
+    status: appError.status,
+    headers: {
+      "Cache-Control": "no-store",
     },
-    {
-      status: appError.status,
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    },
-  );
+  });
 }

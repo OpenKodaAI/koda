@@ -1,25 +1,34 @@
 "use client";
 
-import { MessageSquarePlus, Search, X } from "lucide-react";
+import { useMemo } from "react";
+import { LoaderCircle, MessageSquarePlus, Search, X } from "lucide-react";
 import { BotAgentGlyph } from "@/components/dashboard/bot-agent-glyph";
 import { tourAnchor } from "@/components/tour/tour-attrs";
 import { ErrorState } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
 import { getBotColor } from "@/lib/bot-constants";
 import type { SessionSummary } from "@/lib/types";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 
-function sessionStatusLabel(session: SessionSummary) {
-  if (session.running_count > 0) return "running";
-  if (session.failed_count > 0) return "failed";
-  return session.latest_status ?? "completed";
+const DEFAULT_RAIL_SESSION_LIMIT = 3;
+const DEFAULT_RAIL_FRAGMENT_EXECUTIONS = 3;
+
+function shouldDisplaySessionInRail(session: SessionSummary) {
+  if (session.query_count > 0) return true;
+  if (session.running_count > 0) return true;
+  if (session.failed_count > 0) return true;
+  if (session.execution_count >= DEFAULT_RAIL_FRAGMENT_EXECUTIONS) return true;
+  if (session.latest_response_preview?.trim()) return true;
+  if (session.name?.trim()) return true;
+  return false;
 }
 
 function ConversationRailSkeleton() {
   return (
-    <div className="space-y-2.5">
+    <div>
       {Array.from({ length: 8 }).map((_, index) => (
-        <div key={index} className="skeleton h-[78px] w-full rounded-[1rem]" />
+        <div key={index} className="skeleton mx-2 my-0.5 h-[60px] rounded-[0.8rem]" />
       ))}
     </div>
   );
@@ -28,61 +37,78 @@ function ConversationRailSkeleton() {
 function RailConversationRow({
   session,
   selected,
+  loading,
   onClick,
+  botLabel,
 }: {
   session: SessionSummary;
   selected: boolean;
+  loading: boolean;
   onClick: () => void;
+  botLabel: string;
 }) {
-  const status = sessionStatusLabel(session);
-  const { t } = useAppI18n();
+  const preview = truncateText(
+    session.latest_message_preview ||
+      session.latest_response_preview ||
+      session.latest_query_preview ||
+      (session.name && session.name !== botLabel ? session.name : null) ||
+      `Conversation ${session.session_id.slice(0, 8)}` ||
+      "",
+    72,
+  );
+  const title = session.name?.trim() || botLabel;
+  const metaLabel = session.name?.trim() ? botLabel : null;
 
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-busy={loading}
       className={cn(
-        "flex w-full items-start gap-3 rounded-[1rem] border px-3.5 py-3 text-left transition-[background-color,border-color] duration-200",
+        "flex min-h-[3.65rem] w-full items-center gap-3 rounded-[0.95rem] px-3 py-2 text-left transition-[background-color,transform,opacity] duration-180 ease-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[var(--border-strong)]",
         selected
-          ? "border-[rgba(126,132,255,0.18)] bg-[rgba(255,255,255,0.05)]"
-          : "border-transparent bg-transparent hover:border-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.03)]"
+          ? "bg-[var(--selection-bg)]"
+          : "hover:bg-[var(--surface-panel-soft)]",
+        loading && "opacity-90",
       )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[1rem] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.028)]">
-        <BotAgentGlyph
-          botId={session.bot_id}
-          color={getBotColor(session.bot_id)}
-          active={selected}
-          variant="list"
-          shape="swatch"
-          className="h-6 w-6"
-        />
-      </div>
+      <BotAgentGlyph
+        botId={session.bot_id}
+        color={getBotColor(session.bot_id)}
+        active={selected}
+        variant="list"
+        shape="swatch"
+        className="h-10 w-10 shrink-0 bot-swatch--animated"
+      />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-[14px] font-medium tracking-[-0.03em] text-[var(--text-primary)]">
-              {session.name || truncateText(session.session_id, 28)}
-            </p>
-            <p className="mt-1 truncate text-[12px] text-[var(--text-tertiary)]">
-              {session.latest_message_preview || t("sessions.rail.noMessages")}
-            </p>
-          </div>
-
-          <div className="shrink-0 text-right">
-            <p className="text-[11px] text-[var(--text-tertiary)]">
-              {session.last_activity_at ? formatRelativeTime(session.last_activity_at) : "—"}
+          <div className="min-w-0 truncate pr-2">
+            <p className="truncate text-[13px] font-medium tracking-[-0.02em] text-[var(--text-primary)]">
+              {title}
+              {metaLabel ? (
+                <span className="ml-1.5 text-[11px] font-normal tracking-normal text-[var(--text-quaternary)]">
+                  {`· ${metaLabel}`}
+                </span>
+              ) : null}
             </p>
           </div>
+          {loading ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-[10px] text-[var(--text-quaternary)]">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              Loading
+            </span>
+          ) : (
+            <span className="shrink-0 pt-0.5 text-[10px] text-[var(--text-quaternary)]">
+              {session.last_activity_at ? formatRelativeTime(session.last_activity_at) : ""}
+            </span>
+          )}
         </div>
-
-        <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-quaternary)]">
-          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--text-quaternary)]" />
-          <span>{status}</span>
-          <span>•</span>
-          <span>{session.query_count} msgs</span>
-        </div>
+        {preview && (
+          <p className="mt-0.5 truncate text-[12px] leading-5 text-[var(--text-secondary)]">
+            {preview}
+          </p>
+        )}
       </div>
     </button>
   );
@@ -94,6 +120,8 @@ interface SessionConversationRailProps {
   sessions: SessionSummary[];
   selectedSessionId: string | null;
   loading: boolean;
+  refreshing?: boolean;
+  loadingSessionId?: string | null;
   error?: string | null;
   unavailable?: boolean;
   onRefresh: () => void;
@@ -109,6 +137,8 @@ export function SessionConversationRail({
   sessions,
   selectedSessionId,
   loading,
+  refreshing = false,
+  loadingSessionId = null,
   error,
   unavailable = false,
   onRefresh,
@@ -118,16 +148,48 @@ export function SessionConversationRail({
   onClose,
 }: SessionConversationRailProps) {
   const { t } = useAppI18n();
+  const { bots } = useBotCatalog();
+  const botLabelMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const bot of bots) {
+      map[bot.id] = bot.label || bot.id;
+      map[bot.id.toLowerCase()] = bot.label || bot.id;
+    }
+    return map;
+  }, [bots]);
+  const displayedSessions = useMemo(() => {
+    if (search.trim()) {
+      return sessions;
+    }
+
+    const meaningful = sessions.filter(shouldDisplaySessionInRail);
+
+    if (selectedSessionId) {
+      const selected = sessions.find((session) => session.session_id === selectedSessionId);
+      const remainder = meaningful.filter(
+        (session) => session.session_id !== selectedSessionId,
+      );
+      if (selected && !shouldDisplaySessionInRail(selected)) {
+        return [selected, ...remainder.slice(0, DEFAULT_RAIL_SESSION_LIMIT - 1)];
+      }
+    }
+
+    if (meaningful.length > 0) {
+      return meaningful.slice(0, DEFAULT_RAIL_SESSION_LIMIT);
+    }
+
+    return sessions.slice(0, Math.min(DEFAULT_RAIL_SESSION_LIMIT, sessions.length));
+  }, [search, selectedSessionId, sessions]);
 
   return (
     <aside
       className={cn(
-        "flex h-full min-h-0 flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#0d0e12]",
+        "flex h-full min-h-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-canvas)]",
         className
       )}
     >
       <div
-        className="border-b border-[rgba(255,255,255,0.06)] px-4 py-4"
+        className="border-b border-[var(--border-subtle)] px-4 py-4"
         {...tourAnchor("sessions.rail-header")}
       >
         {onClose ? (
@@ -165,11 +227,18 @@ export function SessionConversationRail({
               <MessageSquarePlus className="h-4 w-4" />
             </button>
           </div>
+
+          {refreshing ? (
+            <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--text-tertiary)]">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              <span>{t("sessions.rail.refreshing", { defaultValue: "Refreshing conversations..." })}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {loading && sessions.length === 0 ? (
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
+        {loading && displayedSessions.length === 0 ? (
           <ConversationRailSkeleton />
         ) : error ? (
           <ErrorState title={t("sessions.rail.loadError")} description={error} onRetry={onRefresh} />
@@ -178,19 +247,25 @@ export function SessionConversationRail({
             <p className="empty-state-text">{t("sessions.rail.unavailable")}</p>
             <p className="empty-state-subtext">{t("sessions.rail.unavailableDescription")}</p>
           </div>
-        ) : sessions.length === 0 ? (
+        ) : displayedSessions.length === 0 ? (
           <div className="empty-state min-h-[18rem]">
             <p className="empty-state-text">{t("sessions.rail.noResults")}</p>
             <p className="empty-state-subtext">{t("sessions.rail.noResultsDescription")}</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {sessions.map((session) => (
+          <div>
+            {displayedSessions.map((session) => (
               <RailConversationRow
                 key={`${session.bot_id}:${session.session_id}`}
                 session={session}
                 selected={session.session_id === selectedSessionId}
+                loading={session.session_id === loadingSessionId}
                 onClick={() => onSelectSession(session)}
+                botLabel={
+                  botLabelMap[session.bot_id] ||
+                  botLabelMap[session.bot_id.toLowerCase()] ||
+                  session.bot_id
+                }
               />
             ))}
           </div>

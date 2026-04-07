@@ -48,7 +48,7 @@ export function StatusIndicator({
       className={cn(
         "inline-flex items-center gap-2 rounded-lg text-[10.5px] font-semibold tracking-[0.01em]",
         isPill
-          ? "min-h-[28px] border px-2.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_18px_rgba(0,0,0,0.1)]"
+          ? "min-h-[28px] border px-2.5 py-1"
           : "border-none bg-transparent px-0 py-0 text-[var(--text-secondary)]",
         className
       )}
@@ -62,9 +62,6 @@ export function StatusIndicator({
           width: 8,
           height: 8,
           backgroundColor: statusConf ? toneVars.dot : config.color,
-          boxShadow: statusConf
-            ? `0 0 0 3px color-mix(in srgb, ${toneVars.dot} 26%, transparent)`
-            : undefined,
         }}
       />
       {showLabel && <span>{label}</span>}

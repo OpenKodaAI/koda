@@ -79,11 +79,57 @@ export interface ExecutionToolTrace {
 export interface ExecutionArtifact {
   id: string;
   label: string;
-  kind: "text" | "json" | "code";
-  content: string | Record<string, unknown> | unknown[];
+  kind:
+    | "text"
+    | "json"
+    | "code"
+    | "image"
+    | "audio"
+    | "video"
+    | "pdf"
+    | "docx"
+    | "spreadsheet"
+    | "html"
+    | "yaml"
+    | "xml"
+    | "csv"
+    | "tsv"
+    | "url"
+    | "file";
+  content: string | Record<string, unknown> | unknown[] | null;
   description?: string;
   language?: string;
+  summary?: string | null;
   unavailable?: boolean;
+  url?: string | null;
+  path?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  source_type?: string | null;
+  status?: string | null;
+  text_content?: string | null;
+  metadata?: Record<string, unknown>;
+  visual_paths?: string[];
+  preview_image_url?: string | null;
+  preview_image_path?: string | null;
+  domain?: string | null;
+  site_name?: string | null;
+}
+
+export interface ExecutionArtifactLinkPreview {
+  url: string;
+  final_url: string;
+  domain: string | null;
+  status: number;
+  content_type: string | null;
+  content_length: number | null;
+  title: string | null;
+  description: string | null;
+  site_name: string | null;
+  image_url: string | null;
+  link_type: string | null;
+  duration: string | null;
+  has_transcript: boolean;
 }
 
 export interface ExecutionSummary {
@@ -173,14 +219,85 @@ export interface ExecutionDetail {
 
 export interface CronJob {
   id: number;
+  bot_id?: string | null;
   user_id: number | null;
   chat_id: number | null;
+  job_type?: string;
+  trigger_type?: string;
+  schedule_expr?: string;
   cron_expression: string;
+  timezone?: string | null;
+  payload?: Record<string, unknown>;
+  summary?: string;
   command: string;
   description: string;
   created_at: string | null;
+  updated_at?: string | null;
   enabled: number;
+  status?: string;
   work_dir: string | null;
+  provider_preference?: string | null;
+  model_preference?: string | null;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  config_version?: number;
+  verification_policy?: Record<string, unknown>;
+  notification_policy?: Record<string, unknown>;
+  dry_run_required?: boolean;
+}
+
+export interface ScheduleRun {
+  id: number;
+  scheduled_job_id: number;
+  scheduled_for: string | null;
+  trigger_reason: string | null;
+  status: string | null;
+  attempt: number;
+  max_attempts: number;
+  task_id: number | null;
+  dlq_id: number | null;
+  trace_id: string | null;
+  provider_effective: string | null;
+  model_effective: string | null;
+  verification_status: string | null;
+  notification_status: string | null;
+  summary_text: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  next_attempt_at: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  dispatch_token: string | null;
+  lease_recovery_count: number;
+  last_recovered_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ScheduleEvent {
+  id: number;
+  scheduled_job_id: number;
+  scheduled_run_id: number | null;
+  trace_id: string | null;
+  event_type: string;
+  actor_type: string;
+  actor_id: string | null;
+  source: string | null;
+  status_from: string | null;
+  status_to: string | null;
+  reason: string | null;
+  created_at: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface ScheduleDetail {
+  job: CronJob;
+  runs: ScheduleRun[];
+  events: ScheduleEvent[];
+  latest_task_runtime?: Record<string, unknown> | null;
 }
 
 export interface DLQEntry {
@@ -243,10 +360,18 @@ export interface SessionMessage {
   linked_execution?: ExecutionSummary | null;
 }
 
+export interface SessionHistoryPage {
+  limit: number;
+  returned: number;
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   messages: SessionMessage[];
   orphan_executions: ExecutionSummary[];
+  page?: SessionHistoryPage | null;
   totals: {
     messages: number;
     executions: number;

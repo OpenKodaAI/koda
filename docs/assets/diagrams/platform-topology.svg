@@ -19,7 +19,7 @@
   <text x="424" y="148" class="label">Control plane</text>
   <text x="424" y="184" class="body">Bootstrap, providers, secrets, agents, publication, policy</text>
   <rect x="424" y="208" width="132" height="34" rx="17" fill="#DFF4F1"/>
-  <text x="448" y="230" class="chip">/setup</text>
+  <text x="448" y="230" class="chip">/control-plane</text>
   <rect x="570" y="208" width="190" height="34" rx="17" fill="#DFF4F1"/>
   <text x="598" y="230" class="chip">/api/control-plane/*</text>
 

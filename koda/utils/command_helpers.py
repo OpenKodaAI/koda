@@ -224,6 +224,15 @@ def ensure_canonical_session_id(user_data: dict[str, Any]) -> str:
     return session_id
 
 
+def rotate_canonical_session_id(user_data: dict[str, Any]) -> tuple[str | None, str]:
+    """Rotate the canonical session id and clear provider session bindings."""
+    current_session_id = str(user_data.get("session_id") or "").strip() or None
+    new_session_id = f"session-{uuid.uuid4()}"
+    user_data["session_id"] = new_session_id
+    user_data["provider_sessions"] = {}
+    return current_session_id, new_session_id
+
+
 def init_user_data(user_data: dict[str, Any] | None, user_id: int | None = None) -> dict[str, Any]:
     """Ensure user_data has required keys.
 
@@ -311,9 +320,6 @@ def init_user_data(user_data: dict[str, Any] | None, user_id: int | None = None)
     user_data.setdefault("audio_response", False)
     user_data.setdefault("tts_voice", TTS_DEFAULT_VOICE)
     user_data.setdefault("tts_voice_language", ELEVENLABS_DEFAULT_LANGUAGE)
-    user_data.setdefault("_approve_all", False)
-    user_data.setdefault("postgres_env", None)
-
     # Restore persisted cost from the canonical state store on first load
     if needs_cost_load and user_id is not None:
         try:

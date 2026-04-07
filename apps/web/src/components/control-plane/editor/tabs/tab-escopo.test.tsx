@@ -8,6 +8,7 @@ import { TabEscopo } from "@/components/control-plane/editor/tabs/tab-escopo";
 import type {
   ControlPlaneBot,
   ControlPlaneCoreCapabilities,
+  ControlPlaneCoreIntegrations,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
   ControlPlaneCoreTools,
@@ -93,6 +94,10 @@ const core = {
   } satisfies ControlPlaneCoreProviders,
   policies: {} as ControlPlaneCorePolicies,
   capabilities: { providers: [] } satisfies ControlPlaneCoreCapabilities,
+  integrations: {
+    items: [],
+    governance: {},
+  } satisfies ControlPlaneCoreIntegrations,
 };
 
 const workspaces: ControlPlaneWorkspaceTree = {
@@ -206,12 +211,26 @@ describe("TabEscopo", () => {
     const user = userEvent.setup();
     renderTab(makeBot());
 
+    // Open the "Escopo de acesso do agente" PolicyCard to reveal compact grant toggles
     await user.click(screen.getByRole("button", { name: /escopo de acesso do agente/i }));
-    await user.click(screen.getByRole("button", { name: /variáveis locais do agente/i }));
-    await user.click(screen.getAllByRole("button", { name: /Conceder acesso/i })[0]);
-    await user.type(screen.getByPlaceholderText("TEAM_CONTEXT"), "TEAM_CONTEXT");
+
+    // Toggle the first shared variable grant via the compact switch
+    await waitFor(() => {
+      expect(screen.getAllByRole("switch").length).toBeGreaterThan(0);
+    });
+    const switches = screen.getAllByRole("switch");
+    // The compact toggles render switches for each shared variable and global secret option
+    // TEAM_NAME is the first shared variable option
+    await user.click(switches[0]);
+
+    // Open the unified "Variaveis e segredos" PolicyCard
+    await user.click(screen.getByRole("button", { name: /variaveis e segredos/i }));
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("API_KEY")).toBeInTheDocument();
+    });
+    await user.type(screen.getByPlaceholderText("API_KEY"), "TEAM_CONTEXT");
     await user.type(
-      screen.getByPlaceholderText(/Ex\.: (squad-platform|plataforma-esquadrão)/i),
+      screen.getByPlaceholderText(/Ex\..*squad-platform|plataforma-esquadr/i),
       "squad-platform",
     );
     await user.click(screen.getByRole("button", { name: "Adicionar" }));
@@ -226,14 +245,19 @@ describe("TabEscopo", () => {
     });
 
     const fetchMock = vi.mocked(globalThis.fetch);
-    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const persistCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        input === "/api/control-plane/agents/ATLAS/agent-spec" &&
+        String(init?.method || "GET").toUpperCase() === "PUT",
+    );
+    const payload = JSON.parse(String(persistCall?.[1]?.body));
     expect(payload.resource_access_policy.allowed_shared_env_keys).toEqual(["TEAM_NAME"]);
     expect(payload.resource_access_policy.local_env).toEqual({
       TEAM_CONTEXT: "squad-platform",
     });
   }, 10000);
 
-  it("updates a local secret through the dedicated bot secret endpoint", async () => {
+  it("updates a local secret through the unified variables and secrets section", async () => {
     const user = userEvent.setup();
     renderTab(
       makeBot({
@@ -247,21 +271,30 @@ describe("TabEscopo", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: /segredos locais do agente/i }));
-    expect(screen.getByText("ji-****")).toBeInTheDocument();
+    // Open the unified "Variaveis e segredos" section
+    await user.click(screen.getByRole("button", { name: /variaveis e segredos/i }));
+    await waitFor(() => {
+      expect(screen.getByText("JIRA_API_TOKEN")).toBeInTheDocument();
+    });
+    // The secret entry shows the masked preview indicator.
+    expect(screen.getByText("••••••••")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Editar$/i }));
-    const secretInput = screen.getByPlaceholderText("Digite um novo valor para substituir") as HTMLInputElement;
+    const secretInput = screen.getByPlaceholderText("Novo valor") as HTMLInputElement;
     expect(secretInput.type).toBe("password");
     await user.type(secretInput, "new-secret-value");
     await user.click(screen.getByRole("button", { name: /Visualizar valor|Valor de exibição/i }));
     expect(secretInput.type).toBe("text");
-    await user.click(screen.getByRole("button", { name: /^Atualizar$/i }));
+    await user.click(screen.getByRole("button", { name: /^Salvar$/i }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/control-plane/agents/ATLAS/secrets/JIRA_API_TOKEN?scope=bot",
-        expect.objectContaining({ method: "PUT" }),
-      );
+      const fetchMock = vi.mocked(globalThis.fetch);
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            input === "/api/control-plane/agents/ATLAS/secrets/JIRA_API_TOKEN?scope=bot" &&
+            String(init?.method || "GET").toUpperCase() === "PUT",
+        ),
+      ).toBe(true);
     });
 
     expect(refreshMock).toHaveBeenCalled();

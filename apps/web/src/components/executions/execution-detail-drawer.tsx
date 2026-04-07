@@ -40,7 +40,7 @@ export function ExecutionDetailDrawer({
   const presence = useAnimatedPresence(
     isOpen,
     { execution, detail, loading, error },
-    { duration: 300 }
+    { duration: 180 }
   );
   const renderedExecution = presence.renderedValue.execution;
   const renderedDetail = presence.renderedValue.detail;
@@ -69,33 +69,23 @@ export function ExecutionDetailDrawer({
     <>
       <div
         className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "app-overlay-backdrop",
           presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
       />
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,720px)] xl:w-[620px] 2xl:w-[680px] will-change-transform transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,720px)] xl:w-[620px] 2xl:w-[680px] transition-opacity duration-150 ease-out",
           presence.isVisible
-            ? "translate-x-0 opacity-100"
-            : "pointer-events-none translate-x-3 opacity-0"
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         role="dialog"
         aria-modal="true"
         aria-label={data ? `${t("common.details")} · ${t("tasks.detail.executionFallback", { id: data.task_id })}` : t("common.details")}
         >
-          <div
-          className="app-drawer-panel relative ml-auto flex h-full w-full flex-col overflow-hidden"
-          style={
-            botColor
-              ? {
-                  borderTop: `1px solid ${botColor}28`,
-                  boxShadow: `-24px 0 80px rgba(0,0,0,0.34), inset 0 1px 0 ${botColor}10`,
-                }
-              : undefined
-          }
-        >
+        <div className="app-drawer-panel relative ml-auto flex h-full w-full flex-col overflow-hidden">
           <div className="border-b border-[var(--border-subtle)] px-5 py-4 lg:px-6">
             {/* Action buttons row */}
             <div className="flex items-center justify-end gap-1 mb-3">

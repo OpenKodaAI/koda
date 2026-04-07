@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 from koda import config
 from koda.internal_rpc.common import (
     EngineSelection,
+    create_grpc_channel,
     ensure_generated_proto_path,
     normalize_internal_service_probe,
     resolve_grpc_target,
@@ -681,8 +682,6 @@ class GrpcMemoryEngineClient:
 
     async def start(self) -> None:
         try:
-            import grpc.aio as grpc_aio
-
             ensure_generated_proto_path()
             from common.v1 import metadata_pb2
             from memory.v1 import memory_pb2, memory_pb2_grpc
@@ -694,7 +693,7 @@ class GrpcMemoryEngineClient:
                 "ready": False,
             }
             raise RuntimeError("grpc_memory_engine_client_requires_grpcio") from exc
-        self._channel = grpc_aio.insecure_channel(self._target)
+        self._channel = create_grpc_channel(self._target, async_channel=True)
         self._metadata_pb2 = metadata_pb2
         self._memory_pb2 = memory_pb2
         self._stub = memory_pb2_grpc.MemoryEngineServiceStub(self._channel)

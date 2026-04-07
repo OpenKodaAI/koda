@@ -28,7 +28,7 @@ class _SilentRuntimeMessage:
 
     def __init__(self, text: str = "") -> None:
         self.text = text
-        self.message_id = int(hashlib.sha1(text.encode()).hexdigest()[:8], 16) or 1
+        self.message_id = int(hashlib.blake2s(text.encode(), digest_size=4).hexdigest(), 16) or 1
 
     async def edit_text(self, text: str, *_args: object, **_kwargs: object) -> _SilentRuntimeMessage:
         self.text = text
@@ -97,6 +97,14 @@ def _authorize_mutation(request: web.Request) -> web.Response | None:
     return _authorize_runtime_access(request, capability="mutate")
 
 
+def _attach_token_from_request(request: web.Request) -> str:
+    headers = getattr(request, "headers", {})
+    header_token = str(headers.get("X-Koda-Attach-Token", "")).strip()
+    if header_token:
+        return header_token
+    return request.query.get("token", "").strip()
+
+
 async def _json_payload(request: web.Request) -> dict[str, object]:
     try:
         payload = await request.json()
@@ -109,7 +117,7 @@ async def _json_payload(request: web.Request) -> dict[str, object]:
 
 def _dashboard_actor_id(*, namespace: str, session_id: str) -> int:
     seed = f"{AGENT_ID}:{namespace}:{session_id}".encode()
-    return 1_000_000_000 + int(hashlib.sha1(seed).hexdigest()[:12], 16) % 900_000_000
+    return 1_000_000_000 + int(hashlib.blake2s(seed, digest_size=8).hexdigest()[:12], 16) % 900_000_000
 
 
 def _include_sensitive(request: web.Request) -> bool:
@@ -213,6 +221,122 @@ async def _runtime_environments(request: web.Request) -> web.Response:
     if auth:
         return auth
     return web.json_response({"items": get_runtime_controller().store.list_environments()})
+
+
+def _schedule_detail_payload(job_id: int) -> dict[str, object] | None:
+    from koda.services import scheduled_jobs
+
+    detail = scheduled_jobs.get_job_detail(job_id, None, run_limit=25, event_limit=100)
+    if not detail:
+        return None
+    runs = [scheduled_jobs.serialize_run(run) for run in detail["runs"]]
+    latest_task_runtime = None
+    for run in runs:
+        task_id = run.get("task_id")
+        if task_id:
+            latest_task_runtime = get_runtime_controller().store.get_task_runtime(int(task_id))
+            if latest_task_runtime:
+                break
+    return {
+        "job": scheduled_jobs.serialize_job(detail["job"]),
+        "runs": runs,
+        "events": detail["events"],
+        "latest_task_runtime": latest_task_runtime,
+    }
+
+
+async def _runtime_schedules(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    from koda.services import scheduled_jobs
+
+    include_archived = request.query.get("include_archived", "false").strip().lower() == "true"
+    limit = _parse_positive_int(request.query.get("limit"), name="limit", default=200, minimum=1, maximum=1000)
+    items = [
+        scheduled_jobs.serialize_job(job)
+        for job in scheduled_jobs.list_all_jobs(include_archived=include_archived, limit=limit)
+    ]
+    return web.json_response({"items": items})
+
+
+async def _runtime_schedule_detail(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    job_id = int(request.match_info["job_id"])
+    payload = _schedule_detail_payload(job_id)
+    if payload is None:
+        return web.json_response({"error": "schedule job not found"}, status=404)
+    return web.json_response(payload)
+
+
+async def _runtime_schedule_update(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    from koda.services import scheduled_jobs
+
+    payload = await _json_payload(request)
+    user_id = int(cast(int | str, payload.get("user_id") or 0))
+    expected_config_version_raw = payload.get("expected_config_version")
+    result = scheduled_jobs.update_job(
+        int(request.match_info["job_id"]),
+        user_id=user_id,
+        patch=cast(dict[str, object], payload.get("patch") or {}),
+        expected_config_version=(
+            int(cast(int | str, expected_config_version_raw)) if expected_config_version_raw is not None else None
+        ),
+        actor_type=str(payload.get("actor_type") or "dashboard"),
+        actor_id=str(payload.get("actor_id") or "runtime-ui"),
+        source="runtime_api",
+        reason=str(payload.get("reason") or "Updated from runtime UI."),
+        evidence=cast(dict[str, object] | None, payload.get("evidence"))
+        if isinstance(payload.get("evidence"), dict)
+        else None,
+    )
+    status = 200 if result.get("ok") else 400
+    if result.get("ok"):
+        detail = _schedule_detail_payload(int(request.match_info["job_id"]))
+        result = {**result, **(detail or {})}
+    return web.json_response(result, status=status)
+
+
+async def _runtime_schedule_action(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    from koda.services import scheduled_jobs
+
+    payload = await _json_payload(request)
+    job_id = int(request.match_info["job_id"])
+    user_id = int(cast(int | str, payload.get("user_id") or 0))
+    action = str(request.match_info["action"] or "").strip().lower()
+    if action == "validate":
+        run_id, message = scheduled_jobs.queue_validation_run(job_id, user_id=user_id, activate_on_success=False)
+        result = {"ok": run_id is not None, "message": message, "run_id": run_id}
+    elif action == "activate":
+        ok, message = scheduled_jobs.activate_job(job_id, user_id)
+        result = {"ok": ok, "message": message}
+    elif action == "pause":
+        ok, message = scheduled_jobs.pause_job(job_id, user_id)
+        result = {"ok": ok, "message": message}
+    elif action == "resume":
+        ok, message = scheduled_jobs.resume_job(job_id, user_id)
+        result = {"ok": ok, "message": message}
+    elif action == "run":
+        run_id, message = scheduled_jobs.run_job_now(job_id, user_id)
+        result = {"ok": run_id is not None, "message": message, "run_id": run_id}
+    elif action == "delete":
+        ok, message = scheduled_jobs.delete_job(job_id, user_id)
+        result = {"ok": ok, "message": message}
+    else:
+        return web.json_response({"error": "unsupported schedule action"}, status=400)
+    status = 200 if result.get("ok") else 400
+    if result.get("ok"):
+        detail = _schedule_detail_payload(job_id)
+        result = {**result, **(detail or {})}
+    return web.json_response(result, status=status)
 
 
 async def _runtime_readiness(request: web.Request) -> web.Response:
@@ -614,7 +738,7 @@ async def _runtime_terminal_ws(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPForbidden(text=json.dumps({"error": "invalid runtime token"}))
     task_id = int(request.match_info["task_id"])
     terminal_id = int(request.match_info["terminal_id"])
-    token = request.query.get("token", "")
+    token = _attach_token_from_request(request)
     session = get_runtime_controller().authorize_attach(token=token, attach_kind="terminal")
     if session is None or int(session["task_id"]) != task_id or int(session.get("terminal_id") or 0) != terminal_id:
         raise web.HTTPForbidden(text="invalid terminal attach session")
@@ -703,7 +827,7 @@ async def _runtime_browser_ws(request: web.Request) -> web.WebSocketResponse:
     if auth:
         raise web.HTTPForbidden(text=json.dumps({"error": "invalid runtime token"}))
     task_id = int(request.match_info["task_id"])
-    token = request.query.get("token", "")
+    token = _attach_token_from_request(request)
     session = get_runtime_controller().authorize_attach(token=token, attach_kind="browser")
     if session is None or int(session["task_id"]) != task_id:
         raise web.HTTPForbidden(text="invalid browser attach session")
@@ -894,9 +1018,9 @@ async def _runtime_attach_terminal(request: web.Request) -> web.Response:
                 ),
             },
             "ws_url": (
-                f"/ws/runtime/tasks/{task_id}/terminals/{terminal_row_id}?token={attach['token']}"
+                f"/ws/runtime/tasks/{task_id}/terminals/{terminal_row_id}"
                 + (
-                    f"&session_id={attach['kernel_session_id']}"
+                    f"?session_id={attach['kernel_session_id']}"
                     if str(attach.get("kernel_session_id") or "").strip()
                     else ""
                 )
@@ -919,7 +1043,7 @@ async def _runtime_attach_browser(request: web.Request) -> web.Response:
         {
             "attach": attach,
             "browser": _browser_payload(task_id),
-            "ws_url": f"/ws/runtime/tasks/{task_id}/browser?token={attach['token']}",
+            "ws_url": f"/ws/runtime/tasks/{task_id}/browser",
             "novnc_url": browser.get("novnc_url"),
         }
     )
@@ -985,6 +1109,8 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/readiness", _runtime_readiness)
     app.router.add_get("/api/runtime/queues", _runtime_queues)
     app.router.add_get("/api/runtime/environments", _runtime_environments)
+    app.router.add_get("/api/runtime/schedules", _runtime_schedules)
+    app.router.add_get("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_detail)
     app.router.add_get("/api/runtime/environments/{env_id:\\d+}", _runtime_environment_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/events", _runtime_task_events)
@@ -1009,6 +1135,8 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/cancel", _runtime_cancel)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/retry", _runtime_retry)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/recover", _runtime_recover)
+    app.router.add_patch("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_update)
+    app.router.add_post("/api/runtime/schedules/{job_id:\\d+}/actions/{action}", _runtime_schedule_action)
     app.router.add_post("/api/runtime/sessions/messages", _runtime_send_session_message)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/pause", _runtime_pause)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/resume", _runtime_resume)
