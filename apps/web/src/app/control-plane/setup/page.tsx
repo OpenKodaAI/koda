@@ -29,6 +29,7 @@ export default async function ControlPlaneSetupPage({
       <ControlPlaneSetup
         initialStatus={access.onboardingStatus}
         authStatus={access.authStatus}
+        nextTarget={nextTarget}
       />
     </ControlPlaneOnboardingShell>
   );

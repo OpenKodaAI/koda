@@ -82,7 +82,18 @@ When the installer completes, start in the dashboard:
 - Control-plane home: `http://127.0.0.1:3000/control-plane`
 - Dashboard overview: `http://127.0.0.1:3000`
 
-From there you can unlock the operator session, validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
+The first-run flow is intentionally linear:
+
+1. open `/control-plane/setup`
+2. paste the short-lived setup code printed by `koda install`
+3. create the local owner account
+4. sign in to open the HTTP-only operator session
+5. finish access policy and default provider setup
+6. optionally connect the first Telegram agent
+
+If the setup code expires before you finish, run `koda auth issue-code` and continue from the same setup screen.
+
+From there you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
 From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
 
 The scoped npm package ships the same product-only release bundle that is attached to GitHub Releases:

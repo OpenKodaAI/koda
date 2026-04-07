@@ -86,7 +86,20 @@ Run:
 koda doctor
 ```
 
-Then finish product configuration through `/control-plane/setup` in the dashboard.
+Then finish product configuration through `/control-plane/setup` in the dashboard:
+
+1. paste the short-lived setup code printed by `koda install --headless`
+2. create the local owner account
+3. sign in to open the operator session
+4. configure access policy and the default provider
+5. optionally connect the first Telegram agent
+6. continue ongoing operations from `/control-plane`
+
+If the headless setup code expires before you reach the dashboard, generate another one from the host:
+
+```bash
+koda auth issue-code
+```
 
 ## Upgrade Path
 

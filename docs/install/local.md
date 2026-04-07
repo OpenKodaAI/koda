@@ -85,12 +85,19 @@ At that point the infrastructure is already ready for use:
 
 Use the dashboard control plane to complete product configuration:
 
-1. review platform health and bootstrap status
-2. configure owner and access policy
-3. connect and verify the providers you want to use
-4. connect and verify the integrations you want to expose globally
-5. optionally connect the first Telegram agent
-6. continue ongoing configuration in the control plane
+1. open `/control-plane/setup`
+2. paste the setup code printed by `koda install`
+3. create the local owner account
+4. sign in with that owner account
+5. configure the initial access policy and default provider
+6. optionally connect the first Telegram agent
+7. continue ongoing configuration in `/control-plane`
+
+If the setup code expires before you finish, reissue one from the terminal:
+
+```bash
+koda auth issue-code
+```
 
 After provider and integration setup, each bot still needs its own grants. In practice the operator flow is:
 
