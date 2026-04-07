@@ -1,4 +1,4 @@
-FROM node:22-slim AS deps
+FROM node:25-slim AS deps
 
 WORKDIR /workspace
 
@@ -10,7 +10,7 @@ COPY packages/cli/package.json packages/cli/package.json
 
 RUN pnpm install --frozen-lockfile
 
-FROM node:22-slim AS prod-deps
+FROM node:25-slim AS prod-deps
 
 WORKDIR /workspace
 
@@ -22,7 +22,7 @@ COPY packages/cli/package.json packages/cli/package.json
 
 RUN pnpm install --frozen-lockfile --prod
 
-FROM node:22-slim AS builder
+FROM node:25-slim AS builder
 
 WORKDIR /workspace
 
@@ -38,7 +38,7 @@ ENV SECURE_COOKIES=${SECURE_COOKIES}
 
 RUN pnpm --filter koda-web build
 
-FROM node:22-slim AS runner
+FROM node:25-slim AS runner
 
 WORKDIR /app
 
