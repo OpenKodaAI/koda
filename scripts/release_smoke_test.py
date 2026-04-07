@@ -54,7 +54,9 @@ def install_cli(cli_tarball: Path, prefix_dir: Path) -> Path:
 def run_smoke(
     cli_tarball: Path, install_dir: Path, *, prefix_dir: Path | None = None, build_images: bool = True
 ) -> None:
-    temp_root = Path(tempfile.mkdtemp(prefix="koda-release-smoke-", dir=str(ROOT / "output")))
+    output_root = ROOT / "output"
+    output_root.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(tempfile.mkdtemp(prefix="koda-release-smoke-", dir=str(output_root)))
     prefix = prefix_dir or (temp_root / "npm-prefix")
     manifest = read_json(ROOT / "packages" / "cli" / "release" / "manifest.json")
     koda_bin = None

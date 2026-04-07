@@ -63,6 +63,50 @@ Only after those gates pass does the workflow:
 Stable releases publish the `latest` tag on npm and the `latest` tag on GHCR. Prereleases publish with the npm
 dist-tag `next` and do not overwrite `latest` on the container registry.
 
+## Automatic Release Tag Cut
+
+Merges to `main` do not publish directly. Instead, [`../../.github/workflows/cut-release-tag.yml`](../../.github/workflows/cut-release-tag.yml)
+waits for `pr-quality` and `security` to finish successfully on the exact `main` commit.
+
+After those workflows pass, the automation:
+
+- reads the canonical version from `pyproject.toml` and verifies the synced release metadata files
+- checks whether the matching semantic tag `v<version>` already exists
+- pushes that tag only when it does not already exist
+- dispatches [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `publish` mode for that tag
+
+The extra dispatch step is intentional. GitHub does not start a new `push` workflow when a workflow pushes a tag with
+the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publish run after creating the tag.
+
+This keeps release publication idempotent:
+
+- if `v<version>` already exists on the current commit and the GitHub release already exists, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on the current commit but the GitHub release is still missing, the tag-cut workflow dispatches `release.yml` again for recovery
+- if `v<version>` already exists on an older commit, the workflow exits without retagging or publishing a duplicate package
+- to ship a new public release, bump the repository version first, then merge to `main`
+
+For backfills, recovery, or operator-controlled releases, you can still:
+
+- run `cut-release-tag` with `workflow_dispatch`
+- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) with `mode=publish` from the ref you want to release
+- push a matching `v<version>` tag manually
+- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `dry-run` mode before publishing
+
+When `release.yml` runs in `publish` mode from `main` or another non-tag ref, it validates the ref, creates
+`v<version>` when needed, and then publishes from that same run after all gates pass.
+
+Example manual publish from `main` with GitHub CLI:
+
+```bash
+gh workflow run release.yml --ref main -f mode=publish -f release_ref=main
+```
+
+Validation-only dry run from `main`:
+
+```bash
+gh workflow run release.yml --ref main -f mode=dry-run -f release_ref=main
+```
+
 ## Artifact Build Commands
 
 Build the releasable assets locally:
@@ -100,15 +144,22 @@ The publish workflow expects:
 - GitHub `id-token: write` for npm provenance
 - npm authentication configured for the `@openkodaai` scope
 
-The preferred npm path is trusted publishing tied to the repository workflow itself. If that path is not yet
-configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls back to that token only
-after the trusted-publishing attempt fails.
+The preferred npm path is trusted publishing tied to the automatic caller workflow. In this repository,
+`cut-release-tag.yml` is the workflow that dispatches `release.yml`, so npm trusted publishing should be configured
+against `OpenKodaAI/koda` and `cut-release-tag.yml`. The `release.yml` publish job still needs `id-token: write`
+because it is the workflow that actually runs `npm publish`.
+
+If that path is not yet configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls
+back to that token only after the trusted-publishing attempt fails.
 
 Recommended GitHub setup:
 
+- create a `release` environment in the repository settings before the first public publish
 - protect a `release` environment and require manual approval if your team wants a final human gate
-- configure npm trusted publishing for `OpenKodaAI/koda` and [release.yml](../../.github/workflows/release.yml)
+- configure npm trusted publishing for `OpenKodaAI/koda` and [cut-release-tag.yml](../../.github/workflows/cut-release-tag.yml)
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
+- use [release.yml](../../.github/workflows/release.yml) directly for dry runs or operator-controlled publish recovery, but
+  expect trusted publishing to come from `cut-release-tag.yml` on the automatic path
 
 If a fork or dry-run cannot publish, the workflow should still complete all validation and artifact build steps
 without pushing npm or GHCR assets.

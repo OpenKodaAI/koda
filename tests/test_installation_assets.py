@@ -204,9 +204,11 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
 
     assert "codeql" in jobs
     assert "workflow-quality" in jobs
+    assert "ensure-release-tag" in jobs
     assert "publish-ghcr" in jobs
     assert "publish-npm" in jobs
     assert "github-release" in jobs
+    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "write"
     assert jobs["publish-ghcr"]["environment"] == "release"
     assert jobs["publish-npm"]["environment"] == "release"
     assert jobs["github-release"]["environment"] == "release"
@@ -216,10 +218,65 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "NPM_TOKEN" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
+    assert "uv export" in workflow_text
+    assert "--all-extras" in workflow_text
+    assert "--no-editable" in workflow_text
+    assert "--no-emit-project" in workflow_text
+    assert "--no-emit-workspace" in workflow_text
+    assert "python-audit-requirements.txt" in workflow_text
+    assert "--require-hashes" in workflow_text
+    assert "--disable-pip" in workflow_text
+    assert 'npm view "${NPM_PACKAGE_NAME}@${VERSION}" version' in workflow_text
+    assert "Skip npm publish when version already exists" in workflow_text
+    assert 'gh release view "${RELEASE_TAG}"' in workflow_text
+    assert "Skip GitHub release creation when the release already exists" in workflow_text
+    assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
     assert "pnpm/action-setup@v5.0.0" in workflow_text
     assert "pnpm/action-setup@v4.2.0" not in workflow_text
+
+
+def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
+    workflow_path = ROOT / ".github" / "workflows" / "cut-release-tag.yml"
+    assert workflow_path.exists()
+
+    payload = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    trigger = payload.get("on", payload.get(True))
+
+    assert trigger["push"]["branches"] == ["main"]
+    assert "workflow_dispatch" in trigger
+    assert payload["permissions"]["actions"] == "write"
+    assert payload["permissions"]["contents"] == "write"
+    assert payload["permissions"]["id-token"] == "write"
+
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    assert '["pr-quality", "security"]' in workflow_text
+    assert "actions/github-script@v8" in workflow_text
+    assert "gh release view" in workflow_text
+    assert "Skip dispatch when the release already exists for the current tag" in workflow_text
+    assert "Recover publish when the tag exists but the release is still missing" in workflow_text
+    assert "git tag -a" in workflow_text
+    assert 'git push origin "refs/tags/${TAG}"' in workflow_text
+    assert 'workflow_id: "release.yml"' in workflow_text
+    assert "createWorkflowDispatch" in workflow_text
+
+
+def test_release_docs_explain_main_release_automation() -> None:
+    release_docs_text = (ROOT / "docs" / "reference" / "releases.md").read_text(encoding="utf-8")
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Automatic Release Tag Cut" in release_docs_text
+    assert "cut-release-tag" in release_docs_text
+    assert "pr-quality" in release_docs_text
+    assert "security" in release_docs_text
+    assert "v<version>" in release_docs_text
+    assert "createWorkflowDispatch" not in release_docs_text
+    assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
+    assert "the GitHub release is still missing" in release_docs_text
+    assert "cut-release-tag.yml" in release_docs_text
+    assert "Public releases are cut from `main` by version." in readme_text
+    assert "the GitHub release is still missing" in readme_text
 
 
 def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:
@@ -239,6 +296,22 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
     pr_quality_workflow_text = (ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8")
+
+    assert "python-audit-requirements.txt" in release_workflow_text
+    assert "python-audit-requirements.txt" in security_workflow_text
+    assert "--all-extras" in release_workflow_text
+    assert "--all-extras" in security_workflow_text
+    assert "--no-editable" in release_workflow_text
+    assert "--no-editable" in security_workflow_text
+    assert "--no-emit-project" in release_workflow_text
+    assert "--no-emit-workspace" in release_workflow_text
+    assert "--no-emit-project" in security_workflow_text
+    assert "--no-emit-workspace" in security_workflow_text
+    assert "--require-hashes" in release_workflow_text
+    assert "--require-hashes" in security_workflow_text
+    assert "--disable-pip" in release_workflow_text
+    assert "--disable-pip" in security_workflow_text
+
     trivy_targets = (
         "koda.sarif --exit-code 1 koda:",
         "koda-web.sarif --exit-code 1 koda-web:",

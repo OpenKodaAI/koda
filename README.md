@@ -105,6 +105,12 @@ The scoped npm package ships the same product-only release bundle that is attach
 
 That means `npm install -g @openkodaai/koda` installs the product channel, not the source tree.
 
+Public releases are cut from `main` by version. When the repository version changes and the merge to `main` passes
+`pr-quality` and `security`, GitHub Actions creates the matching `v<version>` tag and the release workflow publishes
+the npm package, GHCR images, and GitHub Release assets from that tag. If the tag already exists on the validated
+commit but the GitHub release is still missing, the tag-cut workflow dispatches the publish workflow again for
+recovery instead of silently stopping.
+
 ## What The Stack Starts
 
 - `web` on port `3000` for the operator-facing UI
@@ -275,4 +281,10 @@ Official product releases are published through three aligned channels:
 - GHCR images pinned by version in the release manifest
 - GitHub Releases with the bundle archive, manifest, checksums, SBOM, and npm tarball
 
-The release workflow runs quality, test, security, Docker, and packaged-install smoke validation before publish. For the release contract and artifact flow, see [Release distribution](docs/reference/releases.md).
+The release workflow runs quality, test, security, Docker, and packaged-install smoke validation before publish.
+Merges to `main` are picked up by `cut-release-tag`, which creates the semantic tag only after `pr-quality` and
+`security` pass on that exact commit, then dispatches the release workflow in publish mode for the matching tag.
+You can also backfill or recover manually by pushing a `v<version>` tag or by dispatching the `release` workflow in
+`publish` mode from the target ref. When that dispatch starts from `main` or another non-tag ref, the workflow
+validates the commit, creates the semantic tag if needed, and publishes the release in the same run. For the release
+contract and artifact flow, see [Release distribution](docs/reference/releases.md).
