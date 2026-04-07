@@ -247,6 +247,7 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     assert "fail-on-severity: high" in security_workflow_text
     assert "fail-on-scopes: runtime,development" in security_workflow_text
     assert "show-patched-versions: true" in security_workflow_text
+    assert "fetch-depth: 0" in security_workflow_text
 
     for workflow_text in (pr_quality_workflow_text, release_workflow_text):
         assert 'wait_for_url "web health" "http://127.0.0.1:3000/api/health"' in workflow_text

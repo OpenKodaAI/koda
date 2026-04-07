@@ -30,6 +30,8 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
       - name: Review dependency diff risk
         uses: actions/dependency-review-action@v4.9.0
         with:
