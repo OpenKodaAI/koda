@@ -80,9 +80,11 @@ jobs:
             checkout_ref="${release_ref}"
           fi
 
-          echo "ref=${release_ref}" >> "${GITHUB_OUTPUT}"
-          echo "checkout_ref=${checkout_ref}" >> "${GITHUB_OUTPUT}"
-          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "ref=${release_ref}"
+            echo "checkout_ref=${checkout_ref}"
+            echo "publish=${publish}"
+          } >> "${GITHUB_OUTPUT}"
 
       - uses: actions/checkout@v6.0.2
         with:
@@ -556,7 +558,7 @@ jobs:
           wait_for_url() {
             local name="$1"
             local url="$2"
-            for i in $(seq 1 90); do
+            for ((attempt = 0; attempt < 90; attempt++)); do
               if curl -fsS "$url" >/dev/null; then
                 return 0
               fi

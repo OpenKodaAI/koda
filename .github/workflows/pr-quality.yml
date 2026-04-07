@@ -194,7 +194,7 @@ jobs:
           wait_for_url() {
             local name="$1"
             local url="$2"
-            for i in $(seq 1 90); do
+            for ((attempt = 0; attempt < 90; attempt++)); do
               if curl -fsS "$url" >/dev/null; then
                 return 0
               fi
