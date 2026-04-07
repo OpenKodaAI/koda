@@ -108,8 +108,8 @@ That means `npm install -g @openkodaai/koda` installs the product channel, not t
 Public releases are cut from `main` by version. When the repository version changes and the merge to `main` passes
 `pr-quality` and `security`, GitHub Actions creates the matching `v<version>` tag and the release workflow publishes
 the npm package, GHCR images, and GitHub Release assets from that tag. If the tag already exists on the validated
-commit but the GitHub release is still missing, the tag-cut workflow dispatches the publish workflow again for
-recovery instead of silently stopping.
+commit but the GitHub release is still draft, missing assets, or the npm dist-tag is still wrong, the tag-cut
+workflow dispatches the publish workflow again for recovery instead of silently stopping.
 
 ## What The Stack Starts
 

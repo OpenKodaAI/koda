@@ -54,6 +54,11 @@ The release workflow is designed to publish only after these gates pass:
 3. Docker smoke: the stack boots and serves health, dashboard, and control-plane surfaces
 4. packaged-install smoke: the release CLI is packed with `npm pack`, installed from its tarball, and must complete `install`, `doctor`, `auth issue-code`, `update`, and `uninstall`
 
+The Docker smoke gate is shared between PR validation and release publication through
+[`../../scripts/docker_smoke.sh`](../../scripts/docker_smoke.sh). The script retries connection-refused and other
+transient HTTP startup failures, then captures `docker compose ps`, image metadata, logs, and `docker inspect`
+output if the stack still does not stabilize. That keeps the release gate strict while making recovery actionable.
+
 Only after those gates pass does the workflow:
 
 - push the versioned GHCR images
@@ -84,8 +89,8 @@ the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publis
 
 This keeps release publication idempotent:
 
-- if `v<version>` already exists on the current commit and the GitHub release already exists, the tag-cut workflow exits without creating a duplicate release
-- if `v<version>` already exists on the current commit but the GitHub release is still missing, the tag-cut workflow dispatches `release.yml` again for recovery
+- if `v<version>` already exists on the current commit and the GitHub release is published, complete, and the npm dist-tag already points to that version, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow dispatches `release.yml` again for recovery
 - if `v<version>` already exists on an older commit, the workflow exits without retagging or publishing a duplicate package
 - to ship a new public release, bump the repository version first, then merge to `main`
 
@@ -161,7 +166,9 @@ OIDC-based publishing.
 If that path is not yet configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls
 back to that token only after the trusted-publishing attempt fails. The publish job also runs `npm whoami` with the
 fallback token ahead of time so a broken token fails with a clearer diagnostic instead of only surfacing at the final
-`npm publish`.
+`npm publish`. If the package version already exists but the public dist-tag still points elsewhere, the workflow uses
+the fallback token to repair the dist-tag and then re-verifies that `latest` or `next` resolves to the released
+version before the GitHub Release is left non-draft.
 
 Recommended GitHub setup:
 

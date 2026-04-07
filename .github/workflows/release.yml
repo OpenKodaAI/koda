@@ -577,40 +577,7 @@ jobs:
       - name: Build primary Docker image
         run: docker build -t koda:ci .
       - name: Bring up stack and smoke test
-        run: |
-          wait_for_url() {
-            local name="$1"
-            local url="$2"
-            for ((attempt = 0; attempt < 90; attempt++)); do
-              if curl -fsS "$url" >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            echo "Timed out waiting for ${name} at ${url}" >&2
-            return 1
-          }
-
-          cp .env.example .env
-          docker compose config -q
-          docker compose up -d --build
-          wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
-          wait_for_url "web health" "http://127.0.0.1:3000/api/health"
-          wait_for_url "dashboard root" "http://127.0.0.1:3000/"
-          wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"
-          wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"
-          curl -fsS http://127.0.0.1:8090/health
-          curl -fsS http://127.0.0.1:3000/api/health >/dev/null
-          curl -fsS http://127.0.0.1:3000/ >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane/setup >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane >/dev/null
-          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
-      - name: Capture docker logs
-        if: failure()
-        run: |
-          mkdir -p artifacts/docker
-          docker compose ps > artifacts/docker/compose-ps.txt
-          docker compose logs --no-color > artifacts/docker/compose.log
+        run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
         uses: actions/upload-artifact@v7.0.0
@@ -888,6 +855,71 @@ jobs:
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Repair npm dist-tag with token fallback when needed
+        if: env.HAS_NPM_TOKEN == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
+          current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+
+          print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))
+          PY
+          )"
+
+          if [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+            exit 0
+          fi
+
+          npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}" --registry=https://registry.npmjs.org
+      - name: Verify npm package version and dist-tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            version_state=""
+            if version_state="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org 2>/dev/null)"; then
+              :
+            else
+              version_state=""
+            fi
+
+            dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
+            current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 - <<'PY'
+            from __future__ import annotations
+
+            import json
+            import os
+
+            print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))
+            PY
+            )"
+
+            if [ "${version_state}" = "${VERSION}" ] && [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
+          npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org || true
+          exit 1
 
   github-release:
     name: github-release

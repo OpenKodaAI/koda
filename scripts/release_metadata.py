@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = ROOT / "pyproject.toml"
 PACKAGE_JSON_PATH = ROOT / "packages" / "cli" / "package.json"
 MANIFEST_PATH = ROOT / "packages" / "cli" / "release" / "manifest.json"
+CHECKSUMS_PATH = ROOT / "packages" / "cli" / "release" / "CHECKSUMS.txt"
 SBOM_PATH = ROOT / "packages" / "cli" / "release" / "bundle" / "sbom.spdx.json"
 OPENAPI_PATH = ROOT / "docs" / "openapi" / "control-plane.json"
 INIT_PATH = ROOT / "koda" / "__init__.py"
@@ -53,6 +55,12 @@ def read_json(path: Path) -> dict:
 
 def dump_json(path: Path, payload: dict) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def sha256_bytes(payload: bytes) -> str:
+    digest = hashlib.sha256()
+    digest.update(payload)
+    return digest.hexdigest()
 
 
 def image_refs(version: str) -> dict[str, str]:
@@ -169,6 +177,25 @@ def build_openapi(version: str) -> dict:
     return payload
 
 
+def build_release_checksums(version: str, *, published_at: str | None = None) -> str:
+    manifest_text = dump_json(MANIFEST_PATH, build_manifest(version, published_at=published_at))
+    sbom_text = dump_json(SBOM_PATH, build_sbom(version, created_at=published_at))
+    payloads = {
+        "bundle/.env.bootstrap": (ROOT / "packages" / "cli" / "release" / "bundle" / ".env.bootstrap").read_bytes(),
+        "bundle/MIGRATION.md": (ROOT / "packages" / "cli" / "release" / "bundle" / "MIGRATION.md").read_bytes(),
+        "bundle/docker-compose.release.yml": (
+            ROOT / "packages" / "cli" / "release" / "bundle" / "docker-compose.release.yml"
+        ).read_bytes(),
+        "bundle/proxy/nginx.conf": (
+            ROOT / "packages" / "cli" / "release" / "bundle" / "proxy" / "nginx.conf"
+        ).read_bytes(),
+        "bundle/sbom.spdx.json": sbom_text.encode("utf-8"),
+        "manifest.json": manifest_text.encode("utf-8"),
+    }
+    lines = [f"{sha256_bytes(payloads[path])}  {path}" for path in sorted(payloads)]
+    return "\n".join(lines) + "\n"
+
+
 def load_release_metadata(*, published_at: str | None = None) -> dict:
     version = load_project_version()
     return {
@@ -188,6 +215,7 @@ def sync_release_metadata(*, write: bool, published_at: str | None = None) -> li
     expected_payloads = {
         PACKAGE_JSON_PATH: dump_json(PACKAGE_JSON_PATH, build_package_json(version)),
         MANIFEST_PATH: dump_json(MANIFEST_PATH, build_manifest(version, published_at=published_at)),
+        CHECKSUMS_PATH: build_release_checksums(version, published_at=published_at),
         SBOM_PATH: dump_json(SBOM_PATH, build_sbom(version, created_at=published_at)),
         OPENAPI_PATH: dump_json(OPENAPI_PATH, build_openapi(version)),
         INIT_PATH: render_init_text(version),

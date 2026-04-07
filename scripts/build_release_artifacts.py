@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,14 +38,25 @@ def run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProce
     )
 
 
-def build_npm_tarball(output_dir: Path) -> Path:
+def build_npm_tarball(output_dir: Path, *, bundle_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    result = run(["npm", "pack", "--pack-destination", str(output_dir)], cwd=CLI_PACKAGE_DIR)
-    tarball_name = result.stdout.strip().splitlines()[-1]
-    tarball_path = output_dir / tarball_name
-    if not tarball_path.exists():
-        raise RuntimeError(f"npm pack did not produce {tarball_path}")
-    return tarball_path
+    stage_dir = output_dir / ".npm-pack-stage"
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir)
+
+    try:
+        shutil.copytree(CLI_PACKAGE_DIR / "bin", stage_dir / "bin")
+        shutil.copy2(CLI_PACKAGE_DIR / "package.json", stage_dir / "package.json")
+        shutil.copytree(bundle_dir, stage_dir / "release")
+
+        result = run(["npm", "pack", "--pack-destination", str(output_dir)], cwd=stage_dir)
+        tarball_name = result.stdout.strip().splitlines()[-1]
+        tarball_path = output_dir / tarball_name
+        if not tarball_path.exists():
+            raise RuntimeError(f"npm pack did not produce {tarball_path}")
+        return tarball_path
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def build_release_artifacts(output_dir: Path, *, published_at: str | None = None) -> dict[str, object]:
@@ -61,7 +73,7 @@ def build_release_artifacts(output_dir: Path, *, published_at: str | None = None
     bundle_dir, bundle_archive = build_release_bundle(release_dir, published_at=published, archive=True)
     if bundle_archive is None:
         raise RuntimeError("build_release_bundle did not return the expected archive path")
-    npm_tarball = build_npm_tarball(npm_dir)
+    npm_tarball = build_npm_tarball(npm_dir, bundle_dir=bundle_dir)
 
     asset_paths = [
         bundle_archive,

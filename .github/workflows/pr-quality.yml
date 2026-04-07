@@ -190,40 +190,7 @@ jobs:
       - name: Build primary Docker image
         run: docker build -t koda:ci .
       - name: Bring up stack and smoke test
-        run: |
-          wait_for_url() {
-            local name="$1"
-            local url="$2"
-            for ((attempt = 0; attempt < 90; attempt++)); do
-              if curl -fsS "$url" >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            echo "Timed out waiting for ${name} at ${url}" >&2
-            return 1
-          }
-
-          cp .env.example .env
-          docker compose config -q
-          docker compose up -d --build
-          wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
-          wait_for_url "web health" "http://127.0.0.1:3000/api/health"
-          wait_for_url "dashboard root" "http://127.0.0.1:3000/"
-          wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"
-          wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"
-          curl -fsS http://127.0.0.1:8090/health
-          curl -fsS http://127.0.0.1:3000/api/health >/dev/null
-          curl -fsS http://127.0.0.1:3000/ >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane/setup >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane >/dev/null
-          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
-      - name: Capture docker logs
-        if: failure()
-        run: |
-          mkdir -p artifacts/docker
-          docker compose ps > artifacts/docker/compose-ps.txt
-          docker compose logs --no-color > artifacts/docker/compose.log
+        run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
         uses: actions/upload-artifact@v7.0.0

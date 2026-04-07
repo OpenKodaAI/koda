@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import yaml
@@ -164,12 +165,21 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     )
 
     payload = json.loads((output_dir / "release-artifacts.json").read_text(encoding="utf-8"))
+    bundle_manifest = json.loads((output_dir / payload["manifest"]).read_text(encoding="utf-8"))
+    bundle_checksums = (output_dir / payload["bundle_dir"] / "CHECKSUMS.txt").read_text(encoding="utf-8")
 
     assert (output_dir / payload["bundle_archive"]).exists()
     assert (output_dir / payload["npm_tarball"]).exists()
     assert (output_dir / payload["asset_checksums"]).exists()
     assert (output_dir / payload["manifest"]).exists()
     assert (output_dir / payload["sbom"]).exists()
+
+    with tarfile.open(output_dir / payload["npm_tarball"], "r:gz") as tarball:
+        manifest_from_npm = json.loads(tarball.extractfile("package/release/manifest.json").read().decode("utf-8"))
+        checksums_from_npm = tarball.extractfile("package/release/CHECKSUMS.txt").read().decode("utf-8")
+
+    assert manifest_from_npm == bundle_manifest
+    assert checksums_from_npm == bundle_checksums
 
 
 def test_release_metadata_is_publication_ready() -> None:
@@ -234,12 +244,16 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "--disable-pip" in workflow_text
     assert 'npm view "${NPM_PACKAGE_NAME}@${VERSION}" version' in workflow_text
     assert "Skip npm publish when version already exists" in workflow_text
+    assert "Repair npm dist-tag with token fallback when needed" in workflow_text
+    assert "Verify npm package version and dist-tag" in workflow_text
+    assert 'npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}"' in workflow_text
     assert 'gh release view "${RELEASE_TAG}"' in workflow_text
     assert "Create or update GitHub release" in workflow_text
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
     assert "Publish status:" in workflow_text
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "docker/build-push-action" in workflow_text
+    assert "bash scripts/docker_smoke.sh" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
     assert "pnpm/action-setup@v5.0.0" in workflow_text
     assert "pnpm/action-setup@v4.2.0" not in workflow_text
@@ -257,17 +271,39 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert payload["permissions"]["actions"] == "write"
     assert payload["permissions"]["contents"] == "write"
     assert "id-token" not in payload["permissions"]
-
     workflow_text = workflow_path.read_text(encoding="utf-8")
-    assert '["pr-quality", "security"]' in workflow_text
-    assert "actions/github-script@v8" in workflow_text
-    assert "gh release view" in workflow_text
-    assert "Skip dispatch when the release already exists for the current tag" in workflow_text
-    assert "Recover publish when the tag exists but the release is still missing" in workflow_text
-    assert "git tag -a" in workflow_text
-    assert 'git push origin "refs/tags/${TAG}"' in workflow_text
-    assert 'workflow_id: "release.yml"' in workflow_text
-    assert "createWorkflowDispatch" in workflow_text
+    assert "--json isDraft,assets" in workflow_text
+    assert "release_ready" in workflow_text
+    assert "npm_ready" in workflow_text
+    assert "dist-tags --json" in workflow_text
+
+
+def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
+    script_path = ROOT / "scripts" / "docker_smoke.sh"
+    script_text = script_path.read_text(encoding="utf-8")
+    cut_release_workflow_text = (ROOT / ".github" / "workflows" / "cut-release-tag.yml").read_text(encoding="utf-8")
+
+    assert script_path.exists()
+    assert "curl -fsSL" in script_text
+    assert "--retry-connrefused" in script_text
+    assert "--retry-all-errors" in script_text
+    assert "docker compose" in script_text
+    assert "docker-inspect.json" in script_text
+    assert "control-plane/setup" in script_text
+    assert "openapi/control-plane.json" in script_text
+
+    assert '["pr-quality", "security"]' in cut_release_workflow_text
+    assert "actions/github-script@v8" in cut_release_workflow_text
+    assert "gh release view" in cut_release_workflow_text
+    assert (
+        "Skip dispatch when the release and npm publication are complete for the current tag"
+        in cut_release_workflow_text
+    )
+    assert "Recover publish when the tag exists but publication is incomplete" in cut_release_workflow_text
+    assert "git tag -a" in cut_release_workflow_text
+    assert 'git push origin "refs/tags/${TAG}"' in cut_release_workflow_text
+    assert 'workflow_id: "release.yml"' in cut_release_workflow_text
+    assert "createWorkflowDispatch" in cut_release_workflow_text
 
 
 def test_release_docs_explain_main_release_automation() -> None:
@@ -281,20 +317,21 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "v<version>" in release_docs_text
     assert "createWorkflowDispatch" not in release_docs_text
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
-    assert "the GitHub release is still missing" in release_docs_text
+    assert "GitHub release is draft, missing assets, or the npm dist-tag is still wrong" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
     assert "release.yml" in release_docs_text
     assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
     assert "optional `release` environment" in release_docs_text
     assert "draft recovery" in release_docs_text
     assert "npm whoami" in release_docs_text
+    assert "dist-tag" in release_docs_text
     legacy_trusted_publishing_guidance = (
         "cut-release-tag.yml` is the workflow that dispatches "
         "`release.yml`, so npm trusted publishing should be configured"
     )
     assert legacy_trusted_publishing_guidance not in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
-    assert "the GitHub release is still missing" in readme_text
+    assert "GitHub release is still draft, missing assets, or the npm dist-tag is still wrong" in readme_text
 
 
 def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:
@@ -356,11 +393,7 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
 
     for workflow_text in (pr_quality_workflow_text, release_workflow_text):
         assert "rhysd/actionlint@v1.7.12" in workflow_text
-        assert "docker compose config -q" in workflow_text
-        assert 'wait_for_url "web health" "http://127.0.0.1:3000/api/health"' in workflow_text
-        assert 'wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"' in workflow_text
-        assert 'wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"' in workflow_text
-        assert "curl -fsS http://127.0.0.1:3000/api/health >/dev/null" in workflow_text
+        assert "bash scripts/docker_smoke.sh" in workflow_text
 
 
 def test_repo_hygiene_workflows_cover_public_docs_and_installation_assets() -> None:
