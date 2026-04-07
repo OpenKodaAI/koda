@@ -18,6 +18,15 @@ env:
   UV_VERSION: "0.10.7"
 
 jobs:
+  workflow-quality:
+    name: workflow-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1
+
   python-quality:
     name: python-quality
     runs-on: ubuntu-latest
@@ -170,6 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs:
+      - workflow-quality
       - python-quality
       - python-tests
       - web-quality
@@ -195,6 +205,7 @@ jobs:
           }
 
           cp .env.example .env
+          docker compose config -q
           docker compose up -d --build
           wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
           wait_for_url "web health" "http://127.0.0.1:3000/api/health"

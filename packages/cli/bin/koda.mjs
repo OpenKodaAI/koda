@@ -119,10 +119,20 @@ function randomSecretUrlSafe(bytes = 32) {
 
 function randomAlphaNumeric(length = 20) {
   const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const bytes = randomBytes(length);
   let output = "";
-  for (const byte of bytes) {
-    output += alphabet[byte % alphabet.length];
+  const maxUnbiasedByte = 256 - (256 % alphabet.length);
+
+  while (output.length < length) {
+    const bytes = randomBytes(length - output.length);
+    for (const byte of bytes) {
+      if (byte >= maxUnbiasedByte) {
+        continue;
+      }
+      output += alphabet[byte % alphabet.length];
+      if (output.length === length) {
+        break;
+      }
+    }
   }
   return output;
 }

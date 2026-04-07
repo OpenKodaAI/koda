@@ -7,6 +7,40 @@ import json
 import pytest
 
 
+def test_validate_frontend_callback_uri_allows_loopback_without_allowlist(monkeypatch):
+    from koda.services import mcp_oauth as oauth_mod
+
+    monkeypatch.delenv("MCP_OAUTH_CALLBACK_BASE_URL", raising=False)
+    monkeypatch.delenv("WEB_PUBLIC_BASE_URL", raising=False)
+
+    assert (
+        oauth_mod._validate_frontend_callback_uri("http://127.0.0.1:3000/oauth/callback")
+        == "http://127.0.0.1:3000/oauth/callback"
+    )
+
+
+def test_validate_frontend_callback_uri_rejects_remote_origin_without_allowlist(monkeypatch):
+    from koda.services import mcp_oauth as oauth_mod
+
+    monkeypatch.delenv("MCP_OAUTH_CALLBACK_BASE_URL", raising=False)
+    monkeypatch.delenv("WEB_PUBLIC_BASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="not allowed"):
+        oauth_mod._validate_frontend_callback_uri("https://app.example.com/oauth/callback")
+
+
+def test_validate_frontend_callback_uri_allows_configured_remote_origin(monkeypatch):
+    from koda.services import mcp_oauth as oauth_mod
+
+    monkeypatch.setenv("MCP_OAUTH_CALLBACK_BASE_URL", "https://app.example.com")
+    monkeypatch.delenv("WEB_PUBLIC_BASE_URL", raising=False)
+
+    assert (
+        oauth_mod._validate_frontend_callback_uri("https://app.example.com/oauth/callback")
+        == "https://app.example.com/oauth/callback"
+    )
+
+
 @pytest.mark.asyncio
 async def test_handle_oauth_callback_rejects_invalid_or_expired_session(monkeypatch):
     from koda.services import mcp_oauth as oauth_mod

@@ -203,6 +203,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     jobs = payload["jobs"]
 
     assert "codeql" in jobs
+    assert "workflow-quality" in jobs
     assert "publish-ghcr" in jobs
     assert "publish-npm" in jobs
     assert "github-release" in jobs
@@ -216,6 +217,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
     assert "docker/build-push-action" in workflow_text
+    assert "rhysd/actionlint@v1" in workflow_text
     assert "pnpm/action-setup@v5.0.0" in workflow_text
     assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
@@ -249,6 +251,8 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     assert "fetch-depth: 0" in security_workflow_text
 
     for workflow_text in (pr_quality_workflow_text, release_workflow_text):
+        assert "rhysd/actionlint@v1" in workflow_text
+        assert "docker compose config -q" in workflow_text
         assert 'wait_for_url "web health" "http://127.0.0.1:3000/api/health"' in workflow_text
         assert 'wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"' in workflow_text
         assert 'wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"' in workflow_text

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from aiohttp import ContentTypeError, web
 
+from koda.logging_config import get_logger
 from koda.services.http_client import inspect_url
 from koda.services.link_analyzer import fetch_link_metadata
 
@@ -75,6 +76,59 @@ def _clip_preview_text(value: Any, *, limit: int) -> str | None:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    existing = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    for key, value in params.items():
+        existing.append((key, value))
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(existing)))
+
+
+def _oauth_relay_completion_page(*, success: bool) -> str:
+    title = "Authentication complete" if success else "Authentication failed"
+    detail = (
+        "You can return to the Koda dashboard and continue."
+        if success
+        else "Return to the Koda dashboard and try the sign-in flow again."
+    )
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #08111a;
+        color: #f4f7fb;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        padding: 24px;
+      }}
+      main {{
+        width: min(560px, 100%);
+        border-radius: 24px;
+        padding: 28px;
+        background: rgba(11, 22, 34, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+      }}
+      h1 {{ margin: 0 0 12px; font-size: 2rem; }}
+      p {{ margin: 0; color: #b9c4d0; line-height: 1.6; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>{title}</h1>
+      <p>{detail}</p>
+    </main>
+  </body>
+</html>"""
 
 
 _PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
@@ -784,18 +838,30 @@ async def oauth_relay_handler(request: web.Request) -> web.Response:
             aio.ClientSession() as session,
             session.get(internal_url, timeout=aio.ClientTimeout(total=10)) as resp,
         ):
-            body = await resp.text()
+            await resp.read()
             clear_oauth_relay_target(session_id)
-            # Return the CLI's response (usually HTML with a success message)
-            return web.Response(
+            if 200 <= resp.status < 300:
+                return web.Response(
+                    status=200,
+                    text=_oauth_relay_completion_page(success=True),
+                    content_type="text/html",
+                )
+            get_logger(__name__).warning(
+                "oauth_relay_cli_callback_unexpected_status",
+                session_id=session_id,
                 status=resp.status,
-                text=body,
-                content_type=resp.content_type or "text/html",
+                content_type=resp.content_type or "",
             )
-    except Exception as exc:
+            return web.Response(
+                status=502,
+                text=_oauth_relay_completion_page(success=False),
+                content_type="text/html",
+            )
+    except Exception:
+        get_logger(__name__).exception("oauth_relay_cli_callback_failed", session_id=session_id)
         return web.Response(
             status=502,
-            text=f"Failed to reach CLI auth server: {exc}",
+            text="Failed to reach CLI auth server.",
             content_type="text/plain",
         )
 
@@ -1723,7 +1789,7 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
     state = request.query.get("state", "")
     code = request.query.get("code", "")
     error = request.query.get("error", "")
-    from koda.services.mcp_oauth import handle_oauth_callback
+    from koda.services.mcp_oauth import _validate_frontend_callback_uri, handle_oauth_callback
 
     result = await handle_oauth_callback(state, code, error=error or None)
     wants_json = request.query.get("mode") == "json" or "application/json" in request.headers.get("Accept", "")
@@ -1736,11 +1802,30 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
     ).strip()
     if not frontend_target:
         return web.json_response(result, status=200 if result.get("success") else 400)
+    try:
+        frontend_target = _validate_frontend_callback_uri(frontend_target)
+    except ValueError:
+        return web.json_response(result, status=200 if result.get("success") else 400)
     if result.get("success"):
         raise web.HTTPFound(
-            f"{frontend_target}?status=success&server_key={result['server_key']}&agent_id={result['agent_id']}"
+            _append_query_params(
+                frontend_target,
+                {
+                    "status": "success",
+                    "server_key": str(result["server_key"]),
+                    "agent_id": str(result["agent_id"]),
+                },
+            )
         )
-    raise web.HTTPFound(f"{frontend_target}?status=error&error={result.get('error', 'token_exchange_failed')}")
+    raise web.HTTPFound(
+        _append_query_params(
+            frontend_target,
+            {
+                "status": "error",
+                "error": str(result.get("error", "token_exchange_failed")),
+            },
+        )
+    )
 
 
 async def refresh_oauth_token_route(request: web.Request) -> web.Response:

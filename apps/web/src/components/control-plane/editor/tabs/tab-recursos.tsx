@@ -39,9 +39,7 @@ function prettifyModelId(modelId: string) {
     .replace(/\b(\d+(?:\.\d+)?)\b/g, "$1")
     .replace(/\b\w/g, (match) => match.toUpperCase())
     .replace(/\bGpt\b/g, "GPT")
-    .replace(/\bOss\b/g, "OSS")
-    .replace(/\bQwen\b/g, "Qwen")
-    .replace(/\bLlama\b/g, "Llama");
+    .replace(/\bOss\b/g, "OSS");
 }
 
 const PROVIDER_LOGOS: Record<string, string> = {

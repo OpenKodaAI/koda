@@ -161,6 +161,19 @@ jobs:
       - name: Mypy type check
         run: uv run mypy koda/ --ignore-missing-imports
 
+  workflow-quality:
+    name: workflow-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1
+
   python-tests:
     name: python-tests
     runs-on: ubuntu-latest
@@ -521,6 +534,7 @@ jobs:
     timeout-minutes: 45
     needs:
       - prepare
+      - workflow-quality
       - python-quality
       - python-tests
       - web-quality
@@ -553,6 +567,7 @@ jobs:
           }
 
           cp .env.example .env
+          docker compose config -q
           docker compose up -d --build
           wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
           wait_for_url "web health" "http://127.0.0.1:3000/api/health"
@@ -589,6 +604,7 @@ jobs:
     timeout-minutes: 20
     needs:
       - prepare
+      - workflow-quality
       - python-quality
       - python-tests
       - web-quality

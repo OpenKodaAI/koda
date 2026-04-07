@@ -5,29 +5,44 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import web
 
 from koda.control_plane import api as control_plane_api
+from koda.control_plane.operator_auth import OperatorAuthContext
 
 
 class _Request:
     def __init__(
         self,
         *,
+        path: str = "/",
         query: dict[str, str] | None = None,
         payload: dict[str, object] | None = None,
+        query_string: str = "",
     ) -> None:
+        self.path = path
         self.query = query or {}
+        self.query_string = query_string
         self.match_info: dict[str, str] = {}
         self.headers: dict[str, str] = {}
         self.can_read_body = payload is not None
         self._payload = payload or {}
+        self._state: dict[str, object] = {}
 
     async def json(self) -> dict[str, object]:
         return dict(self._payload)
+
+    def __setitem__(self, key: str, value: object) -> None:
+        self._state[key] = value
+
+    def __getitem__(self, key: str) -> object:
+        return self._state[key]
+
+    def get(self, key: str, default: object | None = None) -> object | None:
+        return self._state.get(key, default)
 
 
 @pytest.mark.asyncio
@@ -43,6 +58,12 @@ async def test_setup_page_renders_token_free_ui() -> None:
     assert "localStorage" not in response.text
 
 
+def test_public_control_plane_paths_match_exact_and_nested_routes() -> None:
+    assert control_plane_api._is_public_control_plane_api_path("/api/control-plane/auth/login")
+    assert control_plane_api._is_public_control_plane_api_path("/api/control-plane/auth/login/poll")
+    assert not control_plane_api._is_public_control_plane_api_path("/api/control-plane/auth/tokens")
+
+
 def test_control_plane_authorization_fails_closed_without_token() -> None:
     with (
         patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
@@ -53,6 +74,79 @@ def test_control_plane_authorization_fails_closed_without_token() -> None:
     assert response is not None
     assert response.status == 401
     assert json.loads(response.text) == {"error": "operator session is required"}
+
+
+@pytest.mark.asyncio
+async def test_control_plane_auth_middleware_allows_public_auth_path_without_session() -> None:
+    request = _Request(path="/api/control-plane/auth/login")
+    handler = AsyncMock(return_value=web.json_response({"ok": True}))
+
+    with patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"):
+        response = await control_plane_api.control_plane_auth_middleware(request, handler)
+
+    handler.assert_awaited_once_with(request)
+    assert request.get("operator_auth") is None
+    assert json.loads(response.text) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_control_plane_auth_middleware_attaches_context_on_public_auth_path() -> None:
+    request = _Request(path="/api/control-plane/auth/status")
+    request.headers = {"Authorization": "Bearer operator-token"}
+    context = OperatorAuthContext(
+        auth_kind="token",
+        subject_type="personal_token",
+        user_id="op_123",
+        username="atlas",
+        email="atlas@example.com",
+        display_name="Atlas",
+    )
+    auth_service = MagicMock()
+    auth_service.resolve_bearer_token.return_value = context
+    handler = AsyncMock(return_value=web.json_response({"ok": True}))
+
+    with (
+        patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
+        patch("koda.control_plane.api._auth_service", return_value=auth_service),
+    ):
+        response = await control_plane_api.control_plane_auth_middleware(request, handler)
+
+    handler.assert_awaited_once_with(request)
+    assert request.get("operator_auth") == context
+    assert json.loads(response.text) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_control_plane_auth_middleware_rejects_protected_path_without_session() -> None:
+    request = _Request(path="/api/control-plane/auth/tokens")
+    handler = AsyncMock(return_value=web.json_response({"ok": True}))
+
+    with patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"):
+        response = await control_plane_api.control_plane_auth_middleware(request, handler)
+
+    handler.assert_not_awaited()
+    assert response.status == 401
+    assert json.loads(response.text) == {"error": "operator session is required"}
+
+
+@pytest.mark.asyncio
+async def test_control_plane_auth_middleware_injects_development_context() -> None:
+    request = _Request(path="/api/control-plane/auth/tokens")
+
+    async def handler(inner_request: _Request) -> web.Response:
+        context = inner_request.get("operator_auth")
+        assert isinstance(context, OperatorAuthContext)
+        assert context.auth_kind == "development"
+        assert context.username == "dev"
+        return web.json_response({"ok": True})
+
+    with (
+        patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "development"),
+        patch.dict("os.environ", {"NODE_ENV": "development"}, clear=False),
+    ):
+        response = await control_plane_api.control_plane_auth_middleware(request, handler)
+
+    assert json.loads(response.text) == {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -99,6 +193,29 @@ async def test_onboarding_bootstrap_route_accepts_json_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_issue_bootstrap_code_uses_operator_user_id_as_actor() -> None:
+    auth_service = MagicMock()
+    auth_service.resolve_bearer_token.return_value = OperatorAuthContext(
+        auth_kind="token",
+        subject_type="session",
+        user_id="op_123",
+        username="atlas",
+        email="atlas@example.com",
+        display_name="Atlas",
+    )
+    auth_service.issue_bootstrap_code.return_value = {"ok": True, "code": "ABCD-EFGH-IJKL"}
+    request = _Request(payload={"label": "desktop"})
+    request.headers = {"Authorization": "Bearer operator-token"}
+
+    with patch("koda.control_plane.api._auth_service", return_value=auth_service):
+        response = await control_plane_api.auth_issue_bootstrap_code(request)
+
+    auth_service.issue_bootstrap_code.assert_called_once_with(label="desktop", actor="op_123")
+    assert response.status == 201
+    assert json.loads(response.text)["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_control_plane_openapi_route_serves_spec() -> None:
     response = await control_plane_api.control_plane_openapi(_Request())
     payload = json.loads(response.text)
@@ -134,6 +251,14 @@ def test_setup_control_plane_routes_registers_onboarding_surfaces() -> None:
     assert "/api/control-plane/connections/defaults/{connection_key}/verify" in canonicals
     assert "/api/control-plane/integrations/{integration_id}/system" in canonicals
     assert "/api/control-plane/integrations/{integration_id}/health" in canonicals
+
+
+@pytest.mark.asyncio
+async def test_setup_landing_redirects_to_setup_page() -> None:
+    with pytest.raises(web.HTTPFound) as exc_info:
+        await control_plane_api.setup_landing(_Request())
+
+    assert exc_info.value.location == "/setup"
 
 
 def test_doctor_script_reports_expected_checks() -> None:
@@ -384,3 +509,110 @@ async def test_mcp_oauth_routes_cover_start_callback_refresh_revoke_and_status()
     assert json.loads(refresh_response.text) == {"success": True, "agent_id": "ATLAS", "server_key": "linear"}
     assert json.loads(revoke_response.text) == {"success": True, "agent_id": "ATLAS", "server_key": "linear"}
     assert json.loads(status_response.text)["connected"] is True
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_redirect_validates_frontend_target_and_preserves_query() -> None:
+    async def fake_callback(state: str, code: str, error: str | None = None):
+        assert state == "state-1"
+        assert code == "code-1"
+        assert error is None
+        return {
+            "success": True,
+            "server_key": "linear",
+            "agent_id": "ATLAS",
+            "frontend_callback_uri": "https://app.example.com/oauth/callback?existing=1",
+        }
+
+    with (
+        patch.dict("os.environ", {"MCP_OAUTH_CALLBACK_BASE_URL": "https://app.example.com"}, clear=False),
+        patch("koda.services.mcp_oauth.handle_oauth_callback", side_effect=fake_callback),
+    ):
+        request = _Request(query={"state": "state-1", "code": "code-1"})
+
+        with pytest.raises(web.HTTPFound) as exc_info:
+            await control_plane_api.handle_oauth_callback_route(request)
+
+    assert exc_info.value.location.startswith("https://app.example.com/oauth/callback?existing=1")
+    assert "status=success" in exc_info.value.location
+    assert "server_key=linear" in exc_info.value.location
+    assert "agent_id=ATLAS" in exc_info.value.location
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_invalid_frontend_target_returns_json_payload() -> None:
+    async def fake_callback(state: str, code: str, error: str | None = None):
+        return {
+            "success": False,
+            "error": "token_exchange_failed",
+            "frontend_callback_uri": "javascript:alert(1)",
+        }
+
+    with patch("koda.services.mcp_oauth.handle_oauth_callback", side_effect=fake_callback):
+        request = _Request(query={"state": "state-1", "code": "code-1"})
+        response = await control_plane_api.handle_oauth_callback_route(request)
+
+    assert response.status == 400
+    assert json.loads(response.text) == {
+        "success": False,
+        "error": "token_exchange_failed",
+        "frontend_callback_uri": "javascript:alert(1)",
+    }
+
+
+@pytest.mark.asyncio
+async def test_oauth_relay_handler_hides_internal_exception_details() -> None:
+    request = _Request(query_string="code=abc")
+    request.match_info = {"session_id": "session-1"}
+
+    with (
+        patch("koda.services.provider_auth.get_oauth_relay_target", return_value="http://127.0.0.1:4318/callback"),
+        patch("aiohttp.ClientSession", side_effect=RuntimeError("socket refused on 127.0.0.1:4318")),
+    ):
+        response = await control_plane_api.oauth_relay_handler(request)
+
+    assert response.status == 502
+    assert response.text == "Failed to reach CLI auth server."
+    assert "127.0.0.1" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_oauth_relay_handler_returns_generic_success_page() -> None:
+    class _FakeResponse:
+        status = 200
+        content_type = "text/html"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def read(self) -> bytes:
+            return b"<html>internal success page with stack trace details</html>"
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, *args, **kwargs):
+            return _FakeResponse()
+
+    request = _Request(query_string="code=abc")
+    request.match_info = {"session_id": "session-1"}
+
+    with (
+        patch("koda.services.provider_auth.get_oauth_relay_target", return_value="http://127.0.0.1:4318/callback"),
+        patch("koda.services.provider_auth.clear_oauth_relay_target") as clear_target,
+        patch("aiohttp.ClientSession", return_value=_FakeSession()),
+    ):
+        response = await control_plane_api.oauth_relay_handler(request)
+
+    assert response.status == 200
+    assert response.content_type == "text/html"
+    assert "Authentication complete" in response.text
+    assert "stack trace" not in response.text
+    clear_target.assert_called_once_with("session-1")

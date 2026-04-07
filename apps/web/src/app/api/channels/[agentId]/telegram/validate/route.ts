@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+const TELEGRAM_BOT_TOKEN_RE = /^\d{6,}:[A-Za-z0-9_-]{20,}$/;
+
 export async function POST(request: Request) {
   let token: string;
   try {
@@ -23,15 +25,20 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!TELEGRAM_BOT_TOKEN_RE.test(token)) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid Telegram bot token format" },
+      { status: 400 },
+    );
+  }
+
   let telegramData: {
     ok: boolean;
     description?: string;
     result?: { username?: string; first_name?: string };
   };
   try {
-    const telegramRes = await fetch(
-      `https://api.telegram.org/bot${token}/getMe`,
-    );
+    const telegramRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
     telegramData = (await telegramRes.json()) as typeof telegramData;
   } catch {
     return NextResponse.json(

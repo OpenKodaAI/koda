@@ -80,9 +80,7 @@ function prettifyModelId(modelId: string): string {
     .replace(/:latest$/i, "")
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase())
-    .replace(/\bGpt\b/g, "GPT")
-    .replace(/\bLlama\b/g, "Llama")
-    .replace(/\bQwen\b/g, "Qwen");
+    .replace(/\bGpt\b/g, "GPT");
 }
 
 function buildProviderCatalogMap(

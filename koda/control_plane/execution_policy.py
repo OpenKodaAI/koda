@@ -977,12 +977,10 @@ def _matches_value(pattern: Any, value: Any) -> bool:
     normalized_value = _trimmed(value).lower()
     candidate = normalized_pattern.lower()
     if candidate.startswith("^"):
-        try:
-            import re
-
-            return bool(re.search(candidate, normalized_value, re.IGNORECASE))
-        except re.error:
+        literal_prefix = candidate[1:].strip()
+        if not literal_prefix:
             return False
+        return normalized_value.startswith(literal_prefix)
     if "*" in candidate or "?" in candidate:
         return fnmatch(normalized_value, candidate)
     return normalized_value == candidate
