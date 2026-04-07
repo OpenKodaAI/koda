@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,20 +90,13 @@ class TestStdioTransport:
         with pytest.raises(ValueError, match="invalid control characters"):
             _resolve_stdio_command("python\n-m")
 
-    def test_resolve_stdio_command_accepts_existing_explicit_path(self, tmp_path: Path) -> None:
+    def test_resolve_stdio_command_rejects_explicit_path_command(self, tmp_path) -> None:
         command = tmp_path / "koda-mcp"
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
 
-        resolved = _resolve_stdio_command(str(command))
-
-        assert resolved == str(command.resolve())
-
-    def test_resolve_stdio_command_rejects_missing_path_command(self, tmp_path) -> None:
-        missing = tmp_path / "missing-mcp-server"
-
-        with pytest.raises(ValueError, match="does not exist"):
-            _resolve_stdio_command(str(missing))
+        with pytest.raises(ValueError, match="bare executable name"):
+            _resolve_stdio_command(str(command))
 
     def test_resolve_stdio_command_uses_path_lookup_for_bare_commands(self) -> None:
         with patch("shutil.which", return_value="/usr/local/bin/koda-mcp") as mock_which:

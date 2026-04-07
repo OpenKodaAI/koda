@@ -10,7 +10,6 @@ import shutil
 import socket
 import urllib.request
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
@@ -25,12 +24,8 @@ def _resolve_stdio_command(command: str) -> str:
         raise ValueError("stdio transport requires a command")
     if any(char in value for char in ("\x00", "\r", "\n")):
         raise ValueError("stdio transport command contains invalid control characters")
-
     if "/" in value or "\\" in value:
-        resolved_path = Path(value).expanduser().resolve()
-        if not resolved_path.is_file():
-            raise ValueError(f"stdio transport command does not exist: {value}")
-        return str(resolved_path)
+        raise ValueError("stdio transport command must be a bare executable name available on PATH")
 
     resolved_command = shutil.which(value)
     if not resolved_command:
