@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Keep project config/entrypoint files out of the React rule set.
+    "*.config.{js,cjs,mjs,ts}",
+    "server.mjs",
   ]),
 ]);
 

@@ -222,6 +222,19 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
 
+def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:
+    dependabot_path = ROOT / ".github" / "dependabot.yml"
+    payload = yaml.safe_load(dependabot_path.read_text(encoding="utf-8"))
+
+    npm_update = next(update for update in payload["updates"] if update["package-ecosystem"] == "npm")
+    ignores = npm_update["ignore"]
+
+    assert {
+        "dependency-name": "eslint",
+        "update-types": ["version-update:semver-major"],
+    } in ignores
+
+
 def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
