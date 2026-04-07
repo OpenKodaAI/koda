@@ -218,6 +218,8 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "NPM_TOKEN" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
+    assert "Upgrade npm for trusted publishing support" in workflow_text
+    assert "npm install -g npm@^11.5.1" in workflow_text
     assert "uv export" in workflow_text
     assert "--all-extras" in workflow_text
     assert "--no-editable" in workflow_text
@@ -275,6 +277,14 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
     assert "the GitHub release is still missing" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
+    assert "release.yml" in release_docs_text
+    assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
+    assert "optional `release` environment" in release_docs_text
+    legacy_trusted_publishing_guidance = (
+        "cut-release-tag.yml` is the workflow that dispatches "
+        "`release.yml`, so npm trusted publishing should be configured"
+    )
+    assert legacy_trusted_publishing_guidance not in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
     assert "the GitHub release is still missing" in readme_text
 
