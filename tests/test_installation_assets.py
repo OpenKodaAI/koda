@@ -215,11 +215,14 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
     assert "docker/build-push-action" in workflow_text
+    assert "pnpm/action-setup@v5.0.0" in workflow_text
+    assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
 
 def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    pr_quality_workflow_text = (ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8")
     trivy_targets = (
         "koda.sarif --exit-code 1 koda:",
         "koda-web.sarif --exit-code 1 koda-web:",
@@ -234,6 +237,10 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "docker build -f Dockerfile.security -t koda-security:" in workflow_text
         for trivy_target in trivy_targets:
             assert trivy_target in workflow_text
+
+    for workflow_text in (pr_quality_workflow_text, security_workflow_text, release_workflow_text):
+        assert "pnpm/action-setup@v5.0.0" in workflow_text
+        assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
 
 def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
