@@ -1180,6 +1180,16 @@ mod tests {
         );
     }
 
+    fn command_available(program: &str) -> bool {
+        Command::new(program)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
     fn pick_unused_port() -> u16 {
         let listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -1310,6 +1320,10 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn object_storage_roundtrip_is_durable_across_instances() {
         let _env_lock = env_lock().lock().await;
+        if !command_available("initdb") || !command_available("pg_ctl") {
+            eprintln!("skipping postgres durability test because initdb/pg_ctl are unavailable");
+            return;
+        }
         let postgres = PostgresHarness::start();
         let fake_s3 = FakeS3Server::start("artifact-proof-bucket").await;
         let artifact_root = TempDir::new().unwrap();

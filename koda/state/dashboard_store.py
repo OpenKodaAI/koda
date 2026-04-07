@@ -957,7 +957,7 @@ class DashboardStore:
         request = _json_object((envelope or {}).get("request"))
         assistant = _json_object((envelope or {}).get("assistant"))
         resolved_query = matched_query or self._find_best_query_match(scope, task)
-        tools = []
+        tools: list[dict[str, Any]] = []
         if isinstance((envelope or {}).get("tools"), list):
             for index, step in enumerate(cast(list[Any], (envelope or {}).get("tools") or [])):
                 record = step if isinstance(step, dict) else {}

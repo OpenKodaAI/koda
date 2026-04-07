@@ -7844,8 +7844,8 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        provider_connections = {
-            provider_id: self.get_provider_connection(provider_id)
+        provider_connections: dict[str, dict[str, Any]] = {
+            provider_id: _safe_json_object(self.get_provider_connection(provider_id))
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
         }
