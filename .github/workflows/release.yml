@@ -20,7 +20,7 @@ on:
         default: ""
 
 concurrency:
-  group: release-${{ github.event_name }}-${{ inputs.release_ref != '' && inputs.release_ref || github.ref_name }}
+  group: release-${{ inputs.release_ref != '' && inputs.release_ref || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -844,12 +844,28 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Check whether npm package version already exists
+        id: npm_status
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Skip npm publish when version already exists
+        if: steps.npm_status.outputs.published == 'true'
+        run: echo "${NPM_PACKAGE_NAME}@${{ needs.prepare.outputs.version }} is already published; skipping npm publish."
       - name: Publish scoped npm package with trusted publishing
         id: publish_trusted
+        if: steps.npm_status.outputs.published != 'true'
         continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
       - name: Publish scoped npm package with token fallback
-        if: env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -875,7 +891,24 @@ jobs:
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: ${{ env.RELEASE_BUNDLE_DIR }}
+      - name: Check whether GitHub release already exists
+        id: release_status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Skip GitHub release creation when the release already exists
+        if: steps.release_status.outputs.exists == 'true'
+        run: echo "GitHub release ${{ needs.prepare.outputs.release_tag }} already exists; skipping creation."
       - name: Create GitHub release
+        if: steps.release_status.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}

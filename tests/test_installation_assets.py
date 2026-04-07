@@ -244,10 +244,12 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert "workflow_dispatch" in trigger
     assert payload["permissions"]["actions"] == "write"
     assert payload["permissions"]["contents"] == "write"
+    assert payload["permissions"]["id-token"] == "write"
 
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert '["pr-quality", "security"]' in workflow_text
     assert "actions/github-script@v8" in workflow_text
+    assert "gh release view" in workflow_text
     assert "git tag -a" in workflow_text
     assert 'git push origin "refs/tags/${TAG}"' in workflow_text
     assert 'workflow_id: "release.yml"' in workflow_text
@@ -265,7 +267,10 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "v<version>" in release_docs_text
     assert "createWorkflowDispatch" not in release_docs_text
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
+    assert "the GitHub release is still missing" in release_docs_text
+    assert "cut-release-tag.yml" in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
+    assert "the GitHub release is still missing" in readme_text
 
 
 def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:

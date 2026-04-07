@@ -17,6 +17,7 @@ concurrency:
 permissions:
   actions: write
   contents: write
+  id-token: write
 
 jobs:
   cut-release-tag:
@@ -157,7 +158,7 @@ jobs:
           fi
 
       - name: Stop when the version tag already exists
-        if: steps.existing.outputs.exists == 'true'
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -169,6 +170,35 @@ jobs:
           else
             echo "Tag ${TAG} already exists at ${TAG_SHA}; repository version is unchanged on ${TARGET_SHA}, so no new release tag will be created."
           fi
+
+      - name: Check whether GitHub release already exists for the current tag
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha
+        id: release_state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "release_exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "release_exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Skip dispatch when the release already exists for the current tag
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_exists == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "Tag ${TAG} already exists and its GitHub release is present; nothing to do."
+
+      - name: Recover publish when the tag exists but the release is still missing
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_exists != 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "Tag ${TAG} already exists on the validated commit, but the GitHub release is missing; dispatching release.yml for recovery."
 
       - name: Create and push release tag
         if: steps.existing.outputs.exists != 'true'
@@ -184,7 +214,7 @@ jobs:
           git push origin "refs/tags/${TAG}"
 
       - name: Dispatch release workflow for the tag
-        if: steps.existing.outputs.exists != 'true'
+        if: steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_exists != 'true')
         uses: actions/github-script@v8
         env:
           TAG: ${{ steps.version.outputs.tag }}
