@@ -60,6 +60,10 @@ Only after those gates pass does the workflow:
 - publish the scoped npm package with provenance
 - create a GitHub Release with the bundle archive, manifest, checksums, SBOM, and npm tarball
 
+If a publish job fails after the tag already exists, the workflow now updates the GitHub Release as a draft recovery
+record instead of leaving the version without any release surface. The draft keeps the built assets attached, names the
+failing publish jobs, and gives operators a stable recovery target for rerunning `release.yml`.
+
 Stable releases publish the `latest` tag on npm and the `latest` tag on GHCR. Prereleases publish with the npm
 dist-tag `next` and do not overwrite `latest` on the container registry.
 
@@ -155,12 +159,14 @@ The publish job upgrades npm before the trusted-publishing attempt so it meets t
 OIDC-based publishing.
 
 If that path is not yet configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls
-back to that token only after the trusted-publishing attempt fails.
+back to that token only after the trusted-publishing attempt fails. The publish job also runs `npm whoami` with the
+fallback token ahead of time so a broken token fails with a clearer diagnostic instead of only surfacing at the final
+`npm publish`.
 
 Recommended GitHub setup:
 
 - create a `release` environment in the repository settings before the first public publish
-- protect a `release` environment and require manual approval if your team wants a final human gate
+- protect the `release` environment in production and require manual approval if your team wants a final human gate
 - configure npm trusted publishing for `OpenKodaAI/koda`, [release.yml](../../.github/workflows/release.yml), and the
   optional `release` environment if you want npm to bind trust to the protected deploy stage
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
