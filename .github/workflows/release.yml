@@ -20,7 +20,7 @@ on:
         default: ""
 
 concurrency:
-  group: release-${{ github.event_name }}-${{ github.ref_name }}
+  group: release-${{ github.event_name }}-${{ inputs.release_ref != '' && inputs.release_ref || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       publish: ${{ steps.resolve.outputs.publish }}
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -70,12 +71,19 @@ jobs:
             exit 1
           fi
 
+          if [ "${publish}" = "true" ]; then
+            checkout_ref="refs/tags/${release_ref}"
+          else
+            checkout_ref="${release_ref}"
+          fi
+
           echo "ref=${release_ref}" >> "${GITHUB_OUTPUT}"
+          echo "checkout_ref=${checkout_ref}" >> "${GITHUB_OUTPUT}"
           echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
 
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ steps.resolve.outputs.ref }}
+          ref: ${{ steps.resolve.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Validate release version contract
@@ -124,7 +132,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -155,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -195,7 +203,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: pnpm/action-setup@v4.2.0
         with:
@@ -222,7 +230,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -254,7 +262,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -276,7 +284,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -322,7 +330,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -403,7 +411,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4.35.1
@@ -426,7 +434,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Build container images
         run: |
@@ -506,7 +514,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Build primary Docker image
         run: docker build -t koda:ci .
@@ -566,7 +574,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
@@ -599,7 +607,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
@@ -651,7 +659,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -695,14 +703,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Publish scoped npm package with trusted publishing
+        id: publish_trusted
+        continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
+        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag latest
       - name: Publish scoped npm package with token fallback
-        if: env.HAS_NPM_TOKEN == 'true'
+        if: env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Publish scoped npm package with trusted publishing
-        if: env.HAS_NPM_TOKEN != 'true'
-        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --tag latest
 
   github-release:
     name: github-release

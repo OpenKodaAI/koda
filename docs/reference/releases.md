@@ -6,7 +6,7 @@ Koda ships one product release contract across npm, GHCR, and GitHub Releases.
 
 - npm package: `@openkodaai/koda`
 - executable command after install: `koda`
-- container images: `ghcr.io/openkodaai/koda-app`, `koda-web`, `koda-memory`, `koda-security`
+- container images: `ghcr.io/openkodaai/koda-app`, `ghcr.io/openkodaai/koda-web`, `ghcr.io/openkodaai/koda-memory`, `ghcr.io/openkodaai/koda-security`
 - release archive: `koda-<version>.tar.gz`
 
 Install or update through npm:
@@ -97,8 +97,9 @@ The publish workflow expects:
 - GitHub `id-token: write` for npm provenance
 - npm authentication configured for the `@openkodaai` scope
 
-The preferred npm path is trusted publishing tied to the repository workflow itself. The fallback path is the
-repository Actions secret `NPM_TOKEN`, which the workflow consumes only in the `publish-npm` job when present.
+The preferred npm path is trusted publishing tied to the repository workflow itself. If that path is not yet
+configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls back to that token only
+after the trusted-publishing attempt fails.
 
 Recommended GitHub setup:
 

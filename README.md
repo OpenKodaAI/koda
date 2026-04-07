@@ -73,6 +73,9 @@ cd /opt/koda
 ./scripts/install.sh
 ```
 
+That wrapper automates Docker and Node.js installation only on apt-based Linux hosts with `sudo`. On macOS or
+other environments, install those prerequisites yourself and use the npm CLI path directly.
+
 When the installer completes, start in the dashboard:
 
 - Dashboard setup: `http://127.0.0.1:3000/control-plane/setup`

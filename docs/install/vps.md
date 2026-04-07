@@ -20,6 +20,7 @@ koda install --headless
 
 For source-based administration or contributor workflows you can still use the repository wrapper,
 which installs the npm CLI locally and stages the release bundle into `.koda-release/`.
+That wrapper only automates dependency installation on apt-based Linux with `sudo`.
 
 ## Reverse Proxy
 
@@ -82,17 +83,22 @@ Adjust `WorkingDirectory`, install it as a real unit, and enable it after the co
 Run:
 
 ```bash
-python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
+koda doctor
 ```
 
 Then finish product configuration through `/control-plane/setup` in the dashboard.
 
 ## Upgrade Path
 
-- install the new npm CLI release or run `npx @openkodaai/koda@latest update`
-- rerun `koda update`
-- let the CLI run doctor checks and rollback automatically if the new bundle is unhealthy
-- verify control-plane health and setup status
+Choose one update path:
+
+- global install path:
+  `npm install -g @openkodaai/koda && koda update`
+- one-off path without a global upgrade:
+  `npx @openkodaai/koda@latest update`
+
+In both cases the CLI runs doctor checks and rolls back automatically if the new bundle is unhealthy.
+Afterward, verify control-plane health and setup status.
 
 ## Existing Bundled Object-Storage Installs
 

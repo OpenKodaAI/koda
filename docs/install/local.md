@@ -29,6 +29,9 @@ cd ./koda
 ./scripts/install.sh
 ```
 
+The wrapper only automates dependency installation on apt-based Linux hosts with `sudo`. On macOS
+or other environments, install Docker and Node.js yourself and use the npm CLI path directly.
+
 The installer will:
 
 1. verify Docker and the Koda npm CLI prerequisites
@@ -107,13 +110,16 @@ The quickstart path does not require per-agent env configuration, provider crede
 Run the built-in diagnostic command at any time:
 
 ```bash
-python3 scripts/doctor.py \
-  --env-file .env \
-  --base-url http://127.0.0.1:8090 \
-  --dashboard-url http://127.0.0.1:3000
+koda doctor
 ```
 
-The doctor validates bootstrap configuration, storage connectivity, secrets, dashboard reachability, and control-plane reachability.
+Or, without a global install:
+
+```bash
+npx @openkodaai/koda@latest doctor
+```
+
+The packaged doctor validates bootstrap configuration, storage connectivity, secrets, dashboard reachability, and control-plane reachability for the installed product directory.
 
 ## Manual Startup
 
@@ -124,6 +130,8 @@ cp .env.example .env
 docker compose up -d --build
 python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
 ```
+
+The Python doctor path above is only for source-based/manual repository bootstraps.
 
 ## Troubleshooting
 
