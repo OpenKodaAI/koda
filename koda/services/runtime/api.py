@@ -28,7 +28,7 @@ class _SilentRuntimeMessage:
 
     def __init__(self, text: str = "") -> None:
         self.text = text
-        self.message_id = int(hashlib.sha1(text.encode()).hexdigest()[:8], 16) or 1
+        self.message_id = int(hashlib.blake2s(text.encode(), digest_size=4).hexdigest(), 16) or 1
 
     async def edit_text(self, text: str, *_args: object, **_kwargs: object) -> _SilentRuntimeMessage:
         self.text = text
@@ -117,7 +117,7 @@ async def _json_payload(request: web.Request) -> dict[str, object]:
 
 def _dashboard_actor_id(*, namespace: str, session_id: str) -> int:
     seed = f"{AGENT_ID}:{namespace}:{session_id}".encode()
-    return 1_000_000_000 + int(hashlib.sha1(seed).hexdigest()[:12], 16) % 900_000_000
+    return 1_000_000_000 + int(hashlib.blake2s(seed, digest_size=8).hexdigest()[:12], 16) % 900_000_000
 
 
 def _include_sensitive(request: web.Request) -> bool:

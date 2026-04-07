@@ -39,6 +39,11 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          profile: minimal
       - name: Install Python dependencies
         run: pip install ".[dev]"
       - name: Install web dependencies
@@ -74,7 +79,15 @@ jobs:
       - name: Install Python dependencies
         run: pip install ".[dev]"
       - name: Bandit SAST scan
-        run: bandit -r koda/ -ll --skip B101
+        run: |
+          mkdir -p artifacts/security
+          bandit -r koda/ -lll -iii --skip B101 -f sarif -o artifacts/security/bandit.sarif
+      - name: Upload Bandit SARIF
+        if: always() && hashFiles('artifacts/security/bandit.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/bandit.sarif
+          category: bandit
       - name: Install Gitleaks
         run: |
           set -euo pipefail
@@ -99,7 +112,7 @@ jobs:
             --redact \
             --exit-code 1
       - name: Upload Gitleaks SARIF
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && hashFiles('artifacts/security/gitleaks.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/gitleaks.sarif

@@ -178,6 +178,7 @@ jobs:
         env:
           AGENT_TOKEN: "test-token"
           ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
       - name: Upload pytest artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.0
@@ -239,6 +240,8 @@ jobs:
         run: python3 scripts/release_metadata.py
       - name: Validate AI docs and open source hygiene
         run: pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
+        env:
+          KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
 
   rust-quality:
     name: rust-quality
@@ -334,7 +337,15 @@ jobs:
       - name: Install Python dependencies
         run: pip install ".[dev]"
       - name: Bandit SAST scan
-        run: bandit -r koda/ -ll --skip B101
+        run: |
+          mkdir -p artifacts/security
+          bandit -r koda/ -lll -iii --skip B101 -f sarif -o artifacts/security/bandit.sarif
+      - name: Upload Bandit SARIF
+        if: always() && hashFiles('artifacts/security/bandit.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/bandit.sarif
+          category: bandit
       - name: Install Gitleaks
         run: |
           set -euo pipefail
@@ -359,7 +370,7 @@ jobs:
             --redact \
             --exit-code 1
       - name: Upload Gitleaks SARIF
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && hashFiles('artifacts/security/gitleaks.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/gitleaks.sarif

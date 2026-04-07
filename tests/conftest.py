@@ -65,11 +65,18 @@ def _no_repo_root_database_residue():
 @pytest.fixture(scope="session", autouse=True)
 def _security_guard_service():
     """Make the Rust security guard service available to the test suite."""
+    if os.environ.get("KODA_SKIP_SECURITY_GUARD_SERVICE", "").strip() == "1":
+        yield
+        return
+
     from koda import config
     from koda.internal_rpc.common import resolve_grpc_target
 
     target, _transport = resolve_grpc_target(config.SECURITY_GRPC_TARGET)
     channel = grpc.insecure_channel(target)
+    startup_timeout = float(
+        os.environ.get("KODA_SECURITY_GUARD_STARTUP_TIMEOUT", "90" if os.environ.get("CI") else "20")
+    )
     try:
         grpc.channel_ready_future(channel).result(timeout=0.5)
         yield
@@ -80,31 +87,48 @@ def _security_guard_service():
     root = Path(__file__).resolve().parents[1]
     env = dict(os.environ)
     env["SECURITY_GRPC_TARGET"] = target
-    proc = subprocess.Popen(
-        [
-            "cargo",
-            "run",
-            "-p",
-            "koda-security-service",
-            "--manifest-path",
-            str(root / "rust" / "Cargo.toml"),
-        ],
-        cwd=root,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    try:
-        grpc.channel_ready_future(channel).result(timeout=20.0)
-        yield
-    finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as log_file:
+        proc = subprocess.Popen(
+            [
+                "cargo",
+                "run",
+                "-p",
+                "koda-security-service",
+                "--manifest-path",
+                str(root / "rust" / "Cargo.toml"),
+            ],
+            cwd=root,
+            env=env,
+            stdout=log_file,
+            stderr=log_file,
+            text=True,
+        )
+        try:
+            grpc.channel_ready_future(channel).result(timeout=startup_timeout)
+        except Exception:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            log_file.flush()
+            log_file.seek(0)
+            log_excerpt = log_file.read().strip()
+            tail = "\n".join(log_excerpt.splitlines()[-40:])
+            pytest.fail(
+                "Timed out while starting the Rust security guard service"
+                f" after {startup_timeout:.0f}s.\n{tail or 'No service logs were captured.'}"
+            )
+        try:
+            yield
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
 
 
 @pytest.fixture
