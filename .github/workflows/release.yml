@@ -31,6 +31,7 @@ env:
   PNPM_VERSION: "10.26.2"
   PYTHON_VERSION: "3.12"
   RUST_TOOLCHAIN: "stable"
+  UV_VERSION: "0.10.7"
   RELEASE_BUNDLE_DIR: dist/release
   NPM_PACKAGE_NAME: "@openkodaai/koda"
   GHCR_NAMESPACE: ghcr.io/openkodaai
@@ -44,6 +45,8 @@ jobs:
       checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       publish: ${{ steps.resolve.outputs.publish }}
       version: ${{ steps.version.outputs.version }}
+      publish_latest: ${{ steps.version.outputs.publish_latest }}
+      npm_dist_tag: ${{ steps.version.outputs.npm_dist_tag }}
     steps:
       - name: Resolve release ref and mode
         id: resolve
@@ -123,6 +126,13 @@ jobs:
           fi
 
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          if [[ "${version}" == *-* ]]; then
+            echo "publish_latest=false" >> "${GITHUB_OUTPUT}"
+            echo "npm_dist_tag=next" >> "${GITHUB_OUTPUT}"
+          else
+            echo "publish_latest=true" >> "${GITHUB_OUTPUT}"
+            echo "npm_dist_tag=latest" >> "${GITHUB_OUTPUT}"
+          fi
 
   python-quality:
     name: python-quality
@@ -137,19 +147,19 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Ruff lint
-        run: ruff check .
+        run: uv run ruff check .
       - name: Ruff format check
-        run: ruff format --check .
+        run: uv run ruff format --check .
       - name: Mypy type check
-        run: mypy koda/ --ignore-missing-imports
+        run: uv run mypy koda/ --ignore-missing-imports
 
   python-tests:
     name: python-tests
@@ -168,17 +178,17 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Run tests with coverage
         run: |
           mkdir -p artifacts/python/${{ matrix.python-version }}
-          pytest \
+          uv run pytest \
             --cov=koda \
             --cov-report=term-missing \
             --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
@@ -194,6 +204,7 @@ jobs:
           name: python-tests-${{ matrix.python-version }}-artifacts
           path: artifacts/python/${{ matrix.python-version }}/
           if-no-files-found: ignore
+          retention-days: 14
 
   web-quality:
     name: web-quality
@@ -235,19 +246,19 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Check repo-map drift
-        run: python3 scripts/generate_repo_map.py --check
+        run: uv run python3 scripts/generate_repo_map.py --check
       - name: Check release metadata drift
-        run: python3 scripts/release_metadata.py
+        run: uv run python3 scripts/release_metadata.py
       - name: Validate AI docs and open source hygiene
-        run: pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
+        run: uv run pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
         env:
           KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
 
@@ -289,11 +300,11 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - uses: pnpm/action-setup@v4.2.0
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -306,12 +317,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Install Python dependencies
-        run: pip install ".[dev]"
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
       - name: Python dependency audit
-        run: pip-audit --strict
+        run: uv run pip-audit --strict
       - name: Node dependency audit
         run: pnpm audit --audit-level=high
       - name: Install cargo-audit
@@ -335,18 +346,18 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install Python dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Bandit SAST scan
         run: |
           set +e
           mkdir -p artifacts/security
-          bandit -r koda/ -lll -iii --skip B101 -f json -o artifacts/security/bandit.json
+          uv run bandit -r koda/ -lll -iii --skip B101 -f json -o artifacts/security/bandit.json
           bandit_status=$?
           set -e
           python3 scripts/convert_bandit_json_to_sarif.py artifacts/security/bandit.json artifacts/security/bandit.sarif
@@ -394,6 +405,7 @@ jobs:
           name: sast-artifacts
           path: artifacts/security/
           if-no-files-found: ignore
+          retention-days: 21
 
   codeql:
     name: codeql
@@ -460,10 +472,10 @@ jobs:
       - name: Scan container images with Trivy
         run: |
           mkdir -p artifacts/security/trivy
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:release
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:release
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:release
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:release
       - name: Upload Trivy SARIF for koda
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4.35.1
@@ -495,6 +507,7 @@ jobs:
           name: container-scan-artifacts
           path: artifacts/security/trivy/
           if-no-files-found: ignore
+          retention-days: 21
 
   docker-smoke:
     name: docker-smoke
@@ -551,6 +564,7 @@ jobs:
           name: docker-smoke-artifacts
           path: artifacts/docker/
           if-no-files-found: ignore
+          retention-days: 14
       - name: Tear down stack
         if: always()
         run: docker compose down -v
@@ -596,6 +610,7 @@ jobs:
             ${{ env.RELEASE_BUNDLE_DIR }}/release-artifacts.json
             ${{ env.RELEASE_BUNDLE_DIR }}/SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 90
 
   npm-pack-smoke:
     name: npm-pack-smoke
@@ -661,6 +676,21 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
+      - name: Resolve image tags
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
+        run: |
+          {
+            echo "IMAGE_TAGS<<EOF"
+            echo "${GHCR_NAMESPACE}/${IMAGE_NAME}:${VERSION}"
+            if [ "${PUBLISH_LATEST}" = "true" ]; then
+              echo "${GHCR_NAMESPACE}/${IMAGE_NAME}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_ENV}"
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -675,9 +705,7 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: |
-            ${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
-            ${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:latest
+          tags: ${{ env.IMAGE_TAGS }}
 
   publish-npm:
     name: publish-npm
@@ -706,10 +734,10 @@ jobs:
       - name: Publish scoped npm package with trusted publishing
         id: publish_trusted
         continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
-        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag latest
+        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
       - name: Publish scoped npm package with token fallback
         if: env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
-        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag latest
+        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

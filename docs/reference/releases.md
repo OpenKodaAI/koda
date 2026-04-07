@@ -50,7 +50,7 @@ python3 scripts/release_metadata.py --write
 The release workflow is designed to publish only after these gates pass:
 
 1. quality: `ruff`, format check, `mypy`, `pytest --cov`, web lint/test/build, repo-map/docs hygiene, Rust checks
-2. security: dependency audits, Bandit, Gitleaks, CodeQL, and container scanning
+2. security: dependency audits, Bandit, Gitleaks, CodeQL, and container scanning that fails on fixable HIGH/CRITICAL findings
 3. Docker smoke: the stack boots and serves health, dashboard, and control-plane surfaces
 4. packaged-install smoke: the release CLI is packed with `npm pack`, installed from its tarball, and must complete `install`, `doctor`, `auth issue-code`, `update`, and `uninstall`
 
@@ -59,6 +59,9 @@ Only after those gates pass does the workflow:
 - push the versioned GHCR images
 - publish the scoped npm package with provenance
 - create a GitHub Release with the bundle archive, manifest, checksums, SBOM, and npm tarball
+
+Stable releases publish the `latest` tag on npm and the `latest` tag on GHCR. Prereleases publish with the npm
+dist-tag `next` and do not overwrite `latest` on the container registry.
 
 ## Artifact Build Commands
 

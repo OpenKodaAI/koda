@@ -14,6 +14,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_VERSION: "0.10.7"
+
 jobs:
   python-quality:
     name: python-quality
@@ -24,19 +27,19 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Ruff lint
-        run: ruff check .
+        run: uv run ruff check .
       - name: Ruff format check
-        run: ruff format --check .
+        run: uv run ruff format --check .
       - name: Mypy type check
-        run: mypy koda/ --ignore-missing-imports
+        run: uv run mypy koda/ --ignore-missing-imports
 
   python-tests:
     name: python-tests-${{ matrix.python-version }}
@@ -51,17 +54,17 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Run tests with coverage
         run: |
           mkdir -p artifacts/python/${{ matrix.python-version }}
-          pytest \
+          uv run pytest \
             --cov=koda \
             --cov-report=term-missing \
             --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
@@ -77,6 +80,7 @@ jobs:
           name: python-tests-${{ matrix.python-version }}-artifacts
           path: artifacts/python/${{ matrix.python-version }}/
           if-no-files-found: ignore
+          retention-days: 14
 
   web-quality:
     name: web-quality
@@ -109,6 +113,7 @@ jobs:
           name: web-quality-artifacts
           path: artifacts/web/
           if-no-files-found: ignore
+          retention-days: 14
 
   repo-hygiene:
     name: repo-hygiene
@@ -119,17 +124,17 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Check repo-map drift
-        run: python3 scripts/generate_repo_map.py --check
+        run: uv run python3 scripts/generate_repo_map.py --check
       - name: Validate AI docs and open source hygiene
-        run: pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
+        run: uv run pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
         env:
           KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
 
@@ -201,6 +206,7 @@ jobs:
           name: docker-smoke-artifacts
           path: artifacts/docker/
           if-no-files-found: ignore
+          retention-days: 14
       - name: Tear down stack
         if: always()
         run: docker compose down -v

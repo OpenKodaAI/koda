@@ -3,46 +3,22 @@ import { vi } from "vitest";
 
 if (typeof window !== "undefined") {
   const storageState = new Map<string, string>();
-  const localStorageValue =
-    (window.localStorage as Partial<Storage> | undefined) ?? {};
-
-  if (typeof localStorageValue.getItem !== "function") {
-    Object.defineProperty(localStorageValue, "getItem", {
-      value: vi.fn((key: string) => storageState.get(key) ?? null),
-      writable: true,
-      configurable: true,
-    });
-  }
-
-  if (typeof localStorageValue.setItem !== "function") {
-    Object.defineProperty(localStorageValue, "setItem", {
-      value: vi.fn((key: string, value: string) => {
-        storageState.set(key, String(value));
-      }),
-      writable: true,
-      configurable: true,
-    });
-  }
-
-  if (typeof localStorageValue.removeItem !== "function") {
-    Object.defineProperty(localStorageValue, "removeItem", {
-      value: vi.fn((key: string) => {
-        storageState.delete(key);
-      }),
-      writable: true,
-      configurable: true,
-    });
-  }
-
-  if (typeof localStorageValue.clear !== "function") {
-    Object.defineProperty(localStorageValue, "clear", {
-      value: vi.fn(() => {
-        storageState.clear();
-      }),
-      writable: true,
-      configurable: true,
-    });
-  }
+  const localStorageValue: Storage = {
+    get length() {
+      return storageState.size;
+    },
+    clear: vi.fn(() => {
+      storageState.clear();
+    }),
+    getItem: vi.fn((key: string) => storageState.get(key) ?? null),
+    key: vi.fn((index: number) => Array.from(storageState.keys())[index] ?? null),
+    removeItem: vi.fn((key: string) => {
+      storageState.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      storageState.set(key, String(value));
+    }),
+  };
 
   Object.defineProperty(window, "localStorage", {
     value: localStorageValue,
