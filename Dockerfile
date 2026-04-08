@@ -1,5 +1,5 @@
 # Multi-stage build: Python + Node (for provider CLIs)
-FROM node:22-slim AS node-base
+FROM node:25-slim AS node-base
 
 # Install provider CLIs globally
 RUN npm install -g \
@@ -8,7 +8,7 @@ RUN npm install -g \
     @google/gemini-cli \
     @googleworkspace/cli
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
