@@ -646,7 +646,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: ${{ env.RELEASE_BUNDLE_DIR }}
@@ -771,13 +771,13 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_ENV}"
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -803,7 +803,7 @@ jobs:
     env:
       HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: ${{ env.RELEASE_BUNDLE_DIR }}
@@ -922,7 +922,7 @@ jobs:
       contents: write
     steps:
       - name: Download release bundle artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: ${{ env.RELEASE_BUNDLE_DIR }}
