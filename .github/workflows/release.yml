@@ -869,15 +869,7 @@ jobs:
           fi
 
           dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
-          current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 - <<'PY'
-          from __future__ import annotations
-
-          import json
-          import os
-
-          print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))
-          PY
-          )"
+          current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
 
           if [ "${current_dist_tag_version}" = "${VERSION}" ]; then
             exit 0
@@ -900,15 +892,7 @@ jobs:
             fi
 
             dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
-            current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 - <<'PY'
-            from __future__ import annotations
-
-            import json
-            import os
-
-            print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))
-            PY
-            )"
+            current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
 
             if [ "${version_state}" = "${VERSION}" ] && [ "${current_dist_tag_version}" = "${VERSION}" ]; then
               exit 0
@@ -973,13 +957,17 @@ jobs:
           fi
 
           if [ "${#failed_jobs[@]}" -eq 0 ]; then
-            echo "draft=false" >> "${GITHUB_OUTPUT}"
-            echo "title=Koda v${{ needs.prepare.outputs.version }}" >> "${GITHUB_OUTPUT}"
-            echo "failed_jobs=" >> "${GITHUB_OUTPUT}"
+            {
+              echo "draft=false"
+              echo "title=Koda v${{ needs.prepare.outputs.version }}"
+              echo "failed_jobs="
+            } >> "${GITHUB_OUTPUT}"
           else
-            echo "draft=true" >> "${GITHUB_OUTPUT}"
-            echo "title=Koda v${{ needs.prepare.outputs.version }} (publish recovery required)" >> "${GITHUB_OUTPUT}"
-            echo "failed_jobs=$(IFS=,; echo "${failed_jobs[*]}")" >> "${GITHUB_OUTPUT}"
+            {
+              echo "draft=true"
+              echo "title=Koda v${{ needs.prepare.outputs.version }} (publish recovery required)"
+              echo "failed_jobs=$(IFS=,; echo "${failed_jobs[*]}")"
+            } >> "${GITHUB_OUTPUT}"
           fi
       - name: Build release notes body
         shell: bash

@@ -189,10 +189,12 @@ jobs:
         run: |
           set -euo pipefail
           if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft,assets > release-state.json 2>/dev/null; then
-            echo "release_exists=false" >> "${GITHUB_OUTPUT}"
-            echo "release_ready=false" >> "${GITHUB_OUTPUT}"
-            echo "release_draft=false" >> "${GITHUB_OUTPUT}"
-            echo "missing_assets=" >> "${GITHUB_OUTPUT}"
+            {
+              echo "release_exists=false"
+              echo "release_ready=false"
+              echo "release_draft=false"
+              echo "missing_assets="
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           echo "release_exists=true" >> "${GITHUB_OUTPUT}"
