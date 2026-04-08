@@ -288,6 +288,8 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert "release_ready" in workflow_text
     assert "npm_ready" in workflow_text
     assert "dist-tags --json" in workflow_text
+    assert "Fail when the version tag already exists on an older commit but publication is incomplete" in workflow_text
+    assert "Do not retarget ${TAG}; ship a new patch version from this commit instead." in workflow_text
 
 
 def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
@@ -312,6 +314,14 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
         in cut_release_workflow_text
     )
     assert "Recover publish when the tag exists but publication is incomplete" in cut_release_workflow_text
+    assert (
+        "Stop when the version tag already exists on an older commit and publication is complete"
+        in cut_release_workflow_text
+    )
+    assert (
+        "Fail when the version tag already exists on an older commit but publication is incomplete"
+        in cut_release_workflow_text
+    )
     assert "git tag -a" in cut_release_workflow_text
     assert 'git push origin "refs/tags/${TAG}"' in cut_release_workflow_text
     assert (
@@ -339,6 +349,8 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "createWorkflowDispatch" not in release_docs_text
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
     assert "GitHub release is draft, missing assets, or the npm dist-tag is still wrong" in release_docs_text
+    assert "the workflow fails loudly and requires a new patch version" in release_docs_text
+    assert "treat it as immutable" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
     assert "release.yml" in release_docs_text
     assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
@@ -354,6 +366,8 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert legacy_trusted_publishing_guidance not in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
     assert "GitHub release is still draft, missing assets, or the npm dist-tag is still wrong" in readme_text
+    assert "fails loudly so the next merge must ship a new" in readme_text
+    assert "patch version instead of trying to reuse an escaped semantic tag" in readme_text
 
 
 def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:

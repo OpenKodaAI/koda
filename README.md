@@ -1,5 +1,6 @@
-<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%; background-color: #000000;">
-  <img src="public/koda_hero.jpeg" alt="Koda" width="30%" />
+<div align="center" style="display: flex; position: relative; height: 250px; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%; background-color: #000000;">
+  <img src="public/koda_hero.jpeg" alt="Koda" width="50%" />
+    <img src="docs/assets/brand/koda-hero.png" alt="Koda illustration" style="position: absolute; right: -2px; top: 0; bottom: 0;" width="25%" />
 </div>
 
 <p align="center">
@@ -22,10 +23,6 @@
   <a href="docs/install/local.md"><img alt="SeaweedFS" src="https://img.shields.io/badge/SeaweedFS-S3--compatible%20storage-0F766E?style=flat-square" /></a>
   <a href="docs/reference/api.md"><img alt="Control Plane" src="https://img.shields.io/badge/Control%20Plane-Public%20HTTP%20surface-111827?style=flat-square" /></a>
   <a href="docs/architecture/runtime.md"><img alt="Runtime" src="https://img.shields.io/badge/Runtime-Inspectable%20execution-374151?style=flat-square" /></a>
-</p>
-
-<p align="center">
-  <img src="docs/assets/brand/koda-hero.png" alt="Koda illustration" width="20%" />
 </p>
 
 <p align="center">
@@ -109,7 +106,9 @@ Public releases are cut from `main` by version. When the repository version chan
 `pr-quality` and `security`, GitHub Actions creates the matching `v<version>` tag and the release workflow publishes
 the npm package, GHCR images, and GitHub Release assets from that tag. If the tag already exists on the validated
 commit but the GitHub release is still draft, missing assets, or the npm dist-tag is still wrong, the tag-cut
-workflow dispatches the publish workflow again for recovery instead of silently stopping.
+workflow dispatches the publish workflow again for recovery instead of silently stopping. If that tag already belongs
+to an older commit and publication is incomplete, the workflow now fails loudly so the next merge must ship a new
+patch version instead of trying to reuse an escaped semantic tag.
 
 ## What The Stack Starts
 
