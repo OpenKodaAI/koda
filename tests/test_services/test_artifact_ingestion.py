@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -632,69 +630,39 @@ class TestArtifactExtraction:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         class _FakePage:
-            def get_text(self, mode: str) -> str:
-                assert mode == "text"
+            def extract_text(self) -> str:
                 return (
                     "Native PDF text with enough detail to avoid OCR fallback, "
                     "including reproduction steps and expected behavior."
                 )
 
         class _FakeDocument:
-            def __len__(self) -> int:
-                return 1
+            pages = [_FakePage()]
 
-            def __getitem__(self, index: int):
-                assert index == 0
-                return _FakePage()
-
-        fake_fitz = SimpleNamespace(open=lambda _: _FakeDocument(), Matrix=lambda x, y: (x, y))
-        with (
-            patch.dict(sys.modules, {"fitz": fake_fitz}),
-            patch("koda.services.artifact_ingestion._ocr_image_bytes") as mock_ocr,
-        ):
+        with patch("pypdf.PdfReader", return_value=_FakeDocument()):
             extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
 
-        mock_ocr.assert_not_called()
         assert extracted.status == ArtifactStatus.COMPLETE
         assert "Native PDF text" in extracted.text_content
 
     @pytest.mark.asyncio
-    async def test_extract_pdf_uses_ocr_when_native_text_is_missing(self, tmp_path, artifact_cache_dir):
+    async def test_extract_pdf_marks_partial_when_native_text_is_missing(self, tmp_path, artifact_cache_dir):
         pdf_path = tmp_path / "scan.pdf"
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
-        class _FakePixmap:
-            def tobytes(self, fmt: str) -> bytes:
-                assert fmt == "png"
-                return b"png-bytes"
-
         class _FakePage:
-            def get_text(self, mode: str) -> str:
-                assert mode == "text"
+            def extract_text(self) -> str:
                 return ""
 
-            def get_pixmap(self, matrix):
-                assert matrix is not None
-                return _FakePixmap()
-
         class _FakeDocument:
-            def __len__(self) -> int:
-                return 1
+            pages = [_FakePage()]
 
-            def __getitem__(self, index: int):
-                assert index == 0
-                return _FakePage()
-
-        fake_fitz = SimpleNamespace(open=lambda _: _FakeDocument(), Matrix=lambda x, y: (x, y))
-        with (
-            patch.dict(sys.modules, {"fitz": fake_fitz}),
-            patch("koda.services.artifact_ingestion._ocr_image_bytes", return_value="Screenshot text"),
-        ):
+        with patch("pypdf.PdfReader", return_value=_FakeDocument()):
             extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
 
-        assert extracted.status == ArtifactStatus.COMPLETE
-        assert "Screenshot text" in extracted.text_content
-        assert any("OCR applied on page 1" in warning for warning in extracted.warnings)
+        assert extracted.status == ArtifactStatus.PARTIAL
+        assert "Could not extract readable text" in extracted.summary
+        assert any("No readable text extracted from page 1." in warning for warning in extracted.warnings)
 
     @pytest.mark.asyncio
     async def test_extract_spreadsheet_summarizes_hidden_sheets_and_formulas(self, tmp_path, artifact_cache_dir):

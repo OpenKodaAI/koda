@@ -102,7 +102,7 @@ jobs:
           snyk test \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release \
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/node-open-source.sarif
           status=$?
@@ -146,7 +146,7 @@ jobs:
           snyk monitor \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release
           snyk monitor \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
