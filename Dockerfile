@@ -13,8 +13,9 @@ FROM python:3.12-slim
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RUNNING_IN_DOCKER=true
+ENV UV_VERSION=0.10.7
 
-RUN python -m pip install --no-cache-dir --upgrade pip==26.0
+RUN python -m pip install --no-cache-dir --upgrade pip==26.0 uv==${UV_VERSION}
 
 # Copy Node.js, npm helpers, and provider CLIs from node stage
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
@@ -76,12 +77,21 @@ RUN useradd -m -s /bin/bash botuser
 
 WORKDIR /app
 
-# Install Python dependencies first (cache layer)
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Install locked Python dependencies first (cache layer)
+COPY pyproject.toml uv.lock ./
+RUN uv export \
+        --format requirements.txt \
+        --locked \
+        --no-editable \
+        --no-emit-project \
+        --no-emit-workspace \
+        --no-header \
+        --no-annotate \
+        --output-file /tmp/runtime-requirements.txt \
+    && pip install --no-cache-dir -r /tmp/runtime-requirements.txt \
+    && rm -f /tmp/runtime-requirements.txt
 
 # Copy application code
-COPY pyproject.toml ./
 COPY koda/ koda/
 COPY docs/openapi/ docs/openapi/
 COPY agent.py ./

@@ -314,6 +314,15 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
     assert "Recover publish when the tag exists but publication is incomplete" in cut_release_workflow_text
     assert "git tag -a" in cut_release_workflow_text
     assert 'git push origin "refs/tags/${TAG}"' in cut_release_workflow_text
+    assert (
+        "if: steps.version.outcome == 'success' && steps.existing.outputs.exists != 'true'" in cut_release_workflow_text
+    )
+    assert (
+        "if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || "
+        "(steps.existing.outputs.tag_sha == steps.target.outputs.sha && "
+        "(steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))"
+        in cut_release_workflow_text
+    )
     assert 'workflow_id: "release.yml"' in cut_release_workflow_text
     assert "createWorkflowDispatch" in cut_release_workflow_text
 
@@ -427,6 +436,21 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in web_dockerfile
     assert 'CMD ["node", "server.mjs"]' in web_dockerfile
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
+
+
+def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
+    app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ENV UV_VERSION=0.10.7" in app_dockerfile
+    assert "pip==26.0 uv==${UV_VERSION}" in app_dockerfile
+    assert "COPY pyproject.toml uv.lock ./" in app_dockerfile
+    assert "uv export" in app_dockerfile
+    assert "--locked" in app_dockerfile
+    assert "--no-emit-project" in app_dockerfile
+    assert "--no-emit-workspace" in app_dockerfile
+    assert "/tmp/runtime-requirements.txt" in app_dockerfile
+    assert "COPY requirements.txt ./" not in app_dockerfile
+    assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
 
 
 def test_doctor_checks_dashboard_and_control_plane() -> None:

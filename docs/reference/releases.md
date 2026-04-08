@@ -58,6 +58,9 @@ The Docker smoke gate is shared between PR validation and release publication th
 [`../../scripts/docker_smoke.sh`](../../scripts/docker_smoke.sh). The script retries connection-refused and other
 transient HTTP startup failures, then captures `docker compose ps`, image metadata, logs, and `docker inspect`
 output if the stack still does not stabilize. That keeps the release gate strict while making recovery actionable.
+The Python runtime image exports its install set from [`../../uv.lock`](../../uv.lock) during the Docker build, so
+the published container uses the same locked dependency graph that passed CI instead of resolving a fresh unpinned
+set at release time.
 
 Only after those gates pass does the workflow:
 
