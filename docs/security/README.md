@@ -26,3 +26,5 @@ Use this set when you need:
 - Repository automation includes GitHub-native scanning plus an optional dedicated Snyk workflow when `SNYK_TOKEN` is
   configured. The repository-level [`.snyk`](../../.snyk) file excludes generated build artifacts, local virtualenvs,
   and packaged release bundles from Snyk Code import so scans stay focused on first-party manifests and shipped source.
+  The Snyk Open Source workflow exports lockfile-pinned Python requirements, syncs all uv groups and extras into the
+  local `.venv`, and points Snyk at that interpreter so CI scans match the repository's real dependency graph.

@@ -67,7 +67,7 @@ jobs:
 
       - name: Sync Python dependencies
         if: env.SNYK_TOKEN != ''
-        run: uv sync --locked
+        run: uv sync --locked --all-groups --all-extras
 
       - name: Install web dependencies
         if: env.SNYK_TOKEN != ''
@@ -118,6 +118,8 @@ jobs:
           snyk test \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/python-open-source.sarif
           status=$?
@@ -147,7 +149,9 @@ jobs:
             --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release
           snyk monitor \
             --file=artifacts/security/snyk/python-requirements.txt \
-            --package-manager=pip
+            --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''
@@ -162,7 +166,11 @@ jobs:
         if: env.SNYK_TOKEN != ''
         shell: bash
         run: |
-          if [ "${{ steps.node_scan.outputs.status }}" != "0" ] || [ "${{ steps.python_scan.outputs.status }}" != "0" ]; then
+          node_status="${{ steps.node_scan.outputs.status }}"
+          python_status="${{ steps.python_scan.outputs.status }}"
+          if [ "${node_status}" != "0" ] || [ "${python_status}" != "0" ]; then
+            echo "Snyk Node scan status: ${node_status}" >&2
+            echo "Snyk Python scan status: ${python_status}" >&2
             echo "Snyk reported high-severity issues or a scan failure." >&2
             exit 1
           fi
