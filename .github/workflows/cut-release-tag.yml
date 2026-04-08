@@ -165,22 +165,8 @@ jobs:
             echo "tag_sha=" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Stop when the version tag already exists
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha
-        shell: bash
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          TAG_SHA: ${{ steps.existing.outputs.tag_sha }}
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-        run: |
-          if [ "${TAG_SHA}" = "${TARGET_SHA}" ]; then
-            echo "Tag ${TAG} already exists at ${TARGET_SHA}; nothing to do."
-          else
-            echo "Tag ${TAG} already exists at ${TAG_SHA}; repository version is unchanged on ${TARGET_SHA}, so no new release tag will be created."
-          fi
-
-      - name: Check whether GitHub release is complete for the current tag
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha
+      - name: Check whether GitHub release is complete for the existing tag
+        if: steps.existing.outputs.exists == 'true'
         id: release_state
         shell: bash
         env:
@@ -224,8 +210,8 @@ jobs:
           print(f"missing_assets={','.join(missing_assets)}")
           PY
 
-      - name: Check whether npm publication is complete for the current tag
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha
+      - name: Check whether npm publication is complete for the existing tag
+        if: steps.existing.outputs.exists == 'true'
         id: npm_state
         shell: bash
         env:
@@ -261,6 +247,38 @@ jobs:
           print(f"expected_dist_tag={expected_dist_tag}")
           print(f"current_dist_tag_version={current_dist_tag_version}")
           PY
+
+      - name: Stop when the version tag already exists on an older commit and publication is complete
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_SHA: ${{ steps.existing.outputs.tag_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          echo "Tag ${TAG} already exists at ${TAG_SHA}; publication is complete, so the newer commit ${TARGET_SHA} will not reuse or retarget that version."
+
+      - name: Fail when the version tag already exists on an older commit but publication is incomplete
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_SHA: ${{ steps.existing.outputs.tag_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RELEASE_DRAFT: ${{ steps.release_state.outputs.release_draft }}
+          MISSING_ASSETS: ${{ steps.release_state.outputs.missing_assets }}
+          VERSION_PUBLISHED: ${{ steps.npm_state.outputs.version_published }}
+          EXPECTED_DIST_TAG: ${{ steps.npm_state.outputs.expected_dist_tag }}
+          CURRENT_DIST_TAG_VERSION: ${{ steps.npm_state.outputs.current_dist_tag_version }}
+        run: |
+          echo "Tag ${TAG} already exists at ${TAG_SHA}, but its publication is incomplete." >&2
+          echo "release_draft=${RELEASE_DRAFT:-false}" >&2
+          echo "missing_assets=${MISSING_ASSETS:-none}" >&2
+          echo "version_published=${VERSION_PUBLISHED:-false}" >&2
+          echo "expected_dist_tag=${EXPECTED_DIST_TAG:-unknown}" >&2
+          echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}" >&2
+          echo "The validated commit is ${TARGET_SHA}. Do not retarget ${TAG}; ship a new patch version from this commit instead." >&2
+          exit 1
 
       - name: Skip dispatch when the release and npm publication are complete for the current tag
         if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'

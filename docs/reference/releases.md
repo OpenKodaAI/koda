@@ -94,8 +94,12 @@ This keeps release publication idempotent:
 
 - if `v<version>` already exists on the current commit and the GitHub release is published, complete, and the npm dist-tag already points to that version, the tag-cut workflow exits without creating a duplicate release
 - if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow dispatches `release.yml` again for recovery
-- if `v<version>` already exists on an older commit, the workflow exits without retagging or publishing a duplicate package
+- if `v<version>` already exists on an older commit and that publication is complete, the workflow exits without retagging or publishing a duplicate package
+- if `v<version>` already exists on an older commit but the GitHub release or npm publication is incomplete, the workflow fails loudly and requires a new patch version from the validated commit
 - to ship a new public release, bump the repository version first, then merge to `main`
+
+This is intentional: once a semantic tag has escaped the repository, treat it as immutable. Recovery from a partially
+published older tag should happen through a new patch release, not by retargeting that tag to a different commit.
 
 For backfills, recovery, or operator-controlled releases, you can still:
 
