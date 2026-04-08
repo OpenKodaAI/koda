@@ -23,5 +23,5 @@ rapidocr-onnxruntime>=1.2.3
 requests>=2.33.0
 prometheus_client>=0.20
 pybreaker>=1.0
-cryptography>=46.0.6
+cryptography>=46.0.7
 grpcio>=1.74
