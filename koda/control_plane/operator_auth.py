@@ -28,6 +28,7 @@ from .settings import (
 )
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_BOOTSTRAP_INSERT_ATTEMPTS = 5
 _PASSWORD_MIN_LENGTH = 8
 
 
@@ -160,33 +161,57 @@ class OperatorAuthService:
         return payload
 
     def issue_bootstrap_code(self, *, label: str = "cli", actor: str | None = None) -> dict[str, Any]:
-        code = _random_code()
         now = _utc_now()
         expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
-        execute(
-            """
-            INSERT INTO cp_bootstrap_codes (
-                id,
-                code_hash,
-                code_hint,
-                purpose,
-                created_at,
-                expires_at,
-                issued_by,
-                metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                f"boot_{uuid4().hex}",
-                _hash_secret(code),
-                code[-4:],
-                "owner_setup",
-                now_iso(),
-                expires_at.isoformat(),
-                _safe_text(actor),
-                json_dump({"label": _safe_text(label)}),
-            ),
-        )
+        code = ""
+        last_error: Exception | None = None
+        for _ in range(_BOOTSTRAP_INSERT_ATTEMPTS):
+            code = _random_code()
+            bootstrap_id = f"boot_{uuid4().hex}"
+            code_hash = _hash_secret(code)
+            issued_at = now_iso()
+            try:
+                inserted = execute(
+                    """
+                    INSERT INTO cp_bootstrap_codes (
+                        id,
+                        code_hash,
+                        code_hint,
+                        purpose,
+                        created_at,
+                        expires_at,
+                        issued_by,
+                        metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (
+                        bootstrap_id,
+                        code_hash,
+                        code[-4:],
+                        "owner_setup",
+                        issued_at,
+                        expires_at.isoformat(),
+                        _safe_text(actor),
+                        json_dump({"label": _safe_text(label)}),
+                    ),
+                )
+            except Exception as exc:
+                message = str(exc).lower()
+                if "code_hash" in message and "unique" in message:
+                    last_error = exc
+                    continue
+                raise
+
+            if inserted:
+                break
+
+            existing = fetch_one("SELECT * FROM cp_bootstrap_codes WHERE id = ?", (bootstrap_id,))
+            if existing is not None and str(existing.get("code_hash") or "") == code_hash:
+                break
+        else:
+            raise RuntimeError("Could not issue a setup code. Please retry.") from last_error
+
         emit_security("security.operator_bootstrap_code_issued", actor=actor, label=label)
         return {
             "ok": True,
