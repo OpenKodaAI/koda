@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { createHash, randomBytes } from "node:crypto";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -473,10 +473,12 @@ async function updateCommand(args) {
   const manifestArg = consumeOption(args, "--manifest", undefined);
   const installDir = resolveInstallDir(args);
   const { manifest, releaseRoot } = await loadManifest(manifestArg);
-  const backupDir = join(installDir, ".rollback");
+  let backupRoot = null;
+  let backupDir = null;
 
-  await rm(backupDir, { recursive: true, force: true });
   if (existsSync(installDir)) {
+    backupRoot = await mkdtemp(join(tmpdir(), "koda-rollback-"));
+    backupDir = join(backupRoot, basename(installDir));
     await cp(installDir, backupDir, { recursive: true, force: true });
   }
 
@@ -486,13 +488,17 @@ async function updateCommand(args) {
     await verifyBundledChecksums(installDir, manifest);
     runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
     await doctorCommand(["--dir", installDir]);
-    await rm(backupDir, { recursive: true, force: true });
+    if (backupRoot !== null) {
+      await rm(backupRoot, { recursive: true, force: true });
+    }
   } catch (error) {
-    if (existsSync(backupDir)) {
+    if (backupDir !== null && existsSync(backupDir)) {
       await rm(installDir, { recursive: true, force: true });
       await cp(backupDir, installDir, { recursive: true, force: true });
       runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
-      await rm(backupDir, { recursive: true, force: true });
+      if (backupRoot !== null) {
+        await rm(backupRoot, { recursive: true, force: true });
+      }
     }
     throw error;
   }
