@@ -102,6 +102,7 @@ def build_package_json(version: str) -> dict:
         "repository": {
             "type": "git",
             "url": f"git+{REPOSITORY_URL}.git",
+            "directory": "packages/cli",
         },
         "homepage": f"{REPOSITORY_URL}#readme",
         "bugs": {
@@ -149,7 +150,7 @@ def build_sbom(version: str, *, created_at: str | None = None) -> dict:
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": "koda-release-bundle",
-        "documentNamespace": f"https://openkoda.ai/spdx/koda-release-bundle-{version}",
+        "documentNamespace": f"urn:openkodaai:spdx:koda-release-bundle:{version}",
         "creationInfo": {
             "created": created,
             "creators": [

@@ -23,7 +23,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenKodaAI/koda.git"
+    "url": "git+https://github.com/OpenKodaAI/koda.git",
+    "directory": "packages/cli"
   },
   "homepage": "https://github.com/OpenKodaAI/koda#readme",
   "bugs": {

@@ -26,6 +26,12 @@ npx @openkodaai/koda@latest update
 The npm package contains only the product-facing CLI and the product-only release bundle. It does not ship the
 source tree, tests, CI helpers, or development overlays.
 
+The npm package page README is generated from the repository root README into
+[`../../packages/cli/README.md`](../../packages/cli/README.md) before publication so the registry page stays aligned
+with the product quickstart, setup flow, and reference links. npm only updates the package-page README when a new
+version is published, so README drift is blocked in CI and release validation through
+[`../../scripts/sync_npm_readme.py`](../../scripts/sync_npm_readme.py).
+
 ## Version Source Of Truth
 
 Release versioning is anchored to [`pyproject.toml`](../../pyproject.toml).
@@ -128,6 +134,7 @@ gh workflow run release.yml --ref main -f mode=dry-run -f release_ref=main
 Build the releasable assets locally:
 
 ```bash
+python3 scripts/sync_npm_readme.py --write
 python3 scripts/build_release_artifacts.py --output-dir dist/release-artifacts
 ```
 

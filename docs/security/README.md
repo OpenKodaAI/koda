@@ -23,3 +23,6 @@ Use this set when you need:
 - These documents cover the repository, the bundled local stack, and the public web/control-plane/runtime surfaces.
 - They do not replace a formal external penetration test, production architecture review, or legal/compliance audit.
 - Residual risks that depend on reverse proxies, TLS termination, IAM, backups, WAF, logging, and production hosting remain explicitly called out in the documents below.
+- Repository automation includes GitHub-native scanning plus an optional dedicated Snyk workflow when `SNYK_TOKEN` is
+  configured. The repository-level [`.snyk`](../../.snyk) file excludes generated build artifacts, local virtualenvs,
+  and packaged release bundles from Snyk Code import so scans stay focused on first-party manifests and shipped source.
