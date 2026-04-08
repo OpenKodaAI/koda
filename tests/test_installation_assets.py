@@ -156,6 +156,18 @@ def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> Non
     assert not any("node_modules" in path for path in built_files)
 
 
+def test_release_compose_carries_bootstrap_and_runtime_tokens_into_app_service() -> None:
+    compose_text = (ROOT / "packages" / "cli" / "release" / "bundle" / "docker-compose.release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'CONTROL_PLANE_API_TOKEN: "${CONTROL_PLANE_API_TOKEN:?Set CONTROL_PLANE_API_TOKEN in .env}"' in compose_text
+    assert 'RUNTIME_LOCAL_UI_TOKEN: "${RUNTIME_LOCAL_UI_TOKEN:?Set RUNTIME_LOCAL_UI_TOKEN in .env}"' in compose_text
+    web_block = compose_text.split("  web:")[1].split("  security:")[0]
+    assert "CONTROL_PLANE_API_TOKEN" not in web_block
+    assert "RUNTIME_LOCAL_UI_TOKEN" not in web_block
+
+
 def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path) -> None:
     output_dir = tmp_path / "release-artifacts"
     subprocess.run(

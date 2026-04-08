@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Koda Control Plane API",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Maintained public contract for platform setup, control-plane product configuration, and runtime access."
   },
   "servers": [
