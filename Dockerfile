@@ -8,7 +8,7 @@ RUN npm install -g \
     @google/gemini-cli \
     @googleworkspace/cli
 
-FROM python:3.12-slim
+FROM python:3.15-rc-alpine3.22
 
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
