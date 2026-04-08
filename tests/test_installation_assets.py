@@ -210,6 +210,13 @@ def test_release_metadata_is_publication_ready() -> None:
     assert openapi_payload["info"]["version"] == package_payload["version"]
 
 
+def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    assert 'mkdtemp(join(tmpdir(), "koda-rollback-"))' in cli_text
+    assert 'join(installDir, ".rollback")' not in cli_text
+
+
 def test_systemd_example_operates_docker_compose() -> None:
     unit_text = (ROOT / "koda.service.example").read_text(encoding="utf-8")
 
