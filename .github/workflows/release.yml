@@ -830,27 +830,9 @@ jobs:
         run: |
           set -euo pipefail
           published="$(
-            python3 - <<'PY'
-            import json
-            import os
-            import urllib.error
-            import urllib.parse
-            import urllib.request
-
-            name = os.environ["NPM_PACKAGE_NAME"]
-            version = os.environ["VERSION"]
-            url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}"
-            try:
-                with urllib.request.urlopen(url, timeout=20) as response:
-                    payload = json.load(response)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    payload = {}
-                else:
-                    raise
-            versions = payload.get("versions") or {}
-            print("true" if version in versions else "false")
-            PY
+            python3 scripts/npm_registry_metadata.py exists \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}"
           )"
           echo "published=${published}" >> "${GITHUB_OUTPUT}"
       - name: Skip npm publish when version already exists
@@ -890,30 +872,10 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t registry_state < <(
-            python3 - <<'PY'
-            import json
-            import os
-            import urllib.error
-            import urllib.parse
-            import urllib.request
-
-            name = os.environ["NPM_PACKAGE_NAME"]
-            version = os.environ["VERSION"]
-            dist_tag = os.environ["DIST_TAG"]
-            url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}"
-            try:
-                with urllib.request.urlopen(url, timeout=20) as response:
-                    payload = json.load(response)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    payload = {}
-                else:
-                    raise
-            versions = payload.get("versions") or {}
-            dist_tags = payload.get("dist-tags") or {}
-            print(str((versions.get(version) or {}).get("version", "")))
-            print(str(dist_tags.get(dist_tag, "")))
-            PY
+            python3 scripts/npm_registry_metadata.py state \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}" \
+              --dist-tag "${DIST_TAG}"
           )
 
           version_state="${registry_state[0]:-}"
@@ -937,30 +899,10 @@ jobs:
           set -euo pipefail
           for _attempt in $(seq 1 24); do
             mapfile -t registry_state < <(
-              python3 - <<'PY'
-              import json
-              import os
-              import urllib.error
-              import urllib.parse
-              import urllib.request
-
-              name = os.environ["NPM_PACKAGE_NAME"]
-              version = os.environ["VERSION"]
-              dist_tag = os.environ["DIST_TAG"]
-              url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}"
-              try:
-                  with urllib.request.urlopen(url, timeout=20) as response:
-                      payload = json.load(response)
-              except urllib.error.HTTPError as exc:
-                  if exc.code == 404:
-                      payload = {}
-                  else:
-                      raise
-              versions = payload.get("versions") or {}
-              dist_tags = payload.get("dist-tags") or {}
-              print(str((versions.get(version) or {}).get("version", "")))
-              print(str(dist_tags.get(dist_tag, "")))
-              PY
+              python3 scripts/npm_registry_metadata.py state \
+                --package "${NPM_PACKAGE_NAME}" \
+                --version "${VERSION}" \
+                --dist-tag "${DIST_TAG}"
             )
 
             version_state="${registry_state[0]:-}"
@@ -974,25 +916,8 @@ jobs:
           done
 
           echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
-          python3 - <<'PY' || true
-          import json
-          import os
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-
-          name = os.environ["NPM_PACKAGE_NAME"]
-          url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}"
-          try:
-              with urllib.request.urlopen(url, timeout=20) as response:
-                  payload = json.load(response)
-          except urllib.error.HTTPError as exc:
-              if exc.code == 404:
-                  payload = {}
-              else:
-                  raise
-          print(json.dumps(payload.get("dist-tags") or {}, indent=2, sort_keys=True))
-          PY
+          python3 scripts/npm_registry_metadata.py dist-tags \
+            --package "${NPM_PACKAGE_NAME}" || true
           exit 1
 
   github-release:

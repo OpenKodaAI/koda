@@ -270,8 +270,10 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "Repair npm dist-tag with token fallback when needed" in workflow_text
     assert "Verify npm package version and dist-tag" in workflow_text
     assert 'npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}"' in workflow_text
-    assert "https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}" in workflow_text
-    assert 'payload.get("dist-tags") or {}' in workflow_text
+    assert "python3 scripts/npm_registry_metadata.py exists" in workflow_text
+    assert "python3 scripts/npm_registry_metadata.py state" in workflow_text
+    assert "python3 scripts/npm_registry_metadata.py dist-tags" in workflow_text
+    assert (ROOT / "scripts" / "npm_registry_metadata.py").exists()
     assert 'gh release view "${RELEASE_TAG}"' in workflow_text
     assert "Create or update GitHub release" in workflow_text
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
