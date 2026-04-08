@@ -52,6 +52,38 @@ def test_control_plane_execute_falls_back_to_primary_execute_when_table_has_no_i
     assert affected == 1
 
 
+def test_control_plane_execute_does_not_reinsert_when_returning_text_primary_key():
+    import koda.control_plane.database as database
+
+    with (
+        patch("koda.control_plane.database.STATE_BACKEND", "postgres"),
+        patch("koda.control_plane.database.get_primary_state_backend", return_value=object()),
+        patch("koda.control_plane.database.primary_fetch_val", new=AsyncMock(return_value="boot_abc123")),
+        patch("koda.control_plane.database.primary_execute", new=AsyncMock(return_value=1)) as primary_execute,
+    ):
+        affected = database.execute(
+            """
+            INSERT INTO cp_bootstrap_codes (
+                id, code_hash, code_hint, purpose, created_at, expires_at, issued_by, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "boot_abc123",
+                "hash",
+                "C123",
+                "owner_setup",
+                "2026-04-08T00:00:00+00:00",
+                "2026-04-08T01:00:00+00:00",
+                "",
+                "{}",
+            ),
+        )
+
+    primary_execute.assert_not_awaited()
+    assert affected == 1
+
+
 def test_control_plane_with_connection_replays_operations_in_primary_mode():
     import koda.control_plane.database as database
 
