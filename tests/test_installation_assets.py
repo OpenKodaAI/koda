@@ -282,7 +282,7 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert "workflow_dispatch" in trigger
     assert payload["permissions"]["actions"] == "write"
     assert payload["permissions"]["contents"] == "write"
-    assert "id-token" not in payload["permissions"]
+    assert payload["permissions"]["id-token"] == "write"
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert "--json isDraft,assets" in workflow_text
     assert "release_ready" in workflow_text
@@ -342,6 +342,7 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "cut-release-tag.yml" in release_docs_text
     assert "release.yml" in release_docs_text
     assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
+    assert "Grant `id-token: write` to both `release.yml` and `cut-release-tag.yml`" in release_docs_text
     assert "optional `release` environment" in release_docs_text
     assert "draft recovery" in release_docs_text
     assert "npm whoami" in release_docs_text

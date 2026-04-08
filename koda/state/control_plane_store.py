@@ -75,7 +75,15 @@ def execute(query: str, params: tuple[Any, ...] = ()) -> int:
     if normalized[:6].upper() == "INSERT" and "RETURNING " not in normalized.upper():
         try:
             inserted = run_coro_sync(primary_fetch_val(f"{normalized} RETURNING id", params))
-            return int(inserted or 0)
+            if inserted in (None, ""):
+                return 0
+            try:
+                return int(inserted)
+            except (TypeError, ValueError):
+                # Many control-plane tables use text primary keys such as "boot_*" or "usr_*".
+                # A non-empty RETURNING payload means the insert already succeeded and must not
+                # fall through to a second INSERT attempt.
+                return 1
         except Exception:
             return int(run_coro_sync(primary_execute(normalized, params)) or 0)
     return int(run_coro_sync(primary_execute(normalized, params)) or 0)

@@ -162,6 +162,8 @@ the automatic path starts from [`../../.github/workflows/cut-release-tag.yml`](.
 Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`, and include the `release` environment
 name in npm if you want the OIDC trust relationship to match the protected publish jobs exactly. The `release.yml`
 publish job needs `id-token: write` because it is the workflow that actually runs `npm publish`.
+Grant `id-token: write` to both `release.yml` and `cut-release-tag.yml` so the automatic dispatch path and the direct
+publish path both satisfy npm's current OIDC expectations.
 
 The publish job upgrades npm before the trusted-publishing attempt so it meets the current npm CLI requirement for
 OIDC-based publishing.
