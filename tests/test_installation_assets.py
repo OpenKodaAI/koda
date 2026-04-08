@@ -314,6 +314,15 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
     assert "Recover publish when the tag exists but publication is incomplete" in cut_release_workflow_text
     assert "git tag -a" in cut_release_workflow_text
     assert 'git push origin "refs/tags/${TAG}"' in cut_release_workflow_text
+    assert (
+        "if: steps.version.outcome == 'success' && steps.existing.outputs.exists != 'true'" in cut_release_workflow_text
+    )
+    assert (
+        "if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || "
+        "(steps.existing.outputs.tag_sha == steps.target.outputs.sha && "
+        "(steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))"
+        in cut_release_workflow_text
+    )
     assert 'workflow_id: "release.yml"' in cut_release_workflow_text
     assert "createWorkflowDispatch" in cut_release_workflow_text
 

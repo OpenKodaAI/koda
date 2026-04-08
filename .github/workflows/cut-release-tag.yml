@@ -287,7 +287,7 @@ jobs:
           echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}"
 
       - name: Create and push release tag
-        if: steps.existing.outputs.exists != 'true'
+        if: steps.version.outcome == 'success' && steps.existing.outputs.exists != 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -300,7 +300,7 @@ jobs:
           git push origin "refs/tags/${TAG}"
 
       - name: Dispatch release workflow for the tag
-        if: steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true'))
+        if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))
         uses: actions/github-script@v8
         env:
           TAG: ${{ steps.version.outputs.tag }}
