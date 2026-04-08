@@ -577,40 +577,7 @@ jobs:
       - name: Build primary Docker image
         run: docker build -t koda:ci .
       - name: Bring up stack and smoke test
-        run: |
-          wait_for_url() {
-            local name="$1"
-            local url="$2"
-            for ((attempt = 0; attempt < 90; attempt++)); do
-              if curl -fsS "$url" >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            echo "Timed out waiting for ${name} at ${url}" >&2
-            return 1
-          }
-
-          cp .env.example .env
-          docker compose config -q
-          docker compose up -d --build
-          wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
-          wait_for_url "web health" "http://127.0.0.1:3000/api/health"
-          wait_for_url "dashboard root" "http://127.0.0.1:3000/"
-          wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"
-          wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"
-          curl -fsS http://127.0.0.1:8090/health
-          curl -fsS http://127.0.0.1:3000/api/health >/dev/null
-          curl -fsS http://127.0.0.1:3000/ >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane/setup >/dev/null
-          curl -fsS http://127.0.0.1:3000/control-plane >/dev/null
-          curl -fsS http://127.0.0.1:8090/openapi/control-plane.json >/dev/null
-      - name: Capture docker logs
-        if: failure()
-        run: |
-          mkdir -p artifacts/docker
-          docker compose ps > artifacts/docker/compose-ps.txt
-          docker compose logs --no-color > artifacts/docker/compose.log
+        run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
         uses: actions/upload-artifact@v7.0.0
@@ -844,6 +811,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing support
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
+      - name: Validate npm token fallback identity
+        id: npm_token_status
+        if: env.HAS_NPM_TOKEN == 'true'
+        continue-on-error: true
+        run: npm whoami --registry=https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Check whether npm package version already exists
         id: npm_status
         shell: bash
@@ -864,11 +843,67 @@ jobs:
         if: steps.npm_status.outputs.published != 'true'
         continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+      - name: Abort token fallback when npm authentication is invalid
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure' && steps.npm_token_status.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "Trusted publishing failed and the configured NPM_TOKEN did not pass npm whoami." >&2
+          echo "Fix the token or the npm trusted publisher binding before retrying release.yml." >&2
+          exit 1
       - name: Publish scoped npm package with token fallback
         if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
         run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Repair npm dist-tag with token fallback when needed
+        if: env.HAS_NPM_TOKEN == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
+          current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
+
+          if [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+            exit 0
+          fi
+
+          npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}" --registry=https://registry.npmjs.org
+      - name: Verify npm package version and dist-tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+        run: |
+          set -euo pipefail
+          for _attempt in $(seq 1 24); do
+            version_state=""
+            if version_state="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org 2>/dev/null)"; then
+              :
+            else
+              version_state=""
+            fi
+
+            dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
+            current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
+
+            if [ "${version_state}" = "${VERSION}" ] && [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
+          npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org || true
+          exit 1
 
   github-release:
     name: github-release
@@ -881,7 +916,7 @@ jobs:
       - ensure-release-tag
       - publish-ghcr
       - publish-npm
-    if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    if: always() && needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
     environment: release
     permissions:
       contents: write
@@ -904,35 +939,80 @@ jobs:
           else
             echo "exists=false" >> "${GITHUB_OUTPUT}"
           fi
-      - name: Skip GitHub release creation when the release already exists
-        if: steps.release_status.outputs.exists == 'true'
-        run: echo "GitHub release ${{ needs.prepare.outputs.release_tag }} already exists; skipping creation."
-      - name: Create GitHub release
-        if: steps.release_status.outputs.exists != 'true'
+      - name: Resolve release publication mode
+        id: release_mode
+        shell: bash
+        env:
+          GHCR_RESULT: ${{ needs.publish-ghcr.result }}
+          NPM_RESULT: ${{ needs.publish-npm.result }}
+        run: |
+          set -euo pipefail
+
+          failed_jobs=()
+          if [ "${GHCR_RESULT}" != "success" ]; then
+            failed_jobs+=("publish-ghcr")
+          fi
+          if [ "${NPM_RESULT}" != "success" ]; then
+            failed_jobs+=("publish-npm")
+          fi
+
+          if [ "${#failed_jobs[@]}" -eq 0 ]; then
+            {
+              echo "draft=false"
+              echo "title=Koda v${{ needs.prepare.outputs.version }}"
+              echo "failed_jobs="
+            } >> "${GITHUB_OUTPUT}"
+          else
+            {
+              echo "draft=true"
+              echo "title=Koda v${{ needs.prepare.outputs.version }} (publish recovery required)"
+              echo "failed_jobs=$(IFS=,; echo "${failed_jobs[*]}")"
+            } >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Build release notes body
+        shell: bash
+        env:
+          FAILED_JOBS: ${{ steps.release_mode.outputs.failed_jobs }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+          cat > artifacts/release/body.md <<'EOF'
+          Koda v${{ needs.prepare.outputs.version }} has passed the release gate.
+
+          Validation completed before publish:
+          - Python quality and tests
+          - Web lint, test, and build
+          - Repo hygiene and documentation checks
+          - Rust checks
+          - Dependency audits
+          - SAST and secret scanning
+          - Container scanning
+          - Docker smoke
+          - packaged npm install smoke
+
+          Release artifacts:
+          - Release bundle tarball
+          - npm package tarball
+          - Asset checksums
+          - Release manifest and SBOM
+          EOF
+
+          if [ -n "${FAILED_JOBS}" ]; then
+            cat >> artifacts/release/body.md <<EOF
+
+          Publish status:
+          - This release is intentionally left as a draft because these publish jobs still need recovery: ${FAILED_JOBS}
+          - Rerun \`release.yml\` in \`publish\` mode for \`${{ needs.prepare.outputs.release_tag }}\` after fixing the npm or registry configuration issue.
+          EOF
+          fi
+      - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
-          name: Koda v${{ needs.prepare.outputs.version }}
+          name: ${{ steps.release_mode.outputs.title }}
           generate_release_notes: true
-          body: |
-            Koda v${{ needs.prepare.outputs.version }} has passed the release gate.
-
-            Validation completed before publish:
-            - Python quality and tests
-            - Web lint, test, and build
-            - Repo hygiene and documentation checks
-            - Rust checks
-            - Dependency audits
-            - SAST and secret scanning
-            - Container scanning
-            - Docker smoke
-            - packaged npm install smoke
-
-            Release artifacts:
-            - Release bundle tarball
-            - npm package tarball
-            - Asset checksums
-            - Release manifest and SBOM
+          body_path: artifacts/release/body.md
+          draft: ${{ steps.release_mode.outputs.draft }}
           files: |
             ${{ env.RELEASE_BUNDLE_DIR }}/release/koda-${{ needs.prepare.outputs.version }}.tar.gz
             ${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz

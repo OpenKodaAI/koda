@@ -54,11 +54,20 @@ The release workflow is designed to publish only after these gates pass:
 3. Docker smoke: the stack boots and serves health, dashboard, and control-plane surfaces
 4. packaged-install smoke: the release CLI is packed with `npm pack`, installed from its tarball, and must complete `install`, `doctor`, `auth issue-code`, `update`, and `uninstall`
 
+The Docker smoke gate is shared between PR validation and release publication through
+[`../../scripts/docker_smoke.sh`](../../scripts/docker_smoke.sh). The script retries connection-refused and other
+transient HTTP startup failures, then captures `docker compose ps`, image metadata, logs, and `docker inspect`
+output if the stack still does not stabilize. That keeps the release gate strict while making recovery actionable.
+
 Only after those gates pass does the workflow:
 
 - push the versioned GHCR images
 - publish the scoped npm package with provenance
 - create a GitHub Release with the bundle archive, manifest, checksums, SBOM, and npm tarball
+
+If a publish job fails after the tag already exists, the workflow now updates the GitHub Release as a draft recovery
+record instead of leaving the version without any release surface. The draft keeps the built assets attached, names the
+failing publish jobs, and gives operators a stable recovery target for rerunning `release.yml`.
 
 Stable releases publish the `latest` tag on npm and the `latest` tag on GHCR. Prereleases publish with the npm
 dist-tag `next` and do not overwrite `latest` on the container registry.
@@ -80,8 +89,8 @@ the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publis
 
 This keeps release publication idempotent:
 
-- if `v<version>` already exists on the current commit and the GitHub release already exists, the tag-cut workflow exits without creating a duplicate release
-- if `v<version>` already exists on the current commit but the GitHub release is still missing, the tag-cut workflow dispatches `release.yml` again for recovery
+- if `v<version>` already exists on the current commit and the GitHub release is published, complete, and the npm dist-tag already points to that version, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow dispatches `release.yml` again for recovery
 - if `v<version>` already exists on an older commit, the workflow exits without retagging or publishing a duplicate package
 - to ship a new public release, bump the repository version first, then merge to `main`
 
@@ -144,22 +153,32 @@ The publish workflow expects:
 - GitHub `id-token: write` for npm provenance
 - npm authentication configured for the `@openkodaai` scope
 
-The preferred npm path is trusted publishing tied to the automatic caller workflow. In this repository,
-`cut-release-tag.yml` is the workflow that dispatches `release.yml`, so npm trusted publishing should be configured
-against `OpenKodaAI/koda` and `cut-release-tag.yml`. The `release.yml` publish job still needs `id-token: write`
-because it is the workflow that actually runs `npm publish`.
+The preferred npm path is trusted publishing tied to the workflow that actually executes `npm publish`. In this
+repository, that workflow is [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml), even when
+the automatic path starts from [`../../.github/workflows/cut-release-tag.yml`](../../.github/workflows/cut-release-tag.yml).
+Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`, and include the `release` environment
+name in npm if you want the OIDC trust relationship to match the protected publish jobs exactly. The `release.yml`
+publish job needs `id-token: write` because it is the workflow that actually runs `npm publish`.
+
+The publish job upgrades npm before the trusted-publishing attempt so it meets the current npm CLI requirement for
+OIDC-based publishing.
 
 If that path is not yet configured and the repository Actions secret `NPM_TOKEN` is present, the workflow falls
-back to that token only after the trusted-publishing attempt fails.
+back to that token only after the trusted-publishing attempt fails. The publish job also runs `npm whoami` with the
+fallback token ahead of time so a broken token fails with a clearer diagnostic instead of only surfacing at the final
+`npm publish`. If the package version already exists but the public dist-tag still points elsewhere, the workflow uses
+the fallback token to repair the dist-tag and then re-verifies that `latest` or `next` resolves to the released
+version before the GitHub Release is left non-draft.
 
 Recommended GitHub setup:
 
 - create a `release` environment in the repository settings before the first public publish
-- protect a `release` environment and require manual approval if your team wants a final human gate
-- configure npm trusted publishing for `OpenKodaAI/koda` and [cut-release-tag.yml](../../.github/workflows/cut-release-tag.yml)
+- protect the `release` environment in production and require manual approval if your team wants a final human gate
+- configure npm trusted publishing for `OpenKodaAI/koda`, [release.yml](../../.github/workflows/release.yml), and the
+  optional `release` environment if you want npm to bind trust to the protected deploy stage
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
 - use [release.yml](../../.github/workflows/release.yml) directly for dry runs or operator-controlled publish recovery, but
-  expect trusted publishing to come from `cut-release-tag.yml` on the automatic path
+  expect trusted publishing to come from `release.yml` on both the automatic and manual recovery paths
 
 If a fork or dry-run cannot publish, the workflow should still complete all validation and artifact build steps
 without pushing npm or GHCR assets.

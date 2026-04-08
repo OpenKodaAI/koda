@@ -4,22 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from release_metadata import build_manifest, build_sbom, sync_release_metadata
+from release_metadata import build_manifest, build_release_checksums, build_sbom, sync_release_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI_RELEASE_ROOT = ROOT / "packages" / "cli" / "release"
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 
 def utc_now_rfc3339() -> str:
@@ -54,15 +47,10 @@ def build_release_bundle(
 
     sbom = build_sbom(version, created_at=str(manifest["published_at"]))
     (bundle_dir / "bundle" / "sbom.spdx.json").write_text(json.dumps(sbom, indent=2) + "\n", encoding="utf-8")
-
-    checksum_lines: list[str] = []
-    for path in sorted(bundle_dir.rglob("*")):
-        if not path.is_file() or path.name == "CHECKSUMS.txt":
-            continue
-        relative_path = path.relative_to(bundle_dir).as_posix()
-        checksum_lines.append(f"{sha256_file(path)}  {relative_path}")
-
-    (bundle_dir / "CHECKSUMS.txt").write_text("\n".join(checksum_lines) + "\n", encoding="utf-8")
+    (bundle_dir / "CHECKSUMS.txt").write_text(
+        build_release_checksums(version, published_at=str(manifest["published_at"])),
+        encoding="utf-8",
+    )
 
     archive_path: Path | None = None
     if archive:
