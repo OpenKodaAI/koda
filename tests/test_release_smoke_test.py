@@ -52,3 +52,18 @@ def test_run_smoke_creates_output_root_before_tempdir(monkeypatch: pytest.Monkey
 
     assert (root / "output").exists()
     assert any(len(command) > 1 and command[1] == "install" for command in commands)
+
+
+def test_run_surfaces_stdout_and_stderr_on_failure(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError) as excinfo:
+        release_smoke_test.run(
+            ["python3", "-c", "import sys; print('hello'); print('boom', file=sys.stderr); raise SystemExit(7)"],
+            cwd=tmp_path,
+        )
+
+    message = str(excinfo.value)
+    assert "Command failed with exit code 7" in message
+    assert "stdout:" in message
+    assert "hello" in message
+    assert "stderr:" in message
+    assert "boom" in message

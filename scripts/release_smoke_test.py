@@ -21,14 +21,22 @@ def run(
     merged_env = dict(os.environ)
     if env:
         merged_env.update(env)
-    return subprocess.run(
+    result = subprocess.run(
         cmd,
         cwd=cwd or ROOT,
-        check=True,
+        check=False,
         text=True,
         capture_output=True,
         env=merged_env,
     )
+    if result.returncode != 0:
+        details = [f"Command failed with exit code {result.returncode}: {' '.join(cmd)}"]
+        if result.stdout.strip():
+            details.extend(["stdout:", result.stdout.rstrip()])
+        if result.stderr.strip():
+            details.extend(["stderr:", result.stderr.rstrip()])
+        raise RuntimeError("\n".join(details))
+    return result
 
 
 def read_json(path: Path) -> dict:
