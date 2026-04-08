@@ -75,6 +75,13 @@ from koda.state.knowledge_governance_store import (
     list_approved_runbooks,
     upsert_knowledge_source,
 )
+from koda.utils.embeddings import (
+    embed_batch,
+    embed_batch_with_model,
+    embed_text,
+    embed_text_with_model,
+    load_sentence_transformer,
+)
 
 log = get_logger(__name__)
 
@@ -781,30 +788,22 @@ class KnowledgeManager:
             return self._model
         async with self._model_lock:
             if self._model is None:
-                from sentence_transformers import SentenceTransformer
-
                 loop = asyncio.get_running_loop()
                 self._model = await loop.run_in_executor(
                     None,
-                    lambda: SentenceTransformer(KNOWLEDGE_EMBEDDING_MODEL),
+                    lambda: load_sentence_transformer(KNOWLEDGE_EMBEDDING_MODEL),
                 )
         return self._model
 
     def _embed_sync(self, text: str) -> list[float]:
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(KNOWLEDGE_EMBEDDING_MODEL)
-        result: list[float] = self._model.encode(text, normalize_embeddings=True).tolist()
-        return result
+        if self._model is not None:
+            return embed_text_with_model(text, self._model)
+        return embed_text(text, model_name=KNOWLEDGE_EMBEDDING_MODEL)
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(KNOWLEDGE_EMBEDDING_MODEL)
-        embeddings = self._model.encode(texts, normalize_embeddings=True)
-        return [embedding.tolist() for embedding in embeddings]
+        if self._model is not None:
+            return embed_batch_with_model(texts, self._model)
+        return embed_batch(texts, model_name=KNOWLEDGE_EMBEDDING_MODEL)
 
     def _entry_matches_context(self, entry: KnowledgeEntry, query_context: KnowledgeQueryContext) -> bool:
         if entry.project_key and query_context.project_key and entry.project_key != query_context.project_key:
