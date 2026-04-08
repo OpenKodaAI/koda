@@ -248,10 +248,14 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "NPM_TOKEN" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
-    assert "Upgrade npm for trusted publishing support" in workflow_text
-    assert "npm install -g npm@^11.5.1" in workflow_text
+    assert "Upgrade npm for trusted publishing support" not in workflow_text
+    assert "npm install -g npm@^11.5.1" not in workflow_text
+    assert "docker/setup-buildx-action@v3" in workflow_text
+    assert "driver: docker-container" in workflow_text
+    assert "npx --yes npm@11.5.1 publish" in workflow_text
     assert "Validate npm token fallback identity" in workflow_text
     assert "npm whoami --registry=https://registry.npmjs.org" in workflow_text
+    assert "Abort release when trusted publishing fails without token fallback" in workflow_text
     assert "Abort token fallback when npm authentication is invalid" in workflow_text
     assert "uv export" in workflow_text
     assert "--all-extras" in workflow_text

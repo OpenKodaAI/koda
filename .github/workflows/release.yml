@@ -776,6 +776,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Buildx builder
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -811,11 +815,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
-      - name: Upgrade npm for trusted publishing support
-        run: |
-          npm install -g npm@^11.5.1
-          node --version
-          npm --version
       - name: Validate npm token fallback identity
         id: npm_token_status
         if: env.HAS_NPM_TOKEN == 'true'
@@ -842,7 +841,14 @@ jobs:
         id: publish_trusted
         if: steps.npm_status.outputs.published != 'true'
         continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
-        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+        run: npx --yes npm@11.5.1 publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+      - name: Abort release when trusted publishing fails without token fallback
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN != 'true' && steps.publish_trusted.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "Trusted publishing failed and no NPM_TOKEN fallback is configured." >&2
+          echo "Bind the GitHub trusted publisher in npm or configure NPM_TOKEN before retrying release.yml." >&2
+          exit 1
       - name: Abort token fallback when npm authentication is invalid
         if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure' && steps.npm_token_status.outcome == 'failure'
         shell: bash
@@ -852,7 +858,7 @@ jobs:
           exit 1
       - name: Publish scoped npm package with token fallback
         if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
-        run: npm publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+        run: npx --yes npm@11.5.1 publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Repair npm dist-tag with token fallback when needed
