@@ -465,6 +465,8 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     assert "--command=.venv/bin/python" in snyk_workflow_text
     assert "--skip-unresolved=true" in snyk_workflow_text
     assert "snyk monitor" in snyk_workflow_text
+    assert "continue-on-error: true" in snyk_workflow_text
+    assert "Summarize Snyk monitor snapshot status" in snyk_workflow_text
     assert "SNYK_TOKEN" in snyk_workflow_text
 
     assert "python3 scripts/review_dependency_changes.py" in security_workflow_text
@@ -504,12 +506,13 @@ def test_snyk_workflow_excludes_non_source_manifests() -> None:
     workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
 
     assert (
-        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release"
+        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release"
         in workflow_text
     )
     assert "uv sync --locked --all-groups --all-extras" in workflow_text
     assert "--command=.venv/bin/python" in workflow_text
     assert "--skip-unresolved=true" in workflow_text
+    assert "Summarize Snyk monitor snapshot status" in workflow_text
 
 
 def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> None:
