@@ -241,6 +241,9 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert jobs["publish-ghcr"]["environment"] == "release"
     assert jobs["publish-npm"]["environment"] == "release"
     assert jobs["github-release"]["environment"] == "release"
+    publish_npm_steps = jobs["publish-npm"]["steps"]
+    assert publish_npm_steps[0]["uses"] == "actions/checkout@v6.0.2"
+    assert publish_npm_steps[0]["with"]["ref"] == "${{ needs.ensure-release-tag.outputs.publish_ref }}"
     assert jobs["publish-npm"]["permissions"]["id-token"] == "write"
     assert jobs["github-release"]["if"].startswith("always()")
 

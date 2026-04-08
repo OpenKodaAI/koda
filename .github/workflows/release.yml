@@ -807,6 +807,10 @@ jobs:
     env:
       HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.ensure-release-tag.outputs.publish_ref }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
