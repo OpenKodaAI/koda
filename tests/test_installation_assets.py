@@ -429,6 +429,21 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
 
 
+def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
+    app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ENV UV_VERSION=0.10.7" in app_dockerfile
+    assert "pip==26.0 uv==${UV_VERSION}" in app_dockerfile
+    assert "COPY pyproject.toml uv.lock ./" in app_dockerfile
+    assert "uv export" in app_dockerfile
+    assert "--locked" in app_dockerfile
+    assert "--no-emit-project" in app_dockerfile
+    assert "--no-emit-workspace" in app_dockerfile
+    assert "/tmp/runtime-requirements.txt" in app_dockerfile
+    assert "COPY requirements.txt ./" not in app_dockerfile
+    assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
+
+
 def test_doctor_checks_dashboard_and_control_plane() -> None:
     doctor_text = (ROOT / "scripts" / "doctor.py").read_text(encoding="utf-8")
 

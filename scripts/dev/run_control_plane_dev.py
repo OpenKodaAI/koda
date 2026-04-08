@@ -11,6 +11,7 @@ WATCH_PATHS = (
     ROOT_DIR / "koda",
     ROOT_DIR / "agent.py",
     ROOT_DIR / "pyproject.toml",
+    ROOT_DIR / "uv.lock",
     ROOT_DIR / "requirements.txt",
     ROOT_DIR / "docs" / "openapi",
 )
