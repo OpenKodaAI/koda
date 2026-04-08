@@ -33,7 +33,7 @@ dependencies = [
     "requests>=2.33.0,<3.0",
     "prometheus_client>=0.20,<1.0",
     "pybreaker>=1.0,<2.0",
-    "cryptography>=46.0.6,<47.0",
+    "cryptography>=46.0.7,<47.0",
     "grpcio>=1.74,<2.0",
 ]
 
