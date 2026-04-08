@@ -829,11 +829,12 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          if npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
-            echo "published=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "published=false" >> "${GITHUB_OUTPUT}"
-          fi
+          published="$(
+            python3 scripts/npm_registry_metadata.py exists \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}"
+          )"
+          echo "published=${published}" >> "${GITHUB_OUTPUT}"
       - name: Skip npm publish when version already exists
         if: steps.npm_status.outputs.published == 'true'
         run: echo "${NPM_PACKAGE_NAME}@${{ needs.prepare.outputs.version }} is already published; skipping npm publish."
@@ -870,12 +871,19 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if ! npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+          mapfile -t registry_state < <(
+            python3 scripts/npm_registry_metadata.py state \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}" \
+              --dist-tag "${DIST_TAG}"
+          )
+
+          version_state="${registry_state[0]:-}"
+          current_dist_tag_version="${registry_state[1]:-}"
+
+          if [ "${version_state}" != "${VERSION}" ]; then
             exit 0
           fi
-
-          dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
-          current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
 
           if [ "${current_dist_tag_version}" = "${VERSION}" ]; then
             exit 0
@@ -890,15 +898,15 @@ jobs:
         run: |
           set -euo pipefail
           for _attempt in $(seq 1 24); do
-            version_state=""
-            if version_state="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org 2>/dev/null)"; then
-              :
-            else
-              version_state=""
-            fi
+            mapfile -t registry_state < <(
+              python3 scripts/npm_registry_metadata.py state \
+                --package "${NPM_PACKAGE_NAME}" \
+                --version "${VERSION}" \
+                --dist-tag "${DIST_TAG}"
+            )
 
-            dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
-            current_dist_tag_version="$(DIST_TAGS_JSON="${dist_tags_json}" python3 -c 'import json, os; print(str(json.loads(os.environ["DIST_TAGS_JSON"] or "{}").get(os.environ["DIST_TAG"], "")))')"
+            version_state="${registry_state[0]:-}"
+            current_dist_tag_version="${registry_state[1]:-}"
 
             if [ "${version_state}" = "${VERSION}" ] && [ "${current_dist_tag_version}" = "${VERSION}" ]; then
               exit 0
@@ -908,7 +916,8 @@ jobs:
           done
 
           echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
-          npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org || true
+          python3 scripts/npm_registry_metadata.py dist-tags \
+            --package "${NPM_PACKAGE_NAME}" || true
           exit 1
 
   github-release:
