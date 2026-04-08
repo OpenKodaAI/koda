@@ -201,6 +201,23 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     assert "control-plane/setup" in readme_from_npm
 
 
+def test_workspace_npm_pack_includes_generated_readme() -> None:
+    result = subprocess.run(
+        ["npm", "pack", "./packages/cli", "--json", "--dry-run"],
+        check=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)[0]
+    file_paths = {entry["path"] for entry in payload["files"]}
+
+    assert "README.md" in file_paths
+    assert "bin/koda.mjs" in file_paths
+    assert "release/manifest.json" in file_paths
+
+
 def test_release_metadata_is_publication_ready() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "release_metadata.py")], check=True, cwd=ROOT)
     subprocess.run([sys.executable, str(ROOT / "scripts" / "sync_npm_readme.py")], check=True, cwd=ROOT)
@@ -214,6 +231,7 @@ def test_release_metadata_is_publication_ready() -> None:
     assert package_payload["publishConfig"]["access"] == "public"
     assert package_payload["publishConfig"]["provenance"] is True
     assert package_payload["repository"]["directory"] == "packages/cli"
+    assert "README.md" in package_payload["files"]
     assert manifest_payload["distribution"]["npm_package"] == "@openkodaai/koda"
     assert manifest_payload["distribution"]["npm_bin"] == "koda"
     assert manifest_payload["distribution"]["github_release_tag"] == f"v{package_payload['version']}"
