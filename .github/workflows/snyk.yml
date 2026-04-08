@@ -1,0 +1,176 @@
+name: snyk
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+concurrency:
+  group: snyk-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10.26.2"
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.10.7"
+
+jobs:
+  open-source:
+    name: snyk-open-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Skip when SNYK_TOKEN is not configured
+        if: env.SNYK_TOKEN == ''
+        run: |
+          echo "SNYK_TOKEN is not configured for this repository."
+          echo "The workflow is ready, but Snyk CLI scans are being skipped."
+
+      - uses: actions/setup-python@v6.2.0
+        if: env.SNYK_TOKEN != ''
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: astral-sh/setup-uv@v7
+        if: env.SNYK_TOKEN != ''
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - uses: pnpm/action-setup@v5.0.0
+        if: env.SNYK_TOKEN != ''
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v6.3.0
+        if: env.SNYK_TOKEN != ''
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Sync Python dependencies
+        if: env.SNYK_TOKEN != ''
+        run: uv sync --locked --all-groups --all-extras
+
+      - name: Install web dependencies
+        if: env.SNYK_TOKEN != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Export pinned Python requirements for Snyk
+        if: env.SNYK_TOKEN != ''
+        run: |
+          mkdir -p artifacts/security/snyk
+          uv export \
+            --format requirements.txt \
+            --locked \
+            --all-groups \
+            --all-extras \
+            --no-editable \
+            --no-emit-project \
+            --no-emit-workspace \
+            --no-header \
+            --no-annotate \
+            --output-file artifacts/security/snyk/python-requirements.txt
+
+      - name: Set up Snyk CLI
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/setup@v1.0.0
+
+      - name: Test Node manifests with Snyk Open Source
+        if: env.SNYK_TOKEN != ''
+        id: node_scan
+        shell: bash
+        run: |
+          set +e
+          snyk test \
+            --all-projects \
+            --detection-depth=5 \
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release \
+            --severity-threshold=high \
+            --sarif-file-output=artifacts/security/snyk/node-open-source.sarif
+          status=$?
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Test exported Python requirements with Snyk Open Source
+        if: env.SNYK_TOKEN != ''
+        id: python_scan
+        shell: bash
+        run: |
+          set +e
+          snyk test \
+            --file=artifacts/security/snyk/python-requirements.txt \
+            --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true \
+            --severity-threshold=high \
+            --sarif-file-output=artifacts/security/snyk/python-open-source.sarif
+          status=$?
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Upload Snyk SARIF for Node manifests
+        if: env.SNYK_TOKEN != '' && github.event_name != 'pull_request' && hashFiles('artifacts/security/snyk/node-open-source.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/snyk/node-open-source.sarif
+          category: snyk-open-source-node
+
+      - name: Upload Snyk SARIF for Python manifests
+        if: env.SNYK_TOKEN != '' && github.event_name != 'pull_request' && hashFiles('artifacts/security/snyk/python-open-source.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/snyk/python-open-source.sarif
+          category: snyk-open-source-python
+
+      - name: Monitor projects in Snyk
+        if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          snyk monitor \
+            --all-projects \
+            --detection-depth=5 \
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release
+          snyk monitor \
+            --file=artifacts/security/snyk/python-requirements.txt \
+            --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true
+
+      - name: Upload Snyk artifacts
+        if: always() && env.SNYK_TOKEN != ''
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: snyk-artifacts
+          path: artifacts/security/snyk/
+          if-no-files-found: ignore
+          retention-days: 21
+
+      - name: Fail when Snyk finds high-severity issues
+        if: env.SNYK_TOKEN != ''
+        shell: bash
+        run: |
+          node_status="${{ steps.node_scan.outputs.status }}"
+          python_status="${{ steps.python_scan.outputs.status }}"
+          if [ "${node_status}" != "0" ] || [ "${python_status}" != "0" ]; then
+            echo "Snyk Node scan status: ${node_status}" >&2
+            echo "Snyk Python scan status: ${python_status}" >&2
+            echo "Snyk reported high-severity issues or a scan failure." >&2
+            exit 1
+          fi

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -82,15 +83,18 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert (ROOT / "apps" / "web" / ".env.example").exists()
     assert (ROOT / "apps" / "web" / "Dockerfile").exists()
     assert (ROOT / "packages" / "cli" / "package.json").exists()
+    assert (ROOT / "packages" / "cli" / "README.md").exists()
     assert (ROOT / "packages" / "cli" / "bin" / "koda.mjs").exists()
     assert (ROOT / "packages" / "cli" / "release" / "manifest.json").exists()
     assert (ROOT / "scripts" / "build_release_bundle.py").exists()
     assert (ROOT / "scripts" / "build_release_artifacts.py").exists()
+    assert (ROOT / "scripts" / "npm_registry_metadata.py").exists()
     assert (ROOT / "scripts" / "release_metadata.py").exists()
     assert (ROOT / "scripts" / "release_smoke_test.py").exists()
+    assert (ROOT / "scripts" / "sync_npm_readme.py").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.svg").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.png").exists()
-    assert (ROOT / "docs" / "assets" / "brand" / "koda-hero.png").exists()
+    assert (ROOT / "docs" / "assets" / "brand" / "koda_hero.jpg").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-og.png").exists()
     assert (ROOT / "docs" / "assets" / "screenshots" / "setup.png").exists()
 
@@ -189,25 +193,36 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     with tarfile.open(output_dir / payload["npm_tarball"], "r:gz") as tarball:
         manifest_from_npm = json.loads(tarball.extractfile("package/release/manifest.json").read().decode("utf-8"))
         checksums_from_npm = tarball.extractfile("package/release/CHECKSUMS.txt").read().decode("utf-8")
+        readme_from_npm = tarball.extractfile("package/README.md").read().decode("utf-8")
 
     assert manifest_from_npm == bundle_manifest
     assert checksums_from_npm == bundle_checksums
+    assert "npm install -g @openkodaai/koda" in readme_from_npm
+    assert "control-plane/setup" in readme_from_npm
 
 
 def test_release_metadata_is_publication_ready() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "release_metadata.py")], check=True, cwd=ROOT)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "sync_npm_readme.py")], check=True, cwd=ROOT)
 
     package_payload = json.loads((ROOT / "packages" / "cli" / "package.json").read_text(encoding="utf-8"))
     manifest_payload = json.loads((ROOT / "packages" / "cli" / "release" / "manifest.json").read_text(encoding="utf-8"))
     openapi_payload = json.loads((ROOT / "docs" / "openapi" / "control-plane.json").read_text(encoding="utf-8"))
+    package_readme = (ROOT / "packages" / "cli" / "README.md").read_text(encoding="utf-8")
 
     assert package_payload["name"] == "@openkodaai/koda"
     assert package_payload["publishConfig"]["access"] == "public"
     assert package_payload["publishConfig"]["provenance"] is True
+    assert package_payload["repository"]["directory"] == "packages/cli"
     assert manifest_payload["distribution"]["npm_package"] == "@openkodaai/koda"
     assert manifest_payload["distribution"]["npm_bin"] == "koda"
     assert manifest_payload["distribution"]["github_release_tag"] == f"v{package_payload['version']}"
     assert openapi_payload["info"]["version"] == package_payload["version"]
+    assert package_readme.startswith("<!-- Generated from ../../README.md")
+    assert (
+        f"https://github.com/OpenKodaAI/koda/blob/v{package_payload['version']}/docs/install/local.md" in package_readme
+    )
+    assert "http://localhost:3000/control-plane/setup" in package_readme
 
 
 def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
@@ -282,6 +297,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
     assert "Publish status:" in workflow_text
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
+    assert "scripts/sync_npm_readme.py" in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "bash scripts/docker_smoke.sh" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
@@ -404,6 +420,7 @@ def test_dependabot_blocks_unsupported_eslint_major_updates() -> None:
 def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     security_workflow_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    snyk_workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
     pr_quality_workflow_text = (ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8")
 
     assert "python-audit-requirements.txt" in release_workflow_text
@@ -440,6 +457,16 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "pnpm/action-setup@v5.0.0" in workflow_text
         assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
+    assert "snyk/actions/setup@v1.0.0" in snyk_workflow_text
+    assert "uv sync --locked --all-groups --all-extras" in snyk_workflow_text
+    assert "--all-projects" in snyk_workflow_text
+    assert "--detection-depth=5" in snyk_workflow_text
+    assert "python-requirements.txt" in snyk_workflow_text
+    assert "--command=.venv/bin/python" in snyk_workflow_text
+    assert "--skip-unresolved=true" in snyk_workflow_text
+    assert "snyk monitor" in snyk_workflow_text
+    assert "SNYK_TOKEN" in snyk_workflow_text
+
     assert "python3 scripts/review_dependency_changes.py" in security_workflow_text
     assert "github.event.pull_request.base.sha" in security_workflow_text
     assert "github.event.pull_request.head.sha" in security_workflow_text
@@ -450,11 +477,96 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "bash scripts/docker_smoke.sh" in workflow_text
 
 
+def test_snyk_policy_excludes_generated_artifacts_only() -> None:
+    policy_text = (ROOT / ".snyk").read_text(encoding="utf-8")
+
+    assert "exclude:" in policy_text
+    for excluded_path in (
+        ".koda-release/**",
+        ".pnpm-store/**",
+        ".venv/**",
+        ".next/**",
+        "artifacts/**",
+        "build/**",
+        "coverage/**",
+        "downloads/**",
+        "dist/**",
+        "output/**",
+        "packages/cli/release/**",
+        "target/**",
+        "venv/**",
+    ):
+        assert excluded_path in policy_text
+    assert "docker-compose.release.yml" not in policy_text
+
+
+def test_snyk_workflow_excludes_non_source_manifests() -> None:
+    workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
+
+    assert (
+        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release"
+        in workflow_text
+    )
+    assert "uv sync --locked --all-groups --all-extras" in workflow_text
+    assert "--command=.venv/bin/python" in workflow_text
+    assert "--skip-unresolved=true" in workflow_text
+
+
+def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> None:
+    output_dir = tmp_path / "release-artifacts"
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build_release_artifacts.py"), "--output-dir", str(output_dir)],
+        check=True,
+        cwd=ROOT,
+    )
+
+    payload = json.loads((output_dir / "release-artifacts.json").read_text(encoding="utf-8"))
+    tarball_path = output_dir / payload["npm_tarball"]
+    host_re = re.compile(r"(?:git\\+)?https?://([A-Za-z0-9.-]+)")
+
+    with tarfile.open(tarball_path, "r:gz") as tarball:
+        texts = [
+            tarball.extractfile(name).read().decode("utf-8")
+            for name in (
+                "package/package.json",
+                "package/README.md",
+                "package/bin/koda.mjs",
+                "package/release/manifest.json",
+                "package/release/bundle/docker-compose.release.yml",
+                "package/release/bundle/proxy/nginx.conf",
+                "package/release/bundle/sbom.spdx.json",
+            )
+        ]
+
+    combined = "\n".join(texts)
+    hosts = sorted(set(host_re.findall(combined)))
+    allowed_hosts = {
+        "app",
+        "github.com",
+        "img.shields.io",
+        "localhost",
+        "raw.githubusercontent.com",
+        "seaweedfs",
+    }
+
+    assert "127.0.0.1" not in combined
+    assert "https://openkoda.ai/spdx/" not in combined
+    assert "urn:openkodaai:spdx:koda-release-bundle:" in combined
+    assert "git+https://github.com/OpenKodaAI/koda.git" in combined
+    assert "http://localhost:3000/control-plane/setup" in combined
+    assert "http://localhost:8090/health" in combined
+    assert "http://app:8090" in combined
+    assert "http://seaweedfs:8333" in combined
+    assert hosts
+    assert set(hosts) <= allowed_hosts, hosts
+
+
 def test_repo_hygiene_workflows_cover_public_docs_and_installation_assets() -> None:
     pr_quality_workflow_text = (ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8")
     release_workflow_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
     for workflow_text in (pr_quality_workflow_text, release_workflow_text):
+        assert "scripts/sync_npm_readme.py" in workflow_text
         assert "tests/test_public_docs.py" in workflow_text
         assert "tests/test_installation_assets.py" in workflow_text
 

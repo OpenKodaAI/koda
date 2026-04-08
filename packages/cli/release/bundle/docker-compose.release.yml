@@ -29,7 +29,7 @@ services:
       RUNTIME_LOCAL_UI_TOKEN: "${RUNTIME_LOCAL_UI_TOKEN:?Set RUNTIME_LOCAL_UI_TOKEN in .env}"
       SECURITY_GRPC_TARGET: "security:50065"
       MEMORY_GRPC_TARGET: "memory:50063"
-      HEALTHCHECK_URL: "http://127.0.0.1:${CONTROL_PLANE_PORT:-8090}/health"
+      HEALTHCHECK_URL: "http://localhost:${CONTROL_PLANE_PORT:-8090}/health"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
       STATE_ROOT_DIR: "${STATE_ROOT_DIR:-/var/lib/koda/state}"
@@ -55,7 +55,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'))\""
+          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://localhost:8090/health'))\""
         ]
       interval: 30s
       timeout: 5s
@@ -87,7 +87,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""
+          "node -e \"fetch('http://localhost:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""
         ]
       interval: 30s
       timeout: 5s
@@ -159,7 +159,7 @@ services:
     volumes:
       - seaweedfs-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9333/cluster/status > /dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9333/cluster/status > /dev/null"]
       interval: 10s
       timeout: 5s
       retries: 10

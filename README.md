@@ -1,6 +1,5 @@
-<div align="center" style="display: flex; position: relative; height: 250px; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%; background-color: #000000;">
-  <img src="public/koda_hero.jpeg" alt="Koda" width="50%" />
-    <img src="docs/assets/brand/koda-hero.png" alt="Koda illustration" style="position: absolute; right: -2px; top: 0; bottom: 0;" width="25%" />
+<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%;">
+  <img src="docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
 </div>
 
 <p align="center">

@@ -142,6 +142,8 @@ jobs:
         run: uv sync --locked
       - name: Check repo-map drift
         run: uv run python3 scripts/generate_repo_map.py --check
+      - name: Check npm README drift
+        run: uv run python3 scripts/sync_npm_readme.py
       - name: Validate AI docs and open source hygiene
         run: |
           uv run pytest -q \

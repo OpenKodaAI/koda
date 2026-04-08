@@ -1,0 +1,18 @@
+exclude:
+  global:
+    - .koda-release/**
+    - .pnpm-store/**
+    - .venv/**
+    - .mypy_cache/**
+    - .next/**
+    - .pytest_cache/**
+    - .ruff_cache/**
+    - artifacts/**
+    - build/**
+    - coverage/**
+    - downloads/**
+    - dist/**
+    - output/**
+    - packages/cli/release/**
+    - target/**
+    - venv/**
