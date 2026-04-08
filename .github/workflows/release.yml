@@ -883,7 +883,7 @@ jobs:
           DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 24); do
+          for _attempt in $(seq 1 24); do
             version_state=""
             if version_state="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org 2>/dev/null)"; then
               :
