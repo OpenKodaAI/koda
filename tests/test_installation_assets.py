@@ -286,7 +286,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "npm publish" in workflow_text
     assert "Upgrade npm for trusted publishing support" not in workflow_text
     assert "npm install -g npm@^11.5.1" not in workflow_text
-    assert "docker/setup-buildx-action@v3" in workflow_text
+    assert "docker/setup-buildx-action@v4" in workflow_text
     assert "driver: docker-container" in workflow_text
     assert "npx --yes npm@11.5.1 publish" in workflow_text
     assert "Validate npm token fallback identity" in workflow_text
