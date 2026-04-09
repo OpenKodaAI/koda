@@ -20,5 +20,5 @@ tokio-stream.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
-axum = "0.7"
+axum = "0.8"
 tempfile = "3"

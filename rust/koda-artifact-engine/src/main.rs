@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -768,7 +769,12 @@ impl ArtifactEngineService for ArtifactServer {
             Status::internal(format!("failed to flush upload staging file: {error}"))
         })?;
         drop(file);
-        let content_hash = format!("{:x}", hasher.finalize());
+        let digest = hasher.finalize();
+        let mut content_hash = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            // Writing into a String cannot fail.
+            let _ = write!(&mut content_hash, "{byte:02x}");
+        }
         let object_key = match object_key_override {
             Some(object_key) => object_key,
             None => default_object_key(&agent_scope, &content_hash, logical_filename),
@@ -1050,10 +1056,10 @@ mod tests {
                 objects: Arc::new(StdMutex::new(HashMap::new())),
             };
             let app = Router::new()
-                .route("/:bucket", head(head_bucket))
-                .route("/:bucket/", head(head_bucket))
+                .route("/{bucket}", head(head_bucket))
+                .route("/{bucket}/", head(head_bucket))
                 .route(
-                    "/:bucket/*key",
+                    "/{bucket}/{*key}",
                     put(put_object).get(get_object).delete(delete_object),
                 )
                 .with_state(state.clone());

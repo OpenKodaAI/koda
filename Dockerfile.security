@@ -9,7 +9,7 @@ COPY rust/ rust/
 WORKDIR /build/rust
 RUN cargo build --release -p koda-security-service
 
-FROM debian:bookworm-slim
+FROM debian:13.4-slim
 
 RUN useradd -m -s /bin/bash svcuser
 
