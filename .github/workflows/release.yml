@@ -219,7 +219,7 @@ jobs:
           KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
       - name: Upload pytest artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: python-tests-${{ matrix.python-version }}-artifacts
           path: artifacts/python/${{ matrix.python-version }}/
@@ -236,7 +236,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.0
         with:
           version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v6.3.0
@@ -333,7 +333,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.0
         with:
           version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v6.3.0
@@ -446,7 +446,7 @@ jobs:
           category: gitleaks
       - name: Upload SAST artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sast-artifacts
           path: artifacts/security/
@@ -548,7 +548,7 @@ jobs:
           category: trivy-koda-security
       - name: Upload container scan artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: container-scan-artifacts
           path: artifacts/security/trivy/
@@ -582,7 +582,7 @@ jobs:
         run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: docker-smoke-artifacts
           path: artifacts/docker/
@@ -625,7 +625,7 @@ jobs:
           set -euo pipefail
           python3 scripts/build_release_artifacts.py --output-dir "${RELEASE_BUNDLE_DIR}"
       - name: Upload release bundle artifact
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: |
@@ -1027,7 +1027,7 @@ jobs:
           EOF
           fi
       - name: Create or update GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: ${{ steps.release_mode.outputs.title }}

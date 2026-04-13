@@ -48,7 +48,7 @@ jobs:
       - name: Wait for required main workflows
         if: github.event_name == 'push'
         id: gate
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner;
@@ -320,7 +320,7 @@ jobs:
 
       - name: Dispatch release workflow for the tag
         if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           TAG: ${{ steps.version.outputs.tag }}
         with:

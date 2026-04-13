@@ -53,7 +53,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.0
         if: env.SNYK_TOKEN != ''
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -179,7 +179,7 @@ jobs:
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: snyk-artifacts
           path: artifacts/security/snyk/
