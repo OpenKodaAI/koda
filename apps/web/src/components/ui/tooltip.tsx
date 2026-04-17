@@ -15,20 +15,28 @@ const TooltipContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content> & {
     showArrow?: boolean;
   }
->(({ className, sideOffset = 4, showArrow = false, ...props }, ref) => (
+>(({ className, sideOffset = 6, showArrow = false, children, ...props }, ref) => (
   <TooltipPrimitive.Portal>
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "app-floating-panel relative z-50 max-w-[280px] rounded-lg px-3 py-1.5 text-sm text-popover-foreground animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className
+        "relative z-50 max-w-[220px] rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] px-2 py-1 text-[0.75rem] leading-tight text-[var(--text-primary)] shadow-[var(--shadow-floating)]",
+        "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out",
+        "data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0",
+        "data-[state=closed]:zoom-out-95 data-[state=delayed-open]:zoom-in-95",
+        "data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1",
+        className,
       )}
       {...props}
     >
-      <span className="relative z-[1] block">{props.children}</span>
+      {children}
       {showArrow ? (
-        <TooltipPrimitive.Arrow className="-my-px fill-popover drop-shadow-[0_1px_0_hsl(var(--border))]" />
+        <TooltipPrimitive.Arrow
+          className="fill-[var(--panel-strong)]"
+          width={10}
+          height={5}
+        />
       ) : null}
     </TooltipPrimitive.Content>
   </TooltipPrimitive.Portal>

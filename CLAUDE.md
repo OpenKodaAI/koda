@@ -17,6 +17,7 @@ Follow this order before making non-trivial changes:
    - [`koda/services/CLAUDE.md`](koda/services/CLAUDE.md)
    - [`koda/memory/CLAUDE.md`](koda/memory/CLAUDE.md)
    - [`tests/CLAUDE.md`](tests/CLAUDE.md)
+   - [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md) — **UI design system & principles** (mandatory for any `apps/web/` change)
 
 If another tool expects `AGENTS.md`, the guidance is mirrored there. The provider-neutral content still lives in [`docs/ai`](docs/ai), [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml), and each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md).
 

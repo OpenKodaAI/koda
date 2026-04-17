@@ -53,3 +53,15 @@ export const appTourStorageCodec = createStorageCodec(
     skippedAt: null,
   },
 );
+
+export const recentRoutesStorageCodec = createStorageCodec(
+  "ui:recent-routes",
+  z.array(
+    z.object({
+      href: z.string(),
+      label: z.string(),
+      visitedAt: z.number().int().nonnegative(),
+    }),
+  ),
+  [],
+);

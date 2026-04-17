@@ -17,6 +17,7 @@ Follow this order before making non-trivial changes:
    - [`koda/services/AGENTS.md`](koda/services/AGENTS.md)
    - [`koda/memory/AGENTS.md`](koda/memory/AGENTS.md)
    - [`tests/AGENTS.md`](tests/AGENTS.md)
+   - [`apps/web/AGENTS.md`](apps/web/AGENTS.md) — **UI design system & principles** (mandatory for any `apps/web/` change)
 
 If you are operating through Claude Code, use the matching `CLAUDE.md` files at the same paths. The provider-neutral content still lives in [`docs/ai`](docs/ai), [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml), and each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md).
 

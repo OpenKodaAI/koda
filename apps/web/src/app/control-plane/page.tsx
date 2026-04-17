@@ -1,5 +1,5 @@
+import { redirect } from "next/navigation";
 import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
-import { ControlPlaneSetup } from "@/components/control-plane/control-plane-setup";
 import { CatalogLayout } from "@/components/control-plane/catalog/catalog-layout";
 import {
   getControlPlaneAuthStatus,
@@ -27,8 +27,10 @@ export default async function ControlPlanePage() {
     return <ControlPlaneUnavailable />;
   }
 
+  // If setup is not complete, hand off to the dedicated /setup route.
+  // The middleware + /setup page own the full first-run journey.
   if (!authStatus.authenticated || !onboardingStatus.steps.onboarding_complete) {
-    return <ControlPlaneSetup initialStatus={onboardingStatus} authStatus={authStatus} />;
+    redirect("/setup");
   }
 
   let payload:

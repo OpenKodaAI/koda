@@ -12,8 +12,8 @@ import { ToastProvider } from "@/hooks/use-toast";
 import { sidebarCollapsedStorageCodec } from "@/lib/storage-codecs";
 import { cn } from "@/lib/utils";
 
-const SIDEBAR_EXPANDED_WIDTH = "16.5rem";
-const SIDEBAR_COLLAPSED_WIDTH = "4.75rem";
+const SIDEBAR_EXPANDED_WIDTH = "15rem";
+const SIDEBAR_COLLAPSED_WIDTH = "3.5rem";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -73,6 +73,7 @@ function ShellViewportFrame({
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const isSetupRoute = pathname === "/setup" || pathname.startsWith("/setup/");
   const isSessionsRoute = pathname.startsWith("/sessions");
   const isControlPlaneCatalogRoute = pathname === "/control-plane";
   const isControlPlaneAgentRoute =
@@ -99,6 +100,11 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     document.documentElement.style.setProperty("--shell-sidebar-width", sidebarWidth);
   }, [sidebarWidth]);
+
+  // Full-screen bypass: the setup flow owns the viewport until completed.
+  if (isSetupRoute) {
+    return <>{children}</>;
+  }
 
   return (
     <ToastProvider>
