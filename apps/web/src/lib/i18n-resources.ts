@@ -11980,6 +11980,2488 @@ const COMMAND_BAR_I18N = {
   tr.commandBar = COMMAND_BAR_I18N[lang];
 });
 
+
+// Auto-appended by fill_v2.py — missing agent-rename aliases and new namespaces.
+mutableResources["en-US"].translation.agentDetail ??= {};
+mutableResources["en-US"].translation.agentSwitcher ??= {};
+mutableResources["en-US"].translation.chat ??= {};
+mutableResources["en-US"].translation.commandBar ??= {};
+mutableResources["en-US"].translation.common ??= {};
+mutableResources["en-US"].translation.controlPlane ??= {};
+mutableResources["en-US"].translation.costs ??= {};
+mutableResources["en-US"].translation.dashboard ??= {};
+mutableResources["en-US"].translation.dlq ??= {};
+mutableResources["en-US"].translation.executions ??= {};
+mutableResources["en-US"].translation.memory ??= {};
+mutableResources["en-US"].translation.overview ??= {};
+mutableResources["en-US"].translation.runtime ??= {};
+mutableResources["en-US"].translation.schedules ??= {};
+mutableResources["en-US"].translation.screenTime ??= {};
+mutableResources["en-US"].translation.sessions ??= {};
+mutableResources["en-US"].translation.settings ??= {};
+mutableResources["en-US"].translation.agentDetail.metrics ??= {};
+mutableResources["en-US"].translation.agentDetail.tabs ??= {};
+mutableResources["en-US"].translation.chat.composer ??= {};
+mutableResources["en-US"].translation.chat.header ??= {};
+mutableResources["en-US"].translation.chat.rail ??= {};
+mutableResources["en-US"].translation.chat.reasoning ??= {};
+mutableResources["en-US"].translation.chat.thread ??= {};
+mutableResources["en-US"].translation.chat.timestamp ??= {};
+mutableResources["en-US"].translation.chat.toolCall ??= {};
+mutableResources["en-US"].translation.commandBar.agent ??= {};
+mutableResources["en-US"].translation.commandBar.groups ??= {};
+mutableResources["en-US"].translation.commandBar.recents ??= {};
+mutableResources["en-US"].translation.controlPlane.create ??= {};
+mutableResources["en-US"].translation.controlPlane.policy ??= {};
+mutableResources["en-US"].translation.controlPlane.prompt ??= {};
+mutableResources["en-US"].translation.controlPlane.saveBar ??= {};
+mutableResources["en-US"].translation.costs.page ??= {};
+mutableResources["en-US"].translation.dashboard.checklist ??= {};
+mutableResources["en-US"].translation.dlq.page ??= {};
+mutableResources["en-US"].translation.dlq.table ??= {};
+mutableResources["en-US"].translation.executions.page ??= {};
+mutableResources["en-US"].translation.memory.curation ??= {};
+mutableResources["en-US"].translation.memory.inspector ??= {};
+mutableResources["en-US"].translation.memory.map ??= {};
+mutableResources["en-US"].translation.memory.page ??= {};
+mutableResources["en-US"].translation.overview.activity ??= {};
+mutableResources["en-US"].translation.runtime.overview ??= {};
+mutableResources["en-US"].translation.schedules.page ??= {};
+mutableResources["en-US"].translation.schedules.table ??= {};
+mutableResources["en-US"].translation.sessions.composer ??= {};
+mutableResources["en-US"].translation.sessions.context ??= {};
+mutableResources["en-US"].translation.sessions.detail ??= {};
+mutableResources["en-US"].translation.sessions.thread ??= {};
+mutableResources["en-US"].translation.settings.sections ??= {};
+mutableResources["en-US"].translation.controlPlane.create.name ??= {};
+mutableResources["en-US"].translation.costs.page.allocationModes ??= {};
+mutableResources["en-US"].translation.costs.page.breakdowns ??= {};
+mutableResources["en-US"].translation.costs.page.kpiContexts ??= {};
+mutableResources["en-US"].translation.costs.page.timeChart ??= {};
+mutableResources["en-US"].translation.executions.page.metrics ??= {};
+mutableResources["en-US"].translation.memory.curation.detail ??= {};
+mutableResources["en-US"].translation.memory.curation.row ??= {};
+mutableResources["en-US"].translation.runtime.overview.metrics ??= {};
+mutableResources["en-US"].translation.sessions.context.artifacts ??= {};
+
+mutableResources["pt-BR"].translation.agentDetail ??= {};
+mutableResources["pt-BR"].translation.agentSwitcher ??= {};
+mutableResources["pt-BR"].translation.chat ??= {};
+mutableResources["pt-BR"].translation.commandBar ??= {};
+mutableResources["pt-BR"].translation.common ??= {};
+mutableResources["pt-BR"].translation.controlPlane ??= {};
+mutableResources["pt-BR"].translation.costs ??= {};
+mutableResources["pt-BR"].translation.dashboard ??= {};
+mutableResources["pt-BR"].translation.dlq ??= {};
+mutableResources["pt-BR"].translation.executions ??= {};
+mutableResources["pt-BR"].translation.memory ??= {};
+mutableResources["pt-BR"].translation.overview ??= {};
+mutableResources["pt-BR"].translation.runtime ??= {};
+mutableResources["pt-BR"].translation.schedules ??= {};
+mutableResources["pt-BR"].translation.screenTime ??= {};
+mutableResources["pt-BR"].translation.sessions ??= {};
+mutableResources["pt-BR"].translation.settings ??= {};
+mutableResources["pt-BR"].translation.agentDetail.metrics ??= {};
+mutableResources["pt-BR"].translation.agentDetail.tabs ??= {};
+mutableResources["pt-BR"].translation.chat.composer ??= {};
+mutableResources["pt-BR"].translation.chat.header ??= {};
+mutableResources["pt-BR"].translation.chat.rail ??= {};
+mutableResources["pt-BR"].translation.chat.reasoning ??= {};
+mutableResources["pt-BR"].translation.chat.thread ??= {};
+mutableResources["pt-BR"].translation.chat.timestamp ??= {};
+mutableResources["pt-BR"].translation.chat.toolCall ??= {};
+mutableResources["pt-BR"].translation.commandBar.agent ??= {};
+mutableResources["pt-BR"].translation.commandBar.groups ??= {};
+mutableResources["pt-BR"].translation.commandBar.recents ??= {};
+mutableResources["pt-BR"].translation.controlPlane.create ??= {};
+mutableResources["pt-BR"].translation.controlPlane.policy ??= {};
+mutableResources["pt-BR"].translation.controlPlane.prompt ??= {};
+mutableResources["pt-BR"].translation.controlPlane.saveBar ??= {};
+mutableResources["pt-BR"].translation.costs.page ??= {};
+mutableResources["pt-BR"].translation.dashboard.checklist ??= {};
+mutableResources["pt-BR"].translation.dlq.page ??= {};
+mutableResources["pt-BR"].translation.dlq.table ??= {};
+mutableResources["pt-BR"].translation.executions.page ??= {};
+mutableResources["pt-BR"].translation.memory.curation ??= {};
+mutableResources["pt-BR"].translation.memory.inspector ??= {};
+mutableResources["pt-BR"].translation.memory.map ??= {};
+mutableResources["pt-BR"].translation.memory.page ??= {};
+mutableResources["pt-BR"].translation.overview.activity ??= {};
+mutableResources["pt-BR"].translation.runtime.overview ??= {};
+mutableResources["pt-BR"].translation.schedules.page ??= {};
+mutableResources["pt-BR"].translation.schedules.table ??= {};
+mutableResources["pt-BR"].translation.sessions.composer ??= {};
+mutableResources["pt-BR"].translation.sessions.context ??= {};
+mutableResources["pt-BR"].translation.sessions.detail ??= {};
+mutableResources["pt-BR"].translation.sessions.thread ??= {};
+mutableResources["pt-BR"].translation.settings.sections ??= {};
+mutableResources["pt-BR"].translation.controlPlane.create.name ??= {};
+mutableResources["pt-BR"].translation.costs.page.allocationModes ??= {};
+mutableResources["pt-BR"].translation.costs.page.breakdowns ??= {};
+mutableResources["pt-BR"].translation.costs.page.kpiContexts ??= {};
+mutableResources["pt-BR"].translation.costs.page.timeChart ??= {};
+mutableResources["pt-BR"].translation.executions.page.metrics ??= {};
+mutableResources["pt-BR"].translation.memory.curation.detail ??= {};
+mutableResources["pt-BR"].translation.memory.curation.row ??= {};
+mutableResources["pt-BR"].translation.runtime.overview.metrics ??= {};
+mutableResources["pt-BR"].translation.sessions.context.artifacts ??= {};
+
+mutableResources["es-ES"].translation.agentDetail ??= {};
+mutableResources["es-ES"].translation.agentSwitcher ??= {};
+mutableResources["es-ES"].translation.chat ??= {};
+mutableResources["es-ES"].translation.commandBar ??= {};
+mutableResources["es-ES"].translation.common ??= {};
+mutableResources["es-ES"].translation.controlPlane ??= {};
+mutableResources["es-ES"].translation.costs ??= {};
+mutableResources["es-ES"].translation.dashboard ??= {};
+mutableResources["es-ES"].translation.dlq ??= {};
+mutableResources["es-ES"].translation.executions ??= {};
+mutableResources["es-ES"].translation.memory ??= {};
+mutableResources["es-ES"].translation.overview ??= {};
+mutableResources["es-ES"].translation.runtime ??= {};
+mutableResources["es-ES"].translation.schedules ??= {};
+mutableResources["es-ES"].translation.screenTime ??= {};
+mutableResources["es-ES"].translation.sessions ??= {};
+mutableResources["es-ES"].translation.settings ??= {};
+mutableResources["es-ES"].translation.agentDetail.metrics ??= {};
+mutableResources["es-ES"].translation.agentDetail.tabs ??= {};
+mutableResources["es-ES"].translation.chat.composer ??= {};
+mutableResources["es-ES"].translation.chat.header ??= {};
+mutableResources["es-ES"].translation.chat.rail ??= {};
+mutableResources["es-ES"].translation.chat.reasoning ??= {};
+mutableResources["es-ES"].translation.chat.thread ??= {};
+mutableResources["es-ES"].translation.chat.timestamp ??= {};
+mutableResources["es-ES"].translation.chat.toolCall ??= {};
+mutableResources["es-ES"].translation.commandBar.agent ??= {};
+mutableResources["es-ES"].translation.commandBar.groups ??= {};
+mutableResources["es-ES"].translation.commandBar.recents ??= {};
+mutableResources["es-ES"].translation.controlPlane.create ??= {};
+mutableResources["es-ES"].translation.controlPlane.policy ??= {};
+mutableResources["es-ES"].translation.controlPlane.prompt ??= {};
+mutableResources["es-ES"].translation.controlPlane.saveBar ??= {};
+mutableResources["es-ES"].translation.costs.page ??= {};
+mutableResources["es-ES"].translation.dashboard.checklist ??= {};
+mutableResources["es-ES"].translation.dlq.page ??= {};
+mutableResources["es-ES"].translation.dlq.table ??= {};
+mutableResources["es-ES"].translation.executions.page ??= {};
+mutableResources["es-ES"].translation.memory.curation ??= {};
+mutableResources["es-ES"].translation.memory.inspector ??= {};
+mutableResources["es-ES"].translation.memory.map ??= {};
+mutableResources["es-ES"].translation.memory.page ??= {};
+mutableResources["es-ES"].translation.overview.activity ??= {};
+mutableResources["es-ES"].translation.runtime.overview ??= {};
+mutableResources["es-ES"].translation.schedules.page ??= {};
+mutableResources["es-ES"].translation.schedules.table ??= {};
+mutableResources["es-ES"].translation.sessions.composer ??= {};
+mutableResources["es-ES"].translation.sessions.context ??= {};
+mutableResources["es-ES"].translation.sessions.detail ??= {};
+mutableResources["es-ES"].translation.sessions.thread ??= {};
+mutableResources["es-ES"].translation.settings.sections ??= {};
+mutableResources["es-ES"].translation.controlPlane.create.name ??= {};
+mutableResources["es-ES"].translation.costs.page.allocationModes ??= {};
+mutableResources["es-ES"].translation.costs.page.breakdowns ??= {};
+mutableResources["es-ES"].translation.costs.page.kpiContexts ??= {};
+mutableResources["es-ES"].translation.costs.page.timeChart ??= {};
+mutableResources["es-ES"].translation.executions.page.metrics ??= {};
+mutableResources["es-ES"].translation.memory.curation.detail ??= {};
+mutableResources["es-ES"].translation.memory.curation.row ??= {};
+mutableResources["es-ES"].translation.runtime.overview.metrics ??= {};
+mutableResources["es-ES"].translation.sessions.context.artifacts ??= {};
+
+mutableResources["fr-FR"].translation.agentDetail ??= {};
+mutableResources["fr-FR"].translation.agentSwitcher ??= {};
+mutableResources["fr-FR"].translation.chat ??= {};
+mutableResources["fr-FR"].translation.commandBar ??= {};
+mutableResources["fr-FR"].translation.common ??= {};
+mutableResources["fr-FR"].translation.controlPlane ??= {};
+mutableResources["fr-FR"].translation.costs ??= {};
+mutableResources["fr-FR"].translation.dashboard ??= {};
+mutableResources["fr-FR"].translation.dlq ??= {};
+mutableResources["fr-FR"].translation.executions ??= {};
+mutableResources["fr-FR"].translation.memory ??= {};
+mutableResources["fr-FR"].translation.overview ??= {};
+mutableResources["fr-FR"].translation.runtime ??= {};
+mutableResources["fr-FR"].translation.schedules ??= {};
+mutableResources["fr-FR"].translation.screenTime ??= {};
+mutableResources["fr-FR"].translation.sessions ??= {};
+mutableResources["fr-FR"].translation.settings ??= {};
+mutableResources["fr-FR"].translation.agentDetail.metrics ??= {};
+mutableResources["fr-FR"].translation.agentDetail.tabs ??= {};
+mutableResources["fr-FR"].translation.chat.composer ??= {};
+mutableResources["fr-FR"].translation.chat.header ??= {};
+mutableResources["fr-FR"].translation.chat.rail ??= {};
+mutableResources["fr-FR"].translation.chat.reasoning ??= {};
+mutableResources["fr-FR"].translation.chat.thread ??= {};
+mutableResources["fr-FR"].translation.chat.timestamp ??= {};
+mutableResources["fr-FR"].translation.chat.toolCall ??= {};
+mutableResources["fr-FR"].translation.commandBar.agent ??= {};
+mutableResources["fr-FR"].translation.commandBar.groups ??= {};
+mutableResources["fr-FR"].translation.commandBar.recents ??= {};
+mutableResources["fr-FR"].translation.controlPlane.create ??= {};
+mutableResources["fr-FR"].translation.controlPlane.policy ??= {};
+mutableResources["fr-FR"].translation.controlPlane.prompt ??= {};
+mutableResources["fr-FR"].translation.controlPlane.saveBar ??= {};
+mutableResources["fr-FR"].translation.costs.page ??= {};
+mutableResources["fr-FR"].translation.dashboard.checklist ??= {};
+mutableResources["fr-FR"].translation.dlq.page ??= {};
+mutableResources["fr-FR"].translation.dlq.table ??= {};
+mutableResources["fr-FR"].translation.executions.page ??= {};
+mutableResources["fr-FR"].translation.memory.curation ??= {};
+mutableResources["fr-FR"].translation.memory.inspector ??= {};
+mutableResources["fr-FR"].translation.memory.map ??= {};
+mutableResources["fr-FR"].translation.memory.page ??= {};
+mutableResources["fr-FR"].translation.overview.activity ??= {};
+mutableResources["fr-FR"].translation.runtime.overview ??= {};
+mutableResources["fr-FR"].translation.schedules.page ??= {};
+mutableResources["fr-FR"].translation.schedules.table ??= {};
+mutableResources["fr-FR"].translation.sessions.composer ??= {};
+mutableResources["fr-FR"].translation.sessions.context ??= {};
+mutableResources["fr-FR"].translation.sessions.detail ??= {};
+mutableResources["fr-FR"].translation.sessions.thread ??= {};
+mutableResources["fr-FR"].translation.settings.sections ??= {};
+mutableResources["fr-FR"].translation.controlPlane.create.name ??= {};
+mutableResources["fr-FR"].translation.costs.page.allocationModes ??= {};
+mutableResources["fr-FR"].translation.costs.page.breakdowns ??= {};
+mutableResources["fr-FR"].translation.costs.page.kpiContexts ??= {};
+mutableResources["fr-FR"].translation.costs.page.timeChart ??= {};
+mutableResources["fr-FR"].translation.executions.page.metrics ??= {};
+mutableResources["fr-FR"].translation.memory.curation.detail ??= {};
+mutableResources["fr-FR"].translation.memory.curation.row ??= {};
+mutableResources["fr-FR"].translation.runtime.overview.metrics ??= {};
+mutableResources["fr-FR"].translation.sessions.context.artifacts ??= {};
+
+mutableResources["de-DE"].translation.agentDetail ??= {};
+mutableResources["de-DE"].translation.agentSwitcher ??= {};
+mutableResources["de-DE"].translation.chat ??= {};
+mutableResources["de-DE"].translation.commandBar ??= {};
+mutableResources["de-DE"].translation.common ??= {};
+mutableResources["de-DE"].translation.controlPlane ??= {};
+mutableResources["de-DE"].translation.costs ??= {};
+mutableResources["de-DE"].translation.dashboard ??= {};
+mutableResources["de-DE"].translation.dlq ??= {};
+mutableResources["de-DE"].translation.executions ??= {};
+mutableResources["de-DE"].translation.memory ??= {};
+mutableResources["de-DE"].translation.overview ??= {};
+mutableResources["de-DE"].translation.runtime ??= {};
+mutableResources["de-DE"].translation.schedules ??= {};
+mutableResources["de-DE"].translation.screenTime ??= {};
+mutableResources["de-DE"].translation.sessions ??= {};
+mutableResources["de-DE"].translation.settings ??= {};
+mutableResources["de-DE"].translation.agentDetail.metrics ??= {};
+mutableResources["de-DE"].translation.agentDetail.tabs ??= {};
+mutableResources["de-DE"].translation.chat.composer ??= {};
+mutableResources["de-DE"].translation.chat.header ??= {};
+mutableResources["de-DE"].translation.chat.rail ??= {};
+mutableResources["de-DE"].translation.chat.reasoning ??= {};
+mutableResources["de-DE"].translation.chat.thread ??= {};
+mutableResources["de-DE"].translation.chat.timestamp ??= {};
+mutableResources["de-DE"].translation.chat.toolCall ??= {};
+mutableResources["de-DE"].translation.commandBar.agent ??= {};
+mutableResources["de-DE"].translation.commandBar.groups ??= {};
+mutableResources["de-DE"].translation.commandBar.recents ??= {};
+mutableResources["de-DE"].translation.controlPlane.create ??= {};
+mutableResources["de-DE"].translation.controlPlane.policy ??= {};
+mutableResources["de-DE"].translation.controlPlane.prompt ??= {};
+mutableResources["de-DE"].translation.controlPlane.saveBar ??= {};
+mutableResources["de-DE"].translation.costs.page ??= {};
+mutableResources["de-DE"].translation.dashboard.checklist ??= {};
+mutableResources["de-DE"].translation.dlq.page ??= {};
+mutableResources["de-DE"].translation.dlq.table ??= {};
+mutableResources["de-DE"].translation.executions.page ??= {};
+mutableResources["de-DE"].translation.memory.curation ??= {};
+mutableResources["de-DE"].translation.memory.inspector ??= {};
+mutableResources["de-DE"].translation.memory.map ??= {};
+mutableResources["de-DE"].translation.memory.page ??= {};
+mutableResources["de-DE"].translation.overview.activity ??= {};
+mutableResources["de-DE"].translation.runtime.overview ??= {};
+mutableResources["de-DE"].translation.schedules.page ??= {};
+mutableResources["de-DE"].translation.schedules.table ??= {};
+mutableResources["de-DE"].translation.sessions.composer ??= {};
+mutableResources["de-DE"].translation.sessions.context ??= {};
+mutableResources["de-DE"].translation.sessions.detail ??= {};
+mutableResources["de-DE"].translation.sessions.thread ??= {};
+mutableResources["de-DE"].translation.settings.sections ??= {};
+mutableResources["de-DE"].translation.controlPlane.create.name ??= {};
+mutableResources["de-DE"].translation.costs.page.allocationModes ??= {};
+mutableResources["de-DE"].translation.costs.page.breakdowns ??= {};
+mutableResources["de-DE"].translation.costs.page.kpiContexts ??= {};
+mutableResources["de-DE"].translation.costs.page.timeChart ??= {};
+mutableResources["de-DE"].translation.executions.page.metrics ??= {};
+mutableResources["de-DE"].translation.memory.curation.detail ??= {};
+mutableResources["de-DE"].translation.memory.curation.row ??= {};
+mutableResources["de-DE"].translation.runtime.overview.metrics ??= {};
+mutableResources["de-DE"].translation.sessions.context.artifacts ??= {};
+
+mutableResources["en-US"].translation.agentDetail = {
+  ...(mutableResources["en-US"].translation.agentDetail ?? {}),
+  activeSchedules: "Active schedules",
+  activeTitle: "{{agent}} active",
+  databaseNotInitialized: "Database not initialized yet",
+  entriesCount: "{{count}} entries",
+  noPublishedData: "No published data",
+  noRecentTasks: "No recent task.",
+  noSchedule: "No schedule.",
+  noSession: "No session.",
+  noTask: "No task.",
+  recent: "Recent",
+  refresh: "Refresh",
+  situation: "Situation",
+  stableTitle: "{{agent}} stable",
+  trackedSessions: "Tracked sessions",
+  unavailable: "Agent unavailable",
+};
+
+mutableResources["en-US"].translation.agentDetail.metrics = {
+  ...(mutableResources["en-US"].translation.agentDetail.metrics ?? {}),
+  active: "Active",
+  completed: "Completed",
+  failed: "Failures",
+  lastActivity: "Last activity",
+  queries: "Queries",
+  schedules: "Schedules",
+  todayCost: "Cost today",
+  totalCost: "Total cost",
+};
+
+mutableResources["en-US"].translation.agentDetail.tabs = {
+  ...(mutableResources["en-US"].translation.agentDetail.tabs ?? {}),
+  cron: "Schedules",
+  overview: "Overview",
+  sessions: "Sessions",
+  tasks: "Executions",
+};
+
+mutableResources["en-US"].translation.agentSwitcher = {
+  ...(mutableResources["en-US"].translation.agentSwitcher ?? {}),
+  createAria: "Create new agent",
+};
+
+mutableResources["en-US"].translation.chat.composer = {
+  ...(mutableResources["en-US"].translation.chat.composer ?? {}),
+  placeholder: "Write a message...",
+  send: "Send",
+  sendHint: "Enter to send • Shift + Enter for a new line",
+};
+
+mutableResources["en-US"].translation.chat.header = {
+  ...(mutableResources["en-US"].translation.chat.header ?? {}),
+  viewDetails: "View details",
+};
+
+mutableResources["en-US"].translation.chat.rail = {
+  ...(mutableResources["en-US"].translation.chat.rail ?? {}),
+  clearSearch: "Clear search",
+  close: "Close conversation list",
+  empty: "No conversations yet",
+  emptyHelper: "Start a new session to see it here.",
+  newSession: "New session",
+  noResults: "No results",
+  openLabel: "Open conversation list",
+  search: "Search",
+  title: "Conversations",
+  unavailable: "History unavailable",
+};
+
+mutableResources["en-US"].translation.chat.reasoning = {
+  ...(mutableResources["en-US"].translation.chat.reasoning ?? {}),
+  expandLabelDone: "Thought for {{duration}}",
+  expandLabelDoneNoDuration: "Reasoning",
+  expandLabelStreaming: "Thinking…",
+};
+
+mutableResources["en-US"].translation.chat.thread = {
+  ...(mutableResources["en-US"].translation.chat.thread ?? {}),
+  empty: "No messages yet.",
+  errorGeneric: "Something went wrong. Please try again.",
+  failed: "Failed to send",
+  newMessages: "New messages",
+  retry: "Retry",
+  thinking: "Thinking…",
+};
+
+mutableResources["en-US"].translation.chat.timestamp = {
+  ...(mutableResources["en-US"].translation.chat.timestamp ?? {}),
+  lastActivity: "Last activity",
+};
+
+mutableResources["en-US"].translation.chat.toolCall = {
+  ...(mutableResources["en-US"].translation.chat.toolCall ?? {}),
+  completed: "Completed",
+  cost: "cost",
+  failed: "Failed",
+  queued: "Queued",
+  retrying: "Retrying",
+  running: "Running",
+  tools: "tools",
+  viewArgs: "Arguments",
+  viewExecution: "View execution",
+};
+
+mutableResources["en-US"].translation.commandBar = {
+  ...(mutableResources["en-US"].translation.commandBar ?? {}),
+  emptyState: "No matching commands or agents.",
+  modalTitle: "Command bar",
+  placeholder: "Search commands, agents, and actions…",
+  shortcutHint: "⌘K",
+};
+
+mutableResources["en-US"].translation.commandBar.agent = {
+  ...(mutableResources["en-US"].translation.commandBar.agent ?? {}),
+  description: "Open agent detail",
+};
+
+mutableResources["en-US"].translation.commandBar.groups = {
+  ...(mutableResources["en-US"].translation.commandBar.groups ?? {}),
+  actions: "Actions",
+  agents: "Agents",
+  approvals: "Approvals",
+  pages: "Pages",
+  recents: "Recent",
+  skills: "Skills",
+  tools: "Tools",
+};
+
+mutableResources["en-US"].translation.commandBar.recents = {
+  ...(mutableResources["en-US"].translation.commandBar.recents ?? {}),
+  noQuery: "No recent query",
+};
+
+mutableResources["en-US"].translation.common = {
+  ...(mutableResources["en-US"].translation.common ?? {}),
+  actions: "Actions",
+  attempts: "Attempts",
+  back: "Back",
+  cancel: "Cancel",
+  clear: "Clear",
+  close: "Close",
+  code: "Code",
+  completedAt: "Completed at",
+  copy: "Copy",
+  details: "Details",
+  display: "Display",
+  edit: "Edit",
+  executions: "Executions",
+  expand: "Expand",
+  filters: "Filters",
+  lines: "Lines",
+  message: "Message",
+  mode: "Mode",
+  model: "Model",
+  noAgent: "No agent",
+  noHistory: "No history",
+  off: "Off",
+  on: "On",
+  open: "Open",
+  payload: "Payload",
+  phase: "Phase",
+  pod: "Pod",
+  preview: "Preview",
+  reconnect: "Reconnect",
+  refresh: "Refresh",
+  save: "Save",
+  schedules: "Schedules",
+  sessions: "Sessions",
+  startedAt: "Started at",
+  task: "Task",
+  timing: "Timing",
+  totalTime: "Total time",
+  user: "User",
+  visual: "Visual",
+  workspaceDirectory: "Workspace directory",
+};
+
+mutableResources["en-US"].translation.controlPlane.create = {
+  ...(mutableResources["en-US"].translation.controlPlane.create ?? {}),
+  agentIdHint: "Lowercase, no spaces. Used as canonical identifier.",
+  agentIdLabel: "Agent ID",
+  agentIdPlaceholder: "e.g. sales-assistant",
+  cancel: "Cancel",
+  colorLabel: "Color",
+  descriptionLabel: "Description",
+  descriptionPlaceholder: "Optional short description",
+  genericError: "Could not create the resource. Please try again.",
+  nameLabel: "Name",
+  parentWorkspace: "Parent workspace",
+  squadNone: "No squad",
+  squadOptional: "Squad (optional)",
+  submit: "Create",
+  subtitle: "Fill the fields below to publish.",
+  typeLabel: "Type",
+  workspaceChoose: "Choose a workspace",
+  workspaceNone: "No workspace",
+  workspaceOptional: "Workspace (optional)",
+};
+
+mutableResources["en-US"].translation.controlPlane.create.name = {
+  ...(mutableResources["en-US"].translation.controlPlane.create.name ?? {}),
+  agent: "Agent name",
+  squad: "Squad name",
+  workspace: "Workspace name",
+};
+
+mutableResources["en-US"].translation.controlPlane.policy = {
+  ...(mutableResources["en-US"].translation.controlPlane.policy ?? {}),
+  add: "Add",
+  addPlaceholder: "Add new item…",
+  empty: "No items yet.",
+  remove: "Remove",
+};
+
+mutableResources["en-US"].translation.controlPlane.prompt = {
+  ...(mutableResources["en-US"].translation.controlPlane.prompt ?? {}),
+  edit: "Edit",
+  placeholder: "Write the system prompt for this agent…",
+  preview: "Preview",
+};
+
+mutableResources["en-US"].translation.controlPlane.saveBar = {
+  ...(mutableResources["en-US"].translation.controlPlane.saveBar ?? {}),
+  dirty: "Unsaved changes",
+  dirtyMany: "{{count}} unsaved changes",
+  discard: "Discard",
+  save: "Save",
+  saved: "Saved",
+};
+
+mutableResources["en-US"].translation.costs.page = {
+  ...(mutableResources["en-US"].translation.costs.page ?? {}),
+  allocationDominant: "Dominant:",
+  allocationFooter: "{{label}} accounts for {{value}} of the current cut and leads the observed distribution.",
+  emptyBreakdownShort: "Not enough data",
+  executionsCount: "{{count}} executions",
+  loadError: "Could not load costs.",
+  noConversations: "No conversations in the current filter.",
+  noDominantAllocation: "No dominant concentration",
+  noDominantModel: "No dominant model",
+  noDominantOrigin: "No dominant origin",
+  noModel: "No model",
+  noPeak: "No highlighted peak in the period",
+  noRecentPreview: "No recent preview",
+  queriesCount: "{{count}} queries",
+  shareInPeriod: "Share in period",
+  unavailable: "Costs unavailable",
+};
+
+mutableResources["en-US"].translation.costs.page.allocationModes = {
+  ...(mutableResources["en-US"].translation.costs.page.allocationModes ?? {}),
+  task: "By task",
+};
+
+mutableResources["en-US"].translation.costs.page.breakdowns = {
+  ...(mutableResources["en-US"].translation.costs.page.breakdowns ?? {}),
+  byAgentTitle: "Distribution by agent",
+  byModelTitle: "Distribution by model",
+  byTaskTitle: "Distribution by task type",
+};
+
+mutableResources["en-US"].translation.costs.page.kpiContexts = {
+  ...(mutableResources["en-US"].translation.costs.page.kpiContexts ?? {}),
+  noComparableBase: "No comparable baseline",
+  previousBase: "Previous base {{value}}",
+  resolvedConversations: "{{count}} resolved conversations",
+  totalPeriod: "{{queries}} queries · {{executions}} executions",
+};
+
+mutableResources["en-US"].translation.costs.page.timeChart = {
+  ...(mutableResources["en-US"].translation.costs.page.timeChart ?? {}),
+  base: "Base:",
+  buckets: "Buckets:",
+  driver: "Driver · {{value}}",
+  emptyShort: "Not enough data",
+  modeLabel: "Mode",
+  noBucket: "No bucket",
+  noDriver: "No dominant driver",
+  peak: "Peak:",
+  variation: "Variation:",
+};
+
+mutableResources["en-US"].translation.dashboard.checklist = {
+  ...(mutableResources["en-US"].translation.dashboard.checklist ?? {}),
+  agent: "Create your first agent",
+  dismiss: "Dismiss",
+  provider: "Configure a provider",
+  subtitle: "Finish the workspace setup to unlock automations.",
+  telegram: "Connect Telegram",
+  title: "Getting started",
+};
+
+mutableResources["en-US"].translation.dlq.page = {
+  ...(mutableResources["en-US"].translation.dlq.page ?? {}),
+  affectedAgents: "Affected agents",
+};
+
+mutableResources["en-US"].translation.dlq.table = {
+  ...(mutableResources["en-US"].translation.dlq.table ?? {}),
+  noAgent: "No agent linked",
+};
+
+mutableResources["en-US"].translation.executions.page = {
+  ...(mutableResources["en-US"].translation.executions.page ?? {}),
+  loadError: "Could not load execution details.",
+};
+
+mutableResources["en-US"].translation.executions.page.metrics = {
+  ...(mutableResources["en-US"].translation.executions.page.metrics ?? {}),
+  avgDurationHint: "Average run time across the current filter",
+  costHint: "Total cost for the current cut",
+  toolsHint: "Number of tool invocations observed",
+  warningsHint: "Tasks that required retries or flagged warnings",
+};
+
+mutableResources["en-US"].translation.memory.curation = {
+  ...(mutableResources["en-US"].translation.memory.curation ?? {}),
+  selectedCount: "{{count}} items selected",
+};
+
+mutableResources["en-US"].translation.memory.curation.detail = {
+  ...(mutableResources["en-US"].translation.memory.curation.detail ?? {}),
+  memoriesConnected: "{{count}} connected memories",
+};
+
+mutableResources["en-US"].translation.memory.curation.row = {
+  ...(mutableResources["en-US"].translation.memory.curation.row ?? {}),
+  sessionCount: "{{count}} sessions",
+};
+
+mutableResources["en-US"].translation.memory.inspector = {
+  ...(mutableResources["en-US"].translation.memory.inspector ?? {}),
+  content: "Content",
+  details: "Details",
+  empty: "Select a point on the map",
+  expiresAt: "Expires at",
+  members: "Members",
+  never: "Never",
+  recenter: "Recenter",
+  selectPointHint: "Click a memory on the map to inspect it.",
+};
+
+mutableResources["en-US"].translation.memory.map = {
+  ...(mutableResources["en-US"].translation.memory.map ?? {}),
+  canvasAriaLabel: "Memory map canvas",
+  clusters: "Clusters",
+  memoryCount: "{{count}} memories",
+  reset: "Reset map",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+};
+
+mutableResources["en-US"].translation.memory.page = {
+  ...(mutableResources["en-US"].translation.memory.page ?? {}),
+  noAgentsDescription: "Create or publish at least one agent before opening the map.",
+  noAgentsTitle: "No agents available",
+};
+
+mutableResources["en-US"].translation.overview.activity = {
+  ...(mutableResources["en-US"].translation.overview.activity ?? {}),
+  deploy: "Deploy",
+  events: "{{count}} events",
+  latestExecutions: "Latest executions",
+  noRecent: "No recent activity",
+  retry: "Retry",
+  showingRecent: "Showing the most recent events",
+  taskCompleted: "Task completed",
+  taskFailed: "Task failed",
+  taskQueued: "Task queued",
+  taskStarted: "Task started",
+};
+
+mutableResources["en-US"].translation.runtime.overview.metrics = {
+  ...(mutableResources["en-US"].translation.runtime.overview.metrics ?? {}),
+  attentionHint: "Executions requiring review or retries",
+  executionsHint: "Live executions across visible agents",
+  onlineAgents: "Agents online",
+  onlineAgentsHint: "Agents with a healthy runtime heartbeat",
+};
+
+mutableResources["en-US"].translation.schedules.page = {
+  ...(mutableResources["en-US"].translation.schedules.page ?? {}),
+  unavailable: "Schedules unavailable",
+  unavailableDescription: "Unable to load canonical schedules.",
+  visibleAgents: "Visible agents",
+};
+
+mutableResources["en-US"].translation.schedules.table = {
+  ...(mutableResources["en-US"].translation.schedules.table ?? {}),
+  nextRun: "Next run",
+};
+
+mutableResources["en-US"].translation.screenTime = {
+  ...(mutableResources["en-US"].translation.screenTime ?? {}),
+  focusAgents: "Agents in focus",
+};
+
+mutableResources["en-US"].translation.sessions.composer = {
+  ...(mutableResources["en-US"].translation.sessions.composer ?? {}),
+  selectAgentToStart: "Select a specific agent here to start a chat.",
+};
+
+mutableResources["en-US"].translation.sessions.context = {
+  ...(mutableResources["en-US"].translation.sessions.context ?? {}),
+  summaryLabel: "Summary",
+};
+
+mutableResources["en-US"].translation.sessions.context.artifacts = {
+  ...(mutableResources["en-US"].translation.sessions.context.artifacts ?? {}),
+  executionFallback: "Execution artifact",
+  label: "Artifacts",
+  openExternal: "Open externally",
+  previewUnavailable: "Preview unavailable",
+};
+
+mutableResources["en-US"].translation.sessions.detail = {
+  ...(mutableResources["en-US"].translation.sessions.detail ?? {}),
+  agent: "Agent",
+  model: "Model",
+};
+
+mutableResources["en-US"].translation.sessions.thread = {
+  ...(mutableResources["en-US"].translation.sessions.thread ?? {}),
+  heroHelper: "Pick an agent in the composer and send the first message.",
+  heroTitle: "Start a new conversation",
+  newChatEyebrow: "New chat",
+};
+
+mutableResources["en-US"].translation.settings.sections = {
+  ...(mutableResources["en-US"].translation.settings.sections ?? {}),
+  navigation: "Navigation",
+};
+
+mutableResources["pt-BR"].translation.agentDetail = {
+  ...(mutableResources["pt-BR"].translation.agentDetail ?? {}),
+  activeSchedules: "Agendamentos ativos",
+  activeTitle: "{{agent}} em atividade",
+  databaseNotInitialized: "Base ainda não inicializada",
+  entriesCount: "{{count}} entradas",
+  noPublishedData: "Sem dados publicados",
+  noRecentTasks: "Nenhuma tarefa recente.",
+  noSchedule: "Nenhum agendamento.",
+  noSession: "Nenhuma sessão.",
+  noTask: "Nenhuma tarefa.",
+  recent: "Recentes",
+  refresh: "Atualizar",
+  situation: "Situação",
+  stableTitle: "{{agent}} estável",
+  trackedSessions: "Sessões rastreadas",
+  unavailable: "Agente indisponível",
+};
+
+mutableResources["pt-BR"].translation.agentDetail.metrics = {
+  ...(mutableResources["pt-BR"].translation.agentDetail.metrics ?? {}),
+  active: "Ativas",
+  completed: "Concluídas",
+  failed: "Falhas",
+  lastActivity: "Última atividade",
+  queries: "Consultas",
+  schedules: "Agendamentos",
+  todayCost: "Custo hoje",
+  totalCost: "Custo total",
+};
+
+mutableResources["pt-BR"].translation.agentDetail.tabs = {
+  ...(mutableResources["pt-BR"].translation.agentDetail.tabs ?? {}),
+  cron: "Agendamentos",
+  overview: "Visão geral",
+  sessions: "Sessões",
+  tasks: "Execuções",
+};
+
+mutableResources["pt-BR"].translation.agentSwitcher = {
+  ...(mutableResources["pt-BR"].translation.agentSwitcher ?? {}),
+  createAria: "Criar novo agente",
+};
+
+mutableResources["pt-BR"].translation.chat.composer = {
+  ...(mutableResources["pt-BR"].translation.chat.composer ?? {}),
+  placeholder: "Escreva uma mensagem...",
+  send: "Enviar",
+  sendHint: "Enter para enviar • Shift + Enter para nova linha",
+};
+
+mutableResources["pt-BR"].translation.chat.header = {
+  ...(mutableResources["pt-BR"].translation.chat.header ?? {}),
+  viewDetails: "Ver detalhes",
+};
+
+mutableResources["pt-BR"].translation.chat.rail = {
+  ...(mutableResources["pt-BR"].translation.chat.rail ?? {}),
+  clearSearch: "Limpar busca",
+  close: "Fechar lista de conversas",
+  empty: "Nenhuma conversa ainda",
+  emptyHelper: "Inicie uma nova sessão para vê-la aqui.",
+  newSession: "Nova sessão",
+  noResults: "Nenhum resultado",
+  openLabel: "Abrir lista de conversas",
+  search: "Buscar",
+  title: "Conversas",
+  unavailable: "Histórico indisponível",
+};
+
+mutableResources["pt-BR"].translation.chat.reasoning = {
+  ...(mutableResources["pt-BR"].translation.chat.reasoning ?? {}),
+  expandLabelDone: "Pensou por {{duration}}",
+  expandLabelDoneNoDuration: "Raciocínio",
+  expandLabelStreaming: "Pensando…",
+};
+
+mutableResources["pt-BR"].translation.chat.thread = {
+  ...(mutableResources["pt-BR"].translation.chat.thread ?? {}),
+  empty: "Sem mensagens ainda.",
+  errorGeneric: "Algo deu errado. Tente novamente.",
+  failed: "Falha no envio",
+  newMessages: "Novas mensagens",
+  retry: "Tentar novamente",
+  thinking: "Pensando…",
+};
+
+mutableResources["pt-BR"].translation.chat.timestamp = {
+  ...(mutableResources["pt-BR"].translation.chat.timestamp ?? {}),
+  lastActivity: "Última atividade",
+};
+
+mutableResources["pt-BR"].translation.chat.toolCall = {
+  ...(mutableResources["pt-BR"].translation.chat.toolCall ?? {}),
+  completed: "Concluído",
+  cost: "custo",
+  failed: "Falhou",
+  queued: "Em fila",
+  retrying: "Retentando",
+  running: "Executando",
+  tools: "ferramentas",
+  viewArgs: "Argumentos",
+  viewExecution: "Ver execução",
+};
+
+mutableResources["pt-BR"].translation.commandBar = {
+  ...(mutableResources["pt-BR"].translation.commandBar ?? {}),
+  emptyState: "Nenhum comando ou agente correspondente.",
+  modalTitle: "Barra de comandos",
+  placeholder: "Buscar comandos, agentes e ações…",
+  shortcutHint: "⌘K",
+};
+
+mutableResources["pt-BR"].translation.commandBar.agent = {
+  ...(mutableResources["pt-BR"].translation.commandBar.agent ?? {}),
+  description: "Abrir detalhe do agente",
+};
+
+mutableResources["pt-BR"].translation.commandBar.groups = {
+  ...(mutableResources["pt-BR"].translation.commandBar.groups ?? {}),
+  actions: "Ações",
+  agents: "Agentes",
+  approvals: "Aprovações",
+  pages: "Páginas",
+  recents: "Recentes",
+  skills: "Habilidades",
+  tools: "Ferramentas",
+};
+
+mutableResources["pt-BR"].translation.commandBar.recents = {
+  ...(mutableResources["pt-BR"].translation.commandBar.recents ?? {}),
+  noQuery: "Sem consulta recente",
+};
+
+mutableResources["pt-BR"].translation.common = {
+  ...(mutableResources["pt-BR"].translation.common ?? {}),
+  actions: "Ações",
+  attempts: "Tentativas",
+  back: "Voltar",
+  cancel: "Cancelar",
+  clear: "Limpar",
+  close: "Fechar",
+  code: "Código",
+  completedAt: "Concluído em",
+  copy: "Copiar",
+  details: "Detalhes",
+  display: "Exibição",
+  edit: "Editar",
+  executions: "Execuções",
+  expand: "Expandir",
+  filters: "Filtros",
+  lines: "Linhas",
+  message: "Mensagem",
+  mode: "Modo",
+  model: "Modelo",
+  noAgent: "Sem agente",
+  noHistory: "Sem histórico",
+  off: "Desligado",
+  on: "Ligado",
+  open: "Abrir",
+  payload: "Payload",
+  phase: "Fase",
+  pod: "Pod",
+  preview: "Prévia",
+  reconnect: "Reconectar",
+  refresh: "Atualizar",
+  save: "Salvar",
+  schedules: "Agendamentos",
+  sessions: "Sessões",
+  startedAt: "Iniciado em",
+  task: "Tarefa",
+  timing: "Tempo",
+  totalTime: "Tempo total",
+  user: "Usuário",
+  visual: "Visual",
+  workspaceDirectory: "Diretório do workspace",
+};
+
+mutableResources["pt-BR"].translation.controlPlane.create = {
+  ...(mutableResources["pt-BR"].translation.controlPlane.create ?? {}),
+  agentIdHint: "Minúsculas, sem espaços. Usado como identificador canônico.",
+  agentIdLabel: "ID do agente",
+  agentIdPlaceholder: "ex.: assistente-vendas",
+  cancel: "Cancelar",
+  colorLabel: "Cor",
+  descriptionLabel: "Descrição",
+  descriptionPlaceholder: "Descrição curta opcional",
+  genericError: "Não foi possível criar o recurso. Tente novamente.",
+  nameLabel: "Nome",
+  parentWorkspace: "Workspace pai",
+  squadNone: "Sem time",
+  squadOptional: "Time (opcional)",
+  submit: "Criar",
+  subtitle: "Preencha os campos abaixo para publicar.",
+  typeLabel: "Tipo",
+  workspaceChoose: "Escolha um workspace",
+  workspaceNone: "Sem workspace",
+  workspaceOptional: "Workspace (opcional)",
+};
+
+mutableResources["pt-BR"].translation.controlPlane.create.name = {
+  ...(mutableResources["pt-BR"].translation.controlPlane.create.name ?? {}),
+  agent: "Nome do agente",
+  squad: "Nome do time",
+  workspace: "Nome do workspace",
+};
+
+mutableResources["pt-BR"].translation.controlPlane.policy = {
+  ...(mutableResources["pt-BR"].translation.controlPlane.policy ?? {}),
+  add: "Adicionar",
+  addPlaceholder: "Adicionar novo item…",
+  empty: "Nenhum item ainda.",
+  remove: "Remover",
+};
+
+mutableResources["pt-BR"].translation.controlPlane.prompt = {
+  ...(mutableResources["pt-BR"].translation.controlPlane.prompt ?? {}),
+  edit: "Editar",
+  placeholder: "Escreva o system prompt para este agente…",
+  preview: "Prévia",
+};
+
+mutableResources["pt-BR"].translation.controlPlane.saveBar = {
+  ...(mutableResources["pt-BR"].translation.controlPlane.saveBar ?? {}),
+  dirty: "Alterações não salvas",
+  dirtyMany: "{{count}} alterações não salvas",
+  discard: "Descartar",
+  save: "Salvar",
+  saved: "Salvo",
+};
+
+mutableResources["pt-BR"].translation.costs.page = {
+  ...(mutableResources["pt-BR"].translation.costs.page ?? {}),
+  allocationDominant: "Dominante:",
+  allocationFooter: "{{label}} responde por {{value}} do recorte atual e lidera a distribuição observada.",
+  emptyBreakdownShort: "Dados insuficientes",
+  executionsCount: "{{count}} execuções",
+  loadError: "Não foi possível carregar custos.",
+  noConversations: "Nenhuma conversa no filtro atual.",
+  noDominantAllocation: "Sem concentração dominante",
+  noDominantModel: "Sem modelo dominante",
+  noDominantOrigin: "Sem origem dominante",
+  noModel: "Sem modelo",
+  noPeak: "Nenhum pico destacado no período",
+  noRecentPreview: "Sem prévia recente",
+  queriesCount: "{{count}} consultas",
+  shareInPeriod: "Participação no período",
+  unavailable: "Custos indisponíveis",
+};
+
+mutableResources["pt-BR"].translation.costs.page.allocationModes = {
+  ...(mutableResources["pt-BR"].translation.costs.page.allocationModes ?? {}),
+  task: "Por tarefa",
+};
+
+mutableResources["pt-BR"].translation.costs.page.breakdowns = {
+  ...(mutableResources["pt-BR"].translation.costs.page.breakdowns ?? {}),
+  byAgentTitle: "Distribuição por agente",
+  byModelTitle: "Distribuição por modelo",
+  byTaskTitle: "Distribuição por tipo de tarefa",
+};
+
+mutableResources["pt-BR"].translation.costs.page.kpiContexts = {
+  ...(mutableResources["pt-BR"].translation.costs.page.kpiContexts ?? {}),
+  noComparableBase: "Sem baseline comparável",
+  previousBase: "Base anterior {{value}}",
+  resolvedConversations: "{{count}} conversas resolvidas",
+  totalPeriod: "{{queries}} consultas · {{executions}} execuções",
+};
+
+mutableResources["pt-BR"].translation.costs.page.timeChart = {
+  ...(mutableResources["pt-BR"].translation.costs.page.timeChart ?? {}),
+  base: "Base:",
+  buckets: "Blocos:",
+  driver: "Motor · {{value}}",
+  emptyShort: "Dados insuficientes",
+  modeLabel: "Modo",
+  noBucket: "Sem bloco",
+  noDriver: "Sem motor dominante",
+  peak: "Pico:",
+  variation: "Variação:",
+};
+
+mutableResources["pt-BR"].translation.dashboard.checklist = {
+  ...(mutableResources["pt-BR"].translation.dashboard.checklist ?? {}),
+  agent: "Crie seu primeiro agente",
+  dismiss: "Dispensar",
+  provider: "Configure um provedor",
+  subtitle: "Finalize a configuração do workspace para liberar automações.",
+  telegram: "Conectar Telegram",
+  title: "Primeiros passos",
+};
+
+mutableResources["pt-BR"].translation.dlq.page = {
+  ...(mutableResources["pt-BR"].translation.dlq.page ?? {}),
+  affectedAgents: "Agentes afetados",
+};
+
+mutableResources["pt-BR"].translation.dlq.table = {
+  ...(mutableResources["pt-BR"].translation.dlq.table ?? {}),
+  noAgent: "Sem agente associado",
+};
+
+mutableResources["pt-BR"].translation.executions.page = {
+  ...(mutableResources["pt-BR"].translation.executions.page ?? {}),
+  loadError: "Não foi possível carregar os detalhes da execução.",
+};
+
+mutableResources["pt-BR"].translation.executions.page.metrics = {
+  ...(mutableResources["pt-BR"].translation.executions.page.metrics ?? {}),
+  avgDurationHint: "Tempo médio de execução no filtro atual",
+  costHint: "Custo total no recorte atual",
+  toolsHint: "Número de invocações de ferramentas observadas",
+  warningsHint: "Tarefas que exigiram retentativas ou levantaram avisos",
+};
+
+mutableResources["pt-BR"].translation.memory.curation = {
+  ...(mutableResources["pt-BR"].translation.memory.curation ?? {}),
+  selectedCount: "{{count}} itens selecionados",
+};
+
+mutableResources["pt-BR"].translation.memory.curation.detail = {
+  ...(mutableResources["pt-BR"].translation.memory.curation.detail ?? {}),
+  memoriesConnected: "{{count}} memórias conectadas",
+};
+
+mutableResources["pt-BR"].translation.memory.curation.row = {
+  ...(mutableResources["pt-BR"].translation.memory.curation.row ?? {}),
+  sessionCount: "{{count}} sessões",
+};
+
+mutableResources["pt-BR"].translation.memory.inspector = {
+  ...(mutableResources["pt-BR"].translation.memory.inspector ?? {}),
+  content: "Conteúdo",
+  details: "Detalhes",
+  empty: "Selecione um ponto no mapa",
+  expiresAt: "Expira em",
+  members: "Membros",
+  never: "Nunca",
+  recenter: "Recentralizar",
+  selectPointHint: "Clique em uma memória no mapa para inspecioná-la.",
+};
+
+mutableResources["pt-BR"].translation.memory.map = {
+  ...(mutableResources["pt-BR"].translation.memory.map ?? {}),
+  canvasAriaLabel: "Canvas do mapa de memória",
+  clusters: "Clusters",
+  memoryCount: "{{count}} memórias",
+  reset: "Resetar mapa",
+  zoomIn: "Aproximar",
+  zoomOut: "Afastar",
+};
+
+mutableResources["pt-BR"].translation.memory.page = {
+  ...(mutableResources["pt-BR"].translation.memory.page ?? {}),
+  noAgentsDescription: "Crie ou publique ao menos um agente antes de abrir o mapa.",
+  noAgentsTitle: "Nenhum agente disponível",
+};
+
+mutableResources["pt-BR"].translation.overview.activity = {
+  ...(mutableResources["pt-BR"].translation.overview.activity ?? {}),
+  deploy: "Deploy",
+  events: "{{count}} eventos",
+  latestExecutions: "Últimas execuções",
+  noRecent: "Sem atividade recente",
+  retry: "Tentar novamente",
+  showingRecent: "Mostrando os eventos mais recentes",
+  taskCompleted: "Tarefa concluída",
+  taskFailed: "Tarefa falhou",
+  taskQueued: "Tarefa em fila",
+  taskStarted: "Tarefa iniciada",
+};
+
+mutableResources["pt-BR"].translation.runtime.overview.metrics = {
+  ...(mutableResources["pt-BR"].translation.runtime.overview.metrics ?? {}),
+  attentionHint: "Execuções que exigem revisão ou retentativas",
+  executionsHint: "Execuções ao vivo entre os agentes visíveis",
+  onlineAgents: "Agentes online",
+  onlineAgentsHint: "Agentes com heartbeat do runtime saudável",
+};
+
+mutableResources["pt-BR"].translation.schedules.page = {
+  ...(mutableResources["pt-BR"].translation.schedules.page ?? {}),
+  unavailable: "Agendamentos indisponíveis",
+  unavailableDescription: "Não foi possível carregar os agendamentos canônicos.",
+  visibleAgents: "Agentes visíveis",
+};
+
+mutableResources["pt-BR"].translation.schedules.table = {
+  ...(mutableResources["pt-BR"].translation.schedules.table ?? {}),
+  nextRun: "Próxima execução",
+};
+
+mutableResources["pt-BR"].translation.screenTime = {
+  ...(mutableResources["pt-BR"].translation.screenTime ?? {}),
+  focusAgents: "Agentes em foco",
+};
+
+mutableResources["pt-BR"].translation.sessions.composer = {
+  ...(mutableResources["pt-BR"].translation.sessions.composer ?? {}),
+  selectAgentToStart: "Selecione um agente específico aqui para iniciar uma conversa.",
+};
+
+mutableResources["pt-BR"].translation.sessions.context = {
+  ...(mutableResources["pt-BR"].translation.sessions.context ?? {}),
+  summaryLabel: "Resumo",
+};
+
+mutableResources["pt-BR"].translation.sessions.context.artifacts = {
+  ...(mutableResources["pt-BR"].translation.sessions.context.artifacts ?? {}),
+  executionFallback: "Artefato da execução",
+  label: "Artefatos",
+  openExternal: "Abrir externamente",
+  previewUnavailable: "Prévia indisponível",
+};
+
+mutableResources["pt-BR"].translation.sessions.detail = {
+  ...(mutableResources["pt-BR"].translation.sessions.detail ?? {}),
+  agent: "Agente",
+  model: "Modelo",
+};
+
+mutableResources["pt-BR"].translation.sessions.thread = {
+  ...(mutableResources["pt-BR"].translation.sessions.thread ?? {}),
+  heroHelper: "Escolha um agente no composer e envie a primeira mensagem.",
+  heroTitle: "Inicie uma nova conversa",
+  newChatEyebrow: "Nova conversa",
+};
+
+mutableResources["pt-BR"].translation.settings.sections = {
+  ...(mutableResources["pt-BR"].translation.settings.sections ?? {}),
+  navigation: "Navegação",
+};
+
+mutableResources["es-ES"].translation.agentDetail = {
+  ...(mutableResources["es-ES"].translation.agentDetail ?? {}),
+  activeSchedules: "Active schedules",
+  activeTitle: "{{agent}} active",
+  databaseNotInitialized: "Database not initialized yet",
+  entriesCount: "{{count}} entries",
+  noPublishedData: "No published data",
+  noRecentTasks: "No recent task.",
+  noSchedule: "No schedule.",
+  noSession: "No session.",
+  noTask: "No task.",
+  recent: "Recent",
+  refresh: "Refresh",
+  situation: "Situation",
+  stableTitle: "{{agent}} stable",
+  trackedSessions: "Tracked sessions",
+  unavailable: "Agent unavailable",
+};
+
+mutableResources["es-ES"].translation.agentDetail.metrics = {
+  ...(mutableResources["es-ES"].translation.agentDetail.metrics ?? {}),
+  active: "Active",
+  completed: "Completed",
+  failed: "Failures",
+  lastActivity: "Last activity",
+  queries: "Queries",
+  schedules: "Schedules",
+  todayCost: "Cost today",
+  totalCost: "Total cost",
+};
+
+mutableResources["es-ES"].translation.agentDetail.tabs = {
+  ...(mutableResources["es-ES"].translation.agentDetail.tabs ?? {}),
+  cron: "Schedules",
+  overview: "Overview",
+  sessions: "Sessions",
+  tasks: "Executions",
+};
+
+mutableResources["es-ES"].translation.agentSwitcher = {
+  ...(mutableResources["es-ES"].translation.agentSwitcher ?? {}),
+  createAria: "Create new agent",
+};
+
+mutableResources["es-ES"].translation.chat.composer = {
+  ...(mutableResources["es-ES"].translation.chat.composer ?? {}),
+  placeholder: "Write a message...",
+  send: "Send",
+  sendHint: "Enter to send • Shift + Enter for a new line",
+};
+
+mutableResources["es-ES"].translation.chat.header = {
+  ...(mutableResources["es-ES"].translation.chat.header ?? {}),
+  viewDetails: "View details",
+};
+
+mutableResources["es-ES"].translation.chat.rail = {
+  ...(mutableResources["es-ES"].translation.chat.rail ?? {}),
+  clearSearch: "Clear search",
+  close: "Close conversation list",
+  empty: "No conversations yet",
+  emptyHelper: "Start a new session to see it here.",
+  newSession: "New session",
+  noResults: "No results",
+  openLabel: "Open conversation list",
+  search: "Search",
+  title: "Conversations",
+  unavailable: "History unavailable",
+};
+
+mutableResources["es-ES"].translation.chat.reasoning = {
+  ...(mutableResources["es-ES"].translation.chat.reasoning ?? {}),
+  expandLabelDone: "Thought for {{duration}}",
+  expandLabelDoneNoDuration: "Reasoning",
+  expandLabelStreaming: "Thinking…",
+};
+
+mutableResources["es-ES"].translation.chat.thread = {
+  ...(mutableResources["es-ES"].translation.chat.thread ?? {}),
+  empty: "No messages yet.",
+  errorGeneric: "Something went wrong. Please try again.",
+  failed: "Failed to send",
+  newMessages: "New messages",
+  retry: "Retry",
+  thinking: "Thinking…",
+};
+
+mutableResources["es-ES"].translation.chat.timestamp = {
+  ...(mutableResources["es-ES"].translation.chat.timestamp ?? {}),
+  lastActivity: "Last activity",
+};
+
+mutableResources["es-ES"].translation.chat.toolCall = {
+  ...(mutableResources["es-ES"].translation.chat.toolCall ?? {}),
+  completed: "Completed",
+  cost: "cost",
+  failed: "Failed",
+  queued: "Queued",
+  retrying: "Retrying",
+  running: "Running",
+  tools: "tools",
+  viewArgs: "Arguments",
+  viewExecution: "View execution",
+};
+
+mutableResources["es-ES"].translation.commandBar = {
+  ...(mutableResources["es-ES"].translation.commandBar ?? {}),
+  emptyState: "No matching commands or agents.",
+  modalTitle: "Command bar",
+  placeholder: "Search commands, agents, and actions…",
+  shortcutHint: "⌘K",
+};
+
+mutableResources["es-ES"].translation.commandBar.agent = {
+  ...(mutableResources["es-ES"].translation.commandBar.agent ?? {}),
+  description: "Open agent detail",
+};
+
+mutableResources["es-ES"].translation.commandBar.groups = {
+  ...(mutableResources["es-ES"].translation.commandBar.groups ?? {}),
+  actions: "Actions",
+  agents: "Agents",
+  approvals: "Approvals",
+  pages: "Pages",
+  recents: "Recent",
+  skills: "Skills",
+  tools: "Tools",
+};
+
+mutableResources["es-ES"].translation.commandBar.recents = {
+  ...(mutableResources["es-ES"].translation.commandBar.recents ?? {}),
+  noQuery: "No recent query",
+};
+
+mutableResources["es-ES"].translation.common = {
+  ...(mutableResources["es-ES"].translation.common ?? {}),
+  actions: "Actions",
+  attempts: "Attempts",
+  back: "Back",
+  cancel: "Cancel",
+  clear: "Clear",
+  close: "Close",
+  code: "Code",
+  completedAt: "Completed at",
+  copy: "Copy",
+  details: "Details",
+  display: "Display",
+  edit: "Edit",
+  executions: "Executions",
+  expand: "Expand",
+  filters: "Filters",
+  lines: "Lines",
+  message: "Message",
+  mode: "Mode",
+  model: "Model",
+  noAgent: "No agent",
+  noHistory: "No history",
+  off: "Off",
+  on: "On",
+  open: "Open",
+  payload: "Payload",
+  phase: "Phase",
+  pod: "Pod",
+  preview: "Preview",
+  reconnect: "Reconnect",
+  refresh: "Refresh",
+  save: "Save",
+  schedules: "Schedules",
+  sessions: "Sessions",
+  startedAt: "Started at",
+  task: "Task",
+  timing: "Timing",
+  totalTime: "Total time",
+  user: "User",
+  visual: "Visual",
+  workspaceDirectory: "Workspace directory",
+};
+
+mutableResources["es-ES"].translation.controlPlane.create = {
+  ...(mutableResources["es-ES"].translation.controlPlane.create ?? {}),
+  agentIdHint: "Lowercase, no spaces. Used as canonical identifier.",
+  agentIdLabel: "Agent ID",
+  agentIdPlaceholder: "e.g. sales-assistant",
+  cancel: "Cancel",
+  colorLabel: "Color",
+  descriptionLabel: "Description",
+  descriptionPlaceholder: "Optional short description",
+  genericError: "Could not create the resource. Please try again.",
+  nameLabel: "Name",
+  parentWorkspace: "Parent workspace",
+  squadNone: "No squad",
+  squadOptional: "Squad (optional)",
+  submit: "Create",
+  subtitle: "Fill the fields below to publish.",
+  typeLabel: "Type",
+  workspaceChoose: "Choose a workspace",
+  workspaceNone: "No workspace",
+  workspaceOptional: "Workspace (optional)",
+};
+
+mutableResources["es-ES"].translation.controlPlane.create.name = {
+  ...(mutableResources["es-ES"].translation.controlPlane.create.name ?? {}),
+  agent: "Agent name",
+  squad: "Squad name",
+  workspace: "Workspace name",
+};
+
+mutableResources["es-ES"].translation.controlPlane.policy = {
+  ...(mutableResources["es-ES"].translation.controlPlane.policy ?? {}),
+  add: "Add",
+  addPlaceholder: "Add new item…",
+  empty: "No items yet.",
+  remove: "Remove",
+};
+
+mutableResources["es-ES"].translation.controlPlane.prompt = {
+  ...(mutableResources["es-ES"].translation.controlPlane.prompt ?? {}),
+  edit: "Edit",
+  placeholder: "Write the system prompt for this agent…",
+  preview: "Preview",
+};
+
+mutableResources["es-ES"].translation.controlPlane.saveBar = {
+  ...(mutableResources["es-ES"].translation.controlPlane.saveBar ?? {}),
+  dirty: "Unsaved changes",
+  dirtyMany: "{{count}} unsaved changes",
+  discard: "Discard",
+  save: "Save",
+  saved: "Saved",
+};
+
+mutableResources["es-ES"].translation.costs.page = {
+  ...(mutableResources["es-ES"].translation.costs.page ?? {}),
+  allocationDominant: "Dominant:",
+  allocationFooter: "{{label}} accounts for {{value}} of the current cut and leads the observed distribution.",
+  emptyBreakdownShort: "Not enough data",
+  executionsCount: "{{count}} executions",
+  loadError: "Could not load costs.",
+  noConversations: "No conversations in the current filter.",
+  noDominantAllocation: "No dominant concentration",
+  noDominantModel: "No dominant model",
+  noDominantOrigin: "No dominant origin",
+  noModel: "No model",
+  noPeak: "No highlighted peak in the period",
+  noRecentPreview: "No recent preview",
+  queriesCount: "{{count}} queries",
+  shareInPeriod: "Share in period",
+  unavailable: "Costs unavailable",
+};
+
+mutableResources["es-ES"].translation.costs.page.allocationModes = {
+  ...(mutableResources["es-ES"].translation.costs.page.allocationModes ?? {}),
+  task: "By task",
+};
+
+mutableResources["es-ES"].translation.costs.page.breakdowns = {
+  ...(mutableResources["es-ES"].translation.costs.page.breakdowns ?? {}),
+  byAgentTitle: "Distribution by agent",
+  byModelTitle: "Distribution by model",
+  byTaskTitle: "Distribution by task type",
+};
+
+mutableResources["es-ES"].translation.costs.page.kpiContexts = {
+  ...(mutableResources["es-ES"].translation.costs.page.kpiContexts ?? {}),
+  noComparableBase: "No comparable baseline",
+  previousBase: "Previous base {{value}}",
+  resolvedConversations: "{{count}} resolved conversations",
+  totalPeriod: "{{queries}} queries · {{executions}} executions",
+};
+
+mutableResources["es-ES"].translation.costs.page.timeChart = {
+  ...(mutableResources["es-ES"].translation.costs.page.timeChart ?? {}),
+  base: "Base:",
+  buckets: "Buckets:",
+  driver: "Driver · {{value}}",
+  emptyShort: "Not enough data",
+  modeLabel: "Mode",
+  noBucket: "No bucket",
+  noDriver: "No dominant driver",
+  peak: "Peak:",
+  variation: "Variation:",
+};
+
+mutableResources["es-ES"].translation.dashboard.checklist = {
+  ...(mutableResources["es-ES"].translation.dashboard.checklist ?? {}),
+  agent: "Create your first agent",
+  dismiss: "Dismiss",
+  provider: "Configure a provider",
+  subtitle: "Finish the workspace setup to unlock automations.",
+  telegram: "Connect Telegram",
+  title: "Getting started",
+};
+
+mutableResources["es-ES"].translation.dlq.page = {
+  ...(mutableResources["es-ES"].translation.dlq.page ?? {}),
+  affectedAgents: "Affected agents",
+};
+
+mutableResources["es-ES"].translation.dlq.table = {
+  ...(mutableResources["es-ES"].translation.dlq.table ?? {}),
+  noAgent: "No agent linked",
+};
+
+mutableResources["es-ES"].translation.executions.page = {
+  ...(mutableResources["es-ES"].translation.executions.page ?? {}),
+  loadError: "Could not load execution details.",
+};
+
+mutableResources["es-ES"].translation.executions.page.metrics = {
+  ...(mutableResources["es-ES"].translation.executions.page.metrics ?? {}),
+  avgDurationHint: "Average run time across the current filter",
+  costHint: "Total cost for the current cut",
+  toolsHint: "Number of tool invocations observed",
+  warningsHint: "Tasks that required retries or flagged warnings",
+};
+
+mutableResources["es-ES"].translation.memory.curation = {
+  ...(mutableResources["es-ES"].translation.memory.curation ?? {}),
+  selectedCount: "{{count}} items selected",
+};
+
+mutableResources["es-ES"].translation.memory.curation.detail = {
+  ...(mutableResources["es-ES"].translation.memory.curation.detail ?? {}),
+  memoriesConnected: "{{count}} connected memories",
+};
+
+mutableResources["es-ES"].translation.memory.curation.row = {
+  ...(mutableResources["es-ES"].translation.memory.curation.row ?? {}),
+  sessionCount: "{{count}} sessions",
+};
+
+mutableResources["es-ES"].translation.memory.inspector = {
+  ...(mutableResources["es-ES"].translation.memory.inspector ?? {}),
+  content: "Content",
+  details: "Details",
+  empty: "Select a point on the map",
+  expiresAt: "Expires at",
+  members: "Members",
+  never: "Never",
+  recenter: "Recenter",
+  selectPointHint: "Click a memory on the map to inspect it.",
+};
+
+mutableResources["es-ES"].translation.memory.map = {
+  ...(mutableResources["es-ES"].translation.memory.map ?? {}),
+  canvasAriaLabel: "Memory map canvas",
+  clusters: "Clusters",
+  memoryCount: "{{count}} memories",
+  reset: "Reset map",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+};
+
+mutableResources["es-ES"].translation.memory.page = {
+  ...(mutableResources["es-ES"].translation.memory.page ?? {}),
+  noAgentsDescription: "Create or publish at least one agent before opening the map.",
+  noAgentsTitle: "No agents available",
+};
+
+mutableResources["es-ES"].translation.overview.activity = {
+  ...(mutableResources["es-ES"].translation.overview.activity ?? {}),
+  deploy: "Deploy",
+  events: "{{count}} events",
+  latestExecutions: "Latest executions",
+  noRecent: "No recent activity",
+  retry: "Retry",
+  showingRecent: "Showing the most recent events",
+  taskCompleted: "Task completed",
+  taskFailed: "Task failed",
+  taskQueued: "Task queued",
+  taskStarted: "Task started",
+};
+
+mutableResources["es-ES"].translation.runtime.overview.metrics = {
+  ...(mutableResources["es-ES"].translation.runtime.overview.metrics ?? {}),
+  attentionHint: "Executions requiring review or retries",
+  executionsHint: "Live executions across visible agents",
+  onlineAgents: "Agents online",
+  onlineAgentsHint: "Agents with a healthy runtime heartbeat",
+};
+
+mutableResources["es-ES"].translation.schedules.page = {
+  ...(mutableResources["es-ES"].translation.schedules.page ?? {}),
+  unavailable: "Schedules unavailable",
+  unavailableDescription: "Unable to load canonical schedules.",
+  visibleAgents: "Visible agents",
+};
+
+mutableResources["es-ES"].translation.schedules.table = {
+  ...(mutableResources["es-ES"].translation.schedules.table ?? {}),
+  nextRun: "Next run",
+};
+
+mutableResources["es-ES"].translation.screenTime = {
+  ...(mutableResources["es-ES"].translation.screenTime ?? {}),
+  focusAgents: "Agents in focus",
+};
+
+mutableResources["es-ES"].translation.sessions.composer = {
+  ...(mutableResources["es-ES"].translation.sessions.composer ?? {}),
+  selectAgentToStart: "Select a specific agent here to start a chat.",
+};
+
+mutableResources["es-ES"].translation.sessions.context = {
+  ...(mutableResources["es-ES"].translation.sessions.context ?? {}),
+  summaryLabel: "Summary",
+};
+
+mutableResources["es-ES"].translation.sessions.context.artifacts = {
+  ...(mutableResources["es-ES"].translation.sessions.context.artifacts ?? {}),
+  executionFallback: "Execution artifact",
+  label: "Artifacts",
+  openExternal: "Open externally",
+  previewUnavailable: "Preview unavailable",
+};
+
+mutableResources["es-ES"].translation.sessions.detail = {
+  ...(mutableResources["es-ES"].translation.sessions.detail ?? {}),
+  agent: "Agent",
+  model: "Model",
+};
+
+mutableResources["es-ES"].translation.sessions.thread = {
+  ...(mutableResources["es-ES"].translation.sessions.thread ?? {}),
+  heroHelper: "Pick an agent in the composer and send the first message.",
+  heroTitle: "Start a new conversation",
+  newChatEyebrow: "New chat",
+};
+
+mutableResources["es-ES"].translation.settings.sections = {
+  ...(mutableResources["es-ES"].translation.settings.sections ?? {}),
+  navigation: "Navigation",
+};
+
+mutableResources["fr-FR"].translation.agentDetail = {
+  ...(mutableResources["fr-FR"].translation.agentDetail ?? {}),
+  activeSchedules: "Active schedules",
+  activeTitle: "{{agent}} active",
+  databaseNotInitialized: "Database not initialized yet",
+  entriesCount: "{{count}} entries",
+  noPublishedData: "No published data",
+  noRecentTasks: "No recent task.",
+  noSchedule: "No schedule.",
+  noSession: "No session.",
+  noTask: "No task.",
+  recent: "Recent",
+  refresh: "Refresh",
+  situation: "Situation",
+  stableTitle: "{{agent}} stable",
+  trackedSessions: "Tracked sessions",
+  unavailable: "Agent unavailable",
+};
+
+mutableResources["fr-FR"].translation.agentDetail.metrics = {
+  ...(mutableResources["fr-FR"].translation.agentDetail.metrics ?? {}),
+  active: "Active",
+  completed: "Completed",
+  failed: "Failures",
+  lastActivity: "Last activity",
+  queries: "Queries",
+  schedules: "Schedules",
+  todayCost: "Cost today",
+  totalCost: "Total cost",
+};
+
+mutableResources["fr-FR"].translation.agentDetail.tabs = {
+  ...(mutableResources["fr-FR"].translation.agentDetail.tabs ?? {}),
+  cron: "Schedules",
+  overview: "Overview",
+  sessions: "Sessions",
+  tasks: "Executions",
+};
+
+mutableResources["fr-FR"].translation.agentSwitcher = {
+  ...(mutableResources["fr-FR"].translation.agentSwitcher ?? {}),
+  createAria: "Create new agent",
+};
+
+mutableResources["fr-FR"].translation.chat.composer = {
+  ...(mutableResources["fr-FR"].translation.chat.composer ?? {}),
+  placeholder: "Write a message...",
+  send: "Send",
+  sendHint: "Enter to send • Shift + Enter for a new line",
+};
+
+mutableResources["fr-FR"].translation.chat.header = {
+  ...(mutableResources["fr-FR"].translation.chat.header ?? {}),
+  viewDetails: "View details",
+};
+
+mutableResources["fr-FR"].translation.chat.rail = {
+  ...(mutableResources["fr-FR"].translation.chat.rail ?? {}),
+  clearSearch: "Clear search",
+  close: "Close conversation list",
+  empty: "No conversations yet",
+  emptyHelper: "Start a new session to see it here.",
+  newSession: "New session",
+  noResults: "No results",
+  openLabel: "Open conversation list",
+  search: "Search",
+  title: "Conversations",
+  unavailable: "History unavailable",
+};
+
+mutableResources["fr-FR"].translation.chat.reasoning = {
+  ...(mutableResources["fr-FR"].translation.chat.reasoning ?? {}),
+  expandLabelDone: "Thought for {{duration}}",
+  expandLabelDoneNoDuration: "Reasoning",
+  expandLabelStreaming: "Thinking…",
+};
+
+mutableResources["fr-FR"].translation.chat.thread = {
+  ...(mutableResources["fr-FR"].translation.chat.thread ?? {}),
+  empty: "No messages yet.",
+  errorGeneric: "Something went wrong. Please try again.",
+  failed: "Failed to send",
+  newMessages: "New messages",
+  retry: "Retry",
+  thinking: "Thinking…",
+};
+
+mutableResources["fr-FR"].translation.chat.timestamp = {
+  ...(mutableResources["fr-FR"].translation.chat.timestamp ?? {}),
+  lastActivity: "Last activity",
+};
+
+mutableResources["fr-FR"].translation.chat.toolCall = {
+  ...(mutableResources["fr-FR"].translation.chat.toolCall ?? {}),
+  completed: "Completed",
+  cost: "cost",
+  failed: "Failed",
+  queued: "Queued",
+  retrying: "Retrying",
+  running: "Running",
+  tools: "tools",
+  viewArgs: "Arguments",
+  viewExecution: "View execution",
+};
+
+mutableResources["fr-FR"].translation.commandBar = {
+  ...(mutableResources["fr-FR"].translation.commandBar ?? {}),
+  emptyState: "No matching commands or agents.",
+  modalTitle: "Command bar",
+  placeholder: "Search commands, agents, and actions…",
+  shortcutHint: "⌘K",
+};
+
+mutableResources["fr-FR"].translation.commandBar.agent = {
+  ...(mutableResources["fr-FR"].translation.commandBar.agent ?? {}),
+  description: "Open agent detail",
+};
+
+mutableResources["fr-FR"].translation.commandBar.groups = {
+  ...(mutableResources["fr-FR"].translation.commandBar.groups ?? {}),
+  actions: "Actions",
+  agents: "Agents",
+  approvals: "Approvals",
+  pages: "Pages",
+  recents: "Recent",
+  skills: "Skills",
+  tools: "Tools",
+};
+
+mutableResources["fr-FR"].translation.commandBar.recents = {
+  ...(mutableResources["fr-FR"].translation.commandBar.recents ?? {}),
+  noQuery: "No recent query",
+};
+
+mutableResources["fr-FR"].translation.common = {
+  ...(mutableResources["fr-FR"].translation.common ?? {}),
+  actions: "Actions",
+  attempts: "Attempts",
+  back: "Back",
+  cancel: "Cancel",
+  clear: "Clear",
+  close: "Close",
+  code: "Code",
+  completedAt: "Completed at",
+  copy: "Copy",
+  details: "Details",
+  display: "Display",
+  edit: "Edit",
+  executions: "Executions",
+  expand: "Expand",
+  filters: "Filters",
+  lines: "Lines",
+  message: "Message",
+  mode: "Mode",
+  model: "Model",
+  noAgent: "No agent",
+  noHistory: "No history",
+  off: "Off",
+  on: "On",
+  open: "Open",
+  payload: "Payload",
+  phase: "Phase",
+  pod: "Pod",
+  preview: "Preview",
+  reconnect: "Reconnect",
+  refresh: "Refresh",
+  save: "Save",
+  schedules: "Schedules",
+  sessions: "Sessions",
+  startedAt: "Started at",
+  task: "Task",
+  timing: "Timing",
+  totalTime: "Total time",
+  user: "User",
+  visual: "Visual",
+  workspaceDirectory: "Workspace directory",
+};
+
+mutableResources["fr-FR"].translation.controlPlane.create = {
+  ...(mutableResources["fr-FR"].translation.controlPlane.create ?? {}),
+  agentIdHint: "Lowercase, no spaces. Used as canonical identifier.",
+  agentIdLabel: "Agent ID",
+  agentIdPlaceholder: "e.g. sales-assistant",
+  cancel: "Cancel",
+  colorLabel: "Color",
+  descriptionLabel: "Description",
+  descriptionPlaceholder: "Optional short description",
+  genericError: "Could not create the resource. Please try again.",
+  nameLabel: "Name",
+  parentWorkspace: "Parent workspace",
+  squadNone: "No squad",
+  squadOptional: "Squad (optional)",
+  submit: "Create",
+  subtitle: "Fill the fields below to publish.",
+  typeLabel: "Type",
+  workspaceChoose: "Choose a workspace",
+  workspaceNone: "No workspace",
+  workspaceOptional: "Workspace (optional)",
+};
+
+mutableResources["fr-FR"].translation.controlPlane.create.name = {
+  ...(mutableResources["fr-FR"].translation.controlPlane.create.name ?? {}),
+  agent: "Agent name",
+  squad: "Squad name",
+  workspace: "Workspace name",
+};
+
+mutableResources["fr-FR"].translation.controlPlane.policy = {
+  ...(mutableResources["fr-FR"].translation.controlPlane.policy ?? {}),
+  add: "Add",
+  addPlaceholder: "Add new item…",
+  empty: "No items yet.",
+  remove: "Remove",
+};
+
+mutableResources["fr-FR"].translation.controlPlane.prompt = {
+  ...(mutableResources["fr-FR"].translation.controlPlane.prompt ?? {}),
+  edit: "Edit",
+  placeholder: "Write the system prompt for this agent…",
+  preview: "Preview",
+};
+
+mutableResources["fr-FR"].translation.controlPlane.saveBar = {
+  ...(mutableResources["fr-FR"].translation.controlPlane.saveBar ?? {}),
+  dirty: "Unsaved changes",
+  dirtyMany: "{{count}} unsaved changes",
+  discard: "Discard",
+  save: "Save",
+  saved: "Saved",
+};
+
+mutableResources["fr-FR"].translation.costs.page = {
+  ...(mutableResources["fr-FR"].translation.costs.page ?? {}),
+  allocationDominant: "Dominant:",
+  allocationFooter: "{{label}} accounts for {{value}} of the current cut and leads the observed distribution.",
+  emptyBreakdownShort: "Not enough data",
+  executionsCount: "{{count}} executions",
+  loadError: "Could not load costs.",
+  noConversations: "No conversations in the current filter.",
+  noDominantAllocation: "No dominant concentration",
+  noDominantModel: "No dominant model",
+  noDominantOrigin: "No dominant origin",
+  noModel: "No model",
+  noPeak: "No highlighted peak in the period",
+  noRecentPreview: "No recent preview",
+  queriesCount: "{{count}} queries",
+  shareInPeriod: "Share in period",
+  unavailable: "Costs unavailable",
+};
+
+mutableResources["fr-FR"].translation.costs.page.allocationModes = {
+  ...(mutableResources["fr-FR"].translation.costs.page.allocationModes ?? {}),
+  task: "By task",
+};
+
+mutableResources["fr-FR"].translation.costs.page.breakdowns = {
+  ...(mutableResources["fr-FR"].translation.costs.page.breakdowns ?? {}),
+  byAgentTitle: "Distribution by agent",
+  byModelTitle: "Distribution by model",
+  byTaskTitle: "Distribution by task type",
+};
+
+mutableResources["fr-FR"].translation.costs.page.kpiContexts = {
+  ...(mutableResources["fr-FR"].translation.costs.page.kpiContexts ?? {}),
+  noComparableBase: "No comparable baseline",
+  previousBase: "Previous base {{value}}",
+  resolvedConversations: "{{count}} resolved conversations",
+  totalPeriod: "{{queries}} queries · {{executions}} executions",
+};
+
+mutableResources["fr-FR"].translation.costs.page.timeChart = {
+  ...(mutableResources["fr-FR"].translation.costs.page.timeChart ?? {}),
+  base: "Base:",
+  buckets: "Buckets:",
+  driver: "Driver · {{value}}",
+  emptyShort: "Not enough data",
+  modeLabel: "Mode",
+  noBucket: "No bucket",
+  noDriver: "No dominant driver",
+  peak: "Peak:",
+  variation: "Variation:",
+};
+
+mutableResources["fr-FR"].translation.dashboard.checklist = {
+  ...(mutableResources["fr-FR"].translation.dashboard.checklist ?? {}),
+  agent: "Create your first agent",
+  dismiss: "Dismiss",
+  provider: "Configure a provider",
+  subtitle: "Finish the workspace setup to unlock automations.",
+  telegram: "Connect Telegram",
+  title: "Getting started",
+};
+
+mutableResources["fr-FR"].translation.dlq.page = {
+  ...(mutableResources["fr-FR"].translation.dlq.page ?? {}),
+  affectedAgents: "Affected agents",
+};
+
+mutableResources["fr-FR"].translation.dlq.table = {
+  ...(mutableResources["fr-FR"].translation.dlq.table ?? {}),
+  noAgent: "No agent linked",
+};
+
+mutableResources["fr-FR"].translation.executions.page = {
+  ...(mutableResources["fr-FR"].translation.executions.page ?? {}),
+  loadError: "Could not load execution details.",
+};
+
+mutableResources["fr-FR"].translation.executions.page.metrics = {
+  ...(mutableResources["fr-FR"].translation.executions.page.metrics ?? {}),
+  avgDurationHint: "Average run time across the current filter",
+  costHint: "Total cost for the current cut",
+  toolsHint: "Number of tool invocations observed",
+  warningsHint: "Tasks that required retries or flagged warnings",
+};
+
+mutableResources["fr-FR"].translation.memory.curation = {
+  ...(mutableResources["fr-FR"].translation.memory.curation ?? {}),
+  selectedCount: "{{count}} items selected",
+};
+
+mutableResources["fr-FR"].translation.memory.curation.detail = {
+  ...(mutableResources["fr-FR"].translation.memory.curation.detail ?? {}),
+  memoriesConnected: "{{count}} connected memories",
+};
+
+mutableResources["fr-FR"].translation.memory.curation.row = {
+  ...(mutableResources["fr-FR"].translation.memory.curation.row ?? {}),
+  sessionCount: "{{count}} sessions",
+};
+
+mutableResources["fr-FR"].translation.memory.inspector = {
+  ...(mutableResources["fr-FR"].translation.memory.inspector ?? {}),
+  content: "Content",
+  details: "Details",
+  empty: "Select a point on the map",
+  expiresAt: "Expires at",
+  members: "Members",
+  never: "Never",
+  recenter: "Recenter",
+  selectPointHint: "Click a memory on the map to inspect it.",
+};
+
+mutableResources["fr-FR"].translation.memory.map = {
+  ...(mutableResources["fr-FR"].translation.memory.map ?? {}),
+  canvasAriaLabel: "Memory map canvas",
+  clusters: "Clusters",
+  memoryCount: "{{count}} memories",
+  reset: "Reset map",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+};
+
+mutableResources["fr-FR"].translation.memory.page = {
+  ...(mutableResources["fr-FR"].translation.memory.page ?? {}),
+  noAgentsDescription: "Create or publish at least one agent before opening the map.",
+  noAgentsTitle: "No agents available",
+};
+
+mutableResources["fr-FR"].translation.overview.activity = {
+  ...(mutableResources["fr-FR"].translation.overview.activity ?? {}),
+  deploy: "Deploy",
+  events: "{{count}} events",
+  latestExecutions: "Latest executions",
+  noRecent: "No recent activity",
+  retry: "Retry",
+  showingRecent: "Showing the most recent events",
+  taskCompleted: "Task completed",
+  taskFailed: "Task failed",
+  taskQueued: "Task queued",
+  taskStarted: "Task started",
+};
+
+mutableResources["fr-FR"].translation.runtime.overview.metrics = {
+  ...(mutableResources["fr-FR"].translation.runtime.overview.metrics ?? {}),
+  attentionHint: "Executions requiring review or retries",
+  executionsHint: "Live executions across visible agents",
+  onlineAgents: "Agents online",
+  onlineAgentsHint: "Agents with a healthy runtime heartbeat",
+};
+
+mutableResources["fr-FR"].translation.schedules.page = {
+  ...(mutableResources["fr-FR"].translation.schedules.page ?? {}),
+  unavailable: "Schedules unavailable",
+  unavailableDescription: "Unable to load canonical schedules.",
+  visibleAgents: "Visible agents",
+};
+
+mutableResources["fr-FR"].translation.schedules.table = {
+  ...(mutableResources["fr-FR"].translation.schedules.table ?? {}),
+  nextRun: "Next run",
+};
+
+mutableResources["fr-FR"].translation.screenTime = {
+  ...(mutableResources["fr-FR"].translation.screenTime ?? {}),
+  focusAgents: "Agents in focus",
+};
+
+mutableResources["fr-FR"].translation.sessions.composer = {
+  ...(mutableResources["fr-FR"].translation.sessions.composer ?? {}),
+  selectAgentToStart: "Select a specific agent here to start a chat.",
+};
+
+mutableResources["fr-FR"].translation.sessions.context = {
+  ...(mutableResources["fr-FR"].translation.sessions.context ?? {}),
+  summaryLabel: "Summary",
+};
+
+mutableResources["fr-FR"].translation.sessions.context.artifacts = {
+  ...(mutableResources["fr-FR"].translation.sessions.context.artifacts ?? {}),
+  executionFallback: "Execution artifact",
+  label: "Artifacts",
+  openExternal: "Open externally",
+  previewUnavailable: "Preview unavailable",
+};
+
+mutableResources["fr-FR"].translation.sessions.detail = {
+  ...(mutableResources["fr-FR"].translation.sessions.detail ?? {}),
+  agent: "Agent",
+  model: "Model",
+};
+
+mutableResources["fr-FR"].translation.sessions.thread = {
+  ...(mutableResources["fr-FR"].translation.sessions.thread ?? {}),
+  heroHelper: "Pick an agent in the composer and send the first message.",
+  heroTitle: "Start a new conversation",
+  newChatEyebrow: "New chat",
+};
+
+mutableResources["fr-FR"].translation.settings.sections = {
+  ...(mutableResources["fr-FR"].translation.settings.sections ?? {}),
+  navigation: "Navigation",
+};
+
+mutableResources["de-DE"].translation.agentDetail = {
+  ...(mutableResources["de-DE"].translation.agentDetail ?? {}),
+  activeSchedules: "Active schedules",
+  activeTitle: "{{agent}} active",
+  databaseNotInitialized: "Database not initialized yet",
+  entriesCount: "{{count}} entries",
+  noPublishedData: "No published data",
+  noRecentTasks: "No recent task.",
+  noSchedule: "No schedule.",
+  noSession: "No session.",
+  noTask: "No task.",
+  recent: "Recent",
+  refresh: "Refresh",
+  situation: "Situation",
+  stableTitle: "{{agent}} stable",
+  trackedSessions: "Tracked sessions",
+  unavailable: "Agent unavailable",
+};
+
+mutableResources["de-DE"].translation.agentDetail.metrics = {
+  ...(mutableResources["de-DE"].translation.agentDetail.metrics ?? {}),
+  active: "Active",
+  completed: "Completed",
+  failed: "Failures",
+  lastActivity: "Last activity",
+  queries: "Queries",
+  schedules: "Schedules",
+  todayCost: "Cost today",
+  totalCost: "Total cost",
+};
+
+mutableResources["de-DE"].translation.agentDetail.tabs = {
+  ...(mutableResources["de-DE"].translation.agentDetail.tabs ?? {}),
+  cron: "Schedules",
+  overview: "Overview",
+  sessions: "Sessions",
+  tasks: "Executions",
+};
+
+mutableResources["de-DE"].translation.agentSwitcher = {
+  ...(mutableResources["de-DE"].translation.agentSwitcher ?? {}),
+  createAria: "Create new agent",
+};
+
+mutableResources["de-DE"].translation.chat.composer = {
+  ...(mutableResources["de-DE"].translation.chat.composer ?? {}),
+  placeholder: "Write a message...",
+  send: "Send",
+  sendHint: "Enter to send • Shift + Enter for a new line",
+};
+
+mutableResources["de-DE"].translation.chat.header = {
+  ...(mutableResources["de-DE"].translation.chat.header ?? {}),
+  viewDetails: "View details",
+};
+
+mutableResources["de-DE"].translation.chat.rail = {
+  ...(mutableResources["de-DE"].translation.chat.rail ?? {}),
+  clearSearch: "Clear search",
+  close: "Close conversation list",
+  empty: "No conversations yet",
+  emptyHelper: "Start a new session to see it here.",
+  newSession: "New session",
+  noResults: "No results",
+  openLabel: "Open conversation list",
+  search: "Search",
+  title: "Conversations",
+  unavailable: "History unavailable",
+};
+
+mutableResources["de-DE"].translation.chat.reasoning = {
+  ...(mutableResources["de-DE"].translation.chat.reasoning ?? {}),
+  expandLabelDone: "Thought for {{duration}}",
+  expandLabelDoneNoDuration: "Reasoning",
+  expandLabelStreaming: "Thinking…",
+};
+
+mutableResources["de-DE"].translation.chat.thread = {
+  ...(mutableResources["de-DE"].translation.chat.thread ?? {}),
+  empty: "No messages yet.",
+  errorGeneric: "Something went wrong. Please try again.",
+  failed: "Failed to send",
+  newMessages: "New messages",
+  retry: "Retry",
+  thinking: "Thinking…",
+};
+
+mutableResources["de-DE"].translation.chat.timestamp = {
+  ...(mutableResources["de-DE"].translation.chat.timestamp ?? {}),
+  lastActivity: "Last activity",
+};
+
+mutableResources["de-DE"].translation.chat.toolCall = {
+  ...(mutableResources["de-DE"].translation.chat.toolCall ?? {}),
+  completed: "Completed",
+  cost: "cost",
+  failed: "Failed",
+  queued: "Queued",
+  retrying: "Retrying",
+  running: "Running",
+  tools: "tools",
+  viewArgs: "Arguments",
+  viewExecution: "View execution",
+};
+
+mutableResources["de-DE"].translation.commandBar = {
+  ...(mutableResources["de-DE"].translation.commandBar ?? {}),
+  emptyState: "No matching commands or agents.",
+  modalTitle: "Command bar",
+  placeholder: "Search commands, agents, and actions…",
+  shortcutHint: "⌘K",
+};
+
+mutableResources["de-DE"].translation.commandBar.agent = {
+  ...(mutableResources["de-DE"].translation.commandBar.agent ?? {}),
+  description: "Open agent detail",
+};
+
+mutableResources["de-DE"].translation.commandBar.groups = {
+  ...(mutableResources["de-DE"].translation.commandBar.groups ?? {}),
+  actions: "Actions",
+  agents: "Agents",
+  approvals: "Approvals",
+  pages: "Pages",
+  recents: "Recent",
+  skills: "Skills",
+  tools: "Tools",
+};
+
+mutableResources["de-DE"].translation.commandBar.recents = {
+  ...(mutableResources["de-DE"].translation.commandBar.recents ?? {}),
+  noQuery: "No recent query",
+};
+
+mutableResources["de-DE"].translation.common = {
+  ...(mutableResources["de-DE"].translation.common ?? {}),
+  actions: "Actions",
+  attempts: "Attempts",
+  back: "Back",
+  cancel: "Cancel",
+  clear: "Clear",
+  close: "Close",
+  code: "Code",
+  completedAt: "Completed at",
+  copy: "Copy",
+  details: "Details",
+  display: "Display",
+  edit: "Edit",
+  executions: "Executions",
+  expand: "Expand",
+  filters: "Filters",
+  lines: "Lines",
+  message: "Message",
+  mode: "Mode",
+  model: "Model",
+  noAgent: "No agent",
+  noHistory: "No history",
+  off: "Off",
+  on: "On",
+  open: "Open",
+  payload: "Payload",
+  phase: "Phase",
+  pod: "Pod",
+  preview: "Preview",
+  reconnect: "Reconnect",
+  refresh: "Refresh",
+  save: "Save",
+  schedules: "Schedules",
+  sessions: "Sessions",
+  startedAt: "Started at",
+  task: "Task",
+  timing: "Timing",
+  totalTime: "Total time",
+  user: "User",
+  visual: "Visual",
+  workspaceDirectory: "Workspace directory",
+};
+
+mutableResources["de-DE"].translation.controlPlane.create = {
+  ...(mutableResources["de-DE"].translation.controlPlane.create ?? {}),
+  agentIdHint: "Lowercase, no spaces. Used as canonical identifier.",
+  agentIdLabel: "Agent ID",
+  agentIdPlaceholder: "e.g. sales-assistant",
+  cancel: "Cancel",
+  colorLabel: "Color",
+  descriptionLabel: "Description",
+  descriptionPlaceholder: "Optional short description",
+  genericError: "Could not create the resource. Please try again.",
+  nameLabel: "Name",
+  parentWorkspace: "Parent workspace",
+  squadNone: "No squad",
+  squadOptional: "Squad (optional)",
+  submit: "Create",
+  subtitle: "Fill the fields below to publish.",
+  typeLabel: "Type",
+  workspaceChoose: "Choose a workspace",
+  workspaceNone: "No workspace",
+  workspaceOptional: "Workspace (optional)",
+};
+
+mutableResources["de-DE"].translation.controlPlane.create.name = {
+  ...(mutableResources["de-DE"].translation.controlPlane.create.name ?? {}),
+  agent: "Agent name",
+  squad: "Squad name",
+  workspace: "Workspace name",
+};
+
+mutableResources["de-DE"].translation.controlPlane.policy = {
+  ...(mutableResources["de-DE"].translation.controlPlane.policy ?? {}),
+  add: "Add",
+  addPlaceholder: "Add new item…",
+  empty: "No items yet.",
+  remove: "Remove",
+};
+
+mutableResources["de-DE"].translation.controlPlane.prompt = {
+  ...(mutableResources["de-DE"].translation.controlPlane.prompt ?? {}),
+  edit: "Edit",
+  placeholder: "Write the system prompt for this agent…",
+  preview: "Preview",
+};
+
+mutableResources["de-DE"].translation.controlPlane.saveBar = {
+  ...(mutableResources["de-DE"].translation.controlPlane.saveBar ?? {}),
+  dirty: "Unsaved changes",
+  dirtyMany: "{{count}} unsaved changes",
+  discard: "Discard",
+  save: "Save",
+  saved: "Saved",
+};
+
+mutableResources["de-DE"].translation.costs.page = {
+  ...(mutableResources["de-DE"].translation.costs.page ?? {}),
+  allocationDominant: "Dominant:",
+  allocationFooter: "{{label}} accounts for {{value}} of the current cut and leads the observed distribution.",
+  emptyBreakdownShort: "Not enough data",
+  executionsCount: "{{count}} executions",
+  loadError: "Could not load costs.",
+  noConversations: "No conversations in the current filter.",
+  noDominantAllocation: "No dominant concentration",
+  noDominantModel: "No dominant model",
+  noDominantOrigin: "No dominant origin",
+  noModel: "No model",
+  noPeak: "No highlighted peak in the period",
+  noRecentPreview: "No recent preview",
+  queriesCount: "{{count}} queries",
+  shareInPeriod: "Share in period",
+  unavailable: "Costs unavailable",
+};
+
+mutableResources["de-DE"].translation.costs.page.allocationModes = {
+  ...(mutableResources["de-DE"].translation.costs.page.allocationModes ?? {}),
+  task: "By task",
+};
+
+mutableResources["de-DE"].translation.costs.page.breakdowns = {
+  ...(mutableResources["de-DE"].translation.costs.page.breakdowns ?? {}),
+  byAgentTitle: "Distribution by agent",
+  byModelTitle: "Distribution by model",
+  byTaskTitle: "Distribution by task type",
+};
+
+mutableResources["de-DE"].translation.costs.page.kpiContexts = {
+  ...(mutableResources["de-DE"].translation.costs.page.kpiContexts ?? {}),
+  noComparableBase: "No comparable baseline",
+  previousBase: "Previous base {{value}}",
+  resolvedConversations: "{{count}} resolved conversations",
+  totalPeriod: "{{queries}} queries · {{executions}} executions",
+};
+
+mutableResources["de-DE"].translation.costs.page.timeChart = {
+  ...(mutableResources["de-DE"].translation.costs.page.timeChart ?? {}),
+  base: "Base:",
+  buckets: "Buckets:",
+  driver: "Driver · {{value}}",
+  emptyShort: "Not enough data",
+  modeLabel: "Mode",
+  noBucket: "No bucket",
+  noDriver: "No dominant driver",
+  peak: "Peak:",
+  variation: "Variation:",
+};
+
+mutableResources["de-DE"].translation.dashboard.checklist = {
+  ...(mutableResources["de-DE"].translation.dashboard.checklist ?? {}),
+  agent: "Create your first agent",
+  dismiss: "Dismiss",
+  provider: "Configure a provider",
+  subtitle: "Finish the workspace setup to unlock automations.",
+  telegram: "Connect Telegram",
+  title: "Getting started",
+};
+
+mutableResources["de-DE"].translation.dlq.page = {
+  ...(mutableResources["de-DE"].translation.dlq.page ?? {}),
+  affectedAgents: "Affected agents",
+};
+
+mutableResources["de-DE"].translation.dlq.table = {
+  ...(mutableResources["de-DE"].translation.dlq.table ?? {}),
+  noAgent: "No agent linked",
+};
+
+mutableResources["de-DE"].translation.executions.page = {
+  ...(mutableResources["de-DE"].translation.executions.page ?? {}),
+  loadError: "Could not load execution details.",
+};
+
+mutableResources["de-DE"].translation.executions.page.metrics = {
+  ...(mutableResources["de-DE"].translation.executions.page.metrics ?? {}),
+  avgDurationHint: "Average run time across the current filter",
+  costHint: "Total cost for the current cut",
+  toolsHint: "Number of tool invocations observed",
+  warningsHint: "Tasks that required retries or flagged warnings",
+};
+
+mutableResources["de-DE"].translation.memory.curation = {
+  ...(mutableResources["de-DE"].translation.memory.curation ?? {}),
+  selectedCount: "{{count}} items selected",
+};
+
+mutableResources["de-DE"].translation.memory.curation.detail = {
+  ...(mutableResources["de-DE"].translation.memory.curation.detail ?? {}),
+  memoriesConnected: "{{count}} connected memories",
+};
+
+mutableResources["de-DE"].translation.memory.curation.row = {
+  ...(mutableResources["de-DE"].translation.memory.curation.row ?? {}),
+  sessionCount: "{{count}} sessions",
+};
+
+mutableResources["de-DE"].translation.memory.inspector = {
+  ...(mutableResources["de-DE"].translation.memory.inspector ?? {}),
+  content: "Content",
+  details: "Details",
+  empty: "Select a point on the map",
+  expiresAt: "Expires at",
+  members: "Members",
+  never: "Never",
+  recenter: "Recenter",
+  selectPointHint: "Click a memory on the map to inspect it.",
+};
+
+mutableResources["de-DE"].translation.memory.map = {
+  ...(mutableResources["de-DE"].translation.memory.map ?? {}),
+  canvasAriaLabel: "Memory map canvas",
+  clusters: "Clusters",
+  memoryCount: "{{count}} memories",
+  reset: "Reset map",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+};
+
+mutableResources["de-DE"].translation.memory.page = {
+  ...(mutableResources["de-DE"].translation.memory.page ?? {}),
+  noAgentsDescription: "Create or publish at least one agent before opening the map.",
+  noAgentsTitle: "No agents available",
+};
+
+mutableResources["de-DE"].translation.overview.activity = {
+  ...(mutableResources["de-DE"].translation.overview.activity ?? {}),
+  deploy: "Deploy",
+  events: "{{count}} events",
+  latestExecutions: "Latest executions",
+  noRecent: "No recent activity",
+  retry: "Retry",
+  showingRecent: "Showing the most recent events",
+  taskCompleted: "Task completed",
+  taskFailed: "Task failed",
+  taskQueued: "Task queued",
+  taskStarted: "Task started",
+};
+
+mutableResources["de-DE"].translation.runtime.overview.metrics = {
+  ...(mutableResources["de-DE"].translation.runtime.overview.metrics ?? {}),
+  attentionHint: "Executions requiring review or retries",
+  executionsHint: "Live executions across visible agents",
+  onlineAgents: "Agents online",
+  onlineAgentsHint: "Agents with a healthy runtime heartbeat",
+};
+
+mutableResources["de-DE"].translation.schedules.page = {
+  ...(mutableResources["de-DE"].translation.schedules.page ?? {}),
+  unavailable: "Schedules unavailable",
+  unavailableDescription: "Unable to load canonical schedules.",
+  visibleAgents: "Visible agents",
+};
+
+mutableResources["de-DE"].translation.schedules.table = {
+  ...(mutableResources["de-DE"].translation.schedules.table ?? {}),
+  nextRun: "Next run",
+};
+
+mutableResources["de-DE"].translation.screenTime = {
+  ...(mutableResources["de-DE"].translation.screenTime ?? {}),
+  focusAgents: "Agents in focus",
+};
+
+mutableResources["de-DE"].translation.sessions.composer = {
+  ...(mutableResources["de-DE"].translation.sessions.composer ?? {}),
+  selectAgentToStart: "Select a specific agent here to start a chat.",
+};
+
+mutableResources["de-DE"].translation.sessions.context = {
+  ...(mutableResources["de-DE"].translation.sessions.context ?? {}),
+  summaryLabel: "Summary",
+};
+
+mutableResources["de-DE"].translation.sessions.context.artifacts = {
+  ...(mutableResources["de-DE"].translation.sessions.context.artifacts ?? {}),
+  executionFallback: "Execution artifact",
+  label: "Artifacts",
+  openExternal: "Open externally",
+  previewUnavailable: "Preview unavailable",
+};
+
+mutableResources["de-DE"].translation.sessions.detail = {
+  ...(mutableResources["de-DE"].translation.sessions.detail ?? {}),
+  agent: "Agent",
+  model: "Model",
+};
+
+mutableResources["de-DE"].translation.sessions.thread = {
+  ...(mutableResources["de-DE"].translation.sessions.thread ?? {}),
+  heroHelper: "Pick an agent in the composer and send the first message.",
+  heroTitle: "Start a new conversation",
+  newChatEyebrow: "New chat",
+};
+
+mutableResources["de-DE"].translation.settings.sections = {
+  ...(mutableResources["de-DE"].translation.settings.sections ?? {}),
+  navigation: "Navigation",
+};
+
 Object.assign(literalResources["en-US"] as Record<string, string>, generatedLiteralResources["en-US"]);
 Object.assign(literalResources["pt-BR"] as Record<string, string>, generatedLiteralResources["pt-BR"]);
 Object.assign(literalResources["es-ES"] as Record<string, string>, generatedLiteralResources["es-ES"]);

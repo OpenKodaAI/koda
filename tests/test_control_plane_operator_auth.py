@@ -590,6 +590,40 @@ def test_issue_bootstrap_code_tolerates_insert_replay(
     )
 
 
+def test_issue_bootstrap_code_tolerates_insert_replay(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    bootstrap_id = "boot_" + "1" * 32
+    bootstrap_uuid = uuid.UUID(hex="1" * 32)
+    recorded_insert = {"done": False}
+    original_execute = fake_operator_db.execute
+
+    def execute_with_replay(query: str, params: tuple[Any, ...] = ()) -> int:
+        normalized = " ".join(query.split())
+        if "INSERT INTO cp_bootstrap_codes" not in normalized:
+            original_execute(query, params)
+            return 1
+        original_execute(query, params)
+        if not recorded_insert["done"]:
+            recorded_insert["done"] = True
+            return 0
+        return 1
+
+    monkeypatch.setattr(operator_auth_mod, "execute", execute_with_replay)
+    monkeypatch.setattr(operator_auth_mod, "uuid4", lambda: bootstrap_uuid)
+
+    payload = service.issue_bootstrap_code(label="cli")
+
+    assert payload["ok"] is True
+    assert payload["code"]
+    assert bootstrap_id in fake_operator_db.bootstrap_codes
+    assert fake_operator_db.bootstrap_codes[bootstrap_id]["code_hash"] == operator_auth_mod._hash_secret(
+        payload["code"]
+    )
+
+
 def test_login_lockout_applies_after_repeated_failures(
     fake_operator_db: FakeOperatorAuthDb,
     monkeypatch: pytest.MonkeyPatch,
