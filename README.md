@@ -25,10 +25,6 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/brand/koda-hero.png" alt="Koda illustration" width="20%" />
-</p>
-
-<p align="center">
   <a href="docs/install/local.md"><strong>Install locally</strong></a>
   ·
   <a href="docs/install/vps.md"><strong>Deploy on a VPS</strong></a>
