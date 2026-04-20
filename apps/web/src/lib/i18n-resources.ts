@@ -6082,6 +6082,10 @@ mutableResources["de-DE"].translation.sessions.composer = {
 
 mutableResources["en-US"].translation.sessions.thread = {
   newConversation: "New conversation",
+  newChatEyebrow: "New conversation",
+  heroTitle: "What could we build today?",
+  heroHelper:
+    "Describe a task. Your agent responds with reasoning, tool calls, and artifacts.",
   lastActive: "Last activity {{value}}",
   chooseBot: "Choose a bot",
   activeBot: "Conversation bot",
@@ -12338,9 +12342,9 @@ mutableResources["en-US"].translation.agentSwitcher = {
 
 mutableResources["en-US"].translation.chat.composer = {
   ...(mutableResources["en-US"].translation.chat.composer ?? {}),
-  placeholder: "Write a message...",
+  placeholder: "Send a message…",
   send: "Send",
-  sendHint: "Enter to send • Shift + Enter for a new line",
+  sendHint: "⌘↵ to send",
 };
 
 mutableResources["en-US"].translation.chat.header = {
@@ -12354,10 +12358,10 @@ mutableResources["en-US"].translation.chat.rail = {
   close: "Close conversation list",
   empty: "No conversations yet",
   emptyHelper: "Start a new session to see it here.",
-  newSession: "New session",
+  newSession: "New conversation",
   noResults: "No results",
   openLabel: "Open conversation list",
-  search: "Search",
+  search: "Search conversations",
   title: "Conversations",
   unavailable: "History unavailable",
 };
@@ -12716,9 +12720,9 @@ mutableResources["en-US"].translation.sessions.detail = {
 
 mutableResources["en-US"].translation.sessions.thread = {
   ...(mutableResources["en-US"].translation.sessions.thread ?? {}),
-  heroHelper: "Pick an agent in the composer and send the first message.",
-  heroTitle: "Start a new conversation",
-  newChatEyebrow: "New chat",
+  heroHelper: "Describe a task. Your agent responds with reasoning, tool calls, and artifacts.",
+  heroTitle: "What could we build today?",
+  newChatEyebrow: "New conversation",
 };
 
 mutableResources["en-US"].translation.settings.sections = {
