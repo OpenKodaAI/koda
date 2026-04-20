@@ -43,9 +43,7 @@ def test_rejects_negative_budget() -> None:
 
 def test_rejects_total_budget_below_task_budget() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
-        _manager()._validate_general_payload(
-            {"models": {"max_budget_usd": 10.0, "max_total_budget_usd": 5.0}}
-        )
+        _manager()._validate_general_payload({"models": {"max_budget_usd": 10.0, "max_total_budget_usd": 5.0}})
     fields = {err["field"] for err in excinfo.value.errors}
     assert "models.max_total_budget_usd" in fields
     codes = {err["code"] for err in excinfo.value.errors}
@@ -66,9 +64,7 @@ def test_rejects_zero_rate_limit() -> None:
 
 def test_rejects_unknown_provider_in_enabled_list() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
-        _manager()._validate_general_payload(
-            {"models": {"providers_enabled": ["claude", "not-a-real-provider"]}}
-        )
+        _manager()._validate_general_payload({"models": {"providers_enabled": ["claude", "not-a-real-provider"]}})
     assert any(err["code"] == "unknown_provider" for err in excinfo.value.errors)
 
 
@@ -98,25 +94,19 @@ def test_rejects_invalid_provenance_policy() -> None:
 
 def test_rejects_variable_with_lowercase_key() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
-        _manager()._validate_general_payload(
-            {"variables": [{"key": "my_var", "type": "text", "scope": "system_only"}]}
-        )
+        _manager()._validate_general_payload({"variables": [{"key": "my_var", "type": "text", "scope": "system_only"}]})
     assert any(err["code"] == "invalid_format" for err in excinfo.value.errors)
 
 
 def test_rejects_variable_with_unknown_scope() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
-        _manager()._validate_general_payload(
-            {"variables": [{"key": "OK_VAR", "type": "text", "scope": "mystery"}]}
-        )
+        _manager()._validate_general_payload({"variables": [{"key": "OK_VAR", "type": "text", "scope": "mystery"}]})
     assert any(err["code"] == "invalid_enum" for err in excinfo.value.errors)
 
 
 def test_rejects_variable_with_empty_key() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
-        _manager()._validate_general_payload(
-            {"variables": [{"key": "", "type": "text", "scope": "system_only"}]}
-        )
+        _manager()._validate_general_payload({"variables": [{"key": "", "type": "text", "scope": "system_only"}]})
     assert any(err["code"] == "required" for err in excinfo.value.errors)
 
 
@@ -140,11 +130,7 @@ def test_accepts_functional_default_when_providers_unspecified() -> None:
     # When the payload does not re-declare providers_enabled, we skip the
     # cross-reference check because we don't have authoritative state here.
     _manager()._validate_general_payload(
-        {
-            "models": {
-                "functional_defaults": {"general": {"provider_id": "gemini", "model_id": "x"}}
-            }
-        }
+        {"models": {"functional_defaults": {"general": {"provider_id": "gemini", "model_id": "x"}}}}
     )
 
 
