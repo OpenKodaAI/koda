@@ -91,9 +91,9 @@ def _get_endpoint_limiter(endpoint: str, ip: str) -> AsyncLimiter | None:
 def _client_ip(request: web.Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return str(forwarded.split(",")[0]).strip()
     peer = request.remote
-    return peer or "unknown"
+    return str(peer) if peer else "unknown"
 
 
 def _too_many_requests() -> web.Response:

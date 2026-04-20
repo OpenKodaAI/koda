@@ -1579,7 +1579,13 @@ class ControlPlaneManager:
                     changed = True
             if changed:
                 sections_to_write[section] = merged
-        if not sections_to_write:
+        has_any_workspace = bool(fetch_one("SELECT 1 FROM cp_workspaces LIMIT 1"))
+        has_any_squad = bool(fetch_one("SELECT 1 FROM cp_workspace_squads LIMIT 1"))
+        has_any_agent = bool(fetch_one("SELECT 1 FROM cp_agent_definitions LIMIT 1"))
+        seed_workspace = not has_any_workspace
+        seed_squad = not has_any_squad and seed_workspace
+        seed_agent = not has_any_agent
+        if not sections_to_write and not seed_workspace and not seed_squad and not seed_agent:
             return
         self._seeding_legacy_state = True
         try:
@@ -1592,9 +1598,60 @@ class ControlPlaneManager:
                     """,
                     (section, json_dump(value), now_iso()),
                 )
+            now = now_iso()
+            if seed_workspace:
+                execute(
+                    """
+                    INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    ("ws_default", "Pessoal", "Workspace inicial.", now, now),
+                )
+            if seed_squad:
+                execute(
+                    """
+                    INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    ("sq_default", "ws_default", "Geral", "Squad inicial.", now, now),
+                )
+            if seed_agent:
+                starter_workspace = "ws_default" if seed_workspace or has_any_workspace else None
+                # Only link to the default squad if we also just created it, avoiding
+                # accidental coupling to a legacy squad the operator may not expect.
+                starter_squad = "sq_default" if seed_squad else None
+                appearance = {"label": "Koda", "color": "#D97757", "color_rgb": "217, 119, 87"}
+                execute(
+                    """
+                    INSERT INTO cp_agent_definitions (
+                        id, display_name, status, appearance_json, storage_namespace,
+                        runtime_endpoint_json, applied_version, desired_version, metadata_json,
+                        workspace_id, squad_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (
+                        "koda",
+                        "Koda",
+                        "paused",
+                        json_dump(appearance),
+                        "koda",
+                        json_dump({}),
+                        json_dump({"origin": "default_seed"}),
+                        starter_workspace if has_any_workspace or seed_workspace else None,
+                        starter_squad,
+                        now,
+                        now,
+                    ),
+                )
             log.info(
                 "control_plane_default_world_seeded",
                 sections=sorted(sections_to_write.keys()),
+                seeded_workspace=seed_workspace,
+                seeded_squad=seed_squad,
+                seeded_agent=seed_agent,
             )
         finally:
             self._seeding_legacy_state = False
@@ -6061,6 +6118,7 @@ class ControlPlaneManager:
         clear_api_key = bool(payload.get("clear_api_key"))
         existing_row = self._provider_connection_row(normalized)
         project_id = _trimmed_text(payload.get("project_id")) or _trimmed_text(existing_row["project_id"])
+        verify_after_save = bool(payload.get("verify_after_save", False))
         base_url = ""
         if normalized == "ollama":
             base_url = self._resolve_ollama_base_url(
@@ -6097,6 +6155,17 @@ class ControlPlaneManager:
             last_verified_at="",
             last_error="",
         )
+        if verify_after_save and configured and api_key:
+            try:
+                verification = self.verify_provider_connection(normalized)
+            except Exception:  # noqa: BLE001 - verify failure must not roll back save
+                log.warning(
+                    "control_plane_provider_auto_verify_failed",
+                    provider=normalized,
+                    exc_info=True,
+                )
+            else:
+                return _safe_json_object(verification.get("connection")) or self.get_provider_connection(normalized)
         return self.get_provider_connection(normalized)
 
     def put_provider_local_connection(self, provider_id: str, payload: dict[str, Any]) -> dict[str, Any]:

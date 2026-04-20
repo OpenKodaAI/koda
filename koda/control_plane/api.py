@@ -1673,7 +1673,7 @@ async def list_mcp_connections(request: web.Request) -> web.Response:
 
 
 def _mcp_connection_key(request: web.Request) -> str:
-    raw = request.match_info.get("server_key") or request.match_info["connection_key"]
+    raw = str(request.match_info.get("server_key") or request.match_info["connection_key"])
     return raw.removeprefix("mcp:") if raw.startswith("mcp:") else raw
 
 

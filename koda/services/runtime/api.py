@@ -102,7 +102,7 @@ def _attach_token_from_request(request: web.Request) -> str:
     header_token = str(headers.get("X-Koda-Attach-Token", "")).strip()
     if header_token:
         return header_token
-    return request.query.get("token", "").strip()
+    return str(request.query.get("token", "")).strip()
 
 
 async def _json_payload(request: web.Request) -> dict[str, object]:
@@ -121,7 +121,7 @@ def _dashboard_actor_id(*, namespace: str, session_id: str) -> int:
 
 
 def _include_sensitive(request: web.Request) -> bool:
-    return request.query.get("include_sensitive", "false").strip().lower() == "true"
+    return str(request.query.get("include_sensitive", "false")).strip().lower() == "true"
 
 
 def _authorize_sensitive_runtime_access(request: web.Request, *, agent_scope: str) -> web.Response | None:
