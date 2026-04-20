@@ -13,9 +13,8 @@ import {
   type AgentIntegrationEntry,
   type IntegrationGrantValue,
 } from "@/hooks/use-agent-integration-permissions";
-import { CoreConnectionModal } from "./core-connection-modal";
+import { ConnectionModalRouter } from "./connection/connection-modal-router";
 import { IntegrationPermissionDetail } from "./integration-permission-detail";
-import { McpConnectionModal } from "./mcp-connection-modal";
 import {
   integrationCardRootClassName,
   IntegrationCardStatusIndicator,
@@ -234,41 +233,16 @@ export function TabIntegracoes() {
     updateResourcePolicy({ integration_grants: nextGrants });
   }
 
-  async function saveCoreConnection(
-    entry: AgentIntegrationEntry,
-    payload: {
-      auth_method: string;
-      source_origin: string;
-      allow_local_session: boolean;
-      fields: Array<{ key: string; value: string; clear?: boolean }>;
-    },
-  ) {
-    await runAction(
-      `save-core-connection:${entry.key}`,
-      async () => {
-        await requestJson(
-          `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(entry.connectionKey)}`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              ...payload,
-              enabled: true,
-            }),
-          },
-        );
-        await requestJson(
-          `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(entry.connectionKey)}/verify`,
-          {
-            method: "POST",
-          },
-        );
-        await refreshIntegrations();
-      },
-      {
-        successMessage: tl("Conexão do agente salva e verificada."),
-        errorMessage: tl("Não foi possível salvar a conexão deste agente."),
-      },
-    );
+  async function verifyConnectionSilently(entry: AgentIntegrationEntry) {
+    try {
+      await requestJson(
+        `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(entry.connectionKey)}/verify`,
+        { method: "POST" },
+      );
+    } catch {
+      // The router already showed save feedback; verify failure is surfaced
+      // by the integration status refresh and by the detail view.
+    }
   }
 
   async function importCoreDefault(entry: AgentIntegrationEntry) {
@@ -498,18 +472,11 @@ export function TabIntegracoes() {
         </PolicyCard>
       </section>
 
-      {connectingMcpServer && connectingMcpServer.kind === "mcp" && (
-        <McpConnectionModal
-          server={connectingMcpServer.mcpServer ?? {
-            server_key: connectingMcpServer.key,
-            display_name: connectingMcpServer.label,
-            description: connectingMcpServer.description || "",
-            transport_type: "stdio",
-            enabled: true,
-            env_schema_json: "[]",
-          } as import("@/lib/control-plane").McpServerCatalogEntry}
+      {/* Per-integration connection modal (router picks the sub-form) */}
+      {connectingMcpServer && connectingMcpServer.kind === "mcp" ? (
+        <ConnectionModalRouter
+          entry={connectingMcpServer}
           agentId={agentId}
-          existingConnection={connectingMcpServer.mcpConnection}
           onClose={() => setConnectingMcpServer(null)}
           onSaved={async () => {
             setConnectingMcpServer(null);
@@ -520,18 +487,21 @@ export function TabIntegracoes() {
             }
           }}
         />
-      )}
+      ) : null}
 
-      {editingCoreConnection && editingCoreConnection.kind === "core" && (
-        <CoreConnectionModal
+      {editingCoreConnection && editingCoreConnection.kind === "core" ? (
+        <ConnectionModalRouter
           entry={editingCoreConnection}
+          agentId={agentId}
           onClose={() => setEditingCoreConnection(null)}
-          onSave={async (payload) => {
-            await saveCoreConnection(editingCoreConnection, payload);
+          onSaved={async () => {
+            const saved = editingCoreConnection;
             setEditingCoreConnection(null);
+            await verifyConnectionSilently(saved);
+            await refreshIntegrations();
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

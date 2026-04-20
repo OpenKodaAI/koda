@@ -641,6 +641,53 @@ export type McpEnvSchemaField = {
   input_type?: string;
 };
 
+/* -------------------------------------------------------------------------- */
+/*  ConnectionProfile — declarative per-integration connection contract        */
+/* -------------------------------------------------------------------------- */
+
+export type ConnectionStrategy =
+  | "none"
+  | "api_key"
+  | "connection_string"
+  | "dual_token"
+  | "local_path"
+  | "local_app"
+  | "oauth_only"
+  | "oauth_preferred";
+
+export type RuntimeConstraintKey =
+  | "allowed_domains"
+  | "allowed_paths"
+  | "allowed_db_envs"
+  | "allow_private_network"
+  | "read_only_mode";
+
+export type ConnectionField = {
+  key: string;
+  label: string;
+  required?: boolean;
+  input_type?: "password" | "text" | "textarea" | "switch";
+  help?: string | null;
+};
+
+export type ConnectionProfile = {
+  strategy: ConnectionStrategy;
+  oauth_provider?: string | null;
+  oauth_scopes?: string[];
+  fields?: ConnectionField[];
+  scope_fields?: ConnectionField[];
+  read_only_toggle?: ConnectionField | null;
+  path_argument?: ConnectionField | null;
+  local_app_name?: string | null;
+  local_app_detection_hint?: string | null;
+};
+
+export type CatalogExtension = {
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
+  default_tool_policy?: "auto" | "always_ask";
+};
+
 export type McpServerCatalogEntry = {
   server_key: string;
   display_name: string;
@@ -670,6 +717,8 @@ export type McpServerCatalogEntry = {
   logo_key?: string | null;
   metadata?: Record<string, unknown>;
   metadata_json?: string | null;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
   created_at?: string;
   updated_at?: string;
 };
@@ -724,6 +773,8 @@ export type ControlPlaneConnectionCatalogEntry = {
   logo_key?: string | null;
   metadata?: Record<string, unknown> | null;
   enabled?: boolean;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
 };
 
 export type ControlPlaneAgentConnection = {
@@ -798,6 +849,8 @@ export type ControlPlaneCoreIntegration = {
   health_probe?: string;
   supports_persistence?: boolean;
   connection?: ControlPlaneCoreIntegrationConnection;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
   [key: string]: unknown;
 };
 

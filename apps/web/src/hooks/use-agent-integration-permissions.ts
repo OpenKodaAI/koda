@@ -8,6 +8,7 @@ import {
 } from "@/components/control-plane/system/integrations/integration-catalog-data";
 import { getIntegrationAccent } from "@/components/control-plane/system/integrations/integration-logos";
 import type {
+  ConnectionProfile,
   ControlPlaneCoreIntegration,
   ControlPlaneAgentConnection,
   ControlPlaneConnectionCatalogEntry,
@@ -17,6 +18,7 @@ import type {
   McpOAuthStatus,
   McpServerCatalogEntry,
   McpToolPolicy,
+  RuntimeConstraintKey,
 } from "@/lib/control-plane";
 
 /* ------------------------------------------------------------------ */
@@ -34,6 +36,7 @@ export type IntegrationGrantValue = {
   allowed_paths?: string[];
   allowed_db_envs?: string[];
   allow_private_network?: boolean;
+  read_only_mode?: boolean;
 };
 
 export type AgentIntegrationEntry = {
@@ -64,6 +67,8 @@ export type AgentIntegrationEntry = {
   mcpDiff?: ControlPlaneConnectionTools["diff"];
   oauth_supported?: boolean;
   oauthStatus?: McpOAuthStatus;
+  connectionProfile?: ConnectionProfile | null;
+  runtimeConstraints?: RuntimeConstraintKey[];
 };
 
 type UseAgentIntegrationPermissionsParams = {
@@ -300,6 +305,8 @@ function buildCoreEntries(
       coreConnection: connection,
       coreDefaultConnection: defaultConnection,
       coreGrant: grant,
+      connectionProfile: (integration.connection_profile as ConnectionProfile | undefined) ?? null,
+      runtimeConstraints: (integration.runtime_constraints as RuntimeConstraintKey[] | undefined) ?? undefined,
     };
   });
 }
@@ -334,6 +341,16 @@ function buildMcpEntries(
     const description = catalogItem?.description ?? server?.description ?? "";
     const connectionKey = connection?.connection_key ?? `mcp:${serverKey}`;
 
+    const catalogMetadata =
+      (catalogItem?.metadata as Record<string, unknown> | undefined) ?? {};
+    const profileFromCatalog =
+      (catalogItem?.connection_profile as ConnectionProfile | null | undefined) ??
+      (catalogMetadata.connection_profile as ConnectionProfile | undefined) ??
+      null;
+    const constraintsFromCatalog =
+      (catalogItem?.runtime_constraints as RuntimeConstraintKey[] | undefined) ??
+      (catalogMetadata.runtime_constraints as RuntimeConstraintKey[] | undefined);
+
     entries.push({
       id: `mcp:${serverKey}`,
       key: serverKey,
@@ -350,6 +367,8 @@ function buildMcpEntries(
       mcpServer: server ?? undefined,
       mcpConnection: legacyConnection,
       oauth_supported: resolveMcpOAuthSupport(catalogItem),
+      connectionProfile: profileFromCatalog,
+      runtimeConstraints: constraintsFromCatalog,
     });
   }
 

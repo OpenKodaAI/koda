@@ -17,6 +17,7 @@ import {
   CompactGrantToggle,
   type CompactGrantOption,
 } from "@/components/control-plane/shared/compact-grant-toggle";
+import { DynamicConstraintsPanel } from "./constraints/dynamic-constraints-panel";
 import type { ToolPolicy } from "@/components/control-plane/shared/tool-policy-segment";
 import type {
   AgentIntegrationEntry,
@@ -160,16 +161,6 @@ function computeGroupPolicy(tools: ToolItem[]): GroupPolicy {
   return unanimous ? first : "custom";
 }
 
-function parseConstraintList(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  );
-}
 
 function describeCoreSourceOrigin(
   value: string | null | undefined,
@@ -461,96 +452,33 @@ export function IntegrationPermissionDetail({
         </span>
       </div>
 
-      {entry.kind === "core" && coreGrant && onGrantConfigChange ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-4">
-          <div className="flex flex-col gap-1">
-            <span className="eyebrow">{tl("Restricoes de runtime")}</span>
-            <span className="text-xs text-[var(--text-quaternary)]">
-              {tl("Esses limites tambem entram na decisao central de policy em runtime.")}
-            </span>
-          </div>
+      {coreGrant && onGrantConfigChange ? (
+        <>
+          <DynamicConstraintsPanel
+            constraints={entry.runtimeConstraints ?? []}
+            grant={coreGrant}
+            onPatch={updateGrantPatch}
+          />
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {tl("Allowed domains")}
-              </span>
-              <input
-                type="text"
-                value={(coreGrant.allowed_domains ?? []).join(", ")}
-                onChange={(event) =>
-                  updateGrantPatch({ allowed_domains: parseConstraintList(event.target.value) })
-                }
-                placeholder="googleapis.com, api.github.com"
-                className="field-shell text-[var(--text-primary)]"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {tl("Allowed paths")}
-              </span>
-              <input
-                type="text"
-                value={(coreGrant.allowed_paths ?? []).join(", ")}
-                onChange={(event) =>
-                  updateGrantPatch({ allowed_paths: parseConstraintList(event.target.value) })
-                }
-                placeholder="/workspace/project, /tmp/reports"
-                className="field-shell text-[var(--text-primary)]"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {tl("Allowed DB envs")}
-              </span>
-              <input
-                type="text"
-                value={(coreGrant.allowed_db_envs ?? []).join(", ")}
-                onChange={(event) =>
-                  updateGrantPatch({ allowed_db_envs: parseConstraintList(event.target.value) })
-                }
-                placeholder="dev, staging, readonly"
-                className="field-shell text-[var(--text-primary)]"
-              />
-            </label>
-
-            <div className="flex items-center justify-between rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
-              <div className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  {tl("Allow private network")}
-                </span>
-                <span className="text-[11px] text-[var(--text-quaternary)]">
-                  {tl("Necessario para destinos internos, localhost e IPs privados.")}
-                </span>
-              </div>
-              <GrantSwitch
-                checked={coreGrant.allow_private_network === true}
-                onChange={(checked) => updateGrantPatch({ allow_private_network: checked })}
-              />
-            </div>
-          </div>
-
-          {(sharedEnvOptions.length > 0 || secretOptions.length > 0) ? (
+          {entry.kind === "core" && (sharedEnvOptions.length > 0 || secretOptions.length > 0) ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <CompactGrantToggle
-                title={tl("Shared env por integracao")}
-                description={tl("Disponivel apenas para execucoes desta integracao.")}
+                title={tl("Shared env por integração")}
+                description={tl("Disponível apenas para execuções desta integração.")}
                 options={sharedEnvOptions}
                 selected={coreGrant.shared_env_keys ?? []}
                 onToggle={(value) => toggleGrantListValue("shared_env_keys", value)}
               />
               <CompactGrantToggle
-                title={tl("Secrets por integracao")}
-                description={tl("Reduz a exposicao sensivel ao escopo minimo necessario.")}
+                title={tl("Secrets por integração")}
+                description={tl("Reduz a exposição sensível ao escopo mínimo necessário.")}
                 options={secretOptions}
                 selected={coreGrant.secret_keys ?? []}
                 onToggle={(value) => toggleGrantListValue("secret_keys", value)}
               />
             </div>
           ) : null}
-        </div>
+        </>
       ) : null}
 
       {/* 5. Tool groups — MCP */}

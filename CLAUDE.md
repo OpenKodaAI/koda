@@ -12,7 +12,8 @@ Follow this order before making non-trivial changes:
 4. [`docs/ai/architecture-overview.md`](docs/ai/architecture-overview.md)
 5. [`docs/ai/runtime-flows.md`](docs/ai/runtime-flows.md)
 6. [`docs/ai/configuration-and-prompts.md`](docs/ai/configuration-and-prompts.md)
-7. the closest subtree guide:
+7. [`docs/ai/integrations/README.md`](docs/ai/integrations/README.md) — per-integration reference generated from `koda/agent_contract.py` + `koda/integrations/mcp_catalog.py` via [`scripts/generate_integration_docs.py`](scripts/generate_integration_docs.py). Source of truth for connection profiles, runtime constraints, and MCP tool inventories.
+8. the closest subtree guide:
    - [`koda/CLAUDE.md`](koda/CLAUDE.md)
    - [`koda/services/CLAUDE.md`](koda/services/CLAUDE.md)
    - [`koda/memory/CLAUDE.md`](koda/memory/CLAUDE.md)

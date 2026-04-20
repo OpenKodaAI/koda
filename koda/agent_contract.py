@@ -49,6 +49,64 @@ class CoreProviderDefinition:
     show_in_settings: bool = True
 
 
+RUNTIME_CONSTRAINT_KEYS: frozenset[str] = frozenset(
+    {
+        "allowed_domains",
+        "allowed_paths",
+        "allowed_db_envs",
+        "allow_private_network",
+        "read_only_mode",
+    }
+)
+
+CONNECTION_STRATEGIES: frozenset[str] = frozenset(
+    {
+        "none",
+        "api_key",
+        "connection_string",
+        "dual_token",
+        "local_path",
+        "local_app",
+        "oauth_only",
+        "oauth_preferred",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionField:
+    """One credential/config field declared by a ConnectionProfile."""
+
+    key: str
+    label: str
+    required: bool = True
+    input_type: str = "password"
+    help: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionProfile:
+    """Declarative description of how an integration is connected.
+
+    The frontend uses `strategy` to pick the matching sub-form; only the fields
+    relevant to that strategy are rendered. Unused optional fields stay empty.
+    """
+
+    strategy: str
+    oauth_provider: str | None = None
+    oauth_scopes: tuple[str, ...] = ()
+    fields: tuple[ConnectionField, ...] = ()
+    scope_fields: tuple[ConnectionField, ...] = ()
+    read_only_toggle: ConnectionField | None = None
+    path_argument: ConnectionField | None = None
+    local_app_name: str | None = None
+    local_app_detection_hint: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.strategy not in CONNECTION_STRATEGIES:
+            raise ValueError(f"Unknown connection strategy: {self.strategy}")
+
+
 @dataclass(frozen=True, slots=True)
 class CoreIntegrationDefinition:
     """One integration surface exposed by the core runtime."""
@@ -65,6 +123,8 @@ class CoreIntegrationDefinition:
     timeout: int | None = None
     health_probe: str | None = None
     supports_persistence: bool = False
+    connection_profile: ConnectionProfile | None = None
+    runtime_constraints: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,6 +757,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         transport="http",
         risk_class="write",
         health_probe="external_http",
+        runtime_constraints=("allowed_domains", "allow_private_network"),
     ),
     CoreIntegrationDefinition(
         id="agent_runtime",
@@ -715,6 +776,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         required_env=("BROWSER_ENABLED",),
         health_probe="browser_manager",
         supports_persistence=True,
+        runtime_constraints=("allowed_domains", "allow_private_network"),
     ),
     CoreIntegrationDefinition(
         id="gws",
@@ -726,6 +788,19 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         required_env=(),
         health_probe="credentials_file",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="GOOGLE_APPLICATION_CREDENTIALS",
+                    label="Service Account JSON (caminho ou conteúdo)",
+                    required=True,
+                    input_type="textarea",
+                    help="Cole o JSON do service account ou o caminho absoluto do arquivo.",
+                ),
+            ),
+        ),
+        runtime_constraints=("allowed_domains", "allow_private_network"),
     ),
     CoreIntegrationDefinition(
         id="jira",
@@ -738,6 +813,14 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         required_env=("JIRA_URL", "JIRA_USERNAME"),
         health_probe="credential_presence",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(key="JIRA_URL", label="URL do site Jira", input_type="text"),
+                ConnectionField(key="JIRA_USERNAME", label="Usuário (email)", input_type="text"),
+                ConnectionField(key="JIRA_API_TOKEN", label="API Token", input_type="password"),
+            ),
+        ),
     ),
     CoreIntegrationDefinition(
         id="confluence",
@@ -750,6 +833,14 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         required_env=("CONFLUENCE_URL", "CONFLUENCE_USERNAME"),
         health_probe="credential_presence",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(key="CONFLUENCE_URL", label="URL do site Confluence", input_type="text"),
+                ConnectionField(key="CONFLUENCE_USERNAME", label="Usuário (email)", input_type="text"),
+                ConnectionField(key="CONFLUENCE_API_TOKEN", label="API Token", input_type="password"),
+            ),
+        ),
     ),
     CoreIntegrationDefinition(
         id="aws",
@@ -761,6 +852,23 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         required_env=("AWS_DEFAULT_REGION",),
         health_probe="sts_caller_identity",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(key="AWS_ACCESS_KEY_ID", label="Access Key ID", input_type="password"),
+                ConnectionField(key="AWS_SECRET_ACCESS_KEY", label="Secret Access Key", input_type="password"),
+                ConnectionField(key="AWS_DEFAULT_REGION", label="Região padrão", input_type="text"),
+            ),
+            scope_fields=(
+                ConnectionField(
+                    key="AWS_SESSION_TOKEN",
+                    label="Session Token (opcional)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
+        runtime_constraints=("allowed_db_envs",),
     ),
     CoreIntegrationDefinition(
         id="script_library",
@@ -785,6 +893,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         transport="cli",
         risk_class="destructive",
         health_probe="binary_exec",
+        runtime_constraints=("allowed_paths",),
     ),
     CoreIntegrationDefinition(
         id="git",
@@ -793,6 +902,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         transport="cli",
         risk_class="write",
         health_probe="binary_exec",
+        runtime_constraints=("allowed_paths",),
     ),
     CoreIntegrationDefinition(
         id="gh",
@@ -803,6 +913,20 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         risk_class="write",
         health_probe="gh_api_user",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="local_app",
+            local_app_name="GitHub CLI (gh)",
+            local_app_detection_hint="Execute `gh auth login` no terminal para autenticar.",
+            fields=(
+                ConnectionField(
+                    key="GITHUB_PERSONAL_ACCESS_TOKEN",
+                    label="Personal Access Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help="Opcional: use apenas quando `gh auth login` não for viável.",
+                ),
+            ),
+        ),
     ),
     CoreIntegrationDefinition(
         id="glab",
@@ -813,6 +937,19 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         risk_class="write",
         health_probe="glab_api_user",
         supports_persistence=True,
+        connection_profile=ConnectionProfile(
+            strategy="local_app",
+            local_app_name="GitLab CLI (glab)",
+            local_app_detection_hint="Execute `glab auth login` no terminal para autenticar.",
+            fields=(
+                ConnectionField(
+                    key="GITLAB_PERSONAL_ACCESS_TOKEN",
+                    label="Personal Access Token (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
     ),
     CoreIntegrationDefinition(
         id="docker",
@@ -821,6 +958,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         transport="cli",
         risk_class="destructive",
         health_probe="binary_exec",
+        runtime_constraints=("allowed_paths",),
     ),
     CoreIntegrationDefinition(
         id="pip",
@@ -844,6 +982,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         description="Governed filesystem mutation commands.",
         transport="filesystem",
         risk_class="destructive",
+        runtime_constraints=("allowed_paths",),
     ),
     CoreIntegrationDefinition(
         id="mcp",
@@ -1243,8 +1382,39 @@ def normalize_string_list(value: Any) -> list[str]:
     return result
 
 
+def _integration_runtime_constraints(integration_id: str) -> frozenset[str]:
+    """Return the set of runtime constraint keys applicable to an integration.
+
+    Core integrations declare `runtime_constraints` directly on their
+    `CoreIntegrationDefinition`. MCP integrations (prefixed `mcp:<server_key>`)
+    are resolved through `koda.integrations.mcp_catalog` on demand, with a
+    safe fallback of the empty set if the catalog entry is missing.
+    """
+    integration_id = integration_id.lower()
+    definition = CORE_INTEGRATION_CATALOG.get(integration_id)
+    if definition is not None:
+        return frozenset(definition.runtime_constraints)
+    if integration_id.startswith("mcp:"):
+        try:
+            from koda.integrations.mcp_catalog import MCP_CATALOG_BY_KEY
+        except ImportError:
+            return frozenset()
+        server_key = integration_id.split(":", 1)[1]
+        spec = MCP_CATALOG_BY_KEY.get(server_key)
+        if spec is not None:
+            return frozenset(spec.runtime_constraints)
+    return frozenset()
+
+
 def normalize_integration_grants(value: Any) -> dict[str, dict[str, Any]]:
-    """Normalize resource_access_policy.integration_grants payloads."""
+    """Normalize resource_access_policy.integration_grants payloads.
+
+    Runtime constraint keys (`allowed_domains`, `allowed_paths`,
+    `allowed_db_envs`, `allow_private_network`, `read_only_mode`) are only
+    persisted when the target integration declares them. Unsupported keys are
+    silently dropped to keep stored grants in sync with the declarative
+    catalog — preventing orphan fields surfaced by older UIs.
+    """
     if not isinstance(value, dict):
         return {}
 
@@ -1253,6 +1423,7 @@ def normalize_integration_grants(value: Any) -> dict[str, dict[str, Any]]:
         integration_id = str(raw_integration_id or "").strip().lower()
         if not integration_id or not isinstance(raw_payload, dict):
             continue
+        applicable = _integration_runtime_constraints(integration_id)
         grant: dict[str, Any] = {}
 
         enabled = raw_payload.get("enabled")
@@ -1279,21 +1450,30 @@ def normalize_integration_grants(value: Any) -> dict[str, dict[str, Any]]:
         if shared_env_keys:
             grant["shared_env_keys"] = shared_env_keys
 
-        allowed_domains = [item.lower() for item in normalize_string_list(raw_payload.get("allowed_domains"))]
-        if allowed_domains:
-            grant["allowed_domains"] = allowed_domains
+        if "allowed_domains" in applicable:
+            allowed_domains = [item.lower() for item in normalize_string_list(raw_payload.get("allowed_domains"))]
+            if allowed_domains:
+                grant["allowed_domains"] = allowed_domains
 
-        allowed_paths = normalize_string_list(raw_payload.get("allowed_paths"))
-        if allowed_paths:
-            grant["allowed_paths"] = allowed_paths
+        if "allowed_paths" in applicable:
+            allowed_paths = normalize_string_list(raw_payload.get("allowed_paths"))
+            if allowed_paths:
+                grant["allowed_paths"] = allowed_paths
 
-        allowed_db_envs = [item.lower() for item in normalize_string_list(raw_payload.get("allowed_db_envs"))]
-        if allowed_db_envs:
-            grant["allowed_db_envs"] = allowed_db_envs
+        if "allowed_db_envs" in applicable:
+            allowed_db_envs = [item.lower() for item in normalize_string_list(raw_payload.get("allowed_db_envs"))]
+            if allowed_db_envs:
+                grant["allowed_db_envs"] = allowed_db_envs
 
-        allow_private_network = raw_payload.get("allow_private_network")
-        if isinstance(allow_private_network, bool):
-            grant["allow_private_network"] = allow_private_network
+        if "allow_private_network" in applicable:
+            allow_private_network = raw_payload.get("allow_private_network")
+            if isinstance(allow_private_network, bool):
+                grant["allow_private_network"] = allow_private_network
+
+        if "read_only_mode" in applicable:
+            read_only_mode = raw_payload.get("read_only_mode")
+            if isinstance(read_only_mode, bool):
+                grant["read_only_mode"] = read_only_mode
 
         if grant:
             normalized_grants[integration_id] = grant
