@@ -1123,6 +1123,7 @@ export function SystemSettingsProvider({
         }
         return { ...prev, values: nextValues };
       });
+      setSectionErrors((prev) => ({ ...prev, [sectionId]: [] }));
     },
     [baseline],
   );
