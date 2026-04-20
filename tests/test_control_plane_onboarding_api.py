@@ -74,28 +74,25 @@ async def test_onboarding_status_route_proxies_manager_payload() -> None:
     ):
         response = await control_plane_api.onboarding_status(_Request())
 
-    assert json.loads(response.text) == {
-        "steps": {"onboarding_complete": False},
-        "has_owner": False,
-        "bootstrap_required": True,
-        "auth_mode": "local_account",
-        "session_required": False,
-        "recovery_available": False,
-    }
+    payload = json.loads(response.text)
+    assert payload["steps"] == {"onboarding_complete": False}
+    assert payload["has_owner"] is False
+    assert payload["bootstrap_required"] is True
+    assert payload["auth_mode"] == "local_account"
+    assert payload["session_required"] is False
+    assert payload["recovery_available"] is False
 
 
 @pytest.mark.asyncio
-async def test_onboarding_bootstrap_route_accepts_json_payload() -> None:
-    manager = MagicMock()
-    manager.complete_onboarding.return_value = {"ok": True}
-
-    with patch("koda.control_plane.api._manager", return_value=manager):
-        response = await control_plane_api.onboarding_bootstrap(
-            _Request(payload={"provider": {"provider_id": "claude", "auth_mode": "api_key", "api_key": "test"}})
-        )
-
-    manager.complete_onboarding.assert_called_once()
-    assert json.loads(response.text) == {"ok": True}
+async def test_onboarding_bootstrap_route_is_deprecated() -> None:
+    """/api/control-plane/onboarding/bootstrap was removed — the setup wizard
+    no longer bundles provider/agent setup into first-run. The endpoint must
+    return 410 Gone with a helpful migration message."""
+    response = await control_plane_api.onboarding_bootstrap(_Request(payload={}))
+    assert response.status == 410
+    body = json.loads(response.text)
+    assert body["error"] == "onboarding_bootstrap_removed"
+    assert "register-owner" in body["message"]
 
 
 @pytest.mark.asyncio

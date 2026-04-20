@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+HTML_ATTR_RE = re.compile(r'(?:href|src)="([^"]+)"')
 
 PUBLIC_DOCS = [
     ROOT / "README.md",
@@ -31,7 +32,7 @@ PUBLIC_DOCS = [
 REQUIRED_ASSETS = [
     ROOT / "docs" / "assets" / "brand" / "koda-logo.svg",
     ROOT / "docs" / "assets" / "brand" / "koda-logo.png",
-    ROOT / "docs" / "assets" / "brand" / "koda-hero.png",
+    ROOT / "docs" / "assets" / "brand" / "koda_hero.jpg",
     ROOT / "docs" / "assets" / "brand" / "koda-og.png",
     ROOT / "docs" / "assets" / "screenshots" / "setup.png",
     ROOT / "docs" / "assets" / "diagrams" / "platform-topology.svg",
@@ -41,7 +42,7 @@ REQUIRED_ASSETS = [
 
 def _local_targets(doc_path: Path) -> list[str]:
     targets: list[str] = []
-    for pattern in (MARKDOWN_LINK_RE, IMAGE_RE):
+    for pattern in (MARKDOWN_LINK_RE, IMAGE_RE, HTML_ATTR_RE):
         for target in pattern.findall(doc_path.read_text(encoding="utf-8")):
             if "://" in target or target.startswith("mailto:"):
                 continue

@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  SELECT_ALL_VALUE,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 interface AuditFiltersProps {
@@ -20,22 +27,22 @@ export function AuditFilters({ eventTypes, selectedType, onTypeChange }: AuditFi
       >
         {tl("Evento")}
       </label>
-      <div className="relative min-w-[220px]">
-        <select
-          id="event-type-filter"
-          value={selectedType}
-          onChange={(e) => onTypeChange(e.target.value)}
-          className="glass-card-sm min-w-[220px] appearance-none border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] px-4 py-3 pr-11 text-sm text-[var(--text-primary)] outline-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] focus:border-[var(--border-strong)] focus:bg-[var(--surface-hover)]"
-        >
-          <option value="">{tl("Todos os eventos")}</option>
+      <Select
+        value={selectedType === "" ? SELECT_ALL_VALUE : selectedType}
+        onValueChange={(v) => onTypeChange(v === SELECT_ALL_VALUE ? "" : v)}
+      >
+        <SelectTrigger id="event-type-filter" className="min-w-[220px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={SELECT_ALL_VALUE}>{tl("Todos os eventos")}</SelectItem>
           {eventTypes.map((type) => (
-            <option key={type} value={type}>
+            <SelectItem key={type} value={type}>
               {type}
-            </option>
+            </SelectItem>
           ))}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-      </div>
+        </SelectContent>
+      </Select>
     </div>
   );
 }

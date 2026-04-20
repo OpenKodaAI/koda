@@ -263,6 +263,14 @@ def _fetch_latest_episodes(agent_ids: list[str], task_ids: list[int]) -> dict[in
     return {int(row["task_id"]): row for row in rows if row.get("task_id") is not None}
 
 
+def _pending_approval_id_for_task(*, agent_id: str, session_id: str | None, task_id: int) -> str | None:
+    try:
+        from koda.services.approval_broker import find_pending
+    except Exception:
+        return None
+    return find_pending(agent_id=agent_id, session_id=session_id, task_id=task_id)
+
+
 def _serialize_execution_summary(
     row: dict[str, Any],
     trace: dict[str, Any] | None,
@@ -274,6 +282,11 @@ def _serialize_execution_summary(
     source_refs = _safe_list((episode or {}).get("source_refs_json"))
     winning_sources = [str(item) for item in _safe_list((episode or {}).get("winning_sources_json"))]
     answer_gate_reasons = [str(item) for item in _safe_list((episode or {}).get("answer_gate_reasons_json"))]
+    pending_approval_id = _pending_approval_id_for_task(
+        agent_id=str(row.get("agent_id") or ""),
+        session_id=str(row.get("session_id") or "") or None,
+        task_id=int(row.get("id") or 0),
+    )
     return {
         "task_id": int(row["id"]),
         "agent_id": str(row.get("agent_id") or ""),
@@ -308,6 +321,7 @@ def _serialize_execution_summary(
         "answer_citation_coverage": float((episode or {}).get("answer_citation_coverage") or 0.0),
         "answer_gate_status": str((episode or {}).get("answer_gate_status") or "") or None,
         "answer_gate_reasons": answer_gate_reasons,
+        "pending_approval_id": pending_approval_id,
         "post_write_review_required": bool((episode or {}).get("post_write_review_required")),
         "stale_sources_present": bool((episode or {}).get("stale_sources_present")),
         "ungrounded_operationally": bool((episode or {}).get("ungrounded_operationally")),

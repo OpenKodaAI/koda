@@ -22,7 +22,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
   {
     key: "telegram",
     label: "Telegram",
-    tagline: "Bot API",
+    tagline: "Agent API",
     logoKey: "telegram",
     gradientFrom: "#0088cc",
     gradientTo: "#0077b5",
@@ -30,10 +30,10 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "AGENT_TOKEN",
-        label: "Bot Token",
+        label: "Agent Token",
         type: "secret",
         required: true,
-        helpText: "Token gerado pelo @BotFather no Telegram.",
+        helpText: "Token gerado pelo @AgentFather no Telegram.",
       },
       {
         key: "ALLOWED_USER_IDS",
@@ -86,7 +86,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
   {
     key: "discord",
     label: "Discord",
-    tagline: "Bot API",
+    tagline: "Agent API",
     logoKey: "discord",
     gradientFrom: "#5865F2",
     gradientTo: "#4752C4",
@@ -94,10 +94,10 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "DISCORD_BOT_TOKEN",
-        label: "Bot Token",
+        label: "Agent Token",
         type: "secret",
         required: true,
-        helpText: "Token do bot no Developer Portal",
+        helpText: "Token do agent no Developer Portal",
       },
     ],
   },
@@ -112,10 +112,10 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "SLACK_BOT_TOKEN",
-        label: "Bot Token",
+        label: "Agent Token",
         type: "secret",
         required: true,
-        helpText: "Token do bot (xoxb-)",
+        helpText: "Token do agent (xoxb-)",
       },
       {
         key: "SLACK_APP_TOKEN",
@@ -136,7 +136,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
   {
     key: "teams",
     label: "Microsoft Teams",
-    tagline: "Bot Framework",
+    tagline: "Agent Framework",
     logoKey: "teams",
     gradientFrom: "#6264A7",
     gradientTo: "#464EB8",

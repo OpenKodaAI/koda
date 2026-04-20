@@ -5,37 +5,33 @@ import { useMemo, useState } from "react";
 import { DatabaseZap, ShieldCheck } from "lucide-react";
 import { DLQTable } from "@/components/dlq/dlq-table";
 import { ErrorDetail } from "@/components/dlq/error-detail";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   PageEmptyState,
-  PageFilterChips,
-  PageSection,
-  PageSectionHeader,
-  PageStatCard,
-  PageStatGrid,
+  PageMetricStrip,
+  PageMetricStripItem,
 } from "@/components/ui/page-primitives";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import {
-  formatBotSelectionLabel,
-  resolveBotSelection,
-} from "@/lib/bot-selection";
+  formatAgentSelectionLabel,
+  resolveAgentSelection,
+} from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 import type { DLQEntry } from "@/lib/types";
-import { cn } from "@/lib/utils";
-
 export default function DLQPage() {
   const { t } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<DLQEntry | null>(null);
   const [retryFilter, setRetryFilter] = useState<string>("");
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
   const entriesQuery = useControlPlaneQuery<{
@@ -44,7 +40,7 @@ export default function DLQPage() {
   }>({
     tier: "live",
     queryKey: queryKeys.dashboard.dlq({
-      botIds: visibleBotIds,
+      agentIds: visibleBotIds,
       retryFilter,
       limit: 100,
     }),
@@ -54,7 +50,7 @@ export default function DLQPage() {
         {
           signal,
           params: {
-            bot: visibleBotIds,
+            agent: visibleBotIds,
             limit: 100,
             retryEligible:
               retryFilter === "eligible"
@@ -82,12 +78,12 @@ export default function DLQPage() {
   const entries = entriesQuery.data?.items ?? [];
   const loading = entriesQuery.isLoading;
   const unavailable = entriesQuery.data?.unavailable ?? false;
-  const selectionLabel = formatBotSelectionLabel(visibleBotIds, bots);
+  const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
   const retryEligibleCount = entries.filter(
     (entry) => entry.retry_eligible === 1 && !entry.retried_at
   ).length;
   const retriedCount = entries.filter((entry) => Boolean(entry.retried_at)).length;
-  const affectedBots = new Set(entries.map((entry) => entry.bot_id).filter(Boolean)).size;
+  const affectedAgents = new Set(entries.map((entry) => entry.bot_id).filter(Boolean)).size;
 
   const filterButtons = [
     { value: "", label: t("dlq.page.all") },
@@ -111,57 +107,43 @@ export default function DLQPage() {
   return (
     <>
       <div className="space-y-4">
-        <div className="flex flex-col gap-4 md:flex-row md:flex-wrap xl:flex-nowrap xl:items-center">
-          <div className="w-full md:max-w-[350px] md:min-w-[200px] xl:w-[320px] xl:flex-none">
-            <BotSwitcher
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+          <div className="w-full md:w-[220px] md:flex-none">
+            <AgentSwitcher
               multiple
+              singleRow
+              className="agent-switcher--compact"
               selectedBotIds={selectedBotIds}
               onSelectionChange={setSelectedBotIds}
             />
           </div>
-          <PageFilterChips className="min-w-0 flex-1 items-center justify-start md:justify-end">
-            {filterButtons.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                onClick={() => setRetryFilter(filter.value)}
-                className={cn("button-pill", retryFilter === filter.value && "is-active")}
-              >
-                {filter.label}
-              </button>
-            ))}
-            <span className="chip">{!loading ? t("dlq.page.failures", { count: entries.length }) : t("common.loading")}</span>
-            <span className="chip">{selectionLabel}</span>
-          </PageFilterChips>
+          <div className="w-full md:w-auto md:shrink-0 md:ml-auto">
+            <SoftTabs
+              items={filterButtons.map((filter) => ({
+                id: filter.value || "__all__",
+                label: filter.label,
+              }))}
+              value={retryFilter || "__all__"}
+              onChange={(id) => setRetryFilter(id === "__all__" ? "" : id)}
+              ariaLabel={t("dlq.page.all")}
+            />
+          </div>
         </div>
 
         {loading && entries.length === 0 ? (
           <div className="space-y-4">
-            {/* Controls bar */}
-            <div className="flex flex-col gap-4 md:flex-row md:flex-wrap xl:flex-nowrap xl:items-center">
-              <div className="w-full md:max-w-[350px] md:min-w-[200px] xl:w-[320px] xl:flex-none">
-                <div className="skeleton h-11 w-full rounded-xl" />
-              </div>
-              <div className="flex flex-1 flex-wrap items-center justify-start gap-2 md:justify-end">
-                <div className="skeleton h-7 w-20 rounded-full" />
-                <div className="skeleton h-7 w-20 rounded-full" />
-                <div className="skeleton h-7 w-16 rounded-full" />
-              </div>
-            </div>
-
-            {/* Stat grid */}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="glass-card-sm p-5">
-                  <div className="skeleton skeleton-text mb-3" style={{ width: "40%" }} />
-                  <div className="skeleton skeleton-heading mb-2" style={{ width: "50%" }} />
-                  <div className="skeleton skeleton-text" style={{ width: "65%" }} />
+                <div
+                  key={i}
+                  className="flex h-[72px] animate-pulse flex-col gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-4"
+                >
+                  <div className="h-3 w-16 rounded bg-[var(--panel-strong)]" />
+                  <div className="h-5 w-12 rounded bg-[var(--panel-strong)]" />
                 </div>
               ))}
             </div>
-
-            {/* Table section */}
-            <div className="app-section min-h-[400px] p-5 sm:p-6" />
+            <div className="min-h-[320px]" />
           </div>
         ) : entriesQuery.error ? (
           <ErrorState
@@ -173,72 +155,54 @@ export default function DLQPage() {
           />
         ) : (
           <>
-            <PageStatGrid className="app-kpi-grid--four-up animate-in stagger-1">
-              <PageStatCard
+            <PageMetricStrip className="animate-in stagger-1">
+              <PageMetricStripItem
                 label={t("dlq.page.visibleFailures")}
                 value={`${entries.length}`}
                 hint={loading ? t("common.loading") : t("dlq.page.orderedByRecent")}
               />
-              <PageStatCard
+              <PageMetricStripItem
                 label={t("dlq.page.retryEligible")}
                 value={`${retryEligibleCount}`}
                 hint={t("dlq.page.retryEligibleHint")}
               />
-              <PageStatCard
+              <PageMetricStripItem
                 label={t("dlq.page.alreadyRetried")}
                 value={`${retriedCount}`}
                 hint={t("dlq.page.alreadyRetriedHint")}
               />
-              <PageStatCard
-                label={t("dlq.page.affectedBots")}
-                value={`${affectedBots}`}
+              <PageMetricStripItem
+                label={t("dlq.page.affectedAgents")}
+                value={`${affectedAgents}`}
                 hint={selectionLabel}
               />
-            </PageStatGrid>
+            </PageMetricStrip>
 
-            <PageSection className="animate-in stagger-2 overflow-hidden px-0 py-0">
-              <div className="px-5 py-5 lg:px-6">
-                <PageSectionHeader
-                  eyebrow={t("routeMeta.dlq.title")}
-                  title={t("dlq.page.actionTitle")}
-                  description={t("dlq.page.actionDescription")}
-                  meta={
-                    <div className="app-filter-row">
-                      <span className="chip">
-                        {filterButtons.find((item) => item.value === retryFilter)?.label}
-                      </span>
-                      <span className="chip">{selectionLabel}</span>
-                    </div>
-                  }
+            {unavailable ? (
+              <div className="animate-in stagger-2 px-6 py-10">
+                <PageEmptyState
+                  icon={DatabaseZap}
+                  title={t("dlq.page.unavailable")}
+                  description={t("dlq.page.unavailableDescription")}
                 />
               </div>
-
-              {unavailable ? (
-                <div className="border-t border-[var(--border-subtle)] px-6 py-10">
-                  <PageEmptyState
-                    icon={DatabaseZap}
-                    title={t("dlq.page.unavailable")}
-                    description={t("dlq.page.unavailableDescription")}
-                  />
-                </div>
-              ) : entries.length === 0 ? (
-                <div className="border-t border-[var(--border-subtle)] px-6 py-10">
-                  <PageEmptyState
-                    icon={ShieldCheck}
-                    title={emptyTitle}
-                    description={emptyDescription}
-                  />
-                </div>
-              ) : (
-                <div className="border-t border-[var(--border-subtle)]">
-                  <DLQTable
-                    entries={entries}
-                    onEntryClick={setSelectedEntry}
-                    selectedEntryId={selectedEntry?.id ?? null}
-                  />
-                </div>
-              )}
-            </PageSection>
+            ) : entries.length === 0 ? (
+              <div className="animate-in stagger-2 px-6 py-10">
+                <PageEmptyState
+                  icon={ShieldCheck}
+                  title={emptyTitle}
+                  description={emptyDescription}
+                />
+              </div>
+            ) : (
+              <div className="animate-in stagger-2">
+                <DLQTable
+                  entries={entries}
+                  onEntryClick={setSelectedEntry}
+                  selectedEntryId={selectedEntry?.id ?? null}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

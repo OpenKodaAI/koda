@@ -1138,7 +1138,6 @@ class KnowledgeV2PostgresBackend:
                             id TEXT PRIMARY KEY,
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
-                            color TEXT NOT NULL DEFAULT '',
                             spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
                             documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
@@ -1149,13 +1148,15 @@ class KnowledgeV2PostgresBackend:
                             workspace_id TEXT NOT NULL,
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
-                            color TEXT NOT NULL DEFAULT '',
                             spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
                             documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL,
                             UNIQUE (workspace_id, name)
                         )""",
+                    # Drop the legacy color column if it exists from older deployments.
+                    f"""ALTER TABLE "{schema}"."cp_workspaces" DROP COLUMN IF EXISTS color""",
+                    f"""ALTER TABLE "{schema}"."cp_workspace_squads" DROP COLUMN IF EXISTS color""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_agent_sections" (
                             agent_id TEXT NOT NULL,
                             section TEXT NOT NULL,
@@ -1985,6 +1986,29 @@ class KnowledgeV2PostgresBackend:
                     END
                     $$;
                     """,
+                ),
+            ),
+            _Migration(
+                "018_operator_recovery_codes",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_operator_recovery_codes" (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            code_hash TEXT NOT NULL,
+                            code_hint TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            consumed_at TEXT NOT NULL DEFAULT '',
+                            consumed_reason TEXT NOT NULL DEFAULT '',
+                            generation TEXT NOT NULL DEFAULT ''
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_operator_recovery_codes_user
+                           ON "{schema}"."cp_operator_recovery_codes" (user_id, consumed_at)""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_cp_operator_recovery_codes_hash
+                           ON "{schema}"."cp_operator_recovery_codes" (code_hash)""",
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS recovery_generation TEXT NOT NULL DEFAULT ''""",
                 ),
             ),
         )

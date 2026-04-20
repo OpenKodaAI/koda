@@ -241,9 +241,9 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ],
                 "related_tests": [
                     "apps/web/src/app/sessions/page.test.tsx",
-                    "apps/web/src/components/control-plane/catalog/bot-catalog.test.tsx",
+                    "apps/web/src/components/control-plane/catalog/agent-catalog.test.tsx",
                     "apps/web/src/components/memory/memory-dashboard-api.test.ts",
-                    "apps/web/src/hooks/use-bot-editor.test.tsx",
+                    "apps/web/src/hooks/use-agent-editor.test.tsx",
                     "apps/web/src/lib/runtime-api.test.ts",
                 ],
                 "related_docs": [

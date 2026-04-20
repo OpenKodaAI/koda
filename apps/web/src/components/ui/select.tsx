@@ -5,26 +5,58 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Sentinel value for "no selection" / "all" items. Radix Select rejects
+ * `SelectItem value=""`, so use this constant for any option that maps to
+ * `null | undefined | ""` in the underlying state.
+ *
+ *   <Select
+ *     value={x ?? SELECT_ALL_VALUE}
+ *     onValueChange={(v) => setX(v === SELECT_ALL_VALUE ? null : v)}
+ *   >
+ *     ...
+ *     <SelectItem value={SELECT_ALL_VALUE}>Todos</SelectItem>
+ *   </Select>
+ */
+export const SELECT_ALL_VALUE = "__all__";
+
+export type SelectTriggerSize = "sm" | "md" | "lg";
+
+const triggerSizeClasses: Record<SelectTriggerSize, string> = {
+  sm: "h-8 px-2.5 text-[0.75rem]",
+  md: "h-9 px-3 text-[0.8125rem]",
+  lg: "h-11 px-4 text-[0.875rem]",
+};
+
 const Select = SelectPrimitive.Root;
 
 const SelectGroup = SelectPrimitive.Group;
 
 const SelectValue = SelectPrimitive.Value;
 
+interface SelectTriggerProps extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> {
+  sizeVariant?: SelectTriggerSize;
+  invalid?: boolean;
+}
+
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
+  SelectTriggerProps
+>(({ className, children, sizeVariant = "md", invalid, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
+    data-slot="select-trigger"
+    aria-invalid={invalid || undefined}
     className={cn(
-      "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)]",
+      "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-primary)]",
       "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
       "hover:border-[var(--border-strong)]",
       "focus:outline-none focus-visible:border-[var(--accent)]",
       "data-[state=open]:border-[var(--accent)]",
       "data-[placeholder]:text-[var(--text-quaternary)]",
       "disabled:cursor-not-allowed disabled:opacity-60",
+      invalid && "border-[var(--tone-danger-border)] focus-visible:border-[var(--tone-danger-border)]",
+      triggerSizeClasses[sizeVariant],
       className,
     )}
     {...props}
@@ -72,10 +104,12 @@ const SelectContent = React.forwardRef<
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
+      data-slot="select-content"
       sideOffset={sideOffset}
       position={position}
       className={cn(
-        "relative z-50 min-w-[10rem] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] text-[var(--text-primary)] shadow-[var(--shadow-floating)]",
+        "relative z-50 min-w-[10rem] overflow-hidden rounded-[var(--radius-panel)] border border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-floating-bg)] text-[var(--text-primary)] shadow-[var(--overlay-floating-shadow)]",
+        "backdrop-blur-[22px] backdrop-saturate-[140%]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
         className,
@@ -104,6 +138,7 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
+    data-slot="select-label"
     className={cn(
       "px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
       className,
@@ -119,6 +154,7 @@ const SelectItem = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
+    data-slot="select-item"
     className={cn(
       "relative flex w-full cursor-default select-none items-center gap-2 rounded-[var(--radius-panel-sm)] py-1.5 pl-7 pr-2 text-[0.8125rem] text-[var(--text-secondary)] outline-none",
       "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
@@ -135,7 +171,7 @@ const SelectItem = React.forwardRef<
       </SelectPrimitive.ItemIndicator>
     </span>
 
-    {children}
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;

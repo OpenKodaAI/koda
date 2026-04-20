@@ -3,16 +3,16 @@
 import { memo } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { BotAgentGlyph } from "@/components/dashboard/bot-agent-glyph";
-import type { BotDisplay } from "@/lib/bot-constants";
-import type { BotStats, Task } from "@/lib/types";
+import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import type { AgentDisplay } from "@/lib/agent-constants";
+import type { AgentStats, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const LIVE_STATUSES: Task["status"][] = ["queued", "running", "retrying"];
 
 export interface LiveAgentsListEntry {
-  bot: BotDisplay;
-  stats?: BotStats;
+  agent: AgentDisplay;
+  stats?: AgentStats;
 }
 
 interface LiveAgentsListProps {
@@ -26,11 +26,11 @@ interface LiveAgentsListProps {
     idle: string;
     waiting: string;
   };
-  onSelectBot?: (botId: string) => void;
+  onSelectAgent?: (agentId: string) => void;
   className?: string;
 }
 
-function pickFeaturedTask(stats?: BotStats): Task | null {
+function pickFeaturedTask(stats?: AgentStats): Task | null {
   if (!stats?.recentTasks?.length) return null;
   return (
     stats.recentTasks.find((task) => LIVE_STATUSES.includes(task.status)) ??
@@ -39,7 +39,7 @@ function pickFeaturedTask(stats?: BotStats): Task | null {
   );
 }
 
-function statusToneClass(stats?: BotStats) {
+function statusToneClass(stats?: AgentStats) {
   if (!stats?.dbExists) return "bg-[var(--tone-warning-dot)]";
   if ((stats.activeTasks ?? 0) > 0) return "bg-[var(--tone-info-dot)]";
   return "bg-[var(--tone-success-dot)]";
@@ -52,7 +52,7 @@ function LiveAgentsListComponent({
   viewAllLabel,
   viewAllHref,
   statusLabels,
-  onSelectBot,
+  onSelectAgent,
   className,
 }: LiveAgentsListProps) {
   return (
@@ -95,18 +95,18 @@ function LiveAgentsListComponent({
             const detail = featured?.query_text?.trim() ?? statusLabel;
 
             return (
-              <li key={entry.bot.id}>
+              <li key={entry.agent.id}>
                 <button
                   type="button"
-                  onClick={() => onSelectBot?.(entry.bot.id)}
+                  onClick={() => onSelectAgent?.(entry.agent.id)}
                   className={cn(
                     "flex w-full items-center gap-3 py-2.5 text-left transition-colors",
                     "hover:text-[var(--text-primary)]",
                   )}
                 >
-                  <BotAgentGlyph
-                    botId={entry.bot.id}
-                    color={entry.bot.color}
+                  <AgentGlyph
+                    agentId={entry.agent.id}
+                    color={entry.agent.color}
                     active={activeCount > 0}
                     variant="list"
                     className="h-6 w-6 shrink-0"
@@ -114,7 +114,7 @@ function LiveAgentsListComponent({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
-                        {entry.bot.label}
+                        {entry.agent.label}
                       </span>
                       <span
                         className={cn(
@@ -144,13 +144,13 @@ function arePropsEqual(prev: LiveAgentsListProps, next: LiveAgentsListProps): bo
   if (prev.viewAllLabel !== next.viewAllLabel) return false;
   if (prev.viewAllHref !== next.viewAllHref) return false;
   if (prev.className !== next.className) return false;
-  if (prev.onSelectBot !== next.onSelectBot) return false;
+  if (prev.onSelectAgent !== next.onSelectAgent) return false;
   if (prev.statusLabels !== next.statusLabels) return false;
   if (prev.entries.length !== next.entries.length) return false;
   for (let i = 0; i < prev.entries.length; i += 1) {
     const a = prev.entries[i]!;
     const b = next.entries[i]!;
-    if (a.bot.id !== b.bot.id) return false;
+    if (a.agent.id !== b.agent.id) return false;
     const aActive = a.stats?.activeTasks ?? 0;
     const bActive = b.stats?.activeTasks ?? 0;
     if (aActive !== bActive) return false;

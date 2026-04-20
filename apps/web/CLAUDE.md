@@ -78,7 +78,7 @@ Subscribers to polled queries must never cause visible re-renders or flicker. In
 - `notifyOnChangeProps: ["data", "error"]` — skip re-renders on `isFetching` flips.
 - `placeholderData: keepPreviousData` — preserve last data during refetch.
 - `refetchOnWindowFocus: false`, `refetchOnMount: false`, `refetchOnReconnect: false`.
-- Stabilize payload identity with a `useContentStable(value)` hook (pattern in [`hooks/use-bot-stats.ts`](src/hooks/use-bot-stats.ts)) — uses `useMemo` with a JSON key to return the previous reference when content is structurally identical.
+- Stabilize payload identity with a `useContentStable(value)` hook (pattern in [`hooks/use-agent-stats.ts`](src/hooks/use-agent-stats.ts)) — uses `useMemo` with a JSON key to return the previous reference when content is structurally identical.
 - Heavy consumer components (lists, grids, heatmaps) must be wrapped in `React.memo` with a content-based comparator.
 - Do NOT use `content-visibility: auto` on sections that may re-render — causes paint flashes.
 
@@ -126,6 +126,13 @@ Every change under `apps/web/` must pass:
 - `pnpm lint:web`
 - `pnpm test:web`
 - `pnpm build:web`
+
+## Auth screens (`/setup`, `/login`, `/forgot-password`, `/settings/account`)
+
+- These routes run behind a tighter Content-Security-Policy than the rest of the app. `script-src` is `'self' 'unsafe-inline'` because Next.js App Router injects inline RSC bootstrap scripts, but external origins, framing, and `<object>` embedding are disabled. Do not introduce `dangerouslySetInnerHTML` or third-party inline scripts that would widen the policy further.
+- Every authentication error ("wrong password", "unknown user", "invalid recovery code", "rate-limited") is funneled through a single generic translation key. Never introduce a branch that renders a specific error message — the backend already makes them indistinguishable to neutralize timing and enumeration attacks.
+- The new setup flow is strictly two screens (`step-create-account` → `step-recovery-codes`) in [`src/components/setup/`](src/components/setup/). Do not re-introduce provider / GitHub / Telegram / allowed-user fields into the setup wizard; those belong to the optional post-setup checklist ([`src/components/dashboard/setup-checklist-card.tsx`](src/components/dashboard/setup-checklist-card.tsx)) and their existing drawers in `/control-plane`.
+- See [`../../docs/security/authentication.md`](../../docs/security/authentication.md) for the canonical contract.
 
 ## Related guidance
 

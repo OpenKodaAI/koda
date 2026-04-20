@@ -48,7 +48,7 @@ def validate_startup_config() -> list[str]:
     # --- Critical: no authentication configured ---
     if not ALLOWED_USER_IDS:
         raise StartupValidationError(
-            "ALLOWED_USER_IDS is empty. The bot would reject all messages. Set at least one Telegram user ID."
+            "ALLOWED_USER_IDS is empty. The agent would reject all messages. Set at least one Telegram user ID."
         )
 
     # --- Critical: no providers available ---

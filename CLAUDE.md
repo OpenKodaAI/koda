@@ -34,6 +34,7 @@ Public product and contributor documentation lives in [`docs/README.md`](docs/RE
 - [`AGENTS.md`](AGENTS.md) and the matching subtree `AGENTS.md` files mirror this guidance for `AGENTS.md`-aware tooling.
 - The canonical machine-readable repo index lives at [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml) and must match [`scripts/generate_repo_map.py`](scripts/generate_repo_map.py).
 - Per-agent runtime prompt behavior is derived from control-plane documents and the compiled runtime prompt contract, not repository prompt files.
+- Setup / login / recovery contract is documented in [`docs/security/authentication.md`](docs/security/authentication.md). Changes to [`koda/control_plane/operator_auth.py`](koda/control_plane/operator_auth.py), [`koda/control_plane/password_policy.py`](koda/control_plane/password_policy.py), [`koda/control_plane/bootstrap_file.py`](koda/control_plane/bootstrap_file.py), or the web auth routes must update that document and the matching tests in the same change.
 
 ## Safe Editing Rules
 

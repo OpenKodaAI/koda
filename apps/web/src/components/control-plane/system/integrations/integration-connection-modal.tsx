@@ -159,7 +159,7 @@ export function IntegrationConnectionModal({
                     />
                   ) : (
                     <input
-                      className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                      className="field-shell text-[var(--text-primary)]"
                       type={field.input_type === "password" ? "password" : "text"}
                       value={field.value || ""}
                       onChange={(e) =>

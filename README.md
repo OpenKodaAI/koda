@@ -1,5 +1,5 @@
-<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%; background-color: #000000;">
-  <img src="public/koda_hero.jpeg" alt="Koda" width="30%" />
+<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%;">
+  <img src="docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
 </div>
 
 <p align="center">
@@ -73,7 +73,7 @@ When the installer completes, start in the dashboard:
 - Dashboard home: `http://127.0.0.1:3000`
 
 From there you can unlock the operator session, validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
-From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
+From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per agent through the agent contract instead of relying on ambient system-wide access.
 
 ## What The Stack Starts
 

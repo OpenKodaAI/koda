@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BotEditorProvider } from "@/hooks/use-bot-editor";
+import { AgentEditorProvider } from "@/hooks/use-agent-editor";
 import { ToastProvider } from "@/hooks/use-toast";
 import { TabPublicacao } from "@/components/control-plane/editor/tabs/tab-publicacao";
 import type {
-  ControlPlaneBot,
+  ControlPlaneAgent,
   ControlPlaneCompiledPrompt,
   ControlPlaneCoreCapabilities,
   ControlPlaneCorePolicies,
@@ -33,7 +33,7 @@ vi.mock("@/hooks/use-app-i18n", () => ({
   }),
 }));
 
-function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
+function makeAgent(overrides: Partial<ControlPlaneAgent> = {}): ControlPlaneAgent {
   return {
     id: "ATLAS",
     display_name: "ATLAS",
@@ -49,10 +49,8 @@ function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
     organization: {
       workspace_id: null,
       workspace_name: null,
-      workspace_color: null,
       squad_id: null,
       squad_name: null,
-      squad_color: null,
     },
     applied_version: 3,
     desired_version: 3,
@@ -180,20 +178,20 @@ function makeCompiledPromptPayload(
 }
 
 function renderTab(
-  bot = makeBot(),
+  agent = makeAgent(),
   compiledPromptPayload: ControlPlaneCompiledPrompt | null = makeCompiledPromptPayload(),
 ) {
   return render(
     <ToastProvider>
-      <BotEditorProvider
-        bot={bot}
+      <AgentEditorProvider
+        agent={agent}
         compiledPromptPayload={compiledPromptPayload}
         core={core}
         workspaces={workspaces}
         systemSettings={systemSettings}
       >
         <TabPublicacao />
-      </BotEditorProvider>
+      </AgentEditorProvider>
     </ToastProvider>,
   );
 }
@@ -205,7 +203,6 @@ describe("TabPublicacao", () => {
     expect(screen.getByText("Resumo de alteracoes")).toBeInTheDocument();
     expect(screen.getByText("Versao publicada")).toBeInTheDocument();
     expect(screen.getByText("Versao desejada")).toBeInTheDocument();
-    expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Publicado")).toBeInTheDocument();
   });
 

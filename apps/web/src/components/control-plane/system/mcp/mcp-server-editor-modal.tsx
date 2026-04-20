@@ -5,6 +5,13 @@ import { createPortal } from "react-dom";
 import { X, Plus, Trash2 } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { McpServerCatalogEntry, McpEnvSchemaField } from "@/lib/control-plane";
 import {
   MCP_CATEGORY_LABELS,
@@ -342,7 +349,7 @@ export function McpServerEditorModal({
                 }
               >
                 <input
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                   value={form.server_key}
                   onChange={(e) => patch({ server_key: e.target.value })}
                   placeholder="meu-servidor"
@@ -353,7 +360,7 @@ export function McpServerEditorModal({
 
               <FieldShell label="Nome de exibicao">
                 <input
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                   value={form.display_name}
                   onChange={(e) => patch({ display_name: e.target.value })}
                   placeholder="Meu Servidor MCP"
@@ -362,7 +369,7 @@ export function McpServerEditorModal({
 
               <FieldShell label="Descricao">
                 <textarea
-                  className="field-shell min-h-[60px] resize-y px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                  className="field-shell min-h-[60px] resize-y text-[var(--text-primary)]"
                   value={form.description}
                   onChange={(e) => patch({ description: e.target.value })}
                   placeholder={tl("Breve descricao do que esse servidor oferece")}
@@ -370,22 +377,24 @@ export function McpServerEditorModal({
               </FieldShell>
 
               <FieldShell label="Tipo de transporte">
-                <select
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                <Select
                   value={form.transport_type}
-                  onChange={(e) =>
-                    patch({ transport_type: e.target.value as "stdio" | "http_sse" })
-                  }
+                  onValueChange={(v) => patch({ transport_type: v as "stdio" | "http_sse" })}
                 >
-                  <option value="stdio">stdio (comando local)</option>
-                  <option value="http_sse">HTTP / SSE (URL remota)</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stdio">stdio (comando local)</SelectItem>
+                    <SelectItem value="http_sse">HTTP / SSE (URL remota)</SelectItem>
+                  </SelectContent>
+                </Select>
               </FieldShell>
 
               {form.transport_type === "stdio" ? (
                 <FieldShell label="Comando" description="Comando para iniciar o servidor">
                   <input
-                    className="field-shell px-4 py-2.5 font-mono text-sm text-[var(--text-primary)]"
+                    className="field-shell font-mono text-[var(--text-primary)]"
                     value={form.command}
                     onChange={(e) => patch({ command: e.target.value })}
                     placeholder="npx -y @example/mcp-server"
@@ -394,7 +403,7 @@ export function McpServerEditorModal({
               ) : (
                 <FieldShell label="URL" description="Endpoint HTTP/SSE do servidor">
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     value={form.url}
                     onChange={(e) => patch({ url: e.target.value })}
                     placeholder="https://mcp.example.com/sse"
@@ -403,24 +412,28 @@ export function McpServerEditorModal({
               )}
 
               <FieldShell label="Categoria">
-                <select
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                <Select
                   value={form.category}
-                  onChange={(e) => patch({ category: e.target.value as McpCategory })}
+                  onValueChange={(v) => patch({ category: v as McpCategory })}
                 >
-                  {(Object.entries(MCP_CATEGORY_LABELS) as [McpCategory, string][]).map(
-                    ([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ),
-                  )}
-                </select>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.entries(MCP_CATEGORY_LABELS) as [McpCategory, string][]).map(
+                      ([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
               </FieldShell>
 
               <FieldShell label="URL de documentacao" description="Opcional">
                 <input
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                   value={form.documentation_url}
                   onChange={(e) => patch({ documentation_url: e.target.value })}
                   placeholder="https://docs.example.com"

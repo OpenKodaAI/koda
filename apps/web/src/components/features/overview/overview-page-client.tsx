@@ -9,26 +9,29 @@ import {
   CalendarPlus,
   Play,
   Sparkles,
+  type LucideIcon,
 } from "lucide-react";
 import { ActivityHeatmap } from "@/components/dashboard/activity-heatmap";
+import { CommandBar } from "@/components/command-bar/command-bar";
+import type { CommandBarContext } from "@/components/command-bar/command-registry";
 import {
   ExecutionHistory,
   type ExecutionHistoryStrings,
 } from "@/components/dashboard/execution-history";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { OverviewComposer } from "@/components/features/overview/overview-composer";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDailyActivity } from "@/hooks/use-daily-activity";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
-import { useBotStats } from "@/hooks/use-bot-stats";
-import { resolveBotSelection } from "@/lib/bot-selection";
-import type { BotStats } from "@/lib/types";
+import { useAgentStats } from "@/hooks/use-agent-stats";
+import { resolveAgentSelection } from "@/lib/agent-selection";
+import { cn } from "@/lib/utils";
+import type { AgentStats } from "@/lib/types";
 
-const BotDetailModal = dynamic(
+const AgentDetailModal = dynamic(
   () =>
-    import("@/components/bots/bot-detail-modal").then((module) => ({
-      default: module.BotDetailModal,
+    import("@/components/agents/agent-detail-modal").then((module) => ({
+      default: module.AgentDetailModal,
     })),
   { loading: () => null },
 );
@@ -36,8 +39,8 @@ const BotDetailModal = dynamic(
 function OverviewSkeleton() {
   return (
     <div className="space-y-4" {...tourRoute("overview", "loading")}>
-      {/* BotSwitcher placeholder */}
-      <div className="max-w-[350px]" {...tourAnchor("overview.bot-switcher")}>
+      {/* AgentSwitcher placeholder */}
+      <div className="max-w-[350px]" {...tourAnchor("overview.agent-switcher")}>
         <div className="skeleton h-11 w-full rounded-xl" />
       </div>
 
@@ -75,8 +78,8 @@ export default function OverviewPage() {
 function OverviewPageFallback() {
   return (
     <div className="space-y-4" {...tourRoute("overview", "loading")}>
-      <div className="max-w-[350px]" {...tourAnchor("overview.bot-switcher")}>
-        <BotSwitcher
+      <div className="max-w-[350px]" {...tourAnchor("overview.agent-switcher")}>
+        <AgentSwitcher
           multiple
           selectedBotIds={[]}
           onSelectionChange={() => undefined}
@@ -89,46 +92,46 @@ function OverviewPageFallback() {
 
 function OverviewPageContent() {
   const { t } = useAppI18n();
-  const { bots, botDisplayMap } = useBotCatalog();
+  const { agents, agentDisplayMap } = useAgentCatalog();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const {
     stats: allStats,
     loading,
-  } = useBotStats();
+  } = useAgentStats();
 
   const modalBotId = useMemo(() => {
-    const bot = searchParams.get("bot");
-    return bot && botDisplayMap[bot] ? bot : null;
-  }, [botDisplayMap, searchParams]);
+    const agent = searchParams.get("agent");
+    return agent && agentDisplayMap[agent] ? agent : null;
+  }, [agentDisplayMap, searchParams]);
 
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
 
-  const statsByBot = useMemo(
+  const statsByAgent = useMemo(
     () => {
       const statsMap = Object.fromEntries(
-        (allStats ?? []).map((stats) => [stats.botId, stats]),
-      ) as Record<string, BotStats>;
-      return bots.map((bot) => ({
-        bot,
-        stats: statsMap[bot.id],
+        (allStats ?? []).map((stats) => [stats.agentId, stats]),
+      ) as Record<string, AgentStats>;
+      return agents.map((agent) => ({
+        agent,
+        stats: statsMap[agent.id],
       }));
     },
-    [allStats, bots],
+    [allStats, agents],
   );
 
   const visibleEntries = useMemo(
     () =>
-      statsByBot.filter((entry) => visibleBotIds.includes(entry.bot.id)),
-    [statsByBot, visibleBotIds]
+      statsByAgent.filter((entry) => visibleBotIds.includes(entry.agent.id)),
+    [statsByAgent, visibleBotIds]
   );
 
-  // TEMP: mock roster data for design review — remove once real bots exist.
+  // TEMP: mock roster data for design review — remove once real agents exist.
   const [rosterMockEntries] = useState(() => {
     const now = Date.now();
     const iso = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
@@ -157,9 +160,9 @@ function OverviewPageContent() {
     });
     return [
       {
-        bot: { id: "masp", label: "MASP", color: "#6e97d9", colorRgb: "110, 151, 217" },
+        agent: { id: "atlas", label: "Atlas", color: "#6e97d9", colorRgb: "110, 151, 217" },
         stats: {
-          botId: "masp",
+          agentId: "atlas",
           totalTasks: 142,
           activeTasks: 2,
           completedTasks: 128,
@@ -197,9 +200,9 @@ function OverviewPageContent() {
         },
       },
       {
-        bot: { id: "air-compass", label: "Air Compass", color: "#5da9a3", colorRgb: "93, 169, 163" },
+        agent: { id: "air-compass", label: "Air Compass", color: "#5da9a3", colorRgb: "93, 169, 163" },
         stats: {
-          botId: "air-compass",
+          agentId: "air-compass",
           totalTasks: 89,
           activeTasks: 1,
           completedTasks: 81,
@@ -230,9 +233,9 @@ function OverviewPageContent() {
         },
       },
       {
-        bot: { id: "luby", label: "Luby", color: "#c07a96", colorRgb: "192, 122, 150" },
+        agent: { id: "orion", label: "Orion", color: "#c07a96", colorRgb: "192, 122, 150" },
         stats: {
-          botId: "luby",
+          agentId: "orion",
           totalTasks: 54,
           activeTasks: 0,
           completedTasks: 51,
@@ -262,9 +265,9 @@ function OverviewPageContent() {
         },
       },
       {
-        bot: { id: "archivist", label: "Archivist", color: "#9f8ad5", colorRgb: "159, 138, 213" },
+        agent: { id: "archivist", label: "Archivist", color: "#9f8ad5", colorRgb: "159, 138, 213" },
         stats: {
-          botId: "archivist",
+          agentId: "archivist",
           totalTasks: 211,
           activeTasks: 0,
           completedTasks: 205,
@@ -301,9 +304,9 @@ function OverviewPageContent() {
         },
       },
       {
-        bot: { id: "scribe", label: "Scribe", color: "#d98b57", colorRgb: "217, 139, 87" },
+        agent: { id: "scribe", label: "Scribe", color: "#d98b57", colorRgb: "217, 139, 87" },
         stats: {
-          botId: "scribe",
+          agentId: "scribe",
           totalTasks: 0,
           activeTasks: 0,
           completedTasks: 0,
@@ -337,13 +340,13 @@ function OverviewPageContent() {
     [t],
   );
 
-  const buildBotUrl = useCallback(
-    (botId: string | null) => {
+  const buildAgentUrl = useCallback(
+    (agentId: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (botId) {
-        params.set("bot", botId);
+      if (agentId) {
+        params.set("agent", agentId);
       } else {
-        params.delete("bot");
+        params.delete("agent");
       }
 
       const query = params.toString();
@@ -352,15 +355,15 @@ function OverviewPageContent() {
     [searchParams]
   );
 
-  const closeBotModal = useCallback(() => {
-    router.push(buildBotUrl(null), { scroll: false });
-  }, [buildBotUrl, router]);
+  const closeAgentModal = useCallback(() => {
+    router.push(buildAgentUrl(null), { scroll: false });
+  }, [buildAgentUrl, router]);
 
-  const changeModalBot = useCallback(
-    (botId: string) => {
-      router.push(buildBotUrl(botId), { scroll: false });
+  const changeModalAgent = useCallback(
+    (agentId: string) => {
+      router.push(buildAgentUrl(agentId), { scroll: false });
     },
-    [buildBotUrl, router]
+    [buildAgentUrl, router]
   );
 
   const tourVariant =
@@ -457,7 +460,7 @@ function OverviewPageContent() {
     return t(`overview.greeting.${key}`, { name: "Ryan" });
   }, [t]);
 
-  const composerActions = useMemo(
+  const quickPills = useMemo<Array<{ id: string; label: string; icon: LucideIcon; onSelect: () => void }>>(
     () => [
       {
         id: "run-task",
@@ -485,6 +488,17 @@ function OverviewPageContent() {
       },
     ],
     [t, router],
+  );
+
+  const commandBarCtx = useMemo<CommandBarContext>(
+    () => ({
+      agents,
+      stats: allStats,
+      router: { push: (href: string) => router.push(href) },
+      t,
+      openAgentDetail: (agentId: string) => router.push(buildAgentUrl(agentId), { scroll: false }),
+    }),
+    [allStats, agents, buildAgentUrl, router, t],
   );
 
   const heatmapTooltipTemplate = useCallback(
@@ -525,11 +539,34 @@ function OverviewPageContent() {
           </header>
 
           <div {...tourAnchor("overview.composer")}>
-            <OverviewComposer
-              placeholder={t("overview.composer.placeholder")}
-              submitLabel={t("overview.composer.submit")}
-              actions={composerActions}
-              onSubmit={() => router.push("/runtime")}
+            <CommandBar
+              ctx={commandBarCtx}
+              mode="inline"
+              placeholder={t("commandBar.placeholder")}
+              emptyState={t("commandBar.emptyState")}
+              shortcutHint={t("commandBar.shortcutHint")}
+              pillsSlot={
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {quickPills.map((pill) => {
+                    const Icon = pill.icon;
+                    return (
+                      <button
+                        key={pill.id}
+                        type="button"
+                        onClick={pill.onSelect}
+                        className={cn(
+                          "inline-flex h-8 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] font-medium text-[var(--text-secondary)]",
+                          "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>{pill.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              }
             />
           </div>
         </section>
@@ -547,13 +584,13 @@ function OverviewPageContent() {
               stats={heatmapStatsDisplay}
               legend={{ less: t("overview.heatmap.less"), more: t("overview.heatmap.more") }}
               scopeSlot={
-                <div className="w-[200px]" {...tourAnchor("overview.bot-switcher")}>
-                  <BotSwitcher
+                <div className="w-[200px]" {...tourAnchor("overview.agent-switcher")}>
+                  <AgentSwitcher
                     multiple
                     singleRow
                     selectedBotIds={selectedBotIds}
                     onSelectionChange={setSelectedBotIds}
-                    className="bot-switcher--compact"
+                    className="agent-switcher--compact"
                   />
                 </div>
               }
@@ -571,7 +608,7 @@ function OverviewPageContent() {
               entries={rosterEntries}
               strings={historyStrings}
               limit={10}
-              onSelectBot={(botId) => router.push(buildBotUrl(botId), { scroll: false })}
+              onSelectAgent={(agentId) => router.push(buildAgentUrl(agentId), { scroll: false })}
             />
           </section>
         </div>
@@ -579,11 +616,11 @@ function OverviewPageContent() {
       </div>
 
       {modalBotId ? (
-        <BotDetailModal
-          botId={modalBotId}
+        <AgentDetailModal
+          agentId={modalBotId}
           isOpen={Boolean(modalBotId)}
-          onClose={closeBotModal}
-          onBotChange={changeModalBot}
+          onClose={closeAgentModal}
+          onAgentChange={changeModalAgent}
         />
       ) : null}
     </>

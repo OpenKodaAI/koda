@@ -76,6 +76,47 @@ def _add_trace_context(
     return event_dict
 
 
+# Sensitive keys that must NEVER appear in log output, regardless of caller.
+# Matches are case-insensitive and compared against the full key.
+_REDACTED_KEYS: frozenset[str] = frozenset(
+    {
+        "password",
+        "new_password",
+        "current_password",
+        "recovery_code",
+        "session_token",
+        "registration_token",
+        "bootstrap_code",
+        "code",
+        "totp_secret",
+        "api_key",
+        "apikey",
+        "secret",
+        "private_key",
+        "token",
+        "authorization",
+        "cookie",
+    }
+)
+
+
+def _redact_sensitive(
+    logger: object,
+    method_name: str,
+    event_dict: MutableMapping[str, Any],
+) -> MutableMapping[str, Any]:
+    """Replace values of well-known sensitive keys with a marker string.
+
+    Does not recurse into nested structures; callers should avoid logging
+    entire payload dicts containing secrets. Centralized here so a single fix
+    applies to every structlog call site.
+    """
+    for key in list(event_dict.keys()):
+        if key.lower() in _REDACTED_KEYS and event_dict.get(key):
+            event_dict[key] = "***"
+    return event_dict
+
+
 def setup_logging(json_output: bool | None = None) -> None:
     """Configure structlog with optional JSON output for production.
 
@@ -89,6 +130,7 @@ def setup_logging(json_output: bool | None = None) -> None:
         _add_context,
         _add_k8s_context,
         _add_trace_context,
+        _redact_sensitive,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),

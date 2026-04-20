@@ -132,6 +132,7 @@ from .settings import (
     AGENT_SECTIONS,
     CONTROL_PLANE_AUTO_IMPORT,
     CONTROL_PLANE_RUNTIME_DIR,
+    CONTROL_PLANE_SKIP_DEFAULT_SEED,
     DASHBOARD_AGENT_CONSTANTS_PATH,
     DOCUMENT_KINDS,
     ROOT_DIR,
@@ -184,6 +185,22 @@ _KNOWLEDGE_ENTRY_METADATA_FIELDS: tuple[str, ...] = (
 _RESERVED_MCP_SERVER_KEYS: frozenset[str] = frozenset(
     {"docker", "filesystem", "github", "gitlab", "memory", "puppeteer"}
 )
+_ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
+_ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
+_ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
+_ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
+
+
+class GeneralPayloadValidationError(ValueError):
+    """Raised when ``put_general_system_settings`` payload fails structural validation.
+
+    Carries a list of ``{field, code, message}`` dicts so the API layer can surface
+    per-field errors back to the dashboard.
+    """
+
+    def __init__(self, errors: list[dict[str, str]]) -> None:
+        self.errors = list(errors)
+        super().__init__(f"invalid general settings payload: {len(self.errors)} error(s)")
 
 
 def _normalize_mcp_server_key(server_key: Any) -> str:
@@ -1484,6 +1501,7 @@ class ControlPlaneManager:
         if CONTROL_PLANE_AUTO_IMPORT:
             self.import_legacy_state()
         self._seed_authoritative_mcp_catalog()
+        self._seed_default_world()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
         self._cleanup_provider_download_jobs()
@@ -1501,6 +1519,83 @@ class ControlPlaneManager:
                     self.upsert_mcp_catalog_entry(server_key, entry)
                 except Exception:
                     log.debug("control_plane_mcp_seed_failed", server_key=server_key, exc_info=True)
+        finally:
+            self._seeding_legacy_state = False
+
+    def _seed_default_world(self) -> None:
+        """Seed sensible global defaults so a fresh install is immediately usable.
+
+        Runs idempotently after MCP catalog seeding and legacy import. Only writes
+        sections that are currently absent — never overwrites operator edits nor
+        values already populated by ``import_legacy_state``. Governed by
+        ``CONTROL_PLANE_SKIP_DEFAULT_SEED`` for tests and customized deploys.
+        """
+        if not self._auto_seed_enabled():
+            return
+        if self._seeding_legacy_state:
+            return
+        if CONTROL_PLANE_SKIP_DEFAULT_SEED:
+            return
+        existing_sections = self._load_global_sections()
+        defaults: dict[str, dict[str, Any]] = {
+            "general": {"rate_limit_per_minute": 30},
+            "providers": {
+                "max_budget_usd": 5.0,
+                "max_total_budget_usd": 50.0,
+                "fallback_order": [],
+                "usage_profile": "balanced",
+            },
+            "tools": {"default_agent_mode": "chat"},
+            "integrations": {},
+            "memory": {
+                "enabled": False,
+                "proactive_enabled": False,
+                "procedural_enabled": False,
+            },
+            "knowledge": {
+                "enabled": False,
+                "promotion_mode": "read_only",
+                "require_freshness_provenance": True,
+            },
+            "scheduler": {
+                "scheduler_enabled": True,
+                "scheduler_default_timezone": "America/Sao_Paulo",
+                "runbook_governance_enabled": False,
+            },
+            "runtime": {
+                "runtime_environments_enabled": True,
+                "runtime_event_stream_enabled": True,
+                "runtime_recovery_enabled": True,
+            },
+        }
+        sections_to_write: dict[str, dict[str, Any]] = {}
+        for section, default_values in defaults.items():
+            current = _safe_json_object(existing_sections.get(section))
+            merged = dict(current)
+            changed = False
+            for key, value in default_values.items():
+                if key not in merged:
+                    merged[key] = value
+                    changed = True
+            if changed:
+                sections_to_write[section] = merged
+        if not sections_to_write:
+            return
+        self._seeding_legacy_state = True
+        try:
+            for section, value in sections_to_write.items():
+                execute(
+                    """
+                    INSERT INTO cp_global_sections (section, data_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+                    """,
+                    (section, json_dump(value), now_iso()),
+                )
+            log.info(
+                "control_plane_default_world_seeded",
+                sections=sorted(sections_to_write.keys()),
+            )
         finally:
             self._seeding_legacy_state = False
 
@@ -1571,7 +1666,6 @@ class ControlPlaneManager:
             "id": str(row["id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
-            "color": str(row["color"] or ""),
             "spec": {},
             "documents": documents,
             "agent_count": agent_count,
@@ -1598,7 +1692,6 @@ class ControlPlaneManager:
             "workspace_id": str(row["workspace_id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
-            "color": str(row["color"] or ""),
             "spec": {},
             "documents": documents,
             "agent_count": agent_count,
@@ -1634,10 +1727,8 @@ class ControlPlaneManager:
         return {
             "workspace_id": normalized_workspace_id,
             "workspace_name": str(workspace_row["name"]) if workspace_row is not None else None,
-            "workspace_color": str(workspace_row["color"] or "") if workspace_row is not None else None,
             "squad_id": normalized_squad_id,
             "squad_name": str(squad_row["name"]) if squad_row is not None else None,
-            "squad_color": str(squad_row["color"] or "") if squad_row is not None else None,
         }
 
     def _resolve_agent_organization(
@@ -1770,14 +1861,13 @@ class ControlPlaneManager:
         now = now_iso()
         execute(
             """
-            INSERT INTO cp_workspaces (id, name, description, color, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
                 name,
                 str(payload.get("description") or "").strip(),
-                str(payload.get("color") or "").strip(),
                 now,
                 now,
             ),
@@ -1793,13 +1883,12 @@ class ControlPlaneManager:
         execute(
             """
             UPDATE cp_workspaces
-            SET name = ?, description = ?, color = ?, updated_at = ?
+            SET name = ?, description = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else row["description"] or "").strip(),
-                str(payload.get("color") if "color" in payload else row["color"] or "").strip(),
                 now_iso(),
                 str(row["id"]),
             ),
@@ -1840,15 +1929,14 @@ class ControlPlaneManager:
         now = now_iso()
         execute(
             """
-            INSERT INTO cp_workspace_squads (id, workspace_id, name, description, color, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 squad_id,
                 str(workspace_row["id"]),
                 name,
                 str(payload.get("description") or "").strip(),
-                str(payload.get("color") or "").strip(),
                 now,
                 now,
             ),
@@ -1868,13 +1956,12 @@ class ControlPlaneManager:
         execute(
             """
             UPDATE cp_workspace_squads
-            SET name = ?, description = ?, color = ?, updated_at = ?
+            SET name = ?, description = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else squad_row["description"] or "").strip(),
-                str(payload.get("color") if "color" in payload else squad_row["color"] or "").strip(),
                 now_iso(),
                 str(squad_row["id"]),
             ),
@@ -8055,8 +8142,174 @@ class ControlPlaneManager:
         self._persist_global_sections(sections)
         return self.get_system_settings()
 
+    def _validate_general_payload(self, payload: dict[str, Any]) -> None:
+        """Validate structural constraints on the general settings payload.
+
+        Raises ``GeneralPayloadValidationError`` with a list of field-level errors
+        when the payload would cause surprising or broken runtime behavior. Only
+        rejects payloads that are structurally wrong — no business-logic coercion
+        happens here (that remains inside ``put_general_system_settings``).
+        """
+        errors: list[dict[str, str]] = []
+        account = _safe_json_object(payload.get("account"))
+        models = _safe_json_object(payload.get("models"))
+        memory_and_knowledge = _safe_json_object(payload.get("memory_and_knowledge"))
+        variables_raw = payload.get("variables")
+
+        def _push(field: str, code: str, message: str) -> None:
+            errors.append({"field": field, "code": code, "message": message})
+
+        if "rate_limit_per_minute" in account and account.get("rate_limit_per_minute") not in (None, ""):
+            raw = account.get("rate_limit_per_minute")
+            try:
+                parsed = int(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("account.rate_limit_per_minute", "invalid_type", "Rate limit deve ser um inteiro.")
+            else:
+                if parsed < 1:
+                    _push("account.rate_limit_per_minute", "min_value", "Rate limit deve ser ao menos 1.")
+
+        budget_value: float | None = None
+        total_budget_value: float | None = None
+        if "max_budget_usd" in models and models.get("max_budget_usd") not in (None, ""):
+            try:
+                budget_value = float(models.get("max_budget_usd"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("models.max_budget_usd", "invalid_type", "Orçamento por tarefa deve ser numérico.")
+            else:
+                if budget_value <= 0:
+                    _push("models.max_budget_usd", "must_be_positive", "Orçamento por tarefa deve ser maior que zero.")
+        if "max_total_budget_usd" in models and models.get("max_total_budget_usd") not in (None, ""):
+            try:
+                total_budget_value = float(models.get("max_total_budget_usd"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("models.max_total_budget_usd", "invalid_type", "Orçamento total deve ser numérico.")
+            else:
+                if total_budget_value < 0:
+                    _push(
+                        "models.max_total_budget_usd",
+                        "must_be_non_negative",
+                        "Orçamento total não pode ser negativo.",
+                    )
+        if budget_value is not None and total_budget_value is not None and total_budget_value < budget_value:
+            _push(
+                "models.max_total_budget_usd",
+                "must_gte_max_budget",
+                "Orçamento total deve ser maior ou igual ao orçamento por tarefa.",
+            )
+
+        enabled_providers_specified = "providers_enabled" in models
+        enabled_providers: list[str] = normalize_string_list(models.get("providers_enabled"))
+        if enabled_providers_specified:
+            managed = set(MANAGED_PROVIDER_IDS)
+            for pid in enabled_providers:
+                if pid not in managed:
+                    _push(
+                        "models.providers_enabled",
+                        "unknown_provider",
+                        f"Provider desconhecido: {pid}.",
+                    )
+        if "default_provider" in models and models.get("default_provider") not in (None, ""):
+            dp = _nonempty_text(models.get("default_provider")).lower()
+            if dp and enabled_providers_specified and dp not in enabled_providers:
+                _push(
+                    "models.default_provider",
+                    "must_be_enabled",
+                    f"Provider padrão '{dp}' não está na lista de providers habilitados.",
+                )
+
+        functional_defaults_payload = _safe_json_object(models.get("functional_defaults"))
+        if functional_defaults_payload and enabled_providers_specified:
+            for function_id, selection in functional_defaults_payload.items():
+                selection_obj = _safe_json_object(selection)
+                fd_provider = _nonempty_text(selection_obj.get("provider_id")).lower()
+                if fd_provider and fd_provider not in enabled_providers:
+                    _push(
+                        f"models.functional_defaults.{function_id}.provider_id",
+                        "must_be_enabled",
+                        f"Provider '{fd_provider}' do default funcional '{function_id}' não está habilitado.",
+                    )
+
+        autonomy_policy = _safe_json_object(memory_and_knowledge.get("autonomy_policy"))
+        autonomy_tier_raw = autonomy_policy.get("default_autonomy_tier")
+        if "default_autonomy_tier" in autonomy_policy and autonomy_tier_raw not in (None, ""):
+            tier = _nonempty_text(autonomy_tier_raw).lower()
+            if tier and tier not in _ALLOWED_AUTONOMY_TIERS:
+                _push(
+                    "memory_and_knowledge.autonomy_policy.default_autonomy_tier",
+                    "invalid_enum",
+                    f"Tier de autonomia inválido: {tier}. Use t0, t1 ou t2.",
+                )
+
+        memory_policy_raw = _safe_json_object(memory_and_knowledge.get("memory_policy"))
+        memory_profile = _nonempty_text(
+            _safe_json_object(memory_policy_raw.get("profile")).get("id") or memory_policy_raw.get("profile_id")
+        )
+        if memory_profile and memory_profile not in _GENERAL_MEMORY_PROFILES:
+            _push(
+                "memory_and_knowledge.memory_policy.profile",
+                "unknown_profile",
+                f"Perfil de memória desconhecido: {memory_profile}.",
+            )
+
+        knowledge_policy_raw = _safe_json_object(memory_and_knowledge.get("knowledge_policy"))
+        knowledge_profile = _nonempty_text(
+            _safe_json_object(knowledge_policy_raw.get("profile")).get("id") or knowledge_policy_raw.get("profile_id")
+        )
+        if knowledge_profile and knowledge_profile not in _GENERAL_KNOWLEDGE_PROFILES:
+            _push(
+                "memory_and_knowledge.knowledge_policy.profile",
+                "unknown_profile",
+                f"Perfil de conhecimento desconhecido: {knowledge_profile}.",
+            )
+        if "provenance_policy" in knowledge_policy_raw and knowledge_policy_raw.get("provenance_policy") not in (
+            None,
+            "",
+        ):
+            provenance = _nonempty_text(knowledge_policy_raw.get("provenance_policy")).lower()
+            if provenance and provenance not in _ALLOWED_PROVENANCE_POLICIES:
+                _push(
+                    "memory_and_knowledge.knowledge_policy.provenance_policy",
+                    "invalid_enum",
+                    f"Política de proveniência inválida: {provenance}. Use strict ou standard.",
+                )
+
+        if variables_raw is not None:
+            if not isinstance(variables_raw, list):
+                _push("variables", "invalid_type", "Variáveis devem ser uma lista.")
+            else:
+                for index, entry in enumerate(variables_raw):
+                    entry_obj = _safe_json_object(entry)
+                    key = _nonempty_text(entry_obj.get("key"))
+                    if not key:
+                        _push(f"variables[{index}].key", "required", "Chave da variável é obrigatória.")
+                    elif not _ENV_KEY_RE.match(key):
+                        _push(
+                            f"variables[{index}].key",
+                            "invalid_format",
+                            f"Chave '{key}' deve iniciar em letra maiúscula e conter apenas A-Z, 0-9 e '_'.",
+                        )
+                    vtype = _nonempty_text(entry_obj.get("type")).lower() or "text"
+                    if vtype not in _ALLOWED_VARIABLE_TYPES:
+                        _push(
+                            f"variables[{index}].type",
+                            "invalid_enum",
+                            f"Tipo inválido: {vtype}. Use text ou secret.",
+                        )
+                    vscope = _nonempty_text(entry_obj.get("scope")).lower() or "system_only"
+                    if vscope not in _ALLOWED_VARIABLE_SCOPES:
+                        _push(
+                            f"variables[{index}].scope",
+                            "invalid_enum",
+                            f"Escopo inválido: {vscope}. Use system_only ou agent_grant.",
+                        )
+
+        if errors:
+            raise GeneralPayloadValidationError(errors)
+
     def put_general_system_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_seeded()
+        self._validate_general_payload(payload)
         current = self.get_system_settings()
         sections = self._system_settings_sections()
         general_ui = dict(self._general_ui_meta(sections=sections))
@@ -8153,20 +8406,14 @@ class ControlPlaneManager:
 
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:
-            raise ValueError("O provider padrão precisa estar habilitado.")
-        if default_provider in MANAGED_PROVIDER_IDS and not bool(
-            _safe_json_object(provider_connections.get(default_provider)).get("verified")
-        ):
-            raise ValueError("O provider padrão precisa estar conectado e verificado.")
-        requested_fallback = normalize_string_list(current_providers.get("fallback_order"))
-        if any(provider not in enabled_providers for provider in requested_fallback):
-            raise ValueError("A ordem de fallback contém providers não habilitados.")
-        if any(
-            provider in MANAGED_PROVIDER_IDS
-            and not bool(_safe_json_object(provider_connections.get(provider)).get("verified"))
-            for provider in requested_fallback
-        ):
-            raise ValueError("A ordem de fallback só pode incluir providers verificados.")
+            default_provider = enabled_providers[0] if enabled_providers else ""
+            current_providers["default_provider"] = default_provider
+        requested_fallback = [
+            provider
+            for provider in normalize_string_list(current_providers.get("fallback_order"))
+            if provider in enabled_providers
+        ]
+        current_providers["fallback_order"] = requested_fallback
 
         usage_profile = _nonempty_text(models.get("usage_profile")).lower() or "balanced"
         general_ui["usage_profile"] = usage_profile
@@ -8191,7 +8438,9 @@ class ControlPlaneManager:
                 )
             )
             if not option:
-                raise ValueError(f"O default de {function_id} referencia um provider/modelo invalido.")
+                # Unknown provider/model: drop silently so the operator can still save
+                # unrelated settings. A warning is surfaced elsewhere.
+                continue
             provider_id = _nonempty_text(option.get("provider_id")).lower()
             provider_payload = _safe_json_object(_safe_json_object(provider_catalog.get("providers")).get(provider_id))
             if function_id in {"general", "transcription"} and not self._provider_selectable_for_function(
@@ -8200,10 +8449,9 @@ class ControlPlaneManager:
                 provider_payload,
                 provider_connections,
             ):
-                raise ValueError(
-                    f"{option.get('provider_title') or provider_id} precisa estar disponivel "
-                    f"antes de virar default de {function_id}."
-                )
+                # Provider not ready yet: drop this functional default so save
+                # proceeds. Warning is surfaced by _warnings_for_system_settings.
+                continue
             normalized_functional_defaults[function_id] = {
                 "provider_id": provider_id,
                 "model_id": _nonempty_text(option.get("model_id")),
@@ -8216,11 +8464,15 @@ class ControlPlaneManager:
             general_default = _safe_json_object(normalized_functional_defaults.get("general"))
             general_provider = _nonempty_text(general_default.get("provider_id")).lower()
             general_model = _nonempty_text(general_default.get("model_id"))
-            if general_provider and general_model:
-                if general_provider not in enabled_providers:
-                    raise ValueError("O default geral precisa usar um provider habilitado.")
+            if general_provider and general_model and general_provider in enabled_providers:
                 current_providers["default_provider"] = general_provider
                 current_providers[f"{general_provider}_default_model"] = general_model
+            elif general_provider and general_model:
+                # General default points to a provider that is not enabled:
+                # drop it from normalized_functional_defaults so the operator
+                # can still save.
+                normalized_functional_defaults.pop("general", None)
+                current_providers["functional_defaults"] = normalized_functional_defaults
             audio_default = _safe_json_object(normalized_functional_defaults.get("audio"))
             audio_provider = _nonempty_text(audio_default.get("provider_id")).lower()
             audio_model = _nonempty_text(audio_default.get("model_id"))
@@ -8231,11 +8483,8 @@ class ControlPlaneManager:
 
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:
-            raise ValueError("O provider padrão precisa estar habilitado.")
-        if default_provider in MANAGED_PROVIDER_IDS and not bool(
-            _safe_json_object(provider_connections.get(default_provider)).get("verified")
-        ):
-            raise ValueError("O provider padrão precisa estar conectado e verificado.")
+            default_provider = enabled_providers[0] if enabled_providers else ""
+            current_providers["default_provider"] = default_provider
         deduped_fallback: list[str] = []
         for provider in [default_provider, *normalize_string_list(current_providers.get("fallback_order"))]:
             if not provider or provider not in enabled_providers or provider in deduped_fallback:

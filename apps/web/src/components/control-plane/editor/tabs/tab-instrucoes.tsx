@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileText, ShieldAlert, Sparkles } from "lucide-react";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { FileText, ShieldAlert, Wand2 } from "lucide-react";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { COLLAPSE_TRANSITION } from "@/components/control-plane/shared/motion-constants";
 import { FormInput, FormSelect } from "@/components/control-plane/shared/form-field";
@@ -12,7 +12,7 @@ import { ListEditorField } from "@/components/control-plane/shared/list-editor-f
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
-import { ExecutionPolicyCenter } from "./execution-policy-center";
+import { SoftTabs, type SoftTabItem } from "@/components/ui/soft-tabs";
 import {
   parseAutonomyPolicy,
   parseHardRules,
@@ -28,14 +28,59 @@ import {
   serializeResponsePolicy,
 } from "@/lib/policy-serializers";
 
+type InnerTab = "prompts" | "politicas";
+
+const PROMPT_BLOCKS: Array<{
+  id: "identity_md" | "soul_md" | "system_prompt_md" | "instructions_md" | "rules_md";
+  label: string;
+  description: string;
+  minHeight: string;
+}> = [
+  {
+    id: "instructions_md",
+    label: "Instruções",
+    description: "Como o agente deve processar solicitações, quando escalar, critérios de sucesso.",
+    minHeight: "280px",
+  },
+  {
+    id: "system_prompt_md",
+    label: "System Prompt",
+    description: "Diretriz central passada ao LLM antes de qualquer mensagem.",
+    minHeight: "260px",
+  },
+  {
+    id: "rules_md",
+    label: "Regras",
+    description: "Regras invioláveis, guardrails de segurança e limites.",
+    minHeight: "220px",
+  },
+  {
+    id: "identity_md",
+    label: "Identidade",
+    description: "Nome, papel profissional e contexto básico do agente.",
+    minHeight: "220px",
+  },
+  {
+    id: "soul_md",
+    label: "Soul",
+    description: "Personalidade, tom e valores do agente em prosa livre.",
+    minHeight: "220px",
+  },
+];
+
 export function TabInstrucoes() {
   const {
     state,
     developerMode,
     updateDocument,
     updateAgentSpecField,
-  } = useBotEditor();
+  } = useAgentEditor();
   const { tl } = useAppI18n();
+
+  const [innerTab, setInnerTab] = useState<InnerTab>("prompts");
+  const [activePromptBlock, setActivePromptBlock] = useState<
+    (typeof PROMPT_BLOCKS)[number]["id"]
+  >("instructions_md");
 
   const missionProfile = useMemo(
     () => parseMissionProfile(state.missionProfileJson),
@@ -106,197 +151,152 @@ export function TabInstrucoes() {
     );
   }
 
+  const innerTabs: SoftTabItem[] = [
+    { id: "prompts", label: tl("Prompts"), icon: <Wand2 size={13} /> },
+    { id: "politicas", label: tl("Politicas"), icon: <ShieldAlert size={13} /> },
+  ];
+
+  const activeBlock =
+    PROMPT_BLOCKS.find((block) => block.id === activePromptBlock) ?? PROMPT_BLOCKS[0];
+
   return (
     <div className="flex flex-col gap-6">
-      <ExecutionPolicyCenter />
-
-      {/* Section 1: Personalidade e Missao */}
-      <PolicyCard
-        title={tl("Personalidade e Missao")}
-        icon={Sparkles}
-        dirty={state.dirty.agentSpec}
-      >
-        <FormInput
-          label={tl("Funcao profissional")}
-          value={missionProfile.role}
-          onChange={(event) =>
-            updateMissionProfile({ role: event.target.value })
-          }
-          placeholder={tl("Ex: SRE autonomo supervisionado")}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <SoftTabs
+          items={innerTabs}
+          value={innerTab}
+          onChange={(id) => setInnerTab(id as InnerTab)}
+          ariaLabel={tl("Secoes de instrucoes")}
         />
-        <FormInput
-          label={tl("Objetivo central")}
-          value={missionProfile.mission}
-          onChange={(event) =>
-            updateMissionProfile({ mission: event.target.value })
-          }
-          placeholder={tl("Ex: Resolver tickets com grounding")}
-        />
-        <MarkdownEditorField
-          label={tl("Audiencia e contexto")}
-          value={missionProfile.audience}
-          onChange={(value) => updateMissionProfile({ audience: value })}
-          minHeight="200px"
-          placeholder={tl("Descreva o publico, o tipo de tarefa, restricoes operacionais, canais atendidos e qualquer contexto importante em Markdown.")}
-        />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormSelect
-            label={tl("Tom")}
-            value={interactionStyle.tone}
-            onChange={(event) =>
-              updateInteractionStyle({ tone: event.target.value })
-            }
-            options={[
-              { value: "profissional", label: tl("Profissional") },
-              { value: "calmo", label: tl("Calmo") },
-              { value: "direto", label: tl("Direto") },
-              { value: "colaborativo", label: tl("Colaborativo") },
-            ]}
-          />
-          <FormSelect
-            label={tl("Modo de colaboracao")}
-            value={interactionStyle.collaboration_style}
-            onChange={(event) =>
-              updateInteractionStyle({
-                collaboration_style: event.target.value,
-              })
-            }
-            options={[
-              { value: "colaborativo", label: tl("Colaborativo") },
-              { value: "executor", label: tl("Executor") },
-              { value: "consultivo", label: tl("Consultivo") },
-              { value: "investigativo", label: tl("Investigativo") },
-            ]}
-          />
-        </div>
-      </PolicyCard>
+        <span className="text-xs text-[var(--text-quaternary)]">
+          {innerTab === "prompts"
+            ? tl("Blocos markdown enviados ao modelo")
+            : tl("Limites, autonomia e execucao")}
+        </span>
+      </div>
 
-      {/* Section 2: Instrucoes de Operacao */}
-      <PolicyCard
-        title={tl("Instrucoes de Operacao")}
-        icon={FileText}
-      >
-        <MarkdownEditorField
-          label={tl("Instrucoes do agente")}
-          value={state.documents.instructions_md ?? ""}
-          onChange={(value) => updateDocument("instructions_md", value)}
-          minHeight="200px"
-          placeholder={tl("Descreva como o agente deve processar solicitacoes, quando escalar, e quais criterios definir sucesso.")}
-        />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormSelect
-            label={tl("Idioma")}
-            value={responsePolicy.language}
-            onChange={(event) =>
-              updateResponsePolicy({ language: event.target.value })
-            }
-            options={[
-              { value: "pt-BR", label: tl("Portugues (Brasil)") },
-              { value: "en-US", label: "English (US)" },
-              { value: "es-ES", label: "Español" },
-            ]}
+      {innerTab === "prompts" && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <SoftTabs
+              items={PROMPT_BLOCKS.map((block) => ({
+                id: block.id,
+                label: tl(block.label),
+              }))}
+              value={activePromptBlock}
+              onChange={(id) =>
+                setActivePromptBlock(id as (typeof PROMPT_BLOCKS)[number]["id"])
+              }
+              ariaLabel={tl("Bloco de prompt ativo")}
+            />
+            <span className="text-xs text-[var(--text-quaternary)]">
+              {tl(activeBlock.description)}
+            </span>
+          </div>
+          <MarkdownEditorField
+            hideFieldHeader
+            textareaAriaLabel={tl(activeBlock.label)}
+            value={state.documents[activeBlock.id] ?? ""}
+            onChange={(value) => updateDocument(activeBlock.id, value)}
+            minHeight={activeBlock.minHeight}
+            placeholder={tl(activeBlock.description)}
           />
-          <FormSelect
-            label={tl("Formato")}
-            value={responsePolicy.format}
-            onChange={(event) =>
-              updateResponsePolicy({ format: event.target.value })
-            }
-            options={[
-              { value: "markdown", label: "Markdown" },
-              { value: "plain_text", label: tl("Texto simples") },
-              { value: "structured", label: tl("Estruturado") },
-            ]}
-          />
-          <FormSelect
-            label={tl("Concisao")}
-            value={responsePolicy.conciseness}
-            onChange={(event) =>
-              updateResponsePolicy({ conciseness: event.target.value })
-            }
-            options={[
-              { value: "succinct", label: tl("Enxuto") },
-              { value: "balanced", label: tl("Equilibrado") },
-              { value: "detailed", label: tl("Detalhado") },
-            ]}
-          />
-        </div>
-        <FormInput
-          label={tl("Quality bar")}
-          value={responsePolicy.quality_bar}
-          onChange={(event) =>
-            updateResponsePolicy({ quality_bar: event.target.value })
-          }
-          placeholder={tl("Ex: profissional, rastreavel, sem invencao")}
-        />
-      </PolicyCard>
+        </section>
+      )}
 
-      {/* Section 3: Limites e Seguranca */}
-      <PolicyCard
-        title={tl("Limites e Seguranca")}
-        icon={ShieldAlert}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormSelect
-            label={tl("Modo de aprovacao")}
-            value={autonomyPolicy.default_approval_mode}
-            onChange={(event) =>
-              updateAutonomyPolicy({
-                default_approval_mode: event.target.value,
-              })
-            }
-            options={[
-              { value: "read_only", label: tl("Somente leitura"), description: tl("Agente nao executa acoes de escrita") },
-              { value: "guarded", label: tl("Protegido"), description: tl("Acoes de escrita requerem confirmacao") },
-              { value: "supervised", label: tl("Supervisionado"), description: tl("Agente pede aprovacao antes de executar") },
-              { value: "escalation_required", label: tl("Escalacao obrigatoria"), description: tl("Todas as acoes devem ser escaladas") },
-            ]}
-          />
-          <FormSelect
-            label={tl("Nivel de autonomia")}
-            value={autonomyPolicy.default_autonomy_tier}
-            onChange={(event) =>
-              updateAutonomyPolicy({
-                default_autonomy_tier: event.target.value,
-              })
-            }
-            options={[
-              { value: "t0", label: "T0 — " + tl("Minima"), description: tl("Sem acoes autonomas") },
-              { value: "t1", label: "T1 — " + tl("Moderada"), description: tl("Acoes de leitura livres") },
-              { value: "t2", label: "T2 — " + tl("Ampla"), description: tl("Execucao autonoma com guardrails") },
-            ]}
-          />
-        </div>
+      {innerTab === "politicas" && (
+        <>
+          <PolicyCard title={tl("Formato de resposta")} icon={FileText} variant="flat" defaultOpen>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FormSelect
+                label={tl("Idioma")}
+                value={responsePolicy.language}
+                onChange={(event) =>
+                  updateResponsePolicy({ language: event.target.value })
+                }
+                options={[
+                  { value: "pt-BR", label: tl("Portugues (Brasil)") },
+                  { value: "en-US", label: "English (US)" },
+                  { value: "es-ES", label: "Español" },
+                ]}
+              />
+              <FormSelect
+                label={tl("Formato")}
+                value={responsePolicy.format}
+                onChange={(event) =>
+                  updateResponsePolicy({ format: event.target.value })
+                }
+                options={[
+                  { value: "markdown", label: "Markdown" },
+                  { value: "plain_text", label: tl("Texto simples") },
+                  { value: "structured", label: tl("Estruturado") },
+                ]}
+              />
+              <FormSelect
+                label={tl("Concisao")}
+                value={responsePolicy.conciseness}
+                onChange={(event) =>
+                  updateResponsePolicy({ conciseness: event.target.value })
+                }
+                options={[
+                  { value: "succinct", label: tl("Enxuto") },
+                  { value: "balanced", label: tl("Equilibrado") },
+                  { value: "detailed", label: tl("Detalhado") },
+                ]}
+              />
+            </div>
+            <FormInput
+              label={tl("Quality bar")}
+              value={responsePolicy.quality_bar}
+              onChange={(event) =>
+                updateResponsePolicy({ quality_bar: event.target.value })
+              }
+              placeholder={tl("Ex: profissional, rastreavel, sem invencao")}
+            />
+          </PolicyCard>
 
-        <div className="flex flex-col gap-5 border-t border-[var(--border-subtle)] pt-5">
-          <ListEditorField
-            label={tl("Regras inviolaveis")}
-            items={hardRules.non_negotiables}
-            onChange={(items) =>
-              updateHardRules({ non_negotiables: items })
-            }
-            placeholder={tl("Ex: nao inventar fatos")}
-          />
-          <ListEditorField
-            label={tl("Acoes proibidas")}
-            items={hardRules.forbidden_actions}
-            onChange={(items) =>
-              updateHardRules({ forbidden_actions: items })
-            }
-            placeholder={tl("Ex: deploy sem aprovacao explicita")}
-          />
-          <ListEditorField
-            label={tl("Regras de seguranca")}
-            items={hardRules.security_rules}
-            onChange={(items) =>
-              updateHardRules({ security_rules: items })
-            }
-            placeholder={tl("Ex: nao expor segredos ou PII")}
-          />
-        </div>
-      </PolicyCard>
+          <PolicyCard
+            title={tl("Autonomia e aprovacao")}
+            description={tl("Guardrails aplicados pelo runtime antes de executar tools — nao e texto no prompt.")}
+            icon={ShieldAlert}
+            variant="flat"
+            defaultOpen
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormSelect
+                label={tl("Modo de aprovacao")}
+                value={autonomyPolicy.default_approval_mode}
+                onChange={(event) =>
+                  updateAutonomyPolicy({
+                    default_approval_mode: event.target.value,
+                  })
+                }
+                options={[
+                  { value: "read_only", label: tl("Somente leitura"), description: tl("Agente nao executa acoes de escrita") },
+                  { value: "guarded", label: tl("Protegido"), description: tl("Acoes de escrita requerem confirmacao") },
+                  { value: "supervised", label: tl("Supervisionado"), description: tl("Agente pede aprovacao antes de executar") },
+                  { value: "escalation_required", label: tl("Escalacao obrigatoria"), description: tl("Todas as acoes devem ser escaladas") },
+                ]}
+              />
+              <FormSelect
+                label={tl("Nivel de autonomia")}
+                value={autonomyPolicy.default_autonomy_tier}
+                onChange={(event) =>
+                  updateAutonomyPolicy({
+                    default_autonomy_tier: event.target.value,
+                  })
+                }
+                options={[
+                  { value: "t0", label: "T0 — " + tl("Minima"), description: tl("Sem acoes autonomas") },
+                  { value: "t1", label: "T1 — " + tl("Moderada"), description: tl("Acoes de leitura livres") },
+                  { value: "t2", label: "T2 — " + tl("Ampla"), description: tl("Execucao autonoma com guardrails") },
+                ]}
+              />
+            </div>
+          </PolicyCard>
+        </>
+      )}
 
-      {/* Developer Mode: all raw editors + fields moved from normal view */}
       <AnimatePresence>
         {developerMode && (
           <motion.div
@@ -307,7 +307,7 @@ export function TabInstrucoes() {
             className="overflow-hidden"
           >
             <div className="glass-card p-6 flex flex-col gap-6">
-              <SectionCollapsible title={tl("Campos avancados (movidos do modo normal)")}>
+              <SectionCollapsible title={tl("Campos avancados")}>
                 <div className="flex flex-col gap-6 pt-2">
                   <ListEditorField
                     label={tl("Outcomes principais")}
@@ -386,12 +386,48 @@ export function TabInstrucoes() {
                     }
                     placeholder={tl("Ex: producao exige confirmacao humana")}
                   />
+                  <ListEditorField
+                    label={tl("Regras inviolaveis (legado)")}
+                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    items={hardRules.non_negotiables}
+                    onChange={(items) =>
+                      updateHardRules({ non_negotiables: items })
+                    }
+                    placeholder={tl("Ex: nao inventar fatos")}
+                  />
+                  <ListEditorField
+                    label={tl("Acoes proibidas (legado)")}
+                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    items={hardRules.forbidden_actions}
+                    onChange={(items) =>
+                      updateHardRules({ forbidden_actions: items })
+                    }
+                    placeholder={tl("Ex: deploy sem aprovacao explicita")}
+                  />
+                  <ListEditorField
+                    label={tl("Regras de seguranca (legado)")}
+                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    items={hardRules.security_rules}
+                    onChange={(items) =>
+                      updateHardRules({ security_rules: items })
+                    }
+                    placeholder={tl("Ex: nao expor segredos ou PII")}
+                  />
                 </div>
               </SectionCollapsible>
 
-              <SectionCollapsible title={tl("Prompts derivados e overrides avancados")}>
+              <SectionCollapsible title={tl("Overrides avancados de prompt e autonomia")}>
                 <div className="flex flex-col gap-6 pt-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormInput
+                      label={tl("Funcao profissional")}
+                      description={tl("Campo legado. Prefira descrever o papel em identity_md ou soul_md.")}
+                      value={missionProfile.role}
+                      onChange={(event) =>
+                        updateMissionProfile({ role: event.target.value })
+                      }
+                      placeholder={tl("Ex: SRE autonomo supervisionado")}
+                    />
                     <FormInput
                       label={tl("Persona")}
                       value={interactionStyle.persona}
@@ -399,6 +435,43 @@ export function TabInstrucoes() {
                         updateInteractionStyle({ persona: event.target.value })
                       }
                       placeholder={tl("Ex: funcionario tecnico confiavel")}
+                    />
+                  </div>
+                  <MarkdownEditorField
+                    label={tl("Audiencia e contexto (legado)")}
+                    value={missionProfile.audience}
+                    onChange={(value) => updateMissionProfile({ audience: value })}
+                    minHeight="160px"
+                    placeholder={tl("Descreva o publico, o tipo de tarefa, restricoes operacionais, canais atendidos e qualquer contexto importante em Markdown.")}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <FormSelect
+                      label={tl("Tom")}
+                      value={interactionStyle.tone}
+                      onChange={(event) =>
+                        updateInteractionStyle({ tone: event.target.value })
+                      }
+                      options={[
+                        { value: "profissional", label: tl("Profissional") },
+                        { value: "calmo", label: tl("Calmo") },
+                        { value: "direto", label: tl("Direto") },
+                        { value: "colaborativo", label: tl("Colaborativo") },
+                      ]}
+                    />
+                    <FormSelect
+                      label={tl("Modo de colaboracao")}
+                      value={interactionStyle.collaboration_style}
+                      onChange={(event) =>
+                        updateInteractionStyle({
+                          collaboration_style: event.target.value,
+                        })
+                      }
+                      options={[
+                        { value: "colaborativo", label: tl("Colaborativo") },
+                        { value: "executor", label: tl("Executor") },
+                        { value: "consultivo", label: tl("Consultivo") },
+                        { value: "investigativo", label: tl("Investigativo") },
+                      ]}
                     />
                     <FormInput
                       label={tl("Estilo de escalacao")}
@@ -435,36 +508,6 @@ export function TabInstrucoes() {
                       />
                     </div>
                   </div>
-                  <MarkdownEditorField
-                    label={tl("Identity")}
-                    value={state.documents.identity_md ?? ""}
-                    onChange={(value) => updateDocument("identity_md", value)}
-                    minHeight="180px"
-                  />
-                  <MarkdownEditorField
-                    label={tl("Soul / Interaction Style")}
-                    value={state.documents.soul_md ?? ""}
-                    onChange={(value) => updateDocument("soul_md", value)}
-                    minHeight="180px"
-                  />
-                  <MarkdownEditorField
-                    label={tl("System Prompt")}
-                    value={state.documents.system_prompt_md ?? ""}
-                    onChange={(value) => updateDocument("system_prompt_md", value)}
-                    minHeight="220px"
-                  />
-                  <MarkdownEditorField
-                    label={tl("Instructions")}
-                    value={state.documents.instructions_md ?? ""}
-                    onChange={(value) => updateDocument("instructions_md", value)}
-                    minHeight="220px"
-                  />
-                  <MarkdownEditorField
-                    label={tl("Rules")}
-                    value={state.documents.rules_md ?? ""}
-                    onChange={(value) => updateDocument("rules_md", value)}
-                    minHeight="180px"
-                  />
                   <JsonEditorField
                     label={tl("Autonomy Policy JSON")}
                     description={tl("Schema canonico completo de autonomia, incluindo task_overrides.")}

@@ -21,7 +21,8 @@ const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "relative z-50 max-w-[220px] rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] px-2 py-1 text-[0.75rem] leading-tight text-[var(--text-primary)] shadow-[var(--shadow-floating)]",
+        "relative z-50 max-w-[220px] rounded-[var(--radius-chip)] border border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-floating-bg)] px-2 py-1 text-[0.75rem] leading-tight text-[var(--text-primary)] shadow-[var(--overlay-floating-shadow)]",
+        "backdrop-blur-[22px] backdrop-saturate-[140%]",
         "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=delayed-open]:zoom-in-95",
@@ -33,7 +34,7 @@ const TooltipContent = React.forwardRef<
       {children}
       {showArrow ? (
         <TooltipPrimitive.Arrow
-          className="fill-[var(--panel-strong)]"
+          className="fill-[color:var(--overlay-floating-bg)]"
           width={10}
           height={5}
         />

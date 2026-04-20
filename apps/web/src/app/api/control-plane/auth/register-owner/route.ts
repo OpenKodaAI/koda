@@ -3,18 +3,26 @@ import { z } from "zod";
 
 import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
-import { setWebOperatorSessionCookie } from "@/lib/web-operator-session";
+import {
+  setOwnerExistsHintCookie,
+  setPendingRecoveryCookie,
+  setWebOperatorSessionCookie,
+} from "@/lib/web-operator-session";
 
-const CONTROL_PLANE_BASE_URL =
-  process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
+const CONTROL_PLANE_BASE_URL = process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
 
-const registerSchema = z.object({
-  registration_token: z.string().trim().min(1, "Registration token is required."),
-  username: z.string().trim().min(1, "Username is required."),
-  email: z.string().trim().email("A valid email is required."),
-  password: z.string().min(8, "Password must have at least 8 characters."),
-  display_name: z.string().trim().optional().default(""),
-});
+// New (preferred) payload: email + password, bootstrap code or loopback-trusted request.
+// Legacy `registration_token` still accepted for CLI-driven flows.
+const registerSchema = z
+  .object({
+    email: z.string().trim().email("A valid email is required."),
+    password: z.string().min(12, "Password must have at least 12 characters."),
+    bootstrap_code: z.string().trim().optional().default(""),
+    registration_token: z.string().trim().optional().default(""),
+    username: z.string().trim().optional().default(""),
+    display_name: z.string().trim().optional().default(""),
+  })
+  .strict();
 
 export async function POST(request: NextRequest) {
   if (!isTrustedDashboardRequest(request)) {
@@ -46,10 +54,17 @@ export async function POST(request: NextRequest) {
       );
     }
     const response = NextResponse.json(
-      { ok: true, auth: data.auth || null, operator: data.operator || null },
+      {
+        ok: true,
+        auth: data.auth || null,
+        operator: data.operator || null,
+        recovery_codes: Array.isArray(data.recovery_codes) ? data.recovery_codes : [],
+      },
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );
     setWebOperatorSessionCookie(response, data.session_token);
+    setOwnerExistsHintCookie(response, true);
+    setPendingRecoveryCookie(response, true);
     return response;
   } catch (error) {
     return jsonErrorResponse(error, "Unable to create the owner account.");

@@ -75,9 +75,22 @@ def execute(query: str, params: tuple[Any, ...] = ()) -> int:
     if normalized[:6].upper() == "INSERT" and "RETURNING " not in normalized.upper():
         try:
             inserted = run_coro_sync(primary_fetch_val(f"{normalized} RETURNING id", params))
-            return int(inserted or 0)
         except Exception:
+            # RETURNING id isn't supported here (no `id` column, or some other
+            # driver error). Fall back to a bare INSERT *only in that case* —
+            # never after the RETURNING path already committed the row, which
+            # would produce a duplicate-key on retry.
             return int(run_coro_sync(primary_execute(normalized, params)) or 0)
+        # Callers historically expect an int rowid, but TEXT primary keys
+        # (e.g. "usr_<hex>") return strings. Coerce safely: numeric values stay
+        # as ints, non-numeric ids return 0 without crashing and WITHOUT
+        # re-executing the INSERT (the row is already persisted).
+        if inserted is None:
+            return 0
+        try:
+            return int(inserted)
+        except (TypeError, ValueError):
+            return 0
     return int(run_coro_sync(primary_execute(normalized, params)) or 0)
 
 

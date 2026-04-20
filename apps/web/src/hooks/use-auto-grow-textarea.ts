@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 
 interface AutoGrowOptions {
   minHeight?: number;
@@ -13,7 +13,7 @@ export function useAutoGrowTextarea(
 ): RefObject<HTMLTextAreaElement | null> {
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     element.style.height = "0px";

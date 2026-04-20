@@ -149,7 +149,7 @@ export function isSidebarItemActive(pathname: string, item: SidebarNavItem) {
     return (
       pathname === "/control-plane" ||
       pathname.startsWith("/control-plane/agents/") ||
-      pathname.startsWith("/control-plane/bots/")
+      pathname.startsWith("/control-plane/agents/")
     );
   }
 

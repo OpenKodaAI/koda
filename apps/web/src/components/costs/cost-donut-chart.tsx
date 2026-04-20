@@ -6,10 +6,11 @@ import {
   CategoryBarChart,
   type CategoryBarChartItem,
 } from "@/components/ui/category-bar-chart";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn, formatCost } from "@/lib/utils";
 
-export type CostDonutMode = "task" | "bot" | "model";
+export type CostDonutMode = "task" | "agent" | "model";
 
 interface CostDonutChartProps {
   items: CostBreakdownItem[];
@@ -81,23 +82,16 @@ export function CostDonutChart({
       className={cn(compact ? "p-4 sm:p-5" : "p-5 sm:p-6", className)}
       heading={t("costs.allocation.title")}
       controls={
-        <div className="segmented-control segmented-control--single-row cost-donut-chart__mode-toggle">
-          {([
-            { value: "task", label: t("costs.page.allocationModes.task", { defaultValue: "By task" }) },
-            { value: "bot", label: t("costs.mode.byBot") },
-            { value: "model", label: t("costs.mode.byModel") },
-          ] as const).map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => onModeChange?.(option.value)}
-              className={cn("segmented-control__option", mode === option.value && "is-active")}
-              aria-pressed={mode === option.value}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <SoftTabs
+          items={[
+            { id: "task", label: t("costs.page.allocationModes.task", { defaultValue: "By task" }) },
+            { id: "agent", label: t("costs.mode.byAgent") },
+            { id: "model", label: t("costs.mode.byModel") },
+          ]}
+          value={mode}
+          onChange={(id) => onModeChange?.(id as CostDonutMode)}
+          ariaLabel={t("costs.allocation.title")}
+        />
       }
       totalLabel={totalLabel}
       totalValue={formatCost(total)}
@@ -125,9 +119,7 @@ export function CostDonutChart({
               label: activeItem.label,
               value: formatCost(activeItem.value),
             })
-          : t("costs.page.noAllocationData", {
-              defaultValue: "Not enough cost to build the distribution in the period.",
-            })
+          : undefined
       }
     />
   );

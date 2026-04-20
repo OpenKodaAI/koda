@@ -23,10 +23,10 @@ describe("control-plane fetch tiers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses cached catalog reads for bot listings", async () => {
-    const { getControlPlaneBots } = await import("@/lib/control-plane");
+  it("uses cached catalog reads for agent listings", async () => {
+    const { getControlPlaneAgents } = await import("@/lib/control-plane");
 
-    await getControlPlaneBots();
+    await getControlPlaneAgents();
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.any(URL),
@@ -57,10 +57,10 @@ describe("control-plane fetch tiers", () => {
     );
   });
 
-  it("uses live fetching for bot configuration pages", async () => {
-    const { getControlPlaneBot } = await import("@/lib/control-plane");
+  it("uses live fetching for agent configuration pages", async () => {
+    const { getControlPlaneAgent } = await import("@/lib/control-plane");
 
-    await getControlPlaneBot("ATLAS");
+    await getControlPlaneAgent("ATLAS");
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.any(URL),
@@ -81,7 +81,7 @@ describe("control-plane fetch tiers", () => {
         cache: "force-cache",
         next: expect.objectContaining({
           revalidate: 5,
-          tags: expect.arrayContaining(["control-plane:bot:ATLAS"]),
+          tags: expect.arrayContaining(["control-plane:agent:ATLAS"]),
         }),
       }),
     );
@@ -243,7 +243,7 @@ describe("control-plane fetch tiers", () => {
     expect(payload.values.provider_connections.openai.api_key_preview).toBe("");
   });
 
-  it("removes secret previews and raw values from bot detail payloads", async () => {
+  it("removes secret previews and raw values from agent detail payloads", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -264,7 +264,7 @@ describe("control-plane fetch tiers", () => {
             skills: [],
             secrets: [
               {
-                scope: "bot",
+                scope: "agent",
                 secret_key: "OPENAI_API_KEY",
                 preview: "sk-live...",
                 value: "sk-live-secret",
@@ -285,8 +285,8 @@ describe("control-plane fetch tiers", () => {
       ),
     );
 
-    const { getControlPlaneBot } = await import("@/lib/control-plane");
-    const payload = await getControlPlaneBot("ATLAS");
+    const { getControlPlaneAgent } = await import("@/lib/control-plane");
+    const payload = await getControlPlaneAgent("ATLAS");
 
     expect(payload.secrets[0]).toEqual(
       expect.objectContaining({
@@ -307,7 +307,7 @@ describe("control-plane fetch tiers", () => {
             id: 42,
             scope: "agent",
             secret_key: "DISCORD_BOT_TOKEN",
-            preview: "Bot****",
+            preview: "Agent****",
             value: "real-discord-token-should-be-stripped",
             updated_at: "2026-04-04T00:00:00Z",
           }),

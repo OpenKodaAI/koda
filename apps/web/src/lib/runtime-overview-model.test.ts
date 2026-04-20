@@ -8,9 +8,9 @@ import type { RuntimeOverview } from "@/lib/runtime-types";
 
 function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
   return {
-    botId: "ATLAS",
-    botLabel: "ATLAS",
-    botColor: "#ffffff",
+    agentId: "ATLAS",
+    agentLabel: "ATLAS",
+    agentColor: "#ffffff",
     baseUrl: "http://localhost:8080",
     fetchedAt: "2026-03-19T00:00:00.000Z",
     health: null,
@@ -33,10 +33,10 @@ function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
 }
 
 describe("buildRuntimeRoomRows", () => {
-  it("does not dedupe queue rows across different bots with the same task id", () => {
+  it("does not dedupe queue rows across different agents with the same task id", () => {
     const rows = buildRuntimeRoomRows([
       overview({
-        botId: "ATLAS",
+        agentId: "ATLAS",
         environments: [
           {
             id: 1,
@@ -48,20 +48,20 @@ describe("buildRuntimeRoomRows", () => {
         ],
       }),
       overview({
-        botId: "NOVA",
-        botLabel: "NOVA",
+        agentId: "NOVA",
+        agentLabel: "NOVA",
         queues: [
           {
             task_id: 17,
             status: "queued",
-            query_text: "Second bot still has a queued task",
+            query_text: "Second agent still has a queued task",
           },
         ],
       }),
     ]);
 
     expect(rows).toHaveLength(2);
-    expect(rows.map((row) => `${row.botId}:${row.taskId}:${row.source}`)).toEqual([
+    expect(rows.map((row) => `${row.agentId}:${row.taskId}:${row.source}`)).toEqual([
       "ATLAS:17:environment",
       "NOVA:17:queue",
     ]);

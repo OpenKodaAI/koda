@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "koda-release-bundle",
-  "documentNamespace": "https://openkoda.ai/spdx/koda-release-bundle-1.0.0",
+  "documentNamespace": "urn:openkodaai:spdx:koda-release-bundle:1.0.4",
   "creationInfo": {
     "created": "2026-04-05T00:00:00Z",
     "creators": [

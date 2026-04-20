@@ -1,16 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BotEditorProvider, useBotEditor } from "@/hooks/use-bot-editor";
+import { AgentEditorProvider, useAgentEditor } from "@/hooks/use-agent-editor";
 import { ToastProvider } from "@/hooks/use-toast";
 import { TabInstrucoes } from "@/components/control-plane/editor/tabs/tab-instrucoes";
 import type {
-  ControlPlaneBot,
+  ControlPlaneAgent,
   ControlPlaneCoreCapabilities,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
   ControlPlaneCoreTools,
-  ControlPlaneExecutionPolicyPayload,
   ControlPlaneSystemSettings,
   ControlPlaneWorkspaceTree,
 } from "@/lib/control-plane";
@@ -32,7 +31,7 @@ vi.mock("@/hooks/use-app-i18n", () => ({
   }),
 }));
 
-function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
+function makeAgent(overrides: Partial<ControlPlaneAgent> = {}): ControlPlaneAgent {
   return {
     id: "ATLAS",
     display_name: "ATLAS",
@@ -48,10 +47,8 @@ function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
     organization: {
       workspace_id: null,
       workspace_name: null,
-      workspace_color: null,
       squad_id: null,
       squad_name: null,
-      squad_color: null,
     },
     applied_version: 1,
     desired_version: 1,
@@ -143,7 +140,7 @@ const systemSettings: ControlPlaneSystemSettings = {
 };
 
 function DeveloperHarness() {
-  const { developerMode, setDeveloperMode } = useBotEditor();
+  const { developerMode, setDeveloperMode } = useAgentEditor();
   return (
     <button type="button" onClick={() => setDeveloperMode(!developerMode)}>
       toggle developer
@@ -151,68 +148,18 @@ function DeveloperHarness() {
   );
 }
 
-function renderTab(bot: ControlPlaneBot) {
-  const executionPolicyPayload: ControlPlaneExecutionPolicyPayload = {
-    agent_id: bot.id,
-    source: "compiled_legacy",
-    policy: {
-      version: 1,
-      source: "compiled_legacy",
-      defaults: {},
-      rules: [
-        {
-          name: "allow_read",
-          priority: 10,
-          match: { tool_id: "notes.read" },
-          decision: "allow",
-          reason: "safe_read_default",
-        },
-      ],
-    },
-    catalog: {
-      version: 1,
-      decision_values: ["allow", "allow_with_preview", "require_approval", "deny"],
-      effect_tags: ["external_communication"],
-      selector_keys: ["tool_id", "action_id", "integration_id"],
-      actions: [
-        {
-          action_id: "gmail.users.messages.send",
-          tool_id: "gmail.send",
-          integration_id: "gmail",
-          title: "Send message",
-          description: "Enviar um email pelo Gmail",
-          transport: "http",
-          access_level: "write",
-          risk_class: "high",
-          effect_tags: ["external_communication"],
-          default_decision: "allow_with_preview",
-          default_reason_code: "preview_required_default",
-          preview_required_default: true,
-          approval_scope_default: "tool_call",
-        },
-      ],
-      core_tools: [],
-      core_integrations: [],
-    },
-    legacy: {
-      tool_policy: {},
-      autonomy_policy: {},
-      resource_access_policy: {},
-    },
-  };
-
+function renderTab(agent: ControlPlaneAgent) {
   return render(
     <ToastProvider>
-      <BotEditorProvider
-        bot={bot}
+      <AgentEditorProvider
+        agent={agent}
         core={core}
         workspaces={workspaces}
         systemSettings={systemSettings}
-        executionPolicyPayload={executionPolicyPayload}
       >
         <DeveloperHarness />
         <TabInstrucoes />
-      </BotEditorProvider>
+      </AgentEditorProvider>
     </ToastProvider>,
   );
 }
@@ -226,75 +173,35 @@ describe("TabInstrucoes", () => {
 
   it("keeps legacy style and responsibility fields hidden outside developer mode", async () => {
     const user = userEvent.setup();
-    renderTab(makeBot());
+    renderTab(makeAgent());
 
-    expect(screen.getByText(/policy center/i)).toBeInTheDocument();
+    // Default sub-tab is "Prompts"; switch to "Politicas" to reach response + autonomy
+    await user.click(screen.getByRole("tab", { name: /politicas/i }));
+    expect(screen.getByText(/formato de resposta/i)).toBeInTheDocument();
+    expect(screen.getByText(/autonomia e aprovacao/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/execution policy json/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /personalidade e missao/i }));
+    // Legacy personality/mission/hard-rules list fields are hidden outside dev mode
     expect(screen.queryByLabelText(/persona/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/responsibility limits/i)).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/modo de colaboracao|collaboration/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/modo de colaboracao|collaboration/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/regras inviolaveis/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/acoes proibidas/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/regras de seguranca/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /toggle developer/i }));
-    await user.click(screen.getByRole("button", { name: /prompts derivados e overrides avancados|derived prompts/i }));
+    await user.click(screen.getByRole("button", { name: /campos avancados/i }));
+    await user.click(screen.getByRole("button", { name: /overrides avancados de prompt e autonomia|derived prompts/i }));
 
     expect(screen.getByLabelText(/persona/i)).toBeInTheDocument();
     expect(screen.getByText(/responsibility limits/i)).toBeInTheDocument();
     expect(screen.getByText(/execution policy json/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /migrar para policy explícita/i })).toBeInTheDocument();
+    // Legacy mission/interaction fields now live inside developer mode
+    expect(screen.getByLabelText(/modo de colaboracao|collaboration/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/funcao profissional|legacy role/i)).toBeInTheDocument();
+    // Legacy hard_rules list editors also move into developer mode
+    expect(screen.getByLabelText(/regras inviolaveis \(legado\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/acoes proibidas \(legado\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/regras de seguranca \(legado\)/i)).toBeInTheDocument();
   }, 10000);
-
-  it("runs the policy simulator and renders the evaluate response", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          agent_id: "ATLAS",
-          policy: {
-            version: 1,
-            source: "compiled_legacy",
-            defaults: { preview: true },
-            rules: [],
-          },
-          catalog: {
-            version: 1,
-            decision_values: ["allow", "allow_with_preview", "require_approval", "deny"],
-            effect_tags: ["external_communication"],
-            selector_keys: ["tool_id", "action_id", "integration_id"],
-            actions: [],
-            core_tools: [],
-            core_integrations: [],
-          },
-          action: {
-            tool_id: "gmail.send",
-            action_id: "gmail.users.messages.send",
-            integration_id: "gmail",
-          },
-          evaluation: {
-            decision: "allow_with_preview",
-            reason_code: "preview_required_default",
-            matched_selector: { action_id: "gmail.users.messages.send" },
-            approval_scope: { kind: "tool_call", ttl_seconds: 300 },
-            preview_text: "Preview do envio",
-            audit_payload: { policy_source: "compiled_legacy" },
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
-    globalThis.fetch = fetchMock;
-
-    renderTab(makeBot());
-
-    await user.click(screen.getByRole("button", { name: /avaliar policy/i }));
-
-    expect(screen.getAllByText("allow_with_preview").length).toBeGreaterThan(0);
-    expect(screen.getByText("preview_required_default")).toBeInTheDocument();
-    expect(screen.getAllByText(/gmail\.users\.messages\.send/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/preview do envio/i)).toBeInTheDocument();
-  });
 });

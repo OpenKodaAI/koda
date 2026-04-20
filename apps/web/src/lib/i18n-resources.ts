@@ -16,6 +16,8 @@ export const resources = {
           "en-US": "English (US)",
           "pt-BR": "Português (Brasil)",
           "es-ES": "Español",
+          "fr-FR": "Français",
+          "de-DE": "Deutsch",
         },
       },
       theme: {
@@ -38,13 +40,13 @@ export const resources = {
         docs: "Docs",
         files: "Files",
         notifications: "Notifications",
-        allBots: "All bots",
+        allAgents: "All bots",
         allModels: "All models",
         allTypes: "All types",
         allUsers: "All users",
         allSessions: "All sessions",
         now: "now",
-        bot: "Bot",
+        agent: "Bot",
         status: "Status",
         cost: "Cost",
         duration: "Duration",
@@ -427,16 +429,16 @@ export const resources = {
             "Reopen the tour anytime from Docs if you want a refresher or want to visit a secondary chapter.",
         },
       },
-      botSwitcher: {
+      agentSwitcher: {
         placeholder: "Select bot",
         ariaSingle: "Select bot",
         ariaMultiple: "Select bots",
         searchPlaceholder: "Search bot",
-        allBots: "All bots",
-        botsVisible: "{{count}} bots visible",
-        botsSelected: "{{count}} bots selected",
-        botsSelectedOutOfTotal: "{{selected}} of {{total}} bots selected",
-        noBotFilter: "No bot filter",
+        allAgents: "All bots",
+        agentsVisible: "{{count}} bots visible",
+        agentsSelected: "{{count}} bots selected",
+        agentsSelectedOutOfTotal: "{{selected}} of {{total}} bots selected",
+        noAgentFilter: "No bot filter",
         selectOne: "Choose a bot",
         noResults: "No bots found",
       },
@@ -457,7 +459,7 @@ export const resources = {
       },
       costs: {
         filters: {
-          bots: "Bots",
+          agents: "Bots",
           period: "Period",
           model: "Model",
           taskType: "Task type",
@@ -468,7 +470,7 @@ export const resources = {
           },
         },
         mode: {
-          byBot: "By bot",
+          byAgent: "By bot",
           byModel: "By model",
         },
         kpis: {
@@ -505,7 +507,7 @@ export const resources = {
         searchPlaceholder: "Search by session, name or last message",
         noSelection: "No conversation selected.",
         loadError: "Could not load the conversation.",
-        chatWithBot: "Chat with {{bot}}",
+        chatWithAgent: "Chat with {{bot}}",
         composerHelper:
           "The interface is ready for the bot conversation flow. Real sending depends on the runtime endpoint.",
         composerIdle:
@@ -590,6 +592,77 @@ export const resources = {
           },
         },
       },
+      auth: {
+        login: {
+          title: "Welcome back",
+          subtitle: "Sign in to access the operational workspace.",
+          identifier: "Email or username",
+          password: "Password",
+          submit: "Sign in",
+          submitting: "Signing in...",
+          forgot_link: "Lost my password or recovery code?",
+          generic_error: "Invalid credentials. Please try again.",
+        },
+        forgot: {
+          title: "Recover access",
+          subtitle: "Use a recovery code to define a new password.",
+          identifier: "Email or username",
+          recovery_code: "Recovery code",
+          new_password: "New password",
+          confirm_password: "Confirm new password",
+          submit: "Reset password",
+          submitting: "Resetting...",
+          back_to_login: "Back to login",
+          success_title: "Password updated",
+          success: "You can now sign in with your new password.",
+          password_too_short: "Password must be at least {{n}} characters long.",
+          password_mismatch: "The passwords do not match.",
+          generic_error: "The information provided is invalid or expired. Please try again.",
+        },
+        setup: {
+          create_account: {
+            title: "Create the owner account",
+            subtitle: "Set up the first operator to unlock the workspace.",
+            email: "Work email",
+            password: "Password",
+            password_hint: "Minimum 12 characters.",
+            confirm_password: "Confirm password",
+            bootstrap_code: "Bootstrap code",
+            bootstrap_hint: "Use the one-time bootstrap code printed by the installer.",
+            bootstrap_hint_generic: "Provide the bootstrap code issued for this instance.",
+            submit: "Create account",
+            submitting: "Creating...",
+            errors: {
+              bootstrap_required: "The bootstrap code is required.",
+              email_invalid: "Enter a valid email address.",
+              password_too_short: "Password must be at least {{n}} characters long.",
+              password_mismatch: "The passwords do not match.",
+              generic: "We could not create the account. Please try again.",
+            },
+          },
+          recovery_codes: {
+            title: "Save your recovery codes",
+            subtitle: "Store these codes in a safe place. Each code works only once.",
+            file_header: "Koda recovery codes",
+            copy_all: "Copy all",
+            copied: "Copied",
+            download: "Download",
+            print: "Print",
+            saved_checkbox: "I saved the recovery codes in a safe place.",
+            continue: "Continue to the workspace",
+            already_shown_banner: "These codes will not be shown again.",
+          },
+        },
+        settings: {
+          security: {
+            title: "Security",
+            change_password: "Change password",
+            need_current_password: "Enter your current password to continue.",
+            regenerate_codes: "Regenerate recovery codes",
+            codes_remaining: "{{count}} recovery codes remaining",
+          },
+        },
+      },
     },
   },
   "pt-BR": {
@@ -607,6 +680,8 @@ export const resources = {
           "en-US": "English (US)",
           "pt-BR": "Português (Brasil)",
           "es-ES": "Español",
+          "fr-FR": "Français",
+          "de-DE": "Deutsch",
         },
       },
       theme: {
@@ -629,13 +704,13 @@ export const resources = {
         docs: "Documentação",
         files: "Arquivos",
         notifications: "Notificações",
-        allBots: "Todos os bots",
+        allAgents: "Todos os bots",
         allModels: "Todos os modelos",
         allTypes: "Todos os tipos",
         allUsers: "Todos os usuários",
         allSessions: "Todas as sessões",
         now: "agora",
-        bot: "Bot",
+        agent: "Bot",
         status: "Status",
         cost: "Custo",
         duration: "Duração",
@@ -1017,16 +1092,16 @@ export const resources = {
             "Reabra o tour a qualquer momento em Docs se quiser revisar o fluxo ou visitar um capitulo secundario.",
         },
       },
-      botSwitcher: {
+      agentSwitcher: {
         placeholder: "Selecionar bot",
         ariaSingle: "Selecionar bot",
         ariaMultiple: "Selecionar bots",
         searchPlaceholder: "Buscar bot",
-        allBots: "Todos os bots",
-        botsVisible: "{{count}} bots visíveis",
-        botsSelected: "{{count}} bots selecionados",
-        botsSelectedOutOfTotal: "{{selected}} de {{total}} bots selecionados",
-        noBotFilter: "Sem filtro por bot",
+        allAgents: "Todos os bots",
+        agentsVisible: "{{count}} bots visíveis",
+        agentsSelected: "{{count}} bots selecionados",
+        agentsSelectedOutOfTotal: "{{selected}} de {{total}} bots selecionados",
+        noAgentFilter: "Sem filtro por bot",
         selectOne: "Selecione um bot",
         noResults: "Nenhum bot encontrado",
       },
@@ -1047,7 +1122,7 @@ export const resources = {
       },
       costs: {
         filters: {
-          bots: "Bots",
+          agents: "Bots",
           period: "Período",
           model: "Modelo",
           taskType: "Tipo de tarefa",
@@ -1058,7 +1133,7 @@ export const resources = {
           },
         },
         mode: {
-          byBot: "Por bot",
+          byAgent: "Por bot",
           byModel: "Por modelo",
         },
         kpis: {
@@ -1095,7 +1170,7 @@ export const resources = {
         searchPlaceholder: "Buscar por sessão, nome ou última mensagem",
         noSelection: "Nenhuma conversa selecionada.",
         loadError: "Não foi possível carregar a conversa.",
-        chatWithBot: "Converse com {{bot}}",
+        chatWithAgent: "Converse com {{bot}}",
         composerHelper:
           "A interface já está pronta para o fluxo conversacional do bot. O envio real depende do endpoint do runtime.",
         composerIdle: "Escolha uma conversa para explorar o histórico ou prepare uma nova interação.",
@@ -1179,6 +1254,77 @@ export const resources = {
           },
         },
       },
+      auth: {
+        login: {
+          title: "Bem-vindo de volta",
+          subtitle: "Entre para acessar o espaço de trabalho operacional.",
+          identifier: "E-mail ou nome de usuário",
+          password: "Senha",
+          submit: "Entrar",
+          submitting: "Entrando...",
+          forgot_link: "Esqueceu a senha ou o código de recuperação?",
+          generic_error: "As credenciais informadas não conferem. Tente novamente.",
+        },
+        forgot: {
+          title: "Recuperar acesso",
+          subtitle: "Use um código de recuperação para definir uma nova senha.",
+          identifier: "E-mail ou nome de usuário",
+          recovery_code: "Código de recuperação",
+          new_password: "Nova senha",
+          confirm_password: "Confirmar nova senha",
+          submit: "Redefinir senha",
+          submitting: "Redefinindo...",
+          back_to_login: "Voltar ao login",
+          success_title: "Senha atualizada",
+          success: "Agora você pode entrar com sua nova senha.",
+          password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
+          password_mismatch: "As senhas não coincidem.",
+          generic_error: "As informações fornecidas são inválidas ou expiraram. Tente novamente.",
+        },
+        setup: {
+          create_account: {
+            title: "Criar a conta proprietária",
+            subtitle: "Configure o primeiro operador para desbloquear o espaço de trabalho.",
+            email: "E-mail corporativo",
+            password: "Senha",
+            password_hint: "Mínimo de 12 caracteres.",
+            confirm_password: "Confirmar senha",
+            bootstrap_code: "Código de bootstrap",
+            bootstrap_hint: "Use o código de bootstrap único impresso pelo instalador.",
+            bootstrap_hint_generic: "Informe o código de bootstrap emitido para esta instância.",
+            submit: "Criar conta",
+            submitting: "Criando...",
+            errors: {
+              bootstrap_required: "O código de bootstrap é obrigatório.",
+              email_invalid: "Informe um endereço de e-mail válido.",
+              password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
+              password_mismatch: "As senhas não coincidem.",
+              generic: "Não conseguimos criar a conta. Tente novamente.",
+            },
+          },
+          recovery_codes: {
+            title: "Guarde seus códigos de recuperação",
+            subtitle: "Armazene estes códigos em local seguro. Cada código funciona apenas uma vez.",
+            file_header: "Códigos de recuperação Koda",
+            copy_all: "Copiar todos",
+            copied: "Copiado",
+            download: "Baixar",
+            print: "Imprimir",
+            saved_checkbox: "Guardei os códigos de recuperação em local seguro.",
+            continue: "Continuar para o espaço de trabalho",
+            already_shown_banner: "Estes códigos não serão exibidos novamente.",
+          },
+        },
+        settings: {
+          security: {
+            title: "Segurança",
+            change_password: "Alterar senha",
+            need_current_password: "Informe sua senha atual para continuar.",
+            regenerate_codes: "Regenerar códigos de recuperação",
+            codes_remaining: "{{count}} códigos de recuperação restantes",
+          },
+        },
+      },
     },
   },
   "es-ES": {
@@ -1196,6 +1342,8 @@ export const resources = {
           "en-US": "English (US)",
           "pt-BR": "Português (Brasil)",
           "es-ES": "Español",
+          "fr-FR": "Français",
+          "de-DE": "Deutsch",
         },
       },
       theme: {
@@ -1218,13 +1366,13 @@ export const resources = {
         docs: "Documentación",
         files: "Archivos",
         notifications: "Notificaciones",
-        allBots: "Todos los bots",
+        allAgents: "Todos los bots",
         allModels: "Todos los modelos",
         allTypes: "Todos los tipos",
         allUsers: "Todos los usuarios",
         allSessions: "Todas las sesiones",
         now: "ahora",
-        bot: "Bot",
+        agent: "Bot",
         status: "Estado",
         cost: "Costo",
         duration: "Duración",
@@ -1606,16 +1754,16 @@ export const resources = {
             "Reabre el tour en Docs cuando quieras repasar el flujo o visitar un capitulo secundario.",
         },
       },
-      botSwitcher: {
+      agentSwitcher: {
         placeholder: "Seleccionar bot",
         ariaSingle: "Seleccionar bot",
         ariaMultiple: "Seleccionar bots",
         searchPlaceholder: "Buscar bot",
-        allBots: "Todos los bots",
-        botsVisible: "{{count}} bots visibles",
-        botsSelected: "{{count}} bots seleccionados",
-        botsSelectedOutOfTotal: "{{selected}} de {{total}} bots seleccionados",
-        noBotFilter: "Sin filtro por bot",
+        allAgents: "Todos los bots",
+        agentsVisible: "{{count}} bots visibles",
+        agentsSelected: "{{count}} bots seleccionados",
+        agentsSelectedOutOfTotal: "{{selected}} de {{total}} bots seleccionados",
+        noAgentFilter: "Sin filtro por bot",
         selectOne: "Selecciona un bot",
         noResults: "Ningún bot encontrado",
       },
@@ -1636,7 +1784,7 @@ export const resources = {
       },
       costs: {
         filters: {
-          bots: "Bots",
+          agents: "Bots",
           period: "Período",
           model: "Modelo",
           taskType: "Tipo de tarea",
@@ -1647,7 +1795,7 @@ export const resources = {
           },
         },
         mode: {
-          byBot: "Por bot",
+          byAgent: "Por bot",
           byModel: "Por modelo",
         },
         kpis: {
@@ -1684,7 +1832,7 @@ export const resources = {
         searchPlaceholder: "Buscar por sesión, nombre o último mensaje",
         noSelection: "Ninguna conversación seleccionada.",
         loadError: "No fue posible cargar la conversación.",
-        chatWithBot: "Habla con {{bot}}",
+        chatWithAgent: "Habla con {{bot}}",
         composerHelper:
           "La interfaz ya está lista para el flujo conversacional del bot. El envío real depende del endpoint del runtime.",
         composerIdle: "Elige una conversación para explorar el historial o preparar una nueva interacción.",
@@ -1765,6 +1913,1405 @@ export const resources = {
           variables: {
             label: "Variables y Secretos",
             description: "Variables de sistema y secretos para operación de agentes.",
+          },
+        },
+      },
+      auth: {
+        login: {
+          title: "Bienvenido de nuevo",
+          subtitle: "Inicia sesión para acceder al espacio de trabajo operativo.",
+          identifier: "Correo o nombre de usuario",
+          password: "Contraseña",
+          submit: "Iniciar sesión",
+          submitting: "Iniciando sesión...",
+          forgot_link: "¿Olvidaste la contraseña o el código de recuperación?",
+          generic_error: "Las credenciales no coinciden. Inténtalo de nuevo.",
+        },
+        forgot: {
+          title: "Recuperar acceso",
+          subtitle: "Usa un código de recuperación para definir una nueva contraseña.",
+          identifier: "Correo o nombre de usuario",
+          recovery_code: "Código de recuperación",
+          new_password: "Nueva contraseña",
+          confirm_password: "Confirmar nueva contraseña",
+          submit: "Restablecer contraseña",
+          submitting: "Restableciendo...",
+          back_to_login: "Volver al inicio de sesión",
+          success_title: "Contraseña actualizada",
+          success: "Ya puedes iniciar sesión con tu nueva contraseña.",
+          password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
+          password_mismatch: "Las contraseñas no coinciden.",
+          generic_error: "La información es inválida o ha caducado. Inténtalo de nuevo.",
+        },
+        setup: {
+          create_account: {
+            title: "Crear la cuenta propietaria",
+            subtitle: "Configura el primer operador para desbloquear el espacio de trabajo.",
+            email: "Correo corporativo",
+            password: "Contraseña",
+            password_hint: "Mínimo 12 caracteres.",
+            confirm_password: "Confirmar contraseña",
+            bootstrap_code: "Código de bootstrap",
+            bootstrap_hint: "Usa el código de bootstrap de un solo uso impreso por el instalador.",
+            bootstrap_hint_generic: "Proporciona el código de bootstrap emitido para esta instancia.",
+            submit: "Crear cuenta",
+            submitting: "Creando...",
+            errors: {
+              bootstrap_required: "El código de bootstrap es obligatorio.",
+              email_invalid: "Introduce un correo válido.",
+              password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
+              password_mismatch: "Las contraseñas no coinciden.",
+              generic: "No pudimos crear la cuenta. Inténtalo de nuevo.",
+            },
+          },
+          recovery_codes: {
+            title: "Guarda tus códigos de recuperación",
+            subtitle: "Guarda estos códigos en un lugar seguro. Cada código funciona solo una vez.",
+            file_header: "Códigos de recuperación de Koda",
+            copy_all: "Copiar todo",
+            copied: "Copiado",
+            download: "Descargar",
+            print: "Imprimir",
+            saved_checkbox: "He guardado los códigos de recuperación en un lugar seguro.",
+            continue: "Continuar al espacio de trabajo",
+            already_shown_banner: "Estos códigos no se volverán a mostrar.",
+          },
+        },
+        settings: {
+          security: {
+            title: "Seguridad",
+            change_password: "Cambiar contraseña",
+            need_current_password: "Introduce tu contraseña actual para continuar.",
+            regenerate_codes: "Regenerar códigos de recuperación",
+            codes_remaining: "{{count}} códigos de recuperación restantes",
+          },
+        },
+      },
+    },
+  },
+  "fr-FR": {
+    translation: {
+      app: {
+        name: "Koda",
+        description:
+          "Koda est l'espace de travail opérationnel pour superviser les agents, exécutions, coûts, mémoire et routines en temps réel.",
+        skipToContent: "Aller au contenu principal",
+      },
+      language: {
+        label: "Langue",
+        placeholder: "Langue",
+        options: {
+          "en-US": "English (US)",
+          "pt-BR": "Português (Brasil)",
+          "es-ES": "Español",
+          "fr-FR": "Français",
+          "de-DE": "Deutsch",
+        },
+      },
+      theme: {
+        label: "Thème",
+        placeholder: "Thème",
+        options: {
+          system: "Système",
+          light: "Clair",
+          dark: "Sombre",
+        },
+      },
+      common: {
+        loading: "Chargement",
+        ready: "Prêt",
+        synced: "Synchronisé",
+        updating: "Mise à jour",
+        retry: "Réessayer",
+        search: "Rechercher",
+        ask: "Demander",
+        docs: "Docs",
+        files: "Fichiers",
+        notifications: "Notifications",
+        allAgents: "Tous les bots",
+        allModels: "Tous les modèles",
+        allTypes: "Tous les types",
+        allUsers: "Tous les utilisateurs",
+        allSessions: "Toutes les sessions",
+        now: "maintenant",
+        agent: "Bot",
+        status: "Statut",
+        cost: "Coût",
+        duration: "Durée",
+        created: "Créé",
+        source: "Source",
+        session: "Session",
+        query: "Requête",
+        summary: "Résumé",
+        active: "Actif",
+        paused: "En pause",
+        resolved: "Résolu",
+        failed: "Échoué",
+      },
+      routeMeta: {
+        system: {
+          eyebrow: "Koda",
+          title: "Système",
+          summary: "Gouvernance globale, fournisseurs et ressources partagées.",
+        },
+        agents: {
+          eyebrow: "Koda",
+          title: "Agents",
+          summary: "Catalogue, édition et publication pour les agents.",
+        },
+        runtime: {
+          eyebrow: "Runtime",
+          title: "Plan de contrôle",
+          summary: "Bots, environnements et surfaces en direct.",
+        },
+        overview: {
+          eyebrow: "Espace de travail",
+          title: "Aperçu",
+          summary: "Pouls des bots, coûts et activité.",
+        },
+        executions: {
+          eyebrow: "Opérations",
+          title: "Exécutions",
+          summary: "Tâches, traces et état récent.",
+        },
+        memory: {
+          eyebrow: "Contexte",
+          title: "Mémoire",
+          summary: "Carte, curation et contexte par bot.",
+        },
+        sessions: {
+          eyebrow: "Conversations",
+          title: "Sessions",
+          summary: "Discussions, réponses et exécutions liées.",
+        },
+        costs: {
+          eyebrow: "Consommation",
+          title: "Coûts",
+          summary: "Consommation, répartition et efficacité.",
+        },
+        schedules: {
+          eyebrow: "Routines",
+          title: "Planifications",
+          summary: "Routines, cadence et couverture.",
+        },
+        dlq: {
+          eyebrow: "Récupération",
+          title: "File des messages non distribués",
+          summary: "Échecs, nouvelles tentatives et diagnostic.",
+        },
+        fallback: {
+          eyebrow: "Koda",
+          title: "Espace de travail",
+          summary: "Centre opérationnel Koda.",
+        },
+      },
+      sidebar: {
+        ariaLabel: "Navigation principale",
+        newSession: "Nouvelle session",
+        newSessionLabel: "Démarrer une nouvelle session",
+        recents: "Récents",
+        clearRecents: "Effacer les récents",
+        noRecents: "Vos parcours récents apparaîtront ici.",
+        sections: {
+          atlas: "Koda",
+          operations: "Opérations",
+          analysis: "Analyse",
+          system: "Système",
+        },
+        items: {
+          home: "Accueil",
+          runtime: "Runtime",
+          agents: "Agents",
+          executions: "Exécutions",
+          sessions: "Sessions",
+          costs: "Coûts",
+          memory: "Mémoire",
+          schedules: "Planifications",
+          dlq: "File des messages non distribués",
+          generalSettings: "Paramètres généraux",
+        },
+        loading: {
+          home: "Ouverture de l'accueil",
+          runtime: "Ouverture du runtime",
+          agents: "Ouverture des agents",
+          executions: "Ouverture des exécutions",
+          sessions: "Ouverture des sessions",
+          costs: "Ouverture des coûts",
+          memory: "Ouverture de la mémoire",
+          schedules: "Ouverture des planifications",
+          dlq: "Ouverture de la file des messages non distribués",
+          generalSettings: "Ouverture des paramètres généraux",
+        },
+      },
+      topbar: {
+        openMenu: "Ouvrir le menu",
+        expandSidebar: "Étendre la barre latérale",
+        collapseSidebar: "Réduire la barre latérale",
+        docs: {
+          eyebrow: "Docs",
+          title: "Base opérationnelle Koda",
+          description: "Guides rapides pour naviguer dans les surfaces critiques de l'espace de travail.",
+          entries: {
+            dailyOps: {
+              eyebrow: "Playbook",
+              title: "Opérations quotidiennes",
+              description: "Exécutions, sessions et incidents dans un seul flux.",
+            },
+            governance: {
+              eyebrow: "Système",
+              title: "Gouvernance Koda",
+              description: "Valeurs par défaut globales, fournisseurs et autorisations partagées.",
+            },
+            memory: {
+              eyebrow: "Contexte",
+              title: "Mémoire et curation",
+              description: "Cartes, clusters et signaux opérationnels par bot.",
+            },
+          },
+        },
+        ask: {
+          eyebrow: "Demander",
+          title: "Demander à Koda",
+          description: "Réponse rapide pour vous amener directement à la bonne surface.",
+          placeholder: "Ex. : où voir les échecs critiques ATLAS aujourd'hui ?",
+          responseLabel: "Réponse",
+          button: "Demander",
+          loadingButton: "Analyse en cours...",
+          loadingCopy: "Koda met en relation le contexte opérationnel pour répondre avec précision.",
+          initialReply:
+            "Posez une question sur les opérations, coûts, mémoire ou gouvernance et je vous orienterai vers la meilleure surface Koda.",
+          suggestions: {
+            failures: "Comment prioriser les échecs de la file des messages non distribués ?",
+            cost: "Quel écran montre le plus rapidement les goulots de coût ?",
+            schedules: "Où puis-je revoir les routines en pause ?",
+          },
+          replies: {
+            failures:
+              "Commencez par la file des messages non distribués pour isoler la source, valider les tentatives et inspecter le payload brut si besoin.",
+            cost:
+              "Ouvrez Coûts pour comparer la répartition par bot et croiser avec Exécutions pour comprendre quel flux a fait monter la consommation.",
+            schedules:
+              "Planifications centralise l'état des routines. Utilisez le filtre bot pour séparer ce qui est actif, en pause ou non couvert.",
+            sessions:
+              "Sessions est devenu la surface idéale pour interagir directement avec un bot, avec l'historique et l'envoi de messages au même endroit.",
+            fallback:
+              "Utilisez Exécutions pour le pouls opérationnel, Sessions pour la conversation directe, Mémoire pour le contexte et Système quand la décision concerne les valeurs par défaut ou la gouvernance.",
+          },
+        },
+        files: {
+          eyebrow: "Fichiers",
+          title: "Raccourcis récents",
+          description: "Fichiers et catalogues les plus utilisés dans le flux opérationnel récent.",
+          entries: {
+            runtime: {
+              detail: "Opérations, traces et routines prioritaires",
+              updatedAt: "il y a 12 min",
+            },
+            governance: {
+              detail: "Catalogue en direct des valeurs par défaut, politiques et intégrations",
+              updatedAt: "il y a 36 min",
+            },
+            memory: {
+              detail: "Signaux récents et ajustements de pertinence",
+              updatedAt: "il y a 2h",
+            },
+            costs: {
+              detail: "Répartition récente de la consommation par bot",
+              updatedAt: "il y a 4h",
+            },
+          },
+        },
+        notifications: {
+          eyebrow: "Notifications",
+          title: "Mises à jour récentes",
+          description: "Améliorations et changements récents de Koda en lecture rapide.",
+          summaryLeft: "{{count}} mises à jour récentes",
+          summaryRight: "Tout au même endroit",
+          entries: {
+            sessions: {
+              section: "Sessions",
+              title: "Nouvelle vue opérationnelle pour les sessions",
+              description:
+                "L'écran s'ouvre maintenant en format chat, avec sélection directe du bot et un composeur fixe.",
+              timestamp: "Aujourd'hui",
+            },
+            memory: {
+              section: "Mémoire",
+              title: "Mémoire affinée",
+              description: "Carte repensée et curation avec une meilleure utilisation verticale.",
+              timestamp: "Hier",
+            },
+            system: {
+              section: "Système",
+              title: "Gouvernance unifiée",
+              description:
+                "Système et catalogue suivent désormais la même base visuelle et modale.",
+              timestamp: "il y a 2 jours",
+            },
+          },
+        },
+      },
+      tour: {
+        actions: {
+          start: "Démarrer la visite",
+          back: "Retour",
+          continue: "Continuer",
+          skip: "Passer la visite",
+          finish: "Terminer la visite",
+        },
+        progress: {
+          start: "Démarrage",
+          value: "{{current}} sur {{total}}",
+        },
+        confirmSkip: "Voulez-vous passer la visite guidée ?",
+        topbar: {
+          eyebrow: "Visite",
+          title: "Visite guidée",
+          description: "Ouvrir une visite guidée de cet espace de travail ou de la page actuelle.",
+          resumeTitle: "Reprendre la visite guidée",
+          resumeDescription: "Reprenez la visite en cours à partir de l'endroit où vous vous êtes arrêté.",
+        },
+        welcome: {
+          title: "Commencez par une visite guidée rapide",
+          description:
+            "Koda vous présente les écrans principaux, comment passer de l'un à l'autre et ce que chaque zone signifie. Le parcours reste concis et vous pouvez quitter à tout moment.",
+        },
+        steps: {
+          shellSidebar: {
+            title: "Cette barre latérale est votre carte principale",
+            description:
+              "Utilisez-la pour passer entre aperçu, runtime, catalogue et vues opérationnelles sans perdre le contexte.",
+          },
+          shellTopbar: {
+            title: "La barre supérieure garde le contexte d'itinéraire à proximité",
+            description:
+              "Ici s'affichent le résumé de la page active, les outils rapides, le sélecteur de langue et le raccourci pour rouvrir cette visite plus tard.",
+          },
+          overviewMetrics: {
+            title: "Aperçu résume le pouls opérationnel",
+            description:
+              "Ce premier bloc condense activité, demande et coût pour vous permettre de comprendre ce qui a changé avant d'analyser plus en détail.",
+            emptyTitle: "Aperçu démarre comme votre pouls opérationnel vide",
+            emptyDescription:
+              "Même avant que l'activité n'apparaisse, cette page est l'endroit où vous reviendrez pour un résumé rapide de l'état de l'espace de travail.",
+          },
+          overviewLivePlan: {
+            title: "Cette section met en avant les prochaines actions en direct",
+            description:
+              "Utilisez-la pour repérer ce qui tourne maintenant, ce qui nécessite de l'attention et où continuer l'investigation.",
+          },
+          controlPlanePrimaryAction: {
+            title: "Le catalogue est le point de départ de la configuration",
+            description:
+              "Créez ici des bots et espaces de travail, puis ouvrez un bot pour configurer identité, comportement, ressources et publication.",
+            emptyTitle: "Le catalogue est votre premier arrêt sur une installation neuve",
+            emptyDescription:
+              "Si l'instance est vide, commencez ici en créant un espace de travail ou un bot. L'éditeur s'ouvre juste après.",
+          },
+          controlPlaneBoard: {
+            title: "Le tableau explique comment le catalogue est organisé",
+            description:
+              "Espaces de travail, escouades et bots restent groupés ici pour que gouvernance et responsabilité soient visibles d'un coup d'œil.",
+            emptyTitle: "Le tableau s'étoffe avec le catalogue",
+            emptyDescription:
+              "Dès que des bots existent, cette zone devient la carte visuelle des équipes, espaces de travail et responsabilités opérationnelles.",
+          },
+          controlPlaneEditorHeader: {
+            title: "L'éditeur est le centre de contrôle du bot",
+            description:
+              "Cet en-tête montre quel bot vous éditez et garde les actions principales (enregistrer, revoir la publication) à portée de main.",
+          },
+          controlPlaneEditorSteps: {
+            title: "Ces sections organisent la configuration complète du bot",
+            description:
+              "Parcourez identité, comportement, ressources, mémoire, portée et publication sans mélanger les préoccupations.",
+          },
+          controlPlaneEditorPublish: {
+            title: "Enregistrez d'abord, puis publiez avec confiance",
+            description:
+              "Utilisez ces actions pour enregistrer les modifications en brouillon et avancer vers la revue de publication quand le bot est prêt.",
+          },
+          runtimeHeader: {
+            title: "Runtime est la salle de contrôle en direct",
+            description:
+              "Cet écran concentre la santé des exécutions, l'activité en direct et les filtres pour vous concentrer sur les bots qui importent maintenant.",
+            emptyTitle: "Runtime devient utile dès que l'activité apparaît",
+            emptyDescription:
+              "Quand aucun environnement n'est encore en direct, considérez cette page comme l'endroit où l'activité en direct apparaîtra en premier.",
+            unavailableTitle: "Runtime signale aussi rapidement les problèmes de disponibilité",
+            unavailableDescription:
+              "Si la connectivité runtime est dégradée, cette surface est l'endroit où l'application expose cet état avant une inspection plus approfondie.",
+          },
+          runtimeLiveList: {
+            title: "Les métriques indiquent à quel point le runtime a besoin d'attention",
+            description:
+              "Utilisez ces indicateurs pour estimer la couverture en ligne, les exécutions en direct et la charge d'attention actuelle.",
+            emptyTitle: "Aucune exécution en direct pour l'instant",
+            emptyDescription:
+              "Quand la liste est vide, cela confirme tout de même que le runtime est calme au lieu de masquer l'état.",
+          },
+          sessionsRail: {
+            title: "Sessions est le rail d'historique conversationnel",
+            description:
+              "Recherchez et basculez les conversations ici pour inspecter l'historique du dialogue de chaque bot.",
+            emptyTitle: "Sessions devient l'index de chat",
+            emptyDescription:
+              "Dès que des conversations existent, ce rail devient le moyen le plus rapide d'y naviguer.",
+          },
+          sessionsThread: {
+            title: "Le fil garde messages et contexte ensemble",
+            description:
+              "Cette zone montre la conversation sélectionnée, tandis que le composeur et le panneau de contexte gardent les actions de suivi à portée.",
+            emptyTitle: "Vous pouvez démarrer une conversation d'ici",
+            emptyDescription:
+              "Quand il n'y a pas encore de fil, sélectionnez un bot dans le composeur et démarrez la première conversation depuis cette surface.",
+          },
+          executionsFilters: {
+            title: "Exécutions commence par un filtrage rapide",
+            description:
+              "Utilisez la recherche, la sélection de bot et les puces de statut pour restreindre l'historique avant d'ouvrir une tâche spécifique.",
+            unavailableTitle: "Exécutions signale aussi quand le flux est indisponible",
+            unavailableDescription:
+              "Si la liste ne peut pas être chargée, cette zone est l'endroit où vous réessayez et confirmez l'état du flux opérationnel.",
+          },
+          executionsTable: {
+            title: "Le tableau est la colonne vertébrale de l'historique des exécutions",
+            description:
+              "Ouvrez les tâches d'ici pour inspecter durée, coût, avertissements et surfaces de détail.",
+            emptyTitle: "Aucune exécution ne correspond pour l'instant",
+            emptyDescription:
+              "Quand rien n'apparaît, les filtres peuvent être trop stricts ou l'espace de travail peut encore être calme.",
+            unavailableTitle: "L'historique des exécutions peut aussi échouer avec élégance",
+            unavailableDescription:
+              "Quand le backend est indisponible, cette zone doit expliquer clairement le problème au lieu de laisser la page vide.",
+          },
+          memoryPrimary: {
+            title: "Mémoire cartographie le contexte durable",
+            description:
+              "Utilisez cette zone pour inspecter ce que l'espace de travail apprend, regroupe et garde disponible pour les bots.",
+          },
+          costsPrimary: {
+            title: "Coûts explique la consommation et l'efficacité",
+            description:
+              "Cette page aide à comparer dépenses, répartition et impact opérationnel entre bots et fenêtres temporelles.",
+          },
+          schedulesPrimary: {
+            title: "Planifications centralise les routines",
+            description:
+              "Passez en revue cadence, tâches en pause et couverture d'automatisation ici quand vous devez inspecter le travail récurrent.",
+          },
+          dlqPrimary: {
+            title: "La file des messages non distribués isole les échecs",
+            description:
+              "Venez ici pour inspecter les tentatives, l'état brut des échecs et les décisions de récupération quand les tâches sortent du chemin heureux.",
+          },
+          systemSettingsPrimary: {
+            title: "Paramètres système contient la gouvernance globale",
+            description:
+              "C'est ici que fournisseurs, valeurs par défaut et contrôles partagés sont configurés pour tout l'espace de travail.",
+          },
+        },
+        complete: {
+          title: "Vous êtes prêt à explorer Koda",
+          description:
+            "Rouvrez la visite à tout moment depuis Docs si vous voulez un rappel ou visiter un chapitre secondaire.",
+        },
+      },
+      agentSwitcher: {
+        placeholder: "Sélectionner un bot",
+        ariaSingle: "Sélectionner un bot",
+        ariaMultiple: "Sélectionner des bots",
+        searchPlaceholder: "Rechercher un bot",
+        allAgents: "Tous les bots",
+        agentsVisible: "{{count}} bots visibles",
+        agentsSelected: "{{count}} bots sélectionnés",
+        agentsSelectedOutOfTotal: "{{selected}} sur {{total}} bots sélectionnés",
+        noAgentFilter: "Aucun filtre bot",
+        selectOne: "Choisissez un bot",
+        noResults: "Aucun bot trouvé",
+      },
+      async: {
+        loading: "Chargement",
+        updating: "Mise à jour",
+        synced: "Synchronisé",
+        ready: "Prêt",
+        retry: "Réessayer",
+      },
+      statuses: {
+        all: "Tous",
+        completed: "Terminé",
+        running: "En cours",
+        queued: "En file d'attente",
+        failed: "Échoué",
+        retrying: "Nouvelle tentative",
+      },
+      costs: {
+        filters: {
+          agents: "Bots",
+          period: "Période",
+          model: "Modèle",
+          taskType: "Type de tâche",
+          periods: {
+            "7d": "7 jours",
+            "30d": "30 jours",
+            "90d": "90 jours",
+          },
+        },
+        mode: {
+          byAgent: "Par bot",
+          byModel: "Par modèle",
+        },
+        kpis: {
+          totalPeriod: "Total sur la période",
+          today: "Aujourd'hui",
+          costPerResolved: "Coût par conversation résolue",
+          peakBucket: "Pic de la période",
+        },
+        chart: {
+          eyebrow: "Origine temporelle",
+          title: "Où le coût naît dans la période",
+          description:
+            "Compartiments empilés pour révéler les pics, la dispersion et le principal moteur de coût.",
+        },
+        allocation: {
+          eyebrow: "Répartition",
+          title: "Répartition de la consommation",
+          description: "Une lecture compacte de là où le coût est concentré dans la coupe actuelle.",
+        },
+        ledger: {
+          eyebrow: "Registre des coûts",
+          title: "Opérations par coût",
+          count: "{{count}} enregistrements",
+        },
+      },
+      executions: {
+        searchPlaceholder: "Rechercher requête, session ou modèle",
+        unavailable: "Exécutions indisponibles",
+        loadError: "Impossible de charger les exécutions.",
+        noSelection: "Aucune exécution sélectionnée.",
+        retryLabel: "Nouvelle tentative",
+      },
+      sessions: {
+        searchPlaceholder: "Rechercher par session, nom ou dernier message",
+        noSelection: "Aucune conversation sélectionnée.",
+        loadError: "Impossible de charger la conversation.",
+        chatWithAgent: "Discuter avec {{bot}}",
+        composerHelper:
+          "L'interface est prête pour le flux de conversation avec le bot. L'envoi réel dépend de l'endpoint du runtime.",
+        composerIdle:
+          "Choisissez une conversation pour explorer l'historique ou préparer une nouvelle interaction.",
+        sendUnavailable:
+          "Ce runtime de bot n'expose pas encore d'endpoint HTTP pour le chat web Koda.",
+      },
+      memory: {
+        views: {
+          map: "Mémoire",
+          curation: "Curation",
+        },
+        filters: {
+          title: "Filtres",
+          intro:
+            "Ajustez la coupe par utilisateur, session, temps et types de mémoire avant d'explorer les connexions de la carte.",
+          search: "Rechercher dans la carte",
+          searchPlaceholder: "Contenu, source ou apprentissage...",
+          user: "Utilisateur",
+          session: "Session",
+          timeWindow: "Fenêtre temporelle",
+          includeInactive: "Inclure les mémoires inactives",
+          edges: {
+            semantic: "Sémantique",
+            session: "Session",
+            source: "Source",
+          },
+        },
+        empty: {
+          title: "Aucune mémoire à afficher pour le moment",
+          description:
+            "Lorsque ce bot commencera à consolider des faits, décisions, tâches ou problèmes, la carte organisera ces mémoires en un maillage vivant de contexte et d'apprentissage.",
+        },
+      },
+      schedules: {
+        loading: "Chargement",
+        jobs: "planifications",
+        active: "actif",
+      },
+      dlq: {
+        filters: {
+          all: "Tous",
+          eligible: "Éligible à la réexécution",
+          ineligible: "Pas de réexécution",
+        },
+      },
+      controlPlane: {
+        botCreate: {
+          promptPlaceholder:
+            "Vous êtes un assistant spécialisé dans...\n\nVotre objectif est d'aider les utilisateurs à...\n\nRègles :\n- Soyez clair et concis\n- Répondez toujours en français",
+        },
+      },
+      settings: {
+        sections: {
+          general: {
+            label: "Général",
+            description: "Fuseau horaire et préférences régionales.",
+          },
+          models: {
+            label: "Modèles et fournisseurs",
+            description: "Fournisseurs d'IA, sélection de modèle et contrôles d'utilisation.",
+          },
+          integrations: {
+            label: "Intégrations",
+            description: "Services externes et serveurs MCP tels que Jira, Google, bases de données et passerelles d'outils sélectionnées.",
+          },
+          providers: {
+            label: "Fournisseurs",
+            description: "Fournisseurs d'IA pour modèles de langage, voix et médias.",
+          },
+          mcp: {
+            label: "Serveurs MCP",
+            description: "Serveurs Model Context Protocol pour étendre les outils des agents.",
+          },
+          intelligence: {
+            label: "Intelligence",
+            description: "Mémoire, connaissance et gouvernance de l'autonomie.",
+          },
+          variables: {
+            label: "Variables et secrets",
+            description: "Variables système et secrets pour les opérations des agents.",
+          },
+        },
+      },
+      auth: {
+        login: {
+          title: "Bon retour",
+          subtitle: "Connectez-vous pour accéder à l'espace de travail opérationnel.",
+          identifier: "E-mail ou nom d'utilisateur",
+          password: "Mot de passe",
+          submit: "Se connecter",
+          submitting: "Connexion...",
+          forgot_link: "Mot de passe ou code de récupération oublié ?",
+          generic_error: "Les identifiants fournis ne correspondent pas. Veuillez réessayer.",
+        },
+        forgot: {
+          title: "Récupérer l'accès",
+          subtitle: "Utilisez un code de récupération pour définir un nouveau mot de passe.",
+          identifier: "E-mail ou nom d'utilisateur",
+          recovery_code: "Code de récupération",
+          new_password: "Nouveau mot de passe",
+          confirm_password: "Confirmer le nouveau mot de passe",
+          submit: "Réinitialiser le mot de passe",
+          submitting: "Réinitialisation...",
+          back_to_login: "Retour à la connexion",
+          success_title: "Mot de passe mis à jour",
+          success: "Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.",
+          password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
+          password_mismatch: "Les mots de passe ne correspondent pas.",
+          generic_error: "Les informations fournies sont invalides ou expirées. Veuillez réessayer.",
+        },
+        setup: {
+          create_account: {
+            title: "Créer le compte propriétaire",
+            subtitle: "Configurez le premier opérateur pour débloquer l'espace de travail.",
+            email: "E-mail professionnel",
+            password: "Mot de passe",
+            password_hint: "Minimum 12 caractères.",
+            confirm_password: "Confirmer le mot de passe",
+            bootstrap_code: "Code de bootstrap",
+            bootstrap_hint: "Utilisez le code de bootstrap unique imprimé par l'installateur.",
+            bootstrap_hint_generic: "Fournissez le code de bootstrap émis pour cette instance.",
+            submit: "Créer le compte",
+            submitting: "Création...",
+            errors: {
+              bootstrap_required: "Le code de bootstrap est requis.",
+              email_invalid: "Saisissez une adresse e-mail valide.",
+              password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
+              password_mismatch: "Les mots de passe ne correspondent pas.",
+              generic: "Nous n'avons pas pu créer le compte. Veuillez réessayer.",
+            },
+          },
+          recovery_codes: {
+            title: "Enregistrez vos codes de récupération",
+            subtitle: "Conservez ces codes dans un endroit sûr. Chaque code ne fonctionne qu'une seule fois.",
+            file_header: "Codes de récupération Koda",
+            copy_all: "Tout copier",
+            copied: "Copié",
+            download: "Télécharger",
+            print: "Imprimer",
+            saved_checkbox: "J'ai enregistré les codes de récupération dans un endroit sûr.",
+            continue: "Continuer vers l'espace de travail",
+            already_shown_banner: "Ces codes ne seront plus affichés.",
+          },
+        },
+        settings: {
+          security: {
+            title: "Sécurité",
+            change_password: "Changer le mot de passe",
+            need_current_password: "Saisissez votre mot de passe actuel pour continuer.",
+            regenerate_codes: "Régénérer les codes de récupération",
+            codes_remaining: "{{count}} codes de récupération restants",
+          },
+        },
+      },
+    },
+  },
+  "de-DE": {
+    translation: {
+      app: {
+        name: "Koda",
+        description:
+          "Koda ist der operative Arbeitsbereich zur Echtzeit-Überwachung von Agenten, Ausführungen, Kosten, Speicher und Routinen.",
+        skipToContent: "Zum Hauptinhalt springen",
+      },
+      language: {
+        label: "Sprache",
+        placeholder: "Sprache",
+        options: {
+          "en-US": "English (US)",
+          "pt-BR": "Português (Brasil)",
+          "es-ES": "Español",
+          "fr-FR": "Français",
+          "de-DE": "Deutsch",
+        },
+      },
+      theme: {
+        label: "Design",
+        placeholder: "Design",
+        options: {
+          system: "System",
+          light: "Hell",
+          dark: "Dunkel",
+        },
+      },
+      common: {
+        loading: "Lädt",
+        ready: "Bereit",
+        synced: "Synchronisiert",
+        updating: "Aktualisierung",
+        retry: "Erneut versuchen",
+        search: "Suchen",
+        ask: "Fragen",
+        docs: "Dokumentation",
+        files: "Dateien",
+        notifications: "Benachrichtigungen",
+        allAgents: "Alle Bots",
+        allModels: "Alle Modelle",
+        allTypes: "Alle Typen",
+        allUsers: "Alle Benutzer",
+        allSessions: "Alle Sitzungen",
+        now: "jetzt",
+        agent: "Bot",
+        status: "Status",
+        cost: "Kosten",
+        duration: "Dauer",
+        created: "Erstellt",
+        source: "Quelle",
+        session: "Sitzung",
+        query: "Abfrage",
+        summary: "Zusammenfassung",
+        active: "Aktiv",
+        paused: "Pausiert",
+        resolved: "Gelöst",
+        failed: "Fehlgeschlagen",
+      },
+      routeMeta: {
+        system: {
+          eyebrow: "Koda",
+          title: "System",
+          summary: "Globale Governance, Anbieter und gemeinsam genutzte Ressourcen.",
+        },
+        agents: {
+          eyebrow: "Koda",
+          title: "Agenten",
+          summary: "Katalog, Bearbeitung und Veröffentlichung für Agenten.",
+        },
+        runtime: {
+          eyebrow: "Laufzeit",
+          title: "Steuerungsebene",
+          summary: "Bots, Umgebungen und Live-Oberflächen.",
+        },
+        overview: {
+          eyebrow: "Arbeitsbereich",
+          title: "Übersicht",
+          summary: "Puls für Bots, Kosten und Aktivität.",
+        },
+        executions: {
+          eyebrow: "Operationen",
+          title: "Ausführungen",
+          summary: "Aufgaben, Traces und aktueller Zustand.",
+        },
+        memory: {
+          eyebrow: "Kontext",
+          title: "Speicher",
+          summary: "Karte, Kuration und Kontext pro Bot.",
+        },
+        sessions: {
+          eyebrow: "Unterhaltungen",
+          title: "Sitzungen",
+          summary: "Chats, Antworten und verknüpfte Ausführungen.",
+        },
+        costs: {
+          eyebrow: "Verbrauch",
+          title: "Kosten",
+          summary: "Verbrauch, Verteilung und Effizienz.",
+        },
+        schedules: {
+          eyebrow: "Routinen",
+          title: "Zeitpläne",
+          summary: "Routinen, Takt und Abdeckung.",
+        },
+        dlq: {
+          eyebrow: "Wiederherstellung",
+          title: "Dead-Letter-Queue",
+          summary: "Fehler, Wiederholungen und Diagnose.",
+        },
+        fallback: {
+          eyebrow: "Koda",
+          title: "Arbeitsbereich",
+          summary: "Koda-Operationszentrum.",
+        },
+      },
+      sidebar: {
+        ariaLabel: "Hauptnavigation",
+        newSession: "Neue Sitzung",
+        newSessionLabel: "Eine neue Sitzung starten",
+        recents: "Zuletzt verwendet",
+        clearRecents: "Zuletzt verwendet löschen",
+        noRecents: "Ihre zuletzt besuchten Routen erscheinen hier.",
+        sections: {
+          atlas: "Koda",
+          operations: "Operationen",
+          analysis: "Analyse",
+          system: "System",
+        },
+        items: {
+          home: "Start",
+          runtime: "Laufzeit",
+          agents: "Agenten",
+          executions: "Ausführungen",
+          sessions: "Sitzungen",
+          costs: "Kosten",
+          memory: "Speicher",
+          schedules: "Zeitpläne",
+          dlq: "Dead-Letter-Queue",
+          generalSettings: "Allgemeine Einstellungen",
+        },
+        loading: {
+          home: "Start wird geöffnet",
+          runtime: "Laufzeit wird geöffnet",
+          agents: "Agenten werden geöffnet",
+          executions: "Ausführungen werden geöffnet",
+          sessions: "Sitzungen werden geöffnet",
+          costs: "Kosten werden geöffnet",
+          memory: "Speicher wird geöffnet",
+          schedules: "Zeitpläne werden geöffnet",
+          dlq: "Dead-Letter-Queue wird geöffnet",
+          generalSettings: "Allgemeine Einstellungen werden geöffnet",
+        },
+      },
+      topbar: {
+        openMenu: "Menü öffnen",
+        expandSidebar: "Seitenleiste erweitern",
+        collapseSidebar: "Seitenleiste einklappen",
+        docs: {
+          eyebrow: "Dokumentation",
+          title: "Koda-Operationsbasis",
+          description: "Schnelle Anleitungen zur Navigation durch die kritischen Oberflächen des Arbeitsbereichs.",
+          entries: {
+            dailyOps: {
+              eyebrow: "Playbook",
+              title: "Tägliche Operationen",
+              description: "Ausführungen, Sitzungen und Vorfälle in einem einzigen Ablauf.",
+            },
+            governance: {
+              eyebrow: "System",
+              title: "Koda-Governance",
+              description: "Globale Standards, Anbieter und gemeinsame Freigaben.",
+            },
+            memory: {
+              eyebrow: "Kontext",
+              title: "Speicher und Kuration",
+              description: "Karten, Cluster und operative Signale pro Bot.",
+            },
+          },
+        },
+        ask: {
+          eyebrow: "Fragen",
+          title: "Koda fragen",
+          description: "Schnelle Antwort, die Sie direkt zur richtigen Oberfläche bringt.",
+          placeholder: "Beispiel: Wo sehe ich heute kritische ATLAS-Ausfälle?",
+          responseLabel: "Antwort",
+          button: "Fragen",
+          loadingButton: "Analyse läuft...",
+          loadingCopy: "Koda verbindet den operativen Kontext, um gezielt zu antworten.",
+          initialReply:
+            "Fragen Sie zu Operationen, Kosten, Speicher oder Governance – ich leite Sie zur passenden Koda-Oberfläche weiter.",
+          suggestions: {
+            failures: "Wie priorisiere ich Ausfälle in der Dead-Letter-Queue?",
+            cost: "Welcher Bildschirm zeigt Kostenengpässe am schnellsten?",
+            schedules: "Wo kann ich pausierte Routinen überprüfen?",
+          },
+          replies: {
+            failures:
+              "Beginnen Sie mit der Dead-Letter-Queue, um die Quelle zu isolieren, Wiederholungen zu validieren und den Rohdaten-Payload zu prüfen, wenn Sie die Ursache bestätigen müssen.",
+            cost:
+              "Öffnen Sie Kosten, um die Verteilung pro Bot zu vergleichen, und gleichen Sie mit Ausführungen ab, um zu verstehen, welcher Ablauf den Verbrauch erhöht hat.",
+            schedules:
+              "Zeitpläne zentralisiert den Routinestatus. Nutzen Sie den Bot-Filter, um Aktives, Pausiertes und Ungedecktes zu trennen.",
+            sessions:
+              "Sitzungen ist die ideale Oberfläche für die direkte Interaktion mit einem Bot – Verlauf und Nachrichtenversand am selben Ort.",
+            fallback:
+              "Nutzen Sie Ausführungen für den operativen Puls, Sitzungen für direkte Unterhaltungen, Speicher für Kontext und System, wenn es um Standards oder Governance geht.",
+          },
+        },
+        files: {
+          eyebrow: "Dateien",
+          title: "Zuletzt verwendete Verknüpfungen",
+          description: "Dateien und Kataloge, die im jüngsten operativen Ablauf am häufigsten verwendet wurden.",
+          entries: {
+            runtime: {
+              detail: "Operationen, Traces und priorisierte Routinen",
+              updatedAt: "vor 12 Min",
+            },
+            governance: {
+              detail: "Live-Katalog von Standards, Richtlinien und Integrationen",
+              updatedAt: "vor 36 Min",
+            },
+            memory: {
+              detail: "Aktuelle Signale und Relevanzanpassungen",
+              updatedAt: "vor 2 Std",
+            },
+            costs: {
+              detail: "Aktuelle Verbrauchsverteilung pro Bot",
+              updatedAt: "vor 4 Std",
+            },
+          },
+        },
+        notifications: {
+          eyebrow: "Benachrichtigungen",
+          title: "Aktuelle Updates",
+          description: "Aktuelle Verbesserungen und Änderungen in Koda im Kurzüberblick.",
+          summaryLeft: "{{count}} aktuelle Updates",
+          summaryRight: "Alles an einem Ort",
+          entries: {
+            sessions: {
+              section: "Sitzungen",
+              title: "Neue operative Ansicht für Sitzungen",
+              description:
+                "Der Bildschirm öffnet sich jetzt im Chat-Format mit direkter Bot-Auswahl und festem Composer.",
+              timestamp: "Heute",
+            },
+            memory: {
+              section: "Speicher",
+              title: "Speicher verfeinert",
+              description: "Karte neu gestaltet und Kuration mit besserer vertikaler Nutzung.",
+              timestamp: "Gestern",
+            },
+            system: {
+              section: "System",
+              title: "Vereinheitlichte Governance",
+              description:
+                "System und Katalog folgen jetzt derselben visuellen und modalen Grundlage.",
+              timestamp: "vor 2 Tagen",
+            },
+          },
+        },
+      },
+      tour: {
+        actions: {
+          start: "Tour starten",
+          back: "Zurück",
+          continue: "Weiter",
+          skip: "Tour überspringen",
+          finish: "Tour beenden",
+        },
+        progress: {
+          start: "Erste Schritte",
+          value: "{{current}} von {{total}}",
+        },
+        confirmSkip: "Möchten Sie die geführte Tour überspringen?",
+        topbar: {
+          eyebrow: "Tour",
+          title: "Geführte Tour",
+          description: "Öffnen Sie eine geführte Tour für diesen Arbeitsbereich oder die aktuelle Seite.",
+          resumeTitle: "Geführte Tour fortsetzen",
+          resumeDescription: "Setzen Sie die aktuelle Tour an der Stelle fort, an der Sie aufgehört haben.",
+        },
+        welcome: {
+          title: "Beginnen Sie mit einer kurzen geführten Tour",
+          description:
+            "Koda führt Sie durch die Hauptbildschirme, wie Sie zwischen ihnen wechseln und was jeder Bereich bedeutet. Der Ablauf bleibt zielgerichtet und Sie können jederzeit abbrechen.",
+        },
+        steps: {
+          shellSidebar: {
+            title: "Diese Seitenleiste ist Ihre Hauptkarte",
+            description:
+              "Nutzen Sie sie, um zwischen Übersicht, Laufzeit, Katalog und operativen Ansichten zu wechseln, ohne den Kontext zu verlieren.",
+          },
+          shellTopbar: {
+            title: "Die obere Leiste hält den Routenkontext nah",
+            description:
+              "Hier sehen Sie die Zusammenfassung der aktiven Seite, Schnellwerkzeuge, den Sprachumschalter und die Verknüpfung, um diese Tour später erneut zu öffnen.",
+          },
+          overviewMetrics: {
+            title: "Übersicht fasst den operativen Puls zusammen",
+            description:
+              "Dieser erste Block verdichtet Aktivität, Nachfrage und Kosten, damit Sie verstehen, was sich geändert hat, bevor Sie tiefer einsteigen.",
+            emptyTitle: "Übersicht startet als Ihr leerer operativer Puls",
+            emptyDescription:
+              "Schon bevor Aktivität erscheint, ist diese Seite der Ort, an den Sie für die schnellste Zusammenfassung des Arbeitsbereichs zurückkehren.",
+          },
+          overviewLivePlan: {
+            title: "Dieser Abschnitt hebt die nächsten Live-Aktionen hervor",
+            description:
+              "Nutzen Sie ihn, um zu erkennen, was jetzt läuft, was Aufmerksamkeit braucht und wo die Untersuchung fortgesetzt werden sollte.",
+          },
+          controlPlanePrimaryAction: {
+            title: "Der Katalog ist der Startpunkt der Einrichtung",
+            description:
+              "Erstellen Sie hier Bots und Arbeitsbereiche und öffnen Sie dann einen Bot, um Identität, Verhalten, Ressourcen und Veröffentlichung zu konfigurieren.",
+            emptyTitle: "Der Katalog ist Ihr erster Halt bei einer neuen Installation",
+            emptyDescription:
+              "Wenn die Instanz leer ist, beginnen Sie hier, indem Sie einen Arbeitsbereich oder einen Bot erstellen. Der Editor öffnet sich direkt danach.",
+          },
+          controlPlaneBoard: {
+            title: "Das Board erklärt, wie der Katalog organisiert ist",
+            description:
+              "Arbeitsbereiche, Squads und Bots bleiben hier gruppiert, damit Governance und Verantwortung auf einen Blick sichtbar sind.",
+            emptyTitle: "Das Board wächst mit dem Katalog",
+            emptyDescription:
+              "Sobald Bots existieren, wird dieser Bereich zur visuellen Karte von Teams, Arbeitsbereichen und operativer Verantwortung.",
+          },
+          controlPlaneEditorHeader: {
+            title: "Der Editor ist das Kontrollzentrum des Bots",
+            description:
+              "Diese Kopfzeile zeigt, welchen Bot Sie bearbeiten, und hält die Hauptaktionen Speichern und Veröffentlichung prüfen nah.",
+          },
+          controlPlaneEditorSteps: {
+            title: "Diese Abschnitte organisieren die vollständige Bot-Einrichtung",
+            description:
+              "Bewegen Sie sich durch Identität, Verhalten, Ressourcen, Speicher, Umfang und Veröffentlichung, ohne Zuständigkeiten zu vermischen.",
+          },
+          controlPlaneEditorPublish: {
+            title: "Erst speichern, dann mit Vertrauen veröffentlichen",
+            description:
+              "Nutzen Sie diese Aktionen, um Entwurfsänderungen zu persistieren und zur Veröffentlichungsprüfung voranzuschreiten, wenn der Bot bereit ist.",
+          },
+          runtimeHeader: {
+            title: "Laufzeit ist der Live-Kontrollraum",
+            description:
+              "Dieser Bildschirm bündelt Ausführungsgesundheit, Live-Aktivität und Filter, damit Sie sich auf die aktuell wichtigen Bots konzentrieren können.",
+            emptyTitle: "Laufzeit wird nützlich, sobald Aktivität erscheint",
+            emptyDescription:
+              "Wenn es noch keine Live-Umgebungen gibt, betrachten Sie diese Seite als den Ort, an dem Live-Aktivität zuerst erscheint.",
+            unavailableTitle: "Laufzeit signalisiert auch Verfügbarkeitsprobleme schnell",
+            unavailableDescription:
+              "Wenn die Laufzeitkonnektivität beeinträchtigt ist, ist diese Oberfläche der Ort, an dem die App diesen Zustand vor tieferer Analyse offenlegt.",
+          },
+          runtimeLiveList: {
+            title: "Metriken zeigen, wie viel Aufmerksamkeit die Laufzeit benötigt",
+            description:
+              "Nutzen Sie diese Indikatoren, um Online-Abdeckung, Live-Ausführungen und die aktuelle Aufmerksamkeitslast einzuschätzen.",
+            emptyTitle: "Noch keine Live-Ausführungen",
+            emptyDescription:
+              "Wenn die Liste leer ist, bestätigt dies dennoch, dass die Laufzeit ruhig ist, statt den Zustand zu verbergen.",
+          },
+          sessionsRail: {
+            title: "Sitzungen ist die Leiste des Unterhaltungsverlaufs",
+            description:
+              "Suchen und wechseln Sie Unterhaltungen hier, um den Dialogverlauf jedes Bots einzusehen.",
+            emptyTitle: "Sitzungen wird zum Chat-Index",
+            emptyDescription:
+              "Sobald Unterhaltungen existieren, wird diese Leiste zum schnellsten Weg, zwischen ihnen zu wechseln.",
+          },
+          sessionsThread: {
+            title: "Der Thread hält Nachrichten und Kontext zusammen",
+            description:
+              "Dieser Bereich zeigt die ausgewählte Unterhaltung, während Composer und Kontextpanel Folgeaktionen nah halten.",
+            emptyTitle: "Sie können hier eine Unterhaltung starten",
+            emptyDescription:
+              "Wenn noch kein Thread existiert, wählen Sie einen Bot im Composer und starten Sie die erste Unterhaltung von dieser Oberfläche aus.",
+          },
+          executionsFilters: {
+            title: "Ausführungen beginnt mit schnellem Filtern",
+            description:
+              "Nutzen Sie Suche, Bot-Auswahl und Status-Chips, um den Verlauf einzugrenzen, bevor Sie eine bestimmte Aufgabe öffnen.",
+            unavailableTitle: "Ausführungen signalisiert auch, wenn der Feed nicht verfügbar ist",
+            unavailableDescription:
+              "Wenn die Liste nicht geladen werden kann, ist dies der Bereich, in dem Sie es erneut versuchen und den Zustand des operativen Feeds bestätigen.",
+          },
+          executionsTable: {
+            title: "Die Tabelle ist das Rückgrat des Ausführungsverlaufs",
+            description:
+              "Öffnen Sie Aufgaben von hier, um Dauer, Kosten, Warnungen und Detailoberflächen einzusehen.",
+            emptyTitle: "Noch keine Ausführungen passend",
+            emptyDescription:
+              "Wenn nichts erscheint, sind die Filter möglicherweise zu streng oder der Arbeitsbereich ist noch ruhig.",
+            unavailableTitle: "Der Ausführungsverlauf kann auch elegant scheitern",
+            unavailableDescription:
+              "Wenn das Backend nicht verfügbar ist, sollte dieser Bereich das Problem klar erklären, anstatt die Seite leer zu lassen.",
+          },
+          memoryPrimary: {
+            title: "Speicher kartiert langlebigen Kontext",
+            description:
+              "Nutzen Sie diesen Bereich, um zu prüfen, was der Arbeitsbereich lernt, clustert und für Bots verfügbar hält.",
+          },
+          costsPrimary: {
+            title: "Kosten erklärt Verbrauch und Effizienz",
+            description:
+              "Diese Seite hilft, Ausgaben, Verteilung und operative Auswirkung über Bots und Zeitfenster hinweg zu vergleichen.",
+          },
+          schedulesPrimary: {
+            title: "Zeitpläne zentralisiert Routinen",
+            description:
+              "Überprüfen Sie Takt, pausierte Jobs und Automatisierungsabdeckung hier, wenn Sie wiederkehrende Arbeit inspizieren müssen.",
+          },
+          dlqPrimary: {
+            title: "Dead-Letter-Queue isoliert Fehler",
+            description:
+              "Kommen Sie hierher, um Wiederholungen, Rohfehlerzustände und Wiederherstellungsentscheidungen zu prüfen, wenn Aufgaben vom Happy Path abweichen.",
+          },
+          systemSettingsPrimary: {
+            title: "Systemeinstellungen enthält die globale Governance",
+            description:
+              "Hier werden Anbieter, Standards und gemeinsame Steuerungen für den gesamten Arbeitsbereich konfiguriert.",
+          },
+        },
+        complete: {
+          title: "Sie sind bereit, Koda zu erkunden",
+          description:
+            "Öffnen Sie die Tour jederzeit aus Docs erneut, wenn Sie eine Auffrischung oder ein Nebenkapitel möchten.",
+        },
+      },
+      agentSwitcher: {
+        placeholder: "Bot auswählen",
+        ariaSingle: "Bot auswählen",
+        ariaMultiple: "Bots auswählen",
+        searchPlaceholder: "Bot suchen",
+        allAgents: "Alle Bots",
+        agentsVisible: "{{count}} Bots sichtbar",
+        agentsSelected: "{{count}} Bots ausgewählt",
+        agentsSelectedOutOfTotal: "{{selected}} von {{total}} Bots ausgewählt",
+        noAgentFilter: "Kein Bot-Filter",
+        selectOne: "Bot wählen",
+        noResults: "Keine Bots gefunden",
+      },
+      async: {
+        loading: "Lädt",
+        updating: "Aktualisierung",
+        synced: "Synchronisiert",
+        ready: "Bereit",
+        retry: "Erneut versuchen",
+      },
+      statuses: {
+        all: "Alle",
+        completed: "Abgeschlossen",
+        running: "Läuft",
+        queued: "In Warteschlange",
+        failed: "Fehlgeschlagen",
+        retrying: "Wiederholung",
+      },
+      costs: {
+        filters: {
+          agents: "Bots",
+          period: "Zeitraum",
+          model: "Modell",
+          taskType: "Aufgabentyp",
+          periods: {
+            "7d": "7 Tage",
+            "30d": "30 Tage",
+            "90d": "90 Tage",
+          },
+        },
+        mode: {
+          byAgent: "Nach Bot",
+          byModel: "Nach Modell",
+        },
+        kpis: {
+          totalPeriod: "Gesamt im Zeitraum",
+          today: "Heute",
+          costPerResolved: "Kosten pro gelöster Unterhaltung",
+          peakBucket: "Spitze im Zeitraum",
+        },
+        chart: {
+          eyebrow: "Zeitlicher Ursprung",
+          title: "Wo im Zeitraum Kosten entstehen",
+          description:
+            "Gestapelte Buckets zur Offenlegung von Spitzen, Streuung und dem dominanten Kostenfaktor.",
+        },
+        allocation: {
+          eyebrow: "Zuteilung",
+          title: "Zuteilung des Verbrauchs",
+          description: "Eine kompakte Darstellung, wo sich die Kosten im aktuellen Schnitt konzentrieren.",
+        },
+        ledger: {
+          eyebrow: "Kostenbuch",
+          title: "Operationen nach Kosten",
+          count: "{{count}} Einträge",
+        },
+      },
+      executions: {
+        searchPlaceholder: "Abfrage, Sitzung oder Modell suchen",
+        unavailable: "Ausführungen nicht verfügbar",
+        loadError: "Ausführungen konnten nicht geladen werden.",
+        noSelection: "Keine Ausführung ausgewählt.",
+        retryLabel: "Wiederholung",
+      },
+      sessions: {
+        searchPlaceholder: "Nach Sitzung, Name oder letzter Nachricht suchen",
+        noSelection: "Keine Unterhaltung ausgewählt.",
+        loadError: "Die Unterhaltung konnte nicht geladen werden.",
+        chatWithAgent: "Mit {{bot}} chatten",
+        composerHelper:
+          "Die Oberfläche ist bereit für den Bot-Unterhaltungsablauf. Der tatsächliche Versand hängt vom Laufzeit-Endpunkt ab.",
+        composerIdle:
+          "Wählen Sie eine Unterhaltung, um den Verlauf zu erkunden oder eine neue Interaktion vorzubereiten.",
+        sendUnavailable:
+          "Diese Bot-Laufzeit bietet noch keinen HTTP-Endpunkt für den Koda-Webchat an.",
+      },
+      memory: {
+        views: {
+          map: "Speicher",
+          curation: "Kuration",
+        },
+        filters: {
+          title: "Filter",
+          intro:
+            "Passen Sie den Ausschnitt nach Benutzer, Sitzung, Zeit und Speichertypen an, bevor Sie Kartenverbindungen erkunden.",
+          search: "In Karte suchen",
+          searchPlaceholder: "Inhalt, Quelle oder Lernen...",
+          user: "Benutzer",
+          session: "Sitzung",
+          timeWindow: "Zeitfenster",
+          includeInactive: "Inaktive Speicher einschließen",
+          edges: {
+            semantic: "Semantisch",
+            session: "Sitzung",
+            source: "Quelle",
+          },
+        },
+        empty: {
+          title: "Es gibt noch keine Speicher anzuzeigen",
+          description:
+            "Sobald dieser Bot beginnt, Fakten, Entscheidungen, Aufgaben oder Probleme zu konsolidieren, organisiert die Karte diese Speicher zu einem lebendigen Netz aus Kontext und Lernen.",
+        },
+      },
+      schedules: {
+        loading: "Lädt",
+        jobs: "Zeitpläne",
+        active: "aktiv",
+      },
+      dlq: {
+        filters: {
+          all: "Alle",
+          eligible: "Wiederholung möglich",
+          ineligible: "Keine Wiederholung",
+        },
+      },
+      controlPlane: {
+        botCreate: {
+          promptPlaceholder:
+            "Sie sind ein spezialisierter Assistent für...\n\nIhr Ziel ist es, Benutzern zu helfen bei...\n\nRegeln:\n- Klar und sachlich sein\n- Stets auf Deutsch antworten",
+        },
+      },
+      settings: {
+        sections: {
+          general: {
+            label: "Allgemein",
+            description: "Zeitzone und regionale Einstellungen.",
+          },
+          models: {
+            label: "Modelle und Anbieter",
+            description: "KI-Anbieter, Modellauswahl und Nutzungskontrollen.",
+          },
+          integrations: {
+            label: "Integrationen",
+            description: "Externe Dienste und MCP-Server wie Jira, Google, Datenbanken und kuratierte Tool-Brücken.",
+          },
+          providers: {
+            label: "Anbieter",
+            description: "KI-Anbieter für Sprachmodelle, Stimme und Medien.",
+          },
+          mcp: {
+            label: "MCP-Server",
+            description: "Model-Context-Protocol-Server zur Erweiterung von Agenten-Tools.",
+          },
+          intelligence: {
+            label: "Intelligenz",
+            description: "Speicher-, Wissens- und Autonomie-Governance.",
+          },
+          variables: {
+            label: "Variablen und Geheimnisse",
+            description: "Systemvariablen und Geheimnisse für Agentenoperationen.",
+          },
+        },
+      },
+      auth: {
+        login: {
+          title: "Willkommen zurück",
+          subtitle: "Melden Sie sich an, um auf den operativen Arbeitsbereich zuzugreifen.",
+          identifier: "E-Mail oder Benutzername",
+          password: "Passwort",
+          submit: "Anmelden",
+          submitting: "Anmeldung...",
+          forgot_link: "Passwort oder Wiederherstellungscode vergessen?",
+          generic_error: "Die angegebenen Zugangsdaten stimmen nicht überein. Bitte erneut versuchen.",
+        },
+        forgot: {
+          title: "Zugriff wiederherstellen",
+          subtitle: "Verwenden Sie einen Wiederherstellungscode, um ein neues Passwort festzulegen.",
+          identifier: "E-Mail oder Benutzername",
+          recovery_code: "Wiederherstellungscode",
+          new_password: "Neues Passwort",
+          confirm_password: "Neues Passwort bestätigen",
+          submit: "Passwort zurücksetzen",
+          submitting: "Zurücksetzen...",
+          back_to_login: "Zurück zur Anmeldung",
+          success_title: "Passwort aktualisiert",
+          success: "Sie können sich jetzt mit Ihrem neuen Passwort anmelden.",
+          password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
+          password_mismatch: "Die Passwörter stimmen nicht überein.",
+          generic_error: "Die angegebenen Informationen sind ungültig oder abgelaufen. Bitte erneut versuchen.",
+        },
+        setup: {
+          create_account: {
+            title: "Besitzerkonto erstellen",
+            subtitle: "Richten Sie den ersten Operator ein, um den Arbeitsbereich freizuschalten.",
+            email: "Geschäftliche E-Mail",
+            password: "Passwort",
+            password_hint: "Mindestens 12 Zeichen.",
+            confirm_password: "Passwort bestätigen",
+            bootstrap_code: "Bootstrap-Code",
+            bootstrap_hint: "Verwenden Sie den vom Installer einmalig ausgegebenen Bootstrap-Code.",
+            bootstrap_hint_generic: "Geben Sie den für diese Instanz ausgegebenen Bootstrap-Code ein.",
+            submit: "Konto erstellen",
+            submitting: "Erstellen...",
+            errors: {
+              bootstrap_required: "Der Bootstrap-Code ist erforderlich.",
+              email_invalid: "Geben Sie eine gültige E-Mail-Adresse ein.",
+              password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
+              password_mismatch: "Die Passwörter stimmen nicht überein.",
+              generic: "Das Konto konnte nicht erstellt werden. Bitte erneut versuchen.",
+            },
+          },
+          recovery_codes: {
+            title: "Speichern Sie Ihre Wiederherstellungscodes",
+            subtitle: "Bewahren Sie diese Codes sicher auf. Jeder Code funktioniert nur einmal.",
+            file_header: "Koda-Wiederherstellungscodes",
+            copy_all: "Alle kopieren",
+            copied: "Kopiert",
+            download: "Herunterladen",
+            print: "Drucken",
+            saved_checkbox: "Ich habe die Wiederherstellungscodes sicher aufbewahrt.",
+            continue: "Weiter zum Arbeitsbereich",
+            already_shown_banner: "Diese Codes werden nicht erneut angezeigt.",
+          },
+        },
+        settings: {
+          security: {
+            title: "Sicherheit",
+            change_password: "Passwort ändern",
+            need_current_password: "Geben Sie Ihr aktuelles Passwort ein, um fortzufahren.",
+            regenerate_codes: "Wiederherstellungscodes neu generieren",
+            codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
         },
       },
@@ -2058,6 +3605,74 @@ export const literalResources = {
     "Perfil salvo com sucesso.": "Perfil guardado con éxito.",
     "Erro ao salvar perfil.": "Error al guardar el perfil.",
   },
+  "fr-FR": {
+    "Ativo": "Actif",
+    "Pausado": "En pause",
+    "Movendo": "Déplacement",
+    "Sem modelo definido": "Aucun modèle défini",
+    "Selecionar": "Sélectionner",
+    "Desselecionar": "Désélectionner",
+    "Agente": "Agent",
+    "Agents": "Agents",
+    "Active": "Actifs",
+    "Workspace": "Espace de travail",
+    "Workspaces": "Espaces de travail",
+    "Squad": "Escouade",
+    "Squads": "Escouades",
+    "Editar": "Modifier",
+    "Duplicar": "Dupliquer",
+    "Excluir": "Supprimer",
+    "Voltar": "Retour",
+    "Próximo": "Suivant",
+    "Nome": "Nom",
+    "Tipo": "Type",
+    "Descrição": "Description",
+    "Salvar": "Enregistrer",
+    "Cancelar": "Annuler",
+    "Confirmar": "Confirmer",
+    "Bot publicado com sucesso.": "Bot publié avec succès.",
+    "Erro ao publicar.": "Erreur lors de la publication.",
+    "Bot ativado.": "Bot activé.",
+    "Bot pausado.": "Bot en pause.",
+    "Erro ao alterar status.": "Erreur lors du changement de statut.",
+    "Agentes": "Agents",
+    "Perfil salvo com sucesso.": "Profil enregistré avec succès.",
+    "Erro ao salvar perfil.": "Erreur lors de l'enregistrement du profil.",
+  },
+  "de-DE": {
+    "Ativo": "Aktiv",
+    "Pausado": "Pausiert",
+    "Movendo": "Verschieben",
+    "Sem modelo definido": "Kein Modell konfiguriert",
+    "Selecionar": "Auswählen",
+    "Desselecionar": "Abwählen",
+    "Agente": "Agent",
+    "Agents": "Agenten",
+    "Active": "Aktiv",
+    "Workspace": "Arbeitsbereich",
+    "Workspaces": "Arbeitsbereiche",
+    "Squad": "Squad",
+    "Squads": "Squads",
+    "Editar": "Bearbeiten",
+    "Duplicar": "Duplizieren",
+    "Excluir": "Löschen",
+    "Voltar": "Zurück",
+    "Próximo": "Weiter",
+    "Nome": "Name",
+    "Tipo": "Typ",
+    "Descrição": "Beschreibung",
+    "Salvar": "Speichern",
+    "Cancelar": "Abbrechen",
+    "Confirmar": "Bestätigen",
+    "Bot publicado com sucesso.": "Bot erfolgreich veröffentlicht.",
+    "Erro ao publicar.": "Fehler bei der Veröffentlichung.",
+    "Bot ativado.": "Bot aktiviert.",
+    "Bot pausado.": "Bot pausiert.",
+    "Erro ao alterar status.": "Fehler beim Ändern des Status.",
+    "Agentes": "Agenten",
+    "Perfil salvo com sucesso.": "Profil erfolgreich gespeichert.",
+    "Erro ao salvar perfil.": "Fehler beim Speichern des Profils.",
+  },
 } as const;
 
 Object.assign(literalResources["en-US"] as Record<string, string>, {
@@ -2090,7 +3705,7 @@ Object.assign(literalResources["en-US"] as Record<string, string>, {
   "Atualizar segredo local": "Update local secret",
   "Autonomy Policy JSON": "Autonomy Policy JSON",
   "Autonomy tier padrao": "Default autonomy tier",
-  "Ação {{action}} aplicada em {{botId}}.": "Action {{action}} applied to {{botId}}.",
+  "Ação {{action}} aplicada em {{agentId}}.": "Action {{action}} applied to {{agentId}}.",
   "Bot": "Bot",
   "Bot clonado com sucesso.": "Bot cloned successfully.",
   "Bot criado com sucesso.": "Bot created successfully.",
@@ -2612,7 +4227,7 @@ Object.assign(literalResources["es-ES"] as Record<string, string>, {
   "Atualizar segredo local": "Actualizar secreto local",
   "Autonomy Policy JSON": "Autonomy Policy JSON",
   "Autonomy tier padrao": "Nivel de autonomía predeterminado",
-  "Ação {{action}} aplicada em {{botId}}.": "Acción {{action}} aplicada en {{botId}}.",
+  "Ação {{action}} aplicada em {{agentId}}.": "Acción {{action}} aplicada en {{agentId}}.",
   "Bot": "Bot",
   "Bot clonado com sucesso.": "Bot clonado con éxito.",
   "Bot criado com sucesso.": "Bot creado con éxito.",
@@ -3146,6 +4761,7 @@ mutableResources["en-US"].translation.overview = {
       peakDay: "Peak day",
       peakHint: "{{count}} signals",
       longestStreak: "Longest streak",
+      days: "{{count}} days",
       days_one: "{{count}} day",
       days_other: "{{count}} days",
     },
@@ -3289,6 +4905,7 @@ mutableResources["pt-BR"].translation.overview = {
       peakDay: "Pico",
       peakHint: "{{count}} sinais",
       longestStreak: "Maior sequência",
+      days: "{{count}} dias",
       days_one: "{{count}} dia",
       days_other: "{{count}} dias",
     },
@@ -3432,6 +5049,7 @@ mutableResources["es-ES"].translation.overview = {
       peakDay: "Pico",
       peakHint: "{{count}} señales",
       longestStreak: "Racha más larga",
+      days: "{{count}} días",
       days_one: "{{count}} día",
       days_other: "{{count}} días",
     },
@@ -3536,6 +5154,288 @@ mutableResources["es-ES"].translation.overview = {
   },
 };
 
+mutableResources["fr-FR"].translation.overview = {
+  ...mutableResources["en-US"].translation.overview,
+  toolbar: {
+    visibleBots: "{{count}} agents visibles",
+  },
+  greeting: {
+    morning: "Bonjour, {{name}}",
+    afternoon: "Bon après-midi, {{name}}",
+    evening: "Bonsoir, {{name}}",
+    night: "Encore debout, {{name}} ?",
+    fallback: "Content de vous voir, {{name}}",
+  },
+  composer: {
+    placeholder: "Demandez à Koda ou lancez une tâche…",
+    submit: "Envoyer",
+    actions: {
+      runTask: "Lancer la tâche",
+      newSchedule: "Nouvelle planification",
+      newAgent: "Nouvel agent",
+      reviewMemory: "Revoir la mémoire",
+    },
+  },
+  heatmap: {
+    ...mutableResources["en-US"].translation.overview.heatmap,
+    title: "Activité des agents",
+    subtitle: "Six derniers mois de signaux d'exécution de vos agents.",
+    tooltip: "{{count}} signaux le {{date}}",
+    emptyTooltip: "{{date}} — inactif",
+    less: "moins",
+    more: "plus",
+    stats: {
+      activeDays: "Jours actifs",
+      totalSignals: "Signaux totaux",
+      peakDay: "Jour de pointe",
+      peakHint: "{{count}} signaux",
+      longestStreak: "Plus longue série",
+      days: "{{count}} jours",
+      days_one: "{{count}} jour",
+      days_other: "{{count}} jours",
+    },
+    footerActive: "{{total}} signaux d'exécution sur les {{days}} derniers jours.",
+    footerEmpty: "Aucun signal d'exécution pour l'instant — lancez une tâche pour remplir cette carte.",
+  },
+  liveAgents: {
+    title: "Agents en direct",
+    empty: "Aucun agent dans la sélection actuelle.",
+    viewAll: "Runtime",
+    active: "{{count}} actifs",
+    idle: "Inactif",
+    waiting: "En attente de base",
+  },
+  roster: {
+    empty: "Aucun agent dans la sélection actuelle.",
+    noActiveMessage: "Aucun message publié",
+    lastDelivery: "Dernière livraison {{value}}",
+    waitingFirst: "En attente de la première exécution",
+    status: {
+      running: "En cours",
+      retrying: "Nouvelle tentative",
+      queued: "En file d'attente",
+      idle: "Inactif",
+      waiting: "En attente",
+    },
+  },
+  history: {
+    title: "Activité récente",
+    subtitle: "Dernières exécutions",
+    empty: "Aucune exécution pour l'instant.",
+    noMessage: "Aucun message",
+    status: {
+      completed: "Terminé",
+      failed: "Échoué",
+      running: "En cours",
+      retrying: "Nouvelle tentative",
+      queued: "En file d'attente",
+    },
+  },
+  news: {
+    eyebrow: "Nouveautés",
+    title: "Koda 1.4",
+    body: "Nouvelle carte d'activité sur l'accueil.",
+  },
+  stats: {
+    totalTasks: "Tâches totales",
+    activeTasks: "Tâches actives",
+    totalQueries: "Requêtes totales",
+    costToday: "Coût aujourd'hui",
+    operating: "{{count}} en fonctionnement",
+    noActiveOperation: "Aucune opération active",
+    waiting: "{{count}} en attente",
+    coveragePublished: "Couverture publiée",
+    inPeriod: "{{value}} sur la période",
+  },
+  sections: {
+    recentActivityTitle: "Activité récente",
+    recentActivityDescription: "Signaux récents des agents filtrés.",
+    currentScope: "Portée actuelle",
+    livePlanTitle: "Plan en direct",
+    livePlanDescription: "Développez pour voir ce que fait chaque agent en ce moment.",
+    livePlanHint: "Le développement affiche les activités récentes de la portée filtrée.",
+    focusSingle: "Agent ciblé",
+    focusMultiple: "Derniers signaux d'agent",
+    focusDescription: "Nom, activité actuelle et dernier message publié.",
+    costsTitle: "Coûts",
+    costsDescription: "Fenêtre consolidée pour la portée filtrée.",
+    totalInPeriod: "Total sur la période",
+  },
+  activity: {
+    activeNow: "{{count}} actifs maintenant",
+    lastActivity: "Dernière activité {{value}}",
+    waiting: "En attente",
+    noBase: "Aucune base de données",
+    noPublishedActivity: "Aucune activité publiée",
+    waitingForNewExecutions: "En attente de nouvelles exécutions",
+    waitingFirstExecution: "En attente de la première exécution",
+    connectedNoRecent:
+      "Cet agent est connecté, mais n'a publié aucune nouvelle activité dans la fenêtre actuelle.",
+    botNotReady:
+      "Cet agent n'a pas encore publié suffisamment de tâches ou de messages pour alimenter le suivi.",
+    base: "base",
+    connected: "Connecté",
+    pending: "En attente",
+    queries: "requêtes",
+    noPublishedMessage: "Aucun message publié",
+    executing: "En cours",
+    lastDelivery: "Dernière livraison",
+    completed: "Terminé {{value}}",
+    failed: "Échoué {{value}}",
+    activeAt: "Actif {{value}}",
+    session: "session {{value}}",
+    attempt: "tentative {{current}}/{{max}}",
+  },
+  taskStatus: {
+    running: "En cours",
+    retrying: "Nouvelle tentative",
+    queued: "En file d'attente",
+    completed: "Terminé",
+    failed: "Échoué",
+  },
+};
+
+mutableResources["de-DE"].translation.overview = {
+  ...mutableResources["en-US"].translation.overview,
+  toolbar: {
+    visibleBots: "{{count}} sichtbare Agenten",
+  },
+  greeting: {
+    morning: "Guten Morgen, {{name}}",
+    afternoon: "Guten Tag, {{name}}",
+    evening: "Guten Abend, {{name}}",
+    night: "Noch wach, {{name}}?",
+    fallback: "Schön, Sie zu sehen, {{name}}",
+  },
+  composer: {
+    placeholder: "Koda fragen oder eine Aufgabe starten…",
+    submit: "Senden",
+    actions: {
+      runTask: "Aufgabe ausführen",
+      newSchedule: "Neuer Zeitplan",
+      newAgent: "Neuer Agent",
+      reviewMemory: "Speicher überprüfen",
+    },
+  },
+  heatmap: {
+    ...mutableResources["en-US"].translation.overview.heatmap,
+    title: "Agenten-Aktivität",
+    subtitle: "Letzte sechs Monate Ausführungssignale Ihrer Agenten.",
+    tooltip: "{{count}} Signale am {{date}}",
+    emptyTooltip: "{{date}} — inaktiv",
+    less: "weniger",
+    more: "mehr",
+    stats: {
+      activeDays: "Aktive Tage",
+      totalSignals: "Gesamte Signale",
+      peakDay: "Spitzentag",
+      peakHint: "{{count}} Signale",
+      longestStreak: "Längste Serie",
+      days: "{{count}} Tage",
+      days_one: "{{count}} Tag",
+      days_other: "{{count}} Tage",
+    },
+    footerActive: "{{total}} Ausführungssignale in den letzten {{days}} Tagen.",
+    footerEmpty: "Noch keine Ausführungssignale — starten Sie eine Aufgabe, um diese Karte zu füllen.",
+  },
+  liveAgents: {
+    title: "Live-Agenten",
+    empty: "Keine Agenten in der aktuellen Auswahl.",
+    viewAll: "Laufzeit",
+    active: "{{count}} aktiv",
+    idle: "Untätig",
+    waiting: "Warten auf Basis",
+  },
+  roster: {
+    empty: "Keine Agenten in der aktuellen Auswahl.",
+    noActiveMessage: "Keine Nachricht veröffentlicht",
+    lastDelivery: "Letzte Lieferung {{value}}",
+    waitingFirst: "Warten auf erste Ausführung",
+    status: {
+      running: "Läuft",
+      retrying: "Wiederholung",
+      queued: "In Warteschlange",
+      idle: "Untätig",
+      waiting: "Warten",
+    },
+  },
+  history: {
+    title: "Aktuelle Aktivität",
+    subtitle: "Letzte Ausführungen",
+    empty: "Noch keine Ausführungen.",
+    noMessage: "Keine Nachricht",
+    status: {
+      completed: "Abgeschlossen",
+      failed: "Fehlgeschlagen",
+      running: "Läuft",
+      retrying: "Wiederholung",
+      queued: "In Warteschlange",
+    },
+  },
+  news: {
+    eyebrow: "Neuestes",
+    title: "Koda 1.4",
+    body: "Neue Aktivitäts-Heatmap auf der Startseite.",
+  },
+  stats: {
+    totalTasks: "Gesamtaufgaben",
+    activeTasks: "Aktive Aufgaben",
+    totalQueries: "Gesamtanfragen",
+    costToday: "Kosten heute",
+    operating: "{{count}} in Betrieb",
+    noActiveOperation: "Keine aktive Operation",
+    waiting: "{{count}} wartend",
+    coveragePublished: "Veröffentlichte Abdeckung",
+    inPeriod: "{{value}} im Zeitraum",
+  },
+  sections: {
+    recentActivityTitle: "Aktuelle Aktivität",
+    recentActivityDescription: "Aktuelle Signale gefilterter Agenten.",
+    currentScope: "Aktueller Geltungsbereich",
+    livePlanTitle: "Live-Plan",
+    livePlanDescription: "Erweitern, um zu sehen, was jeder Agent gerade tut.",
+    livePlanHint: "Die Erweiterung zeigt aktuelle Aktivitäten für den gefilterten Bereich.",
+    focusSingle: "Fokussierter Agent",
+    focusMultiple: "Letzte Agent-Signale",
+    focusDescription: "Name, aktuelle Aktivität und zuletzt veröffentlichte Nachricht.",
+    costsTitle: "Kosten",
+    costsDescription: "Konsolidiertes Fenster für den gefilterten Bereich.",
+    totalInPeriod: "Gesamt im Zeitraum",
+  },
+  activity: {
+    activeNow: "{{count}} jetzt aktiv",
+    lastActivity: "Letzte Aktivität {{value}}",
+    waiting: "Warten",
+    noBase: "Keine Datenbank",
+    noPublishedActivity: "Keine veröffentlichte Aktivität",
+    waitingForNewExecutions: "Warten auf neue Ausführungen",
+    waitingFirstExecution: "Warten auf die erste Ausführung",
+    connectedNoRecent:
+      "Dieser Agent ist verbunden, hat aber im aktuellen Fenster keine neue Aktivität veröffentlicht.",
+    botNotReady:
+      "Dieser Agent hat noch nicht genügend Aufgaben oder Nachrichten veröffentlicht, um das Monitoring zu speisen.",
+    base: "Basis",
+    connected: "Verbunden",
+    pending: "Ausstehend",
+    queries: "Abfragen",
+    noPublishedMessage: "Keine veröffentlichte Nachricht",
+    executing: "Läuft",
+    lastDelivery: "Letzte Lieferung",
+    completed: "Abgeschlossen {{value}}",
+    failed: "Fehlgeschlagen {{value}}",
+    activeAt: "Aktiv {{value}}",
+    session: "Sitzung {{value}}",
+    attempt: "Versuch {{current}}/{{max}}",
+  },
+  taskStatus: {
+    running: "Läuft",
+    retrying: "Wiederholung",
+    queued: "In Warteschlange",
+    completed: "Abgeschlossen",
+    failed: "Fehlgeschlagen",
+  },
+};
+
 mutableResources["en-US"].translation.overview.activity = {
   ...mutableResources["en-US"].translation.overview.activity,
   latestExecutions: "Latest executions",
@@ -3576,6 +5476,48 @@ mutableResources["pt-BR"].translation.overview.activity = {
   waitingFirstPublishedExecution: "Aguardando primeira execução publicada para iniciar o plano vivo.",
   noRecentPublished: "Sem atividade recente publicada no recorte atual.",
   attemptLabel: "tentativa",
+};
+
+mutableResources["fr-FR"].translation.overview.activity = {
+  ...mutableResources["fr-FR"].translation.overview.activity,
+  latestExecutions: "Dernières exécutions",
+  events: "{{count}} événements",
+  noRecent: "Aucune activité récente",
+  showingRecent: "Affichage des événements les plus récents",
+  taskCompleted: "Tâche terminée",
+  taskFailed: "Tâche échouée",
+  taskStarted: "Tâche démarrée",
+  taskQueued: "Tâche en file",
+  deploy: "Déployer",
+  retry: "Réessayer",
+  noRecentExecution: "Aucune exécution récente",
+  baseConnected: "base connectée",
+  noBaseTag: "aucune base",
+  queriesCount: "{{count}} requêtes",
+  waitingFirstPublishedExecution: "En attente de la première exécution publiée pour démarrer le plan en direct.",
+  noRecentPublished: "Aucune activité récente publiée dans la sélection actuelle.",
+  attemptLabel: "tentative",
+};
+
+mutableResources["de-DE"].translation.overview.activity = {
+  ...mutableResources["de-DE"].translation.overview.activity,
+  latestExecutions: "Letzte Ausführungen",
+  events: "{{count}} Ereignisse",
+  noRecent: "Keine aktuelle Aktivität",
+  showingRecent: "Anzeige der aktuellsten Ereignisse",
+  taskCompleted: "Aufgabe abgeschlossen",
+  taskFailed: "Aufgabe fehlgeschlagen",
+  taskStarted: "Aufgabe gestartet",
+  taskQueued: "Aufgabe in Warteschlange",
+  deploy: "Bereitstellen",
+  retry: "Erneut versuchen",
+  noRecentExecution: "Keine aktuelle Ausführung",
+  baseConnected: "verbundene Basis",
+  noBaseTag: "keine Basis",
+  queriesCount: "{{count}} Abfragen",
+  waitingFirstPublishedExecution: "Warten auf die erste veröffentlichte Ausführung, um den Live-Plan zu starten.",
+  noRecentPublished: "Keine aktuelle Aktivität in der aktuellen Auswahl veröffentlicht.",
+  attemptLabel: "Versuch",
 };
 
 mutableResources["es-ES"].translation.overview.activity = {
@@ -3621,6 +5563,22 @@ mutableResources["es-ES"].translation.screenTime = {
   hourlyWindow: "ventana horaria consolidada",
   focusBots: "Bots en foco",
   items: "{{count}} elementos",
+};
+
+mutableResources["fr-FR"].translation.screenTime = {
+  aggregate: "Activité agrégée",
+  last24h: "au cours des dernières 24h",
+  hourlyWindow: "fenêtre horaire consolidée",
+  focusBots: "Bots en focus",
+  items: "{{count}} éléments",
+};
+
+mutableResources["de-DE"].translation.screenTime = {
+  aggregate: "Aggregierte Aktivität",
+  last24h: "in den letzten 24 Std.",
+  hourlyWindow: "konsolidiertes Stundenfenster",
+  focusBots: "Bots im Fokus",
+  items: "{{count}} Einträge",
 };
 
 mutableResources["en-US"].translation.executions.page = {
@@ -3674,6 +5632,40 @@ mutableResources["es-ES"].translation.executions.page = {
   },
 };
 
+mutableResources["fr-FR"].translation.executions.page = {
+  statusAll: "Toutes",
+  statusCompleted: "Terminées",
+  statusRunning: "En cours",
+  statusQueued: "En file",
+  statusFailed: "Échouées",
+  statusRetrying: "Nouvelle tentative",
+  noSelection: "Aucune exécution sélectionnée.",
+  detailLoadError: "Impossible de charger les détails de l'exécution.",
+  metrics: {
+    cost: "Coût",
+    avgDuration: "Durée moyenne",
+    tools: "Outils",
+    warnings: "Avertissements",
+  },
+};
+
+mutableResources["de-DE"].translation.executions.page = {
+  statusAll: "Alle",
+  statusCompleted: "Abgeschlossen",
+  statusRunning: "Läuft",
+  statusQueued: "In Warteschlange",
+  statusFailed: "Fehlgeschlagen",
+  statusRetrying: "Wiederholung",
+  noSelection: "Keine Ausführung ausgewählt.",
+  detailLoadError: "Ausführungsdetails konnten nicht geladen werden.",
+  metrics: {
+    cost: "Kosten",
+    avgDuration: "Durchschn. Dauer",
+    tools: "Tools",
+    warnings: "Warnungen",
+  },
+};
+
 mutableResources["en-US"].translation.executions.table = {
   richTrace: "Rich trace",
   rebuilt: "Rebuilt",
@@ -3714,6 +5706,34 @@ mutableResources["es-ES"].translation.executions.table = {
   noResults: "No se encontró ninguna ejecución.",
   tools: "Herramientas",
   warnings: "Avisos",
+};
+
+mutableResources["fr-FR"].translation.executions.table = {
+  richTrace: "Trace riche",
+  rebuilt: "Reconstruit",
+  noTrace: "Aucun trace",
+  execution: "Exécution",
+  queryColumn: "Requête",
+  trace: "Trace",
+  noQuery: "Aucune requête",
+  noQueryRegistered: "Aucune requête enregistrée",
+  noResults: "Aucune exécution trouvée.",
+  tools: "Outils",
+  warnings: "Avertissements",
+};
+
+mutableResources["de-DE"].translation.executions.table = {
+  richTrace: "Umfangreicher Trace",
+  rebuilt: "Neu aufgebaut",
+  noTrace: "Kein Trace",
+  execution: "Ausführung",
+  queryColumn: "Abfrage",
+  trace: "Trace",
+  noQuery: "Keine Abfrage",
+  noQueryRegistered: "Keine Abfrage erfasst",
+  noResults: "Keine Ausführungen gefunden.",
+  tools: "Tools",
+  warnings: "Warnungen",
 };
 
 mutableResources["en-US"].translation.sessions.page = {
@@ -3785,6 +5805,52 @@ mutableResources["es-ES"].translation.sessions.page = {
   },
 };
 
+mutableResources["fr-FR"].translation.sessions.page = {
+  openConversations: "Ouvrir les conversations",
+  botChat: "Discussion avec le bot",
+  chooseBot: "Choisissez un bot",
+  conversationInfo: "Informations sur la conversation",
+  activity: "activité {{value}}",
+  loadingHistory: "Chargement de l'historique...",
+  availableConversations_one: "{{count}} conversation",
+  availableConversations_other: "{{count}} conversations",
+  noAvailable: "Aucune conversation disponible",
+  chooseConversation: "Choisissez une conversation pour ouvrir l'historique",
+  switchBot: "Changez de bot dans la colonne latérale pour voir un autre historique ou attendez de nouvelles sessions.",
+  useRail: "Utilisez la colonne latérale pour naviguer entre les sessions et suivre la conversation en plein écran.",
+  selectHistory: "Sélectionnez un historique ou démarrez une nouvelle conversation",
+  botConversations: "Conversations du bot",
+  totals: {
+    messages_one: "{{count}} message",
+    messages_other: "{{count}} messages",
+    executions_one: "{{count}} exécution",
+    executions_other: "{{count}} exécutions",
+  },
+};
+
+mutableResources["de-DE"].translation.sessions.page = {
+  openConversations: "Unterhaltungen öffnen",
+  botChat: "Bot-Chat",
+  chooseBot: "Bot wählen",
+  conversationInfo: "Informationen zur Unterhaltung",
+  activity: "Aktivität {{value}}",
+  loadingHistory: "Verlauf wird geladen...",
+  availableConversations_one: "{{count}} Unterhaltung",
+  availableConversations_other: "{{count}} Unterhaltungen",
+  noAvailable: "Keine Unterhaltungen verfügbar",
+  chooseConversation: "Wählen Sie eine Unterhaltung, um den Verlauf zu öffnen",
+  switchBot: "Wechseln Sie den Bot in der Seitenleiste, um einen anderen Verlauf zu sehen, oder warten Sie auf neue Sitzungen.",
+  useRail: "Verwenden Sie die Seitenleiste, um durch Sitzungen zu navigieren und der Unterhaltung im Vollbildmodus zu folgen.",
+  selectHistory: "Wählen Sie einen Verlauf oder starten Sie eine neue Unterhaltung",
+  botConversations: "Bot-Unterhaltungen",
+  totals: {
+    messages_one: "{{count}} Nachricht",
+    messages_other: "{{count}} Nachrichten",
+    executions_one: "{{count}} Ausführung",
+    executions_other: "{{count}} Ausführungen",
+  },
+};
+
 mutableResources["en-US"].translation.sessions.rail = {
   title: "Bot conversations",
   loadingHistory: "Loading history...",
@@ -3839,6 +5905,42 @@ mutableResources["es-ES"].translation.sessions.rail = {
   messagesCount: "{{count}} msgs",
 };
 
+mutableResources["fr-FR"].translation.sessions.rail = {
+  title: "Conversations du bot",
+  loadingHistory: "Chargement de l'historique...",
+  available: "{{count}} conversations disponibles",
+  refresh: "Actualiser les conversations",
+  close: "Fermer la liste des conversations",
+  searchPlaceholder: "Rechercher par nom ou message",
+  loadError: "Impossible de charger les conversations",
+  unavailable: "Historique indisponible",
+  unavailableDescription: "Le runtime de ce bot n'a pas encore exposé les sessions au web.",
+  noResults: "Aucune conversation trouvée",
+  noResultsDescription: "Changez de bot ou ajustez la recherche pour trouver une autre session.",
+  noMessages: "Aucun message enregistré dans cette conversation.",
+  newChat: "Nouvelle discussion",
+  recent: "les plus récents",
+  messagesCount: "{{count}} msgs",
+};
+
+mutableResources["de-DE"].translation.sessions.rail = {
+  title: "Bot-Unterhaltungen",
+  loadingHistory: "Verlauf wird geladen...",
+  available: "{{count}} Unterhaltungen verfügbar",
+  refresh: "Unterhaltungen aktualisieren",
+  close: "Unterhaltungsliste schließen",
+  searchPlaceholder: "Nach Name oder Nachricht suchen",
+  loadError: "Unterhaltungen konnten nicht geladen werden",
+  unavailable: "Verlauf nicht verfügbar",
+  unavailableDescription: "Die Laufzeit dieses Bots hat die Sitzungen noch nicht für das Web bereitgestellt.",
+  noResults: "Keine Unterhaltung gefunden",
+  noResultsDescription: "Wechseln Sie den Bot oder passen Sie die Suche an, um eine andere Sitzung zu finden.",
+  noMessages: "In dieser Unterhaltung wurden keine Nachrichten erfasst.",
+  newChat: "Neuer Chat",
+  recent: "aktuellste",
+  messagesCount: "{{count}} Nachr.",
+};
+
 mutableResources["en-US"].translation.sessions.detail = {
   runningExecution: "Execution in progress",
   failedExecution: "Execution failed",
@@ -3884,6 +5986,40 @@ mutableResources["es-ES"].translation.sessions.detail = {
   noMessagesYet: "This session has not yet published messages to the queries table.",
 };
 
+mutableResources["fr-FR"].translation.sessions.detail = {
+  runningExecution: "Exécution en cours",
+  failedExecution: "Exécution échouée",
+  error: "erreur",
+  you: "Vous",
+  close: "Fermer la conversation",
+  loadError: "Impossible de charger la conversation",
+  emptyTitle: "Sélectionnez une conversation",
+  emptyDescription: "Ouvrez une session dans la liste pour suivre les messages et les exécutions liées.",
+  conversation: "Conversation",
+  sessionInProgress: "Session en cours",
+  orphanEvents: "Événements sans tour associé",
+  executionLabel: "Exécution #{{id}}",
+  toolsCount: "{{count}} outils",
+  noMessagesYet: "Cette session n'a pas encore publié de messages dans la table des requêtes.",
+};
+
+mutableResources["de-DE"].translation.sessions.detail = {
+  runningExecution: "Ausführung läuft",
+  failedExecution: "Ausführung fehlgeschlagen",
+  error: "Fehler",
+  you: "Sie",
+  close: "Unterhaltung schließen",
+  loadError: "Unterhaltung konnte nicht geladen werden",
+  emptyTitle: "Wählen Sie eine Unterhaltung",
+  emptyDescription: "Öffnen Sie eine Sitzung aus der Liste, um Nachrichten und verknüpfte Ausführungen zu verfolgen.",
+  conversation: "Unterhaltung",
+  sessionInProgress: "Sitzung läuft",
+  orphanEvents: "Ereignisse ohne zugeordneten Turn",
+  executionLabel: "Ausführung #{{id}}",
+  toolsCount: "{{count}} Tools",
+  noMessagesYet: "Diese Sitzung hat noch keine Nachrichten in der Abfragetabelle veröffentlicht.",
+};
+
 mutableResources["en-US"].translation.sessions.composer = {
   selectBot: "Select a bot to chat",
   sendingMessage: "Sending message...",
@@ -3918,6 +6054,30 @@ mutableResources["es-ES"].translation.sessions.composer = {
   syncHint: "El historial sigue sincronizándose mientras la conversación está abierta.",
   send: "Enviar",
   sending: "Enviando",
+};
+
+mutableResources["fr-FR"].translation.sessions.composer = {
+  selectBot: "Sélectionnez un bot pour discuter",
+  sendingMessage: "Envoi du message...",
+  enterToSend: "Entrée pour envoyer • Maj + Entrée pour un saut de ligne",
+  disabledPlaceholder: "L'envoi web n'est pas encore disponible pour ce bot.",
+  selectBotToStart: "Sélectionnez ici un bot spécifique pour démarrer une discussion.",
+  enabledPlaceholder: "Écrivez votre message pour démarrer ou continuer la conversation...",
+  syncHint: "L'historique continue de se synchroniser pendant que la conversation est ouverte.",
+  send: "Envoyer",
+  sending: "Envoi",
+};
+
+mutableResources["de-DE"].translation.sessions.composer = {
+  selectBot: "Wählen Sie einen Bot zum Chatten",
+  sendingMessage: "Nachricht wird gesendet...",
+  enterToSend: "Enter zum Senden • Umschalt + Enter für einen Zeilenumbruch",
+  disabledPlaceholder: "Der Web-Versand ist für diesen Bot noch nicht verfügbar.",
+  selectBotToStart: "Wählen Sie hier einen bestimmten Bot aus, um einen Chat zu starten.",
+  enabledPlaceholder: "Schreiben Sie Ihre Nachricht, um die Unterhaltung zu starten oder fortzusetzen...",
+  syncHint: "Der Verlauf wird weiter synchronisiert, solange die Unterhaltung geöffnet ist.",
+  send: "Senden",
+  sending: "Senden",
 };
 
 mutableResources["en-US"].translation.sessions.thread = {
@@ -3977,6 +6137,44 @@ mutableResources["es-ES"].translation.sessions.thread = {
   noBotDescription: "Elige un bot específico en el composer para iniciar un chat nuevo.",
 };
 
+mutableResources["fr-FR"].translation.sessions.thread = {
+  newConversation: "Nouvelle conversation",
+  lastActive: "Dernière activité {{value}}",
+  chooseBot: "Choisissez un bot",
+  activeBot: "Bot de la conversation",
+  modelUnknown: "Modèle non renseigné",
+  waitingForReply: "En attente de la réponse du bot...",
+  loadingOlder: "Chargement des messages précédents...",
+  pending: "En attente",
+  failed: "Échec de l'envoi",
+  retry: "Réessayer",
+  continueConversation: "Poursuivez la conversation actuelle.",
+  startConversationTitle: "Démarrez une nouvelle conversation",
+  startConversationDescription:
+    "Utilisez le composeur ci-dessous pour démarrer une nouvelle conversation ou choisissez une session précédente dans la boîte de réception.",
+  noBotTitle: "Sélectionnez un bot spécifique",
+  noBotDescription: "Choisissez un bot spécifique dans le composeur pour démarrer une nouvelle discussion.",
+};
+
+mutableResources["de-DE"].translation.sessions.thread = {
+  newConversation: "Neue Unterhaltung",
+  lastActive: "Letzte Aktivität {{value}}",
+  chooseBot: "Bot wählen",
+  activeBot: "Bot der Unterhaltung",
+  modelUnknown: "Modell nicht angegeben",
+  waitingForReply: "Warten auf die Antwort des Bots...",
+  loadingOlder: "Ältere Nachrichten werden geladen...",
+  pending: "Ausstehend",
+  failed: "Senden fehlgeschlagen",
+  retry: "Erneut versuchen",
+  continueConversation: "Setzen Sie die aktuelle Unterhaltung fort.",
+  startConversationTitle: "Starten Sie eine neue Unterhaltung",
+  startConversationDescription:
+    "Verwenden Sie den Composer unten, um eine neue Unterhaltung zu starten, oder wählen Sie eine frühere Sitzung aus dem Posteingang.",
+  noBotTitle: "Wählen Sie einen bestimmten Bot",
+  noBotDescription: "Wählen Sie einen bestimmten Bot im Composer, um einen neuen Chat zu starten.",
+};
+
 mutableResources["en-US"].translation.sessions.context = {
   emptyTitle: "Conversation details",
   emptyDescription:
@@ -4023,6 +6221,38 @@ mutableResources["es-ES"].translation.sessions.context = {
   userId: "ID de usuario",
   recentExecutions: "Ejecuciones recientes",
   noExecutions: "Todavía no hay ejecuciones vinculadas.",
+};
+
+mutableResources["fr-FR"].translation.sessions.context = {
+  emptyTitle: "Détails de la conversation",
+  emptyDescription:
+    "Choisissez une conversation pour examiner le statut, l'activité, les exécutions liées et les identifiants.",
+  messages: "Messages",
+  executions: "Exécutions",
+  tools: "Outils",
+  cost: "Coût",
+  createdAt: "Créée",
+  lastActivity: "Dernière activité",
+  sessionId: "ID de session",
+  userId: "ID utilisateur",
+  recentExecutions: "Exécutions récentes",
+  noExecutions: "Aucune exécution liée pour l'instant.",
+};
+
+mutableResources["de-DE"].translation.sessions.context = {
+  emptyTitle: "Unterhaltungsdetails",
+  emptyDescription:
+    "Wählen Sie eine Unterhaltung, um Status, Aktivität, verknüpfte Ausführungen und Kennungen zu prüfen.",
+  messages: "Nachrichten",
+  executions: "Ausführungen",
+  tools: "Tools",
+  cost: "Kosten",
+  createdAt: "Erstellt",
+  lastActivity: "Letzte Aktivität",
+  sessionId: "Sitzungs-ID",
+  userId: "Benutzer-ID",
+  recentExecutions: "Letzte Ausführungen",
+  noExecutions: "Noch keine verknüpften Ausführungen.",
 };
 
 mutableResources["en-US"].translation.sessions.detail = {
@@ -4137,6 +6367,343 @@ mutableResources["es-ES"].translation.schedules.table = {
   routine: "Rutina",
   summary: "Resumen",
   scope: "Alcance",
+};
+
+mutableResources["fr-FR"].translation.schedules.page = {
+  visibleBots: "Bots visibles",
+  withSchedule: "Avec planning",
+  enabled: "Activés",
+  paused: "En pause",
+  withAtLeastOne: "Bots avec au moins une routine configurée",
+  runningNormally: "Routines s'exécutant normalement",
+  registeredDisabled: "Routines enregistrées actuellement désactivées",
+  eyebrow: "Planifications",
+  title: "Routines planifiées par bot",
+  description: "Chaque carte résume les routines visibles avec cron, commande principale, portée et état opérationnel.",
+  noVisible: "Aucune routine visible pour l'instant",
+  noVisibleDescription: "Lorsque les bots sélectionnés ont des plannings, ils apparaîtront ici avec la même lecture opérationnelle que le reste de l'application.",
+  routines: "{{count}} routines",
+  active: "{{count}} actifs",
+  configured: "{{count}} configurés",
+  configuredDescription: "Vue consolidée des routines configurées pour ce bot.",
+  pausedCount: "{{count}} en pause",
+};
+
+mutableResources["de-DE"].translation.schedules.page = {
+  visibleBots: "Sichtbare Bots",
+  withSchedule: "Mit Zeitplan",
+  enabled: "Aktiviert",
+  paused: "Pausiert",
+  withAtLeastOne: "Bots mit mindestens einer konfigurierten Routine",
+  runningNormally: "Routinen laufen normal",
+  registeredDisabled: "Registrierte, aber deaktivierte Routinen",
+  eyebrow: "Zeitpläne",
+  title: "Geplante Routinen pro Bot",
+  description: "Jede Karte fasst die sichtbaren Routinen mit Cron, Hauptbefehl, Geltungsbereich und operativem Status zusammen.",
+  noVisible: "Derzeit keine sichtbaren Routinen",
+  noVisibleDescription: "Wenn die ausgewählten Bots Zeitpläne haben, erscheinen sie hier mit derselben operativen Lesart wie im Rest der Anwendung.",
+  routines: "{{count}} Routinen",
+  active: "{{count}} aktiv",
+  configured: "{{count}} konfiguriert",
+  configuredDescription: "Konsolidierte Ansicht der für diesen Bot konfigurierten Routinen.",
+  pausedCount: "{{count}} pausiert",
+};
+
+mutableResources["fr-FR"].translation.schedules.table = {
+  noRoutine: "Aucune routine configurée pour {{bot}}",
+  noRoutineDescription: "Lorsque des plannings actifs ou en pause existent, ils apparaîtront ici en format opérationnel.",
+  noSummary: "Aucun résumé configuré",
+  noDirectory: "Aucun répertoire",
+  schedule: "Planning",
+  routine: "Routine",
+  summary: "Résumé",
+  scope: "Portée",
+};
+
+mutableResources["de-DE"].translation.schedules.table = {
+  noRoutine: "Keine Routinen für {{bot}} konfiguriert",
+  noRoutineDescription: "Wenn aktive oder pausierte Zeitpläne vorhanden sind, erscheinen sie hier im operativen Format.",
+  noSummary: "Keine Zusammenfassung konfiguriert",
+  noDirectory: "Kein Verzeichnis",
+  schedule: "Zeitplan",
+  routine: "Routine",
+  summary: "Zusammenfassung",
+  scope: "Geltungsbereich",
+};
+
+mutableResources["en-US"].translation.schedules.inspector = {
+  eyebrow: "Inspector",
+  jobTitle: "Job #{{id}}",
+  detailFallback: "Schedule detail",
+  loadingDetail: "Loading schedule detail…",
+  currentStatus: "Current status",
+  status: "Status",
+  unknown: "unknown",
+  nextRun: "Next run",
+  pendingValidation: "pending validation",
+  version: "Version",
+  runtimeTask: "Runtime task",
+  phase: "Phase",
+  recentRuns: "Recent runs",
+  noRunsYet: "No runs yet.",
+  auditTrail: "Audit trail",
+  noEventsYet: "No events yet.",
+  selectToInspect: "Select a job to inspect or edit it.",
+  trigger: "Trigger",
+  timezone: "Timezone",
+  scheduleExpression: "Schedule expression",
+  reminderText: "Reminder text",
+  command: "Command",
+  query: "Query",
+  description: "Description",
+  workDir: "Work dir",
+  notificationMode: "Notification mode",
+  verificationMode: "Verification mode",
+  triggerTypes: {
+    one_shot: "One-shot",
+    interval: "Interval",
+    cron: "Cron",
+  },
+  actions: {
+    saveChanges: "Save changes",
+    queueValidation: "Queue validation",
+    archiveJob: "Archive job",
+    refreshDetail: "Refresh detail",
+  },
+  lifecycle: {
+    update: "Update job",
+    pause: "Pause job",
+    resume: "Resume job",
+    activate: "Activate job",
+    resumeFailedOpen: "Resume failed-open job",
+    queueValidation: "Queue validation",
+    activateOrResume: "Activate or resume",
+  },
+  messages: {
+    updated: "Schedule updated.",
+    updateFailed: "Unable to update schedule",
+    updateReason: "Updated from schedules page",
+  },
+};
+
+mutableResources["pt-BR"].translation.schedules.inspector = {
+  eyebrow: "Inspetor",
+  jobTitle: "Job #{{id}}",
+  detailFallback: "Detalhe do agendamento",
+  loadingDetail: "Carregando detalhes do agendamento…",
+  currentStatus: "Status atual",
+  status: "Status",
+  unknown: "desconhecido",
+  nextRun: "Próxima execução",
+  pendingValidation: "aguardando validação",
+  version: "Versão",
+  runtimeTask: "Tarefa de runtime",
+  phase: "Fase",
+  recentRuns: "Execuções recentes",
+  noRunsYet: "Nenhuma execução ainda.",
+  auditTrail: "Trilha de auditoria",
+  noEventsYet: "Nenhum evento ainda.",
+  selectToInspect: "Selecione um job para inspecionar ou editar.",
+  trigger: "Gatilho",
+  timezone: "Fuso horário",
+  scheduleExpression: "Expressão do agendamento",
+  reminderText: "Texto do lembrete",
+  command: "Comando",
+  query: "Consulta",
+  description: "Descrição",
+  workDir: "Diretório de trabalho",
+  notificationMode: "Modo de notificação",
+  verificationMode: "Modo de verificação",
+  triggerTypes: {
+    one_shot: "Uma vez",
+    interval: "Intervalo",
+    cron: "Cron",
+  },
+  actions: {
+    saveChanges: "Salvar alterações",
+    queueValidation: "Enfileirar validação",
+    archiveJob: "Arquivar job",
+    refreshDetail: "Atualizar detalhes",
+  },
+  lifecycle: {
+    update: "Atualizar job",
+    pause: "Pausar job",
+    resume: "Retomar job",
+    activate: "Ativar job",
+    resumeFailedOpen: "Retomar job em failed-open",
+    queueValidation: "Enfileirar validação",
+    activateOrResume: "Ativar ou retomar",
+  },
+  messages: {
+    updated: "Agendamento atualizado.",
+    updateFailed: "Não foi possível atualizar o agendamento",
+    updateReason: "Atualizado a partir da página de agendamentos",
+  },
+};
+
+mutableResources["es-ES"].translation.schedules.inspector = {
+  eyebrow: "Inspector",
+  jobTitle: "Tarea #{{id}}",
+  detailFallback: "Detalle de la programación",
+  loadingDetail: "Cargando detalles de la programación…",
+  currentStatus: "Estado actual",
+  status: "Estado",
+  unknown: "desconocido",
+  nextRun: "Próxima ejecución",
+  pendingValidation: "pendiente de validación",
+  version: "Versión",
+  runtimeTask: "Tarea en runtime",
+  phase: "Fase",
+  recentRuns: "Ejecuciones recientes",
+  noRunsYet: "Aún no hay ejecuciones.",
+  auditTrail: "Registro de auditoría",
+  noEventsYet: "Aún no hay eventos.",
+  selectToInspect: "Selecciona una tarea para inspeccionar o editar.",
+  trigger: "Disparador",
+  timezone: "Zona horaria",
+  scheduleExpression: "Expresión de programación",
+  reminderText: "Texto del recordatorio",
+  command: "Comando",
+  query: "Consulta",
+  description: "Descripción",
+  workDir: "Directorio de trabajo",
+  notificationMode: "Modo de notificación",
+  verificationMode: "Modo de verificación",
+  triggerTypes: {
+    one_shot: "Una vez",
+    interval: "Intervalo",
+    cron: "Cron",
+  },
+  actions: {
+    saveChanges: "Guardar cambios",
+    queueValidation: "Encolar validación",
+    archiveJob: "Archivar tarea",
+    refreshDetail: "Actualizar detalle",
+  },
+  lifecycle: {
+    update: "Actualizar tarea",
+    pause: "Pausar tarea",
+    resume: "Reanudar tarea",
+    activate: "Activar tarea",
+    resumeFailedOpen: "Reanudar tarea en failed-open",
+    queueValidation: "Encolar validación",
+    activateOrResume: "Activar o reanudar",
+  },
+  messages: {
+    updated: "Programación actualizada.",
+    updateFailed: "No se pudo actualizar la programación",
+    updateReason: "Actualizado desde la página de programaciones",
+  },
+};
+
+mutableResources["fr-FR"].translation.schedules.inspector = {
+  eyebrow: "Inspecteur",
+  jobTitle: "Tâche #{{id}}",
+  detailFallback: "Détail du planning",
+  loadingDetail: "Chargement des détails du planning…",
+  currentStatus: "Statut actuel",
+  status: "Statut",
+  unknown: "inconnu",
+  nextRun: "Prochaine exécution",
+  pendingValidation: "validation en attente",
+  version: "Version",
+  runtimeTask: "Tâche runtime",
+  phase: "Phase",
+  recentRuns: "Exécutions récentes",
+  noRunsYet: "Aucune exécution pour l'instant.",
+  auditTrail: "Piste d'audit",
+  noEventsYet: "Aucun événement pour l'instant.",
+  selectToInspect: "Sélectionnez une tâche pour l'inspecter ou la modifier.",
+  trigger: "Déclencheur",
+  timezone: "Fuseau horaire",
+  scheduleExpression: "Expression de planification",
+  reminderText: "Texte du rappel",
+  command: "Commande",
+  query: "Requête",
+  description: "Description",
+  workDir: "Répertoire de travail",
+  notificationMode: "Mode de notification",
+  verificationMode: "Mode de vérification",
+  triggerTypes: {
+    one_shot: "Unique",
+    interval: "Intervalle",
+    cron: "Cron",
+  },
+  actions: {
+    saveChanges: "Enregistrer les modifications",
+    queueValidation: "Mettre en file la validation",
+    archiveJob: "Archiver la tâche",
+    refreshDetail: "Actualiser le détail",
+  },
+  lifecycle: {
+    update: "Mettre à jour la tâche",
+    pause: "Mettre la tâche en pause",
+    resume: "Reprendre la tâche",
+    activate: "Activer la tâche",
+    resumeFailedOpen: "Reprendre la tâche en failed-open",
+    queueValidation: "Mettre en file la validation",
+    activateOrResume: "Activer ou reprendre",
+  },
+  messages: {
+    updated: "Planning mis à jour.",
+    updateFailed: "Impossible de mettre à jour le planning",
+    updateReason: "Mis à jour depuis la page des plannings",
+  },
+};
+
+mutableResources["de-DE"].translation.schedules.inspector = {
+  eyebrow: "Inspektor",
+  jobTitle: "Aufgabe #{{id}}",
+  detailFallback: "Zeitplan-Detail",
+  loadingDetail: "Zeitplan-Details werden geladen…",
+  currentStatus: "Aktueller Status",
+  status: "Status",
+  unknown: "unbekannt",
+  nextRun: "Nächste Ausführung",
+  pendingValidation: "Validierung ausstehend",
+  version: "Version",
+  runtimeTask: "Laufzeit-Aufgabe",
+  phase: "Phase",
+  recentRuns: "Letzte Ausführungen",
+  noRunsYet: "Noch keine Ausführungen.",
+  auditTrail: "Prüfpfad",
+  noEventsYet: "Noch keine Ereignisse.",
+  selectToInspect: "Wählen Sie eine Aufgabe aus, um sie zu prüfen oder zu bearbeiten.",
+  trigger: "Auslöser",
+  timezone: "Zeitzone",
+  scheduleExpression: "Zeitplan-Ausdruck",
+  reminderText: "Erinnerungstext",
+  command: "Befehl",
+  query: "Abfrage",
+  description: "Beschreibung",
+  workDir: "Arbeitsverzeichnis",
+  notificationMode: "Benachrichtigungsmodus",
+  verificationMode: "Verifizierungsmodus",
+  triggerTypes: {
+    one_shot: "Einmalig",
+    interval: "Intervall",
+    cron: "Cron",
+  },
+  actions: {
+    saveChanges: "Änderungen speichern",
+    queueValidation: "Validierung einreihen",
+    archiveJob: "Aufgabe archivieren",
+    refreshDetail: "Detail aktualisieren",
+  },
+  lifecycle: {
+    update: "Aufgabe aktualisieren",
+    pause: "Aufgabe pausieren",
+    resume: "Aufgabe fortsetzen",
+    activate: "Aufgabe aktivieren",
+    resumeFailedOpen: "Failed-open-Aufgabe fortsetzen",
+    queueValidation: "Validierung einreihen",
+    activateOrResume: "Aktivieren oder fortsetzen",
+  },
+  messages: {
+    updated: "Zeitplan aktualisiert.",
+    updateFailed: "Zeitplan konnte nicht aktualisiert werden",
+    updateReason: "Von der Zeitpläne-Seite aktualisiert",
+  },
 };
 
 mutableResources["en-US"].translation.dlq.page = {
@@ -4254,6 +6821,84 @@ mutableResources["es-ES"].translation.dlq.table = {
   waitingDecision: "Esperando decisión",
   noErrorMessage: "Sin mensaje de error",
   noFailures: "No hay fallos registrados.",
+};
+
+mutableResources["fr-FR"].translation.dlq.page = {
+  all: "Tous",
+  retryEligible: "Éligible à la réexécution",
+  noRetry: "Pas de réexécution",
+  failures: "{{count}} échecs",
+  visibleFailures: "Échecs visibles",
+  orderedByRecent: "Triés par échec le plus récent",
+  alreadyRetried: "Déjà réessayés",
+  affectedBots: "Bots affectés",
+  retryEligibleHint: "Entrées toujours éligibles au retraitement",
+  alreadyRetriedHint: "Échecs qui ont déjà eu une nouvelle tentative",
+  actionTitle: "Échecs nécessitant une action opérationnelle",
+  actionDescription: "Sélectionnez une entrée pour ouvrir le diagnostic complet, examiner le contexte et décider de l'étape suivante.",
+  unavailable: "File des messages non distribués indisponible",
+  unavailableDescription: "Impossible de synchroniser les échecs des bots visibles pour le moment.",
+  emptyEligible: "Aucun échec prêt à être réessayé",
+  emptyEligibleDescription: "Les entrées éligibles réapparaîtront ici lorsque de nouveaux échecs pourront encore être retraités.",
+  emptyIneligible: "Aucun échec bloqué pour réessai",
+  emptyIneligibleDescription: "Les échecs nécessitant une action manuelle sont listés ici lorsqu'il existe des entrées sans réessai possible.",
+  emptyDefault: "Aucun échec en attente dans la file des messages non distribués",
+  emptyDefaultDescription: "Les bots visibles n'ont aucun échec en attente pour le moment.",
+};
+
+mutableResources["de-DE"].translation.dlq.page = {
+  all: "Alle",
+  retryEligible: "Wiederholung möglich",
+  noRetry: "Keine Wiederholung",
+  failures: "{{count}} Fehler",
+  visibleFailures: "Sichtbare Fehler",
+  orderedByRecent: "Geordnet nach aktuellstem Fehler",
+  alreadyRetried: "Bereits wiederholt",
+  affectedBots: "Betroffene Bots",
+  retryEligibleHint: "Einträge, die noch für eine erneute Verarbeitung in Frage kommen",
+  alreadyRetriedHint: "Fehler, die bereits einen weiteren Versuch hatten",
+  actionTitle: "Fehler, die operatives Eingreifen erfordern",
+  actionDescription: "Wählen Sie einen Eintrag, um die vollständige Diagnose zu öffnen, den Kontext zu prüfen und den nächsten Schritt zu entscheiden.",
+  unavailable: "Dead-Letter-Queue nicht verfügbar",
+  unavailableDescription: "Die Fehler der sichtbaren Bots konnten derzeit nicht synchronisiert werden.",
+  emptyEligible: "Keine Fehler bereit für erneuten Versuch",
+  emptyEligibleDescription: "Berechtigte Einträge erscheinen hier wieder, wenn neue Fehler noch erneut verarbeitet werden können.",
+  emptyIneligible: "Keine blockierten Fehler für erneuten Versuch",
+  emptyIneligibleDescription: "Fehler, die manuelles Handeln erfordern, werden hier aufgelistet, wenn Einträge ohne verfügbare Wiederholung vorhanden sind.",
+  emptyDefault: "Keine ausstehenden Fehler in der Dead-Letter-Queue",
+  emptyDefaultDescription: "Die sichtbaren Bots haben derzeit keine ausstehenden Fehler.",
+};
+
+mutableResources["fr-FR"].translation.dlq.table = {
+  canRetry: "Peut être réessayé",
+  retried: "Réessayé",
+  noRetry: "Pas de réessai",
+  entry: "Entrée",
+  origin: "Origine",
+  error: "Erreur",
+  lastFailure: "Dernier échec",
+  noBot: "Aucun bot lié",
+  modelUnknown: "Modèle non renseigné",
+  alreadyReprocessed: "Déjà retraité",
+  waitingDecision: "En attente de décision",
+  noErrorMessage: "Aucun message d'erreur",
+  noFailures: "Aucun échec enregistré.",
+};
+
+mutableResources["de-DE"].translation.dlq.table = {
+  canRetry: "Kann wiederholt werden",
+  retried: "Wiederholt",
+  noRetry: "Keine Wiederholung",
+  entry: "Eintrag",
+  origin: "Quelle",
+  error: "Fehler",
+  lastFailure: "Letzter Fehler",
+  noBot: "Kein verknüpfter Bot",
+  modelUnknown: "Modell nicht angegeben",
+  alreadyReprocessed: "Bereits erneut verarbeitet",
+  waitingDecision: "Wartet auf Entscheidung",
+  noErrorMessage: "Keine Fehlermeldung",
+  noFailures: "Keine Fehler erfasst.",
 };
 
 mutableResources["en-US"].translation.memory.curation = {
@@ -4400,6 +7045,102 @@ mutableResources["es-ES"].translation.memory.curation = {
   },
 };
 
+mutableResources["fr-FR"].translation.memory.curation = {
+  mode: "Mode",
+  states: "État",
+  type: "Type",
+  search: "Recherche",
+  allStates: "Tous les états",
+  allTypes: "Tous les types",
+  searchPlaceholder: "Rechercher par contenu, origine ou session...",
+  selectedCount_one: "{{count}} élément sélectionné",
+  selectedCount_other: "{{count}} éléments sélectionnés",
+  memories: "Mémoires",
+  clusters: "Clusters",
+  clustersAndLearning: "Clusters / apprentissages",
+  pendingCount: "{{count}} en attente",
+  noMemoryFound: "Aucune mémoire trouvée",
+  noClusterFound: "Aucun regroupement trouvé",
+  adjustFilters: "Ajustez la recherche et les filtres pour retrouver des éléments pertinents.",
+  sortHint: "plus récents",
+  detailLoadError: "Impossible de charger le détail.",
+  actionError: "Impossible d'appliquer l'action.",
+  kpis: {
+    pendingMemories: "Mémoires en attente",
+    pendingMemoriesMeta: "en attente de décision éditoriale",
+    pendingClusters: "Clusters en attente",
+    pendingClustersMeta: "apprentissages sans décision",
+    expiringSoon: "Expirent bientôt",
+    expiringSoonMeta: "expirent dans les 7 prochains jours",
+    reviewed7d: "Révisées en 7 jours",
+    reviewed7dMeta: "{{approved}} approuvées · {{merged}} fusionnées · {{discarded}} rejetées",
+  },
+  actions: {
+    approve: "Approuver",
+    expire: "Expirer",
+    archive: "Archiver",
+    discard: "Rejeter",
+    restore: "Restaurer",
+    merge: "Fusionner",
+    mergeTarget: "Cible de la fusion",
+    mergeSelectedHint: "Fusionne les mémoires sélectionnées dans la première sélectionnée.",
+    mergeChooseHint: "Choisissez une mémoire cible pour la fusion.",
+  },
+  row: {
+    select: "Sélectionner {{title}}",
+    sessionCount_one: "{{count}} session",
+    sessionCount_other: "{{count}} sessions",
+  },
+};
+
+mutableResources["de-DE"].translation.memory.curation = {
+  mode: "Modus",
+  states: "Zustand",
+  type: "Typ",
+  search: "Suche",
+  allStates: "Alle Zustände",
+  allTypes: "Alle Typen",
+  searchPlaceholder: "Nach Inhalt, Quelle oder Sitzung suchen...",
+  selectedCount_one: "{{count}} Element ausgewählt",
+  selectedCount_other: "{{count}} Elemente ausgewählt",
+  memories: "Speicher",
+  clusters: "Cluster",
+  clustersAndLearning: "Cluster / Lernen",
+  pendingCount: "{{count}} ausstehend",
+  noMemoryFound: "Kein Speicher gefunden",
+  noClusterFound: "Keine Gruppierung gefunden",
+  adjustFilters: "Passen Sie Suche und Filter an, um relevante Elemente wiederzufinden.",
+  sortHint: "aktuellste",
+  detailLoadError: "Detail konnte nicht geladen werden.",
+  actionError: "Aktion konnte nicht angewendet werden.",
+  kpis: {
+    pendingMemories: "Ausstehende Speicher",
+    pendingMemoriesMeta: "warten auf redaktionelle Entscheidung",
+    pendingClusters: "Ausstehende Cluster",
+    pendingClustersMeta: "Lerninhalte ohne Entscheidung",
+    expiringSoon: "Laufen bald ab",
+    expiringSoonMeta: "laufen in den nächsten 7 Tagen ab",
+    reviewed7d: "In 7 Tagen geprüft",
+    reviewed7dMeta: "{{approved}} genehmigt · {{merged}} zusammengeführt · {{discarded}} verworfen",
+  },
+  actions: {
+    approve: "Genehmigen",
+    expire: "Ablaufen lassen",
+    archive: "Archivieren",
+    discard: "Verwerfen",
+    restore: "Wiederherstellen",
+    merge: "Zusammenführen",
+    mergeTarget: "Zusammenführungsziel",
+    mergeSelectedHint: "Fügt die ausgewählten Speicher in den zuerst ausgewählten zusammen.",
+    mergeChooseHint: "Wählen Sie einen Zielspeicher für die Zusammenführung.",
+  },
+  row: {
+    select: "{{title}} auswählen",
+    sessionCount_one: "{{count}} Sitzung",
+    sessionCount_other: "{{count}} Sitzungen",
+  },
+};
+
 mutableResources["en-US"].translation.runtime = {
   labels: {
     active: "Active",
@@ -4472,6 +7213,54 @@ mutableResources["es-ES"].translation.runtime = {
   },
 };
 
+mutableResources["fr-FR"].translation.runtime = {
+  labels: {
+    active: "Actif",
+    cleaning: "Nettoyage",
+    cleaned: "Nettoyé",
+    retained: "Conservé",
+    queued: "En file",
+    running: "En cours",
+    retrying: "Nouvelle tentative",
+    completed: "Terminé",
+    failed: "Échoué",
+    cancelled: "Annulé",
+    cancel_requested: "Annulation demandée",
+    paused_for_operator: "En pause",
+    operator_attached: "Opérateur attaché",
+    recoverable_failed_retained: "Échec récupérable",
+    cancel_requested_retained: "Annulation conservée",
+    cancelled_retained: "Annulé et conservé",
+    save_verified: "Snapshot vérifié",
+    unavailable: "Indisponible",
+    warning: "Avertissement",
+  },
+};
+
+mutableResources["de-DE"].translation.runtime = {
+  labels: {
+    active: "Aktiv",
+    cleaning: "Wird bereinigt",
+    cleaned: "Bereinigt",
+    retained: "Aufbewahrt",
+    queued: "In Warteschlange",
+    running: "Läuft",
+    retrying: "Wiederholung",
+    completed: "Abgeschlossen",
+    failed: "Fehlgeschlagen",
+    cancelled: "Abgebrochen",
+    cancel_requested: "Abbruch angefordert",
+    paused_for_operator: "Pausiert",
+    operator_attached: "Operator angebunden",
+    recoverable_failed_retained: "Wiederherstellbarer Fehler",
+    cancel_requested_retained: "Abbruch aufbewahrt",
+    cancelled_retained: "Abgebrochen und aufbewahrt",
+    save_verified: "Verifiziertes Snapshot",
+    unavailable: "Nicht verfügbar",
+    warning: "Warnung",
+  },
+};
+
 mutableResources["en-US"].translation.runtime.labels = {
   ...mutableResources["en-US"].translation.runtime.labels,
   available: "Available",
@@ -4494,6 +7283,22 @@ mutableResources["es-ES"].translation.runtime.labels = {
   disabled: "Deshabilitado",
   offline: "Fuera de línea",
   partial: "Degradado",
+};
+
+mutableResources["fr-FR"].translation.runtime.labels = {
+  ...mutableResources["fr-FR"].translation.runtime.labels,
+  available: "Disponible",
+  disabled: "Désactivé",
+  offline: "Hors ligne",
+  partial: "Dégradé",
+};
+
+mutableResources["de-DE"].translation.runtime.labels = {
+  ...mutableResources["de-DE"].translation.runtime.labels,
+  available: "Verfügbar",
+  disabled: "Deaktiviert",
+  offline: "Offline",
+  partial: "Eingeschränkt",
 };
 
 mutableResources["en-US"].translation.costs = {
@@ -4661,6 +7466,116 @@ mutableResources["es-ES"].translation.costs = {
   },
 };
 
+mutableResources["fr-FR"].translation.costs = {
+  ...mutableResources["fr-FR"].translation.costs,
+  page: {
+    unavailable: "Coûts indisponibles",
+    loadError: "Impossible de charger les coûts.",
+    loadGenericError: "Erreur lors du chargement des coûts.",
+    shareInPeriod: "Part sur la période",
+    noConversations: "Aucune conversation dans le filtre actuel.",
+    noRecentPreview: "Aucun aperçu récent",
+    noModel: "Aucun modèle",
+    noDominantOrigin: "Aucune origine dominante",
+    noDominantModel: "Aucun modèle dominant",
+    noPeak: "Aucun pic notable dans la période",
+    queriesCount: "{{count}} requêtes",
+    executionsCount: "{{count}} exécutions",
+    operationalRail: "Rail opérationnel",
+    operationalRailHint: "4 signaux de la coupe actuelle",
+    itemsCount: "{{count}} éléments",
+    emptyBreakdown: "Données insuffisantes sur la période sélectionnée.",
+    breakdownDefaultMeta: "Part consolidée sur la période sélectionnée",
+    allocationDominant: "Dominant :",
+    noDominantAllocation: "Aucune concentration dominante",
+    allocationFooter:
+      "{{label}} représente {{value}} de la coupe actuelle et mène la distribution observée.",
+    noAllocationData: "Pas assez de coût pour construire la distribution sur la période.",
+    allocationModes: {
+      task: "Par tâche",
+    },
+    kpiContexts: {
+      totalPeriod: "{{queries}} requêtes · {{executions}} exécutions",
+      noComparableBase: "Pas de base comparable",
+      previousBase: "Base précédente {{value}}",
+      resolvedConversations: "{{count}} conversations résolues",
+    },
+    timeChart: {
+      empty: "Données insuffisantes pour construire l'origine temporelle.",
+      peak: "Pic :",
+      base: "Base :",
+      buckets: "Compartiments :",
+      variation: "Variation :",
+      noBucket: "Aucun compartiment",
+      driver: "Moteur · {{value}}",
+      noDriver: "Aucun moteur dominant",
+    },
+    breakdowns: {
+      byBotTitle: "Répartition par bot",
+      byBotSubtitle: "Qui concentre le coût et quelle est l'efficacité par conversation résolue.",
+      byModelTitle: "Répartition par modèle",
+      byModelSubtitle: "Où l'allocation par modèle pèse sur la coupe actuelle.",
+      byTaskTitle: "Répartition par type de tâche",
+      byTaskSubtitle: "Type de tâche dominant et pression moyenne par occurrence.",
+    },
+  },
+};
+
+mutableResources["de-DE"].translation.costs = {
+  ...mutableResources["de-DE"].translation.costs,
+  page: {
+    unavailable: "Kosten nicht verfügbar",
+    loadError: "Kosten konnten nicht geladen werden.",
+    loadGenericError: "Fehler beim Laden der Kosten.",
+    shareInPeriod: "Anteil im Zeitraum",
+    noConversations: "Keine Unterhaltungen im aktuellen Filter.",
+    noRecentPreview: "Keine aktuelle Vorschau",
+    noModel: "Kein Modell",
+    noDominantOrigin: "Keine dominante Quelle",
+    noDominantModel: "Kein dominantes Modell",
+    noPeak: "Kein hervorgehobener Peak im Zeitraum",
+    queriesCount: "{{count}} Abfragen",
+    executionsCount: "{{count}} Ausführungen",
+    operationalRail: "Operativer Rail",
+    operationalRailHint: "4 Signale aus dem aktuellen Ausschnitt",
+    itemsCount: "{{count}} Einträge",
+    emptyBreakdown: "Nicht genügend Daten im ausgewählten Zeitraum.",
+    breakdownDefaultMeta: "Konsolidierter Anteil im ausgewählten Zeitraum",
+    allocationDominant: "Dominant:",
+    noDominantAllocation: "Keine dominante Konzentration",
+    allocationFooter:
+      "{{label}} macht {{value}} des aktuellen Ausschnitts aus und führt die beobachtete Verteilung an.",
+    noAllocationData: "Nicht genug Kosten, um die Verteilung im Zeitraum aufzubauen.",
+    allocationModes: {
+      task: "Nach Aufgabe",
+    },
+    kpiContexts: {
+      totalPeriod: "{{queries}} Abfragen · {{executions}} Ausführungen",
+      noComparableBase: "Keine vergleichbare Basis",
+      previousBase: "Vorherige Basis {{value}}",
+      resolvedConversations: "{{count}} gelöste Unterhaltungen",
+    },
+    timeChart: {
+      empty: "Nicht genügend Daten, um den zeitlichen Ursprung aufzubauen.",
+      peak: "Peak:",
+      base: "Basis:",
+      buckets: "Buckets:",
+      variation: "Variation:",
+      noBucket: "Kein Bucket",
+      driver: "Treiber · {{value}}",
+      noDriver: "Kein dominanter Treiber",
+    },
+    breakdowns: {
+      byBotTitle: "Verteilung nach Bot",
+      byBotSubtitle: "Wer die Kosten konzentriert und wie die Effizienz pro gelöster Unterhaltung ist.",
+      byModelTitle: "Verteilung nach Modell",
+      byModelSubtitle: "Wo die Modellzuweisung den aktuellen Ausschnitt belastet.",
+      byTaskTitle: "Verteilung nach Aufgabentyp",
+      byTaskSubtitle: "Dominanter Aufgabentyp und durchschnittlicher Druck pro Vorkommen.",
+    },
+  },
+};
+
 mutableResources["en-US"].translation.common = {
   ...mutableResources["en-US"].translation.common,
   clear: "Clear",
@@ -4692,6 +7607,28 @@ mutableResources["es-ES"].translation.common = {
   on: "Activado",
   off: "Desactivado",
   user: "Usuario",
+};
+
+mutableResources["fr-FR"].translation.common = {
+  ...mutableResources["fr-FR"].translation.common,
+  clear: "Effacer",
+  refresh: "Actualiser",
+  refine: "Affiner",
+  hideRefinements: "Masquer les affinements",
+  on: "Activé",
+  off: "Désactivé",
+  user: "Utilisateur",
+};
+
+mutableResources["de-DE"].translation.common = {
+  ...mutableResources["de-DE"].translation.common,
+  clear: "Löschen",
+  refresh: "Aktualisieren",
+  refine: "Verfeinern",
+  hideRefinements: "Verfeinerungen ausblenden",
+  on: "An",
+  off: "Aus",
+  user: "Benutzer",
 };
 
 mutableResources["en-US"].translation.memory.types = {
@@ -4728,6 +7665,30 @@ mutableResources["es-ES"].translation.memory.types = {
   task: "Tarea",
   commit: "Compromiso",
   relationship: "Relación",
+};
+
+mutableResources["fr-FR"].translation.memory.types = {
+  fact: "Fait",
+  procedure: "Procédure",
+  event: "Événement",
+  preference: "Préférence",
+  decision: "Décision",
+  problem: "Problème",
+  task: "Tâche",
+  commit: "Engagement",
+  relationship: "Relation",
+};
+
+mutableResources["de-DE"].translation.memory.types = {
+  fact: "Fakt",
+  procedure: "Verfahren",
+  event: "Ereignis",
+  preference: "Präferenz",
+  decision: "Entscheidung",
+  problem: "Problem",
+  task: "Aufgabe",
+  commit: "Verpflichtung",
+  relationship: "Beziehung",
 };
 
 mutableResources["en-US"].translation.memory.map = {
@@ -4898,6 +7859,120 @@ mutableResources["es-ES"].translation.memory.health = {
   noMaintenance: "Sin registro",
 };
 
+mutableResources["fr-FR"].translation.memory.map = {
+  toggleViewAria: "Basculer entre carte et curation",
+  refreshAria: "Actualiser les mémoires",
+  unavailableTitle: "Mémoire indisponible",
+  fallbackLoadError: "Impossible de charger la carte mémoire.",
+  mapAndFilters: "Carte et filtres",
+  memoryCount_one: "{{count}} mémoire",
+  memoryCount_other: "{{count}} mémoires",
+  documentsCount_one: "{{count}} document",
+  documentsCount_other: "{{count}} documents",
+  connectionsCount_one: "{{count}} connexion",
+  connectionsCount_other: "{{count}} connexions",
+  activeFilters_one: "{{count}} filtre actif",
+  activeFilters_other: "{{count}} filtres actifs",
+  searchMap: "Rechercher dans la carte",
+  searchPlaceholder: "Contenu, source, mémoire ou apprentissage...",
+  timeWindow: "Fenêtre temporelle",
+  days: "{{count}} jours",
+  inactiveMemories: "Mémoires inactives",
+  filterTitle: "Types de mémoire",
+  visibleConnections: "Connexions visibles",
+  visible: "Visible",
+  hidden: "Masqué",
+  legend: "Légende",
+  isolatedCluster: "cluster isolé",
+  statistics: "Statistiques",
+  nodes: "Nœuds",
+  document: "Document",
+  memoryLatest: "Mémoire (récente)",
+  memoryOlder: "Mémoire (plus ancienne)",
+  statusTitle: "Statut",
+  forgotten: "Oubliée",
+  expiringSoon: "Expire bientôt",
+  currentFocus: "Focus actuel",
+  learning: "Apprentissage",
+  memory: "Mémoire",
+  noContentAvailable: "Aucun contenu disponible.",
+  clusters: "Clusters",
+};
+
+mutableResources["fr-FR"].translation.memory.health = {
+  eyebrow: "Santé de la mémoire",
+  title: "État actuel du maillage",
+  semanticAvailable: "Embeddings actifs",
+  semanticFallback: "Repli contextuel",
+  semanticUnavailable: "Aucune donnée sémantique",
+  active: "Actives",
+  inactive: "Inactives",
+  learning: "Apprentissages",
+  expiring: "Expirant",
+  semanticEdges: "Arêtes sémantiques",
+  contextualEdges: "Arêtes contextuelles",
+  maintenance: "Maintenances",
+  lastMaintenance: "Dernière maintenance",
+  noMaintenance: "Aucun enregistrement",
+};
+
+mutableResources["de-DE"].translation.memory.map = {
+  toggleViewAria: "Zwischen Karte und Kuration wechseln",
+  refreshAria: "Speicher aktualisieren",
+  unavailableTitle: "Speicher nicht verfügbar",
+  fallbackLoadError: "Speicherkarte konnte nicht geladen werden.",
+  mapAndFilters: "Karte und Filter",
+  memoryCount_one: "{{count}} Speicher",
+  memoryCount_other: "{{count}} Speicher",
+  documentsCount_one: "{{count}} Dokument",
+  documentsCount_other: "{{count}} Dokumente",
+  connectionsCount_one: "{{count}} Verbindung",
+  connectionsCount_other: "{{count}} Verbindungen",
+  activeFilters_one: "{{count}} aktiver Filter",
+  activeFilters_other: "{{count}} aktive Filter",
+  searchMap: "In Karte suchen",
+  searchPlaceholder: "Inhalt, Quelle, Speicher oder Lernen...",
+  timeWindow: "Zeitfenster",
+  days: "{{count}} Tage",
+  inactiveMemories: "Inaktive Speicher",
+  filterTitle: "Speichertypen",
+  visibleConnections: "Sichtbare Verbindungen",
+  visible: "Sichtbar",
+  hidden: "Verborgen",
+  legend: "Legende",
+  isolatedCluster: "isolierter Cluster",
+  statistics: "Statistiken",
+  nodes: "Knoten",
+  document: "Dokument",
+  memoryLatest: "Speicher (aktuell)",
+  memoryOlder: "Speicher (älter)",
+  statusTitle: "Status",
+  forgotten: "Vergessen",
+  expiringSoon: "Läuft bald ab",
+  currentFocus: "Aktueller Fokus",
+  learning: "Lernen",
+  memory: "Speicher",
+  noContentAvailable: "Kein Inhalt verfügbar.",
+  clusters: "Cluster",
+};
+
+mutableResources["de-DE"].translation.memory.health = {
+  eyebrow: "Speicherzustand",
+  title: "Aktueller Netzzustand",
+  semanticAvailable: "Aktive Embeddings",
+  semanticFallback: "Kontextueller Fallback",
+  semanticUnavailable: "Keine semantischen Daten",
+  active: "Aktiv",
+  inactive: "Inaktiv",
+  learning: "Lernen",
+  expiring: "Läuft ab",
+  semanticEdges: "Semantische Kanten",
+  contextualEdges: "Kontextuelle Kanten",
+  maintenance: "Wartungen",
+  lastMaintenance: "Letzte Wartung",
+  noMaintenance: "Kein Eintrag",
+};
+
 mutableResources["en-US"].translation.memory.inspector = {
   selectPoint: "Select a point on the map",
   close: "Close inspector",
@@ -4997,6 +8072,72 @@ mutableResources["es-ES"].translation.memory.inspector = {
   noRelatedMemories: "Sin memorias relacionadas.",
 };
 
+mutableResources["fr-FR"].translation.memory.inspector = {
+  selectPoint: "Sélectionnez un point sur la carte",
+  close: "Fermer l'inspecteur",
+  active: "Active",
+  inactive: "Inactive",
+  importance: "Importance",
+  accesses: "Accès",
+  lastUsed: "Dernière utilisation",
+  notAccessedYet: "Pas encore accédée",
+  createdAt: "Créée le",
+  noDate: "Aucune date",
+  origin: "Origine",
+  noLinkedSession: "Aucune session liée",
+  unavailable: "Indisponible",
+  relatedConnections: "Connexions associées",
+  syntheticLearning: "Apprentissage synthétique",
+  semantic: "Sémantique",
+  source: "Source",
+  learning: "Apprentissage",
+  noVisibleConnections: "Aucune connexion visible.",
+  metadata: "Métadonnées",
+  learningBadge: "Apprentissage",
+  memoriesCount: "{{count}} mémoires",
+  dominantType: "Type dominant",
+  intensity: "Intensité",
+  semanticStrength: "Force sémantique",
+  noStrongAffinity: "Aucune affinité forte",
+  contextualFallback: "Repli contextuel",
+  sessions: "Sessions",
+  relatedMemories: "Mémoires associées",
+  noRelatedMemories: "Aucune mémoire associée.",
+};
+
+mutableResources["de-DE"].translation.memory.inspector = {
+  selectPoint: "Wählen Sie einen Punkt auf der Karte",
+  close: "Inspektor schließen",
+  active: "Aktiv",
+  inactive: "Inaktiv",
+  importance: "Wichtigkeit",
+  accesses: "Zugriffe",
+  lastUsed: "Zuletzt verwendet",
+  notAccessedYet: "Noch nicht abgerufen",
+  createdAt: "Erstellt am",
+  noDate: "Kein Datum",
+  origin: "Quelle",
+  noLinkedSession: "Keine verknüpfte Sitzung",
+  unavailable: "Nicht verfügbar",
+  relatedConnections: "Verwandte Verbindungen",
+  syntheticLearning: "Synthetisches Lernen",
+  semantic: "Semantisch",
+  source: "Quelle",
+  learning: "Lernen",
+  noVisibleConnections: "Keine sichtbaren Verbindungen.",
+  metadata: "Metadaten",
+  learningBadge: "Lernen",
+  memoriesCount: "{{count}} Speicher",
+  dominantType: "Dominanter Typ",
+  intensity: "Intensität",
+  semanticStrength: "Semantische Stärke",
+  noStrongAffinity: "Keine starke Affinität",
+  contextualFallback: "Kontextueller Fallback",
+  sessions: "Sitzungen",
+  relatedMemories: "Verwandte Speicher",
+  noRelatedMemories: "Keine verwandten Speicher.",
+};
+
 mutableResources["en-US"].translation.memory.curation.status = {
   approved: "Approved",
   merged: "Merged",
@@ -5022,6 +8163,24 @@ mutableResources["es-ES"].translation.memory.curation.status = {
   expired: "Expirada",
   archived: "Archivada",
   pending: "Pendiente",
+};
+
+mutableResources["fr-FR"].translation.memory.curation.status = {
+  approved: "Approuvée",
+  merged: "Fusionnée",
+  discarded: "Rejetée",
+  expired: "Expirée",
+  archived: "Archivée",
+  pending: "En attente",
+};
+
+mutableResources["de-DE"].translation.memory.curation.status = {
+  approved: "Genehmigt",
+  merged: "Zusammengeführt",
+  discarded: "Verworfen",
+  expired: "Abgelaufen",
+  archived: "Archiviert",
+  pending: "Ausstehend",
 };
 
 mutableResources["en-US"].translation.memory.curation.detail = {
@@ -5142,6 +8301,86 @@ mutableResources["es-ES"].translation.memory.curation.detail = {
   sessionsCovered: "Sesiones cubiertas",
   primaryMembers: "Miembros principales",
   noLinkedSessions: "Sin sesiones vinculadas.",
+};
+
+mutableResources["fr-FR"].translation.memory.curation.detail = {
+  noReviewRecorded: "Aucune révision enregistrée.",
+  content: "Contenu",
+  sourceAndContext: "Origine et contexte",
+  sourceQuery: "Requête d'origine",
+  noSourceQuery: "Aucune requête d'origine enregistrée.",
+  cluster: "Cluster",
+  noGrouping: "Aucun regroupement",
+  editorialStatus: "Statut éditorial",
+  navigation: "Navigation",
+  viewOnMap: "Voir sur la carte",
+  editorialReason: "Motif éditorial",
+  relatedAndDuplicates: "Éléments associés et doublons",
+  relatedMemories: "Mémoires associées",
+  noStrongRelation: "Aucune relation forte trouvée dans cette lecture.",
+  possibleDuplicates: "Doublons possibles",
+  noDuplicateDetected: "Aucun doublon évident détecté.",
+  history: "Historique",
+  loadDetailErrorTitle: "Impossible de charger le détail",
+  selectEditorialItemTitle: "Sélectionnez un élément éditorial",
+  selectEditorialItemDescription:
+    "Ouvrez une mémoire ou un cluster pour examiner contexte, duplication et décisions éditoriales.",
+  loadingMemoryDetail: "Chargement du détail de la mémoire",
+  loadingClusterDetail: "Chargement du détail du regroupement",
+  learningTitle: "Apprentissage",
+  learningDescription: "Révisez ce regroupement avant de le promouvoir comme contexte récurrent.",
+  createdMeta: "Créée {{value}}",
+  lastAccessedMeta: "Dernier accès {{value}}",
+  importanceMeta: "{{value}}% d'importance",
+  accessesMeta: "{{value}} accès",
+  sessionFallback: "Aucune session",
+  memoriesConnected_one: "{{count}} mémoire connectée",
+  memoriesConnected_other: "{{count}} mémoires connectées",
+  groupingContext: "Contexte du regroupement",
+  created: "Créé",
+  sessionsCovered: "Sessions couvertes",
+  primaryMembers: "Membres principaux",
+  noLinkedSessions: "Aucune session liée.",
+};
+
+mutableResources["de-DE"].translation.memory.curation.detail = {
+  noReviewRecorded: "Keine Überprüfung erfasst.",
+  content: "Inhalt",
+  sourceAndContext: "Quelle und Kontext",
+  sourceQuery: "Quellabfrage",
+  noSourceQuery: "Keine Quellabfrage erfasst.",
+  cluster: "Cluster",
+  noGrouping: "Keine Gruppierung",
+  editorialStatus: "Redaktioneller Status",
+  navigation: "Navigation",
+  viewOnMap: "Auf der Karte anzeigen",
+  editorialReason: "Redaktioneller Grund",
+  relatedAndDuplicates: "Verwandte Elemente und Duplikate",
+  relatedMemories: "Verwandte Speicher",
+  noStrongRelation: "In dieser Lesung wurde keine starke Beziehung gefunden.",
+  possibleDuplicates: "Mögliche Duplikate",
+  noDuplicateDetected: "Keine offensichtlichen Duplikate erkannt.",
+  history: "Verlauf",
+  loadDetailErrorTitle: "Detail konnte nicht geladen werden",
+  selectEditorialItemTitle: "Wählen Sie ein redaktionelles Element",
+  selectEditorialItemDescription:
+    "Öffnen Sie einen Speicher oder einen Cluster, um Kontext, Duplikate und redaktionelle Entscheidungen zu prüfen.",
+  loadingMemoryDetail: "Speicherdetail wird geladen",
+  loadingClusterDetail: "Gruppierungsdetail wird geladen",
+  learningTitle: "Lernen",
+  learningDescription: "Überprüfen Sie diese Gruppierung, bevor Sie sie als wiederkehrenden Kontext fördern.",
+  createdMeta: "Erstellt {{value}}",
+  lastAccessedMeta: "Letzter Zugriff {{value}}",
+  importanceMeta: "{{value}}% Wichtigkeit",
+  accessesMeta: "{{value}} Zugriffe",
+  sessionFallback: "Keine Sitzung",
+  memoriesConnected_one: "{{count}} verbundener Speicher",
+  memoriesConnected_other: "{{count}} verbundene Speicher",
+  groupingContext: "Gruppierungskontext",
+  created: "Erstellt",
+  sessionsCovered: "Abgedeckte Sitzungen",
+  primaryMembers: "Hauptmitglieder",
+  noLinkedSessions: "Keine verknüpften Sitzungen.",
 };
 
 mutableResources["en-US"].translation.overview.activity = {
@@ -5317,8 +8556,8 @@ mutableResources["en-US"].translation.runtime.overview = {
   },
   liveExecutions: "Live executions",
   noExecutionsMatch: "No execution matches the current filters.",
-  bots: "Bots",
-  noVisibleBots: "No visible bot.",
+  agents: "Bots",
+  noVisibleAgents: "No visible bot.",
   live: "Live",
 };
 
@@ -5339,8 +8578,8 @@ mutableResources["pt-BR"].translation.runtime.overview = {
   },
   liveExecutions: "Execuções ao vivo",
   noExecutionsMatch: "Nenhuma execução combina com os filtros atuais.",
-  bots: "Bots",
-  noVisibleBots: "Nenhum bot visível.",
+  agents: "Bots",
+  noVisibleAgents: "Nenhum bot visível.",
   live: "Ao vivo",
 };
 
@@ -5361,9 +8600,53 @@ mutableResources["es-ES"].translation.runtime.overview = {
   },
   liveExecutions: "Ejecuciones en vivo",
   noExecutionsMatch: "Ninguna ejecución coincide con los filtros actuales.",
-  bots: "Bots",
-  noVisibleBots: "Ningún bot visible.",
+  agents: "Bots",
+  noVisibleAgents: "Ningún bot visible.",
   live: "En vivo",
+};
+
+mutableResources["fr-FR"].translation.runtime.overview = {
+  title: "Runtime",
+  searchPlaceholder: "Rechercher tâche, branche ou bot",
+  filterLabel: "Filtrer les exécutions",
+  filters: {
+    all: "Tout",
+    active: "Maintenant",
+    retained: "Conservées",
+    recovery: "Attention",
+  },
+  metrics: {
+    onlineBots: "Bots en ligne",
+    executions: "Exécutions",
+    attention: "Attention",
+  },
+  liveExecutions: "Exécutions en direct",
+  noExecutionsMatch: "Aucune exécution ne correspond aux filtres actuels.",
+  agents: "Bots",
+  noVisibleAgents: "Aucun bot visible.",
+  live: "En direct",
+};
+
+mutableResources["de-DE"].translation.runtime.overview = {
+  title: "Laufzeit",
+  searchPlaceholder: "Aufgabe, Branch oder Bot suchen",
+  filterLabel: "Ausführungen filtern",
+  filters: {
+    all: "Alle",
+    active: "Jetzt",
+    retained: "Aufbewahrt",
+    recovery: "Aufmerksamkeit",
+  },
+  metrics: {
+    onlineBots: "Bots online",
+    executions: "Ausführungen",
+    attention: "Aufmerksamkeit",
+  },
+  liveExecutions: "Live-Ausführungen",
+  noExecutionsMatch: "Keine Ausführung entspricht den aktuellen Filtern.",
+  agents: "Bots",
+  noVisibleAgents: "Kein sichtbarer Bot.",
+  live: "Live",
 };
 
 mutableResources["en-US"].translation.runtime.controlCard = {
@@ -5448,6 +8731,52 @@ mutableResources["es-ES"].translation.runtime.terminal = {
   control: "Control",
   read: "Lectura",
   searchPlaceholder: "Buscar en el terminal...",
+};
+
+mutableResources["fr-FR"].translation.runtime.terminal = {
+  connecting: "Connexion au terminal",
+  waitingAttach: "En attente de l'attachement du terminal...",
+  assumeControl: "Prise de contrôle...",
+  enterReadMode: "Passage en mode lecture",
+  attachUnavailable: "Impossible de s'attacher au terminal.",
+  writeChannelActive: "Canal supervisé actif. Le clavier écrit désormais dans l'environnement.",
+  readChannelActive: "Canal en lecture seule connecté. Utilisez « Prendre le contrôle » pour écrire.",
+  live: "Terminal en direct",
+  terminated: "Terminal terminé",
+  invalidFrame: "[trame non valide ignorée]",
+  channelClosed: "Canal fermé",
+  relayFailure: "Le relais du terminal a échoué.",
+  connectFailure: "Impossible de connecter le terminal",
+  terminalError: "Erreur du terminal",
+  previewHeader: "Aperçu du terminal de l'environnement. L'attachement authentifié n'est pas actif.",
+  previewMode: "Aperçu du terminal",
+  noOutputYet: "[aucune sortie disponible pour l'instant]",
+  control: "Contrôle",
+  read: "Lecture",
+  searchPlaceholder: "Rechercher dans le terminal...",
+};
+
+mutableResources["de-DE"].translation.runtime.terminal = {
+  connecting: "Terminal wird verbunden",
+  waitingAttach: "Warten auf Terminal-Attach...",
+  assumeControl: "Kontrolle wird übernommen...",
+  enterReadMode: "Wechsel in den Lesemodus",
+  attachUnavailable: "Anhängen an das Terminal nicht möglich.",
+  writeChannelActive: "Überwachter Kanal aktiv. Die Tastatur schreibt jetzt in die Umgebung.",
+  readChannelActive: "Nur-Lese-Kanal verbunden. Verwenden Sie „Kontrolle übernehmen“, um zu schreiben.",
+  live: "Terminal live",
+  terminated: "Terminal beendet",
+  invalidFrame: "[ungültiger Frame ignoriert]",
+  channelClosed: "Kanal geschlossen",
+  relayFailure: "Terminal-Relay fehlgeschlagen.",
+  connectFailure: "Terminal konnte nicht verbunden werden",
+  terminalError: "Terminalfehler",
+  previewHeader: "Vorschau des Umgebungs-Terminals. Der authentifizierte Attach ist nicht aktiv.",
+  previewMode: "Terminal-Vorschau",
+  noOutputYet: "[noch keine Ausgabe verfügbar]",
+  control: "Kontrolle",
+  read: "Lesen",
+  searchPlaceholder: "Im Terminal suchen...",
 };
 
 mutableResources["en-US"].translation.runtime.browser = {
@@ -5559,6 +8888,80 @@ mutableResources["es-ES"].translation.runtime.attach = {
     "El attach del browser tardó más de lo esperado; mostrando snapshot y metadatos mientras responde el runtime.",
   terminalPreviewFallback: "No fue posible anexar al terminal; mostrando vista previa del log.",
   browserSnapshotFallback: "No fue posible anexar al browser; mostrando snapshot.",
+};
+
+mutableResources["fr-FR"].translation.runtime.browser = {
+  preparing: "Préparation du navigateur en direct",
+  endpointError: "Le point d'accès du navigateur a renvoyé une erreur",
+  screenshotUnavailable: "Impossible d'obtenir un instantané visuel de cette session du navigateur.",
+  invalidImage: "Le runtime a renvoyé une image non valide pour cette session de navigateur.",
+  snapshotMetadata: "Instantané et métadonnées du navigateur",
+  preparingAttach: "Préparation de l'attachement du navigateur...",
+  snapshotActive: "Instantané du navigateur actif",
+  snapshotClosed: "Instantané du navigateur fermé",
+  snapshotFailure: "Le canal d'instantané du navigateur a échoué.",
+  liveConnected: "Navigateur en direct connecté",
+  liveDisconnected: "Navigateur en direct déconnecté",
+  noVncFallback: "Navigateur sans noVNC ; affichage de l'instantané et des métadonnées uniquement",
+  openFailure: "Échec de l'ouverture du navigateur en direct",
+  title: "Navigateur",
+  visualSessionUnavailable: "Session visuelle indisponible",
+  noGraphicsTransport: "Navigateur en direct sans transport graphique",
+  noVncDescription:
+    "Le runtime a répondu sans noVNC. Lorsqu'une page est active dans le navigateur, le tableau de bord affiche ici des instantanés périodiques.",
+  missingBinaries: "Binaires manquants",
+  activeSnapshot: "Instantané actif",
+  noVisualSurface: "Aucune surface visuelle disponible",
+  sessionGone:
+    "La session visuelle du navigateur n'est plus active dans cette instance de runtime. L'environnement a été conservé, mais le navigateur en mémoire n'a pas survécu au redémarrage du bot.",
+  noScreenshot: "Le runtime est connecté, mais aucune capture d'écran n'est disponible pour cette session pour l'instant.",
+  noVisualForSession: "Aucune surface visuelle disponible pour cette session.",
+};
+
+mutableResources["fr-FR"].translation.runtime.attach = {
+  terminalTimeout:
+    "L'attachement du terminal a pris plus de temps que prévu ; affichage de l'aperçu des journaux pendant la réponse de l'environnement.",
+  browserTimeout:
+    "L'attachement du navigateur a pris plus de temps que prévu ; affichage de l'instantané et des métadonnées pendant la réponse du runtime.",
+  terminalPreviewFallback: "Impossible de s'attacher au terminal ; affichage de l'aperçu des journaux.",
+  browserSnapshotFallback: "Impossible de s'attacher au navigateur ; affichage de l'instantané.",
+};
+
+mutableResources["de-DE"].translation.runtime.browser = {
+  preparing: "Live-Browser wird vorbereitet",
+  endpointError: "Der Browser-Endpunkt hat einen Fehler zurückgegeben",
+  screenshotUnavailable: "Es konnte kein visueller Snapshot dieser Browser-Sitzung erstellt werden.",
+  invalidImage: "Das Runtime gab für diese Browser-Sitzung kein gültiges Bild zurück.",
+  snapshotMetadata: "Browser-Snapshot und Metadaten",
+  preparingAttach: "Browser-Attach wird vorbereitet...",
+  snapshotActive: "Browser-Snapshot aktiv",
+  snapshotClosed: "Browser-Snapshot geschlossen",
+  snapshotFailure: "Der Browser-Snapshot-Kanal ist fehlgeschlagen.",
+  liveConnected: "Live-Browser verbunden",
+  liveDisconnected: "Live-Browser getrennt",
+  noVncFallback: "Browser ohne noVNC; nur Snapshot und Metadaten werden angezeigt",
+  openFailure: "Live-Browser konnte nicht geöffnet werden",
+  title: "Browser",
+  visualSessionUnavailable: "Visuelle Sitzung nicht verfügbar",
+  noGraphicsTransport: "Live-Browser ohne grafischen Transport",
+  noVncDescription:
+    "Das Runtime hat ohne noVNC geantwortet. Wenn eine Seite im Browser aktiv ist, zeigt das Dashboard hier regelmäßige Snapshots an.",
+  missingBinaries: "Fehlende Binärdateien",
+  activeSnapshot: "Aktiver Snapshot",
+  noVisualSurface: "Keine visuelle Oberfläche verfügbar",
+  sessionGone:
+    "Die visuelle Browser-Sitzung ist in dieser Runtime-Instanz nicht mehr aktiv. Die Umgebung wurde erhalten, aber der Browser im Speicher hat den Bot-Neustart nicht überlebt.",
+  noScreenshot: "Das Runtime ist verbunden, aber derzeit ist kein Screenshot für diese Sitzung verfügbar.",
+  noVisualForSession: "Für diese Sitzung ist keine visuelle Oberfläche verfügbar.",
+};
+
+mutableResources["de-DE"].translation.runtime.attach = {
+  terminalTimeout:
+    "Der Terminal-Attach hat länger als erwartet gedauert; die Log-Vorschau wird angezeigt, während die Umgebung antwortet.",
+  browserTimeout:
+    "Der Browser-Attach hat länger als erwartet gedauert; Snapshot und Metadaten werden angezeigt, während das Runtime antwortet.",
+  terminalPreviewFallback: "Anhängen an das Terminal fehlgeschlagen; Log-Vorschau wird angezeigt.",
+  browserSnapshotFallback: "Anhängen an den Browser fehlgeschlagen; Snapshot wird angezeigt.",
 };
 
 mutableResources["en-US"].translation.runtime.room = {
@@ -5717,6 +9120,162 @@ mutableResources["pt-BR"].translation.runtime.room = {
   completed: "{{label}} concluído.",
 };
 
+mutableResources["fr-FR"].translation.runtime.room = {
+  executionLive: "Exécution en direct",
+  stats: {
+    state: "État",
+    phase: "Phase",
+    cpu: "CPU",
+    memory: "Mémoire",
+    now: "Maintenant",
+    noHeartbeat: "aucun heartbeat",
+  },
+  tabs: {
+    terminal: "Terminal",
+    browser: "Navigateur",
+    files: "Fichiers",
+    activity: "Activité",
+  },
+  detailTabs: {
+    details: "Détails",
+    logs: "Journaux",
+    diagnostics: "Diagnostics",
+  },
+  openErrorTitle: "Impossible d'ouvrir l'exécution",
+  openErrorDescription: "La tâche n'a pas répondu au runtime du bot.",
+  trackingLabel: "Suivi de l'exécution",
+  switchSurface: "Changer de surface",
+  pause: "Mettre en pause",
+  resume: "Reprendre",
+  saveSnapshot: "Enregistrer le snapshot",
+  cancelExecution: "Annuler l'exécution",
+  cancelExecutionConfirm: "Annuler cette exécution maintenant ?",
+  more: "Plus",
+  refresh: "Actualiser",
+  retry: "Réessayer",
+  recover: "Récupérer",
+  pin: "Épingler",
+  unpin: "Désépingler",
+  requestCleanup: "Demander le nettoyage",
+  requestCleanupConfirm: "Planifier le nettoyage de cet environnement ?",
+  forceCleanup: "Forcer le nettoyage",
+  forceCleanupConfirm: "Forcer le nettoyage peut supprimer immédiatement l'environnement. Continuer ?",
+  details: "Détails",
+  history: "Historique",
+  closeDetails: "Fermer les détails",
+  closeDetailsPanel: "Fermer le panneau de détails",
+  detailTabsAria: "Onglets de détails",
+  warnings: "Avertissements",
+  events: "Événements",
+  services: "Services",
+  checkpointsAndArtifacts: "Checkpoints et artefacts",
+  sessions: "Sessions",
+  recentGuardrails: "Garde-fous récents",
+  workspace: "Espace de travail",
+  runtimeDir: "Répertoire runtime",
+  gitStatus: "Statut Git",
+  diff: "Diff",
+  noStatus: "Aucun statut",
+  noDiff: "Aucun diff",
+  noMovementYet: "Aucun mouvement n'est encore apparu.",
+  noEvents: "Aucun événement enregistré.",
+  noActiveServices: "Aucun service actif.",
+  latestCheckpoint: "Dernier checkpoint",
+  noRecentGuardrails: "Aucun garde-fou récent.",
+  attach: "Attacher",
+  terminals: "Terminaux",
+  branch: "Branche",
+  retention: "Rétention",
+  processes: "Processus",
+  disk: "Disque",
+  loops: "Boucles",
+  guardrails: "Garde-fous",
+  taskRoomBack: "Retour au runtime",
+  eventFallback: "événement",
+  eventRecordedNow: "maintenant",
+  phasePreview: "Phase {{value}}.",
+  environmentUpdateRecorded: "Mise à jour de l'environnement runtime enregistrée.",
+  completed: "{{label}} terminé.",
+};
+
+mutableResources["de-DE"].translation.runtime.room = {
+  executionLive: "Live-Ausführung",
+  stats: {
+    state: "Zustand",
+    phase: "Phase",
+    cpu: "CPU",
+    memory: "Speicher",
+    now: "Jetzt",
+    noHeartbeat: "kein Heartbeat",
+  },
+  tabs: {
+    terminal: "Terminal",
+    browser: "Browser",
+    files: "Dateien",
+    activity: "Aktivität",
+  },
+  detailTabs: {
+    details: "Details",
+    logs: "Protokolle",
+    diagnostics: "Diagnose",
+  },
+  openErrorTitle: "Ausführung konnte nicht geöffnet werden",
+  openErrorDescription: "Die Aufgabe hat nicht auf das Bot-Runtime reagiert.",
+  trackingLabel: "Ausführungsverfolgung",
+  switchSurface: "Oberfläche wechseln",
+  pause: "Pausieren",
+  resume: "Fortsetzen",
+  saveSnapshot: "Snapshot speichern",
+  cancelExecution: "Ausführung abbrechen",
+  cancelExecutionConfirm: "Diese Ausführung jetzt abbrechen?",
+  more: "Mehr",
+  refresh: "Aktualisieren",
+  retry: "Erneut versuchen",
+  recover: "Wiederherstellen",
+  pin: "Anheften",
+  unpin: "Lösen",
+  requestCleanup: "Bereinigung anfordern",
+  requestCleanupConfirm: "Bereinigung für diese Umgebung planen?",
+  forceCleanup: "Bereinigung erzwingen",
+  forceCleanupConfirm: "Die erzwungene Bereinigung kann die Umgebung sofort entfernen. Fortfahren?",
+  details: "Details",
+  history: "Verlauf",
+  closeDetails: "Details schließen",
+  closeDetailsPanel: "Detailpanel schließen",
+  detailTabsAria: "Detail-Tabs",
+  warnings: "Warnungen",
+  events: "Ereignisse",
+  services: "Dienste",
+  checkpointsAndArtifacts: "Checkpoints & Artefakte",
+  sessions: "Sitzungen",
+  recentGuardrails: "Aktuelle Guardrails",
+  workspace: "Arbeitsbereich",
+  runtimeDir: "Runtime-Verzeichnis",
+  gitStatus: "Git-Status",
+  diff: "Diff",
+  noStatus: "Kein Status",
+  noDiff: "Kein Diff",
+  noMovementYet: "Noch keine Bewegung erkennbar.",
+  noEvents: "Keine Ereignisse erfasst.",
+  noActiveServices: "Kein aktiver Dienst.",
+  latestCheckpoint: "Aktuellster Checkpoint",
+  noRecentGuardrails: "Keine aktuellen Guardrails.",
+  attach: "Anhängen",
+  terminals: "Terminals",
+  branch: "Branch",
+  retention: "Aufbewahrung",
+  processes: "Prozesse",
+  disk: "Festplatte",
+  loops: "Schleifen",
+  guardrails: "Guardrails",
+  taskRoomBack: "Zurück zum Runtime",
+  eventFallback: "Ereignis",
+  eventRecordedNow: "jetzt",
+  phasePreview: "Phase {{value}}.",
+  environmentUpdateRecorded: "Runtime-Umgebungsupdate erfasst.",
+  completed: "{{label}} abgeschlossen.",
+};
+
 mutableResources["es-ES"].translation.runtime.room = {
   executionLive: "Ejecución en vivo",
   stats: {
@@ -5858,6 +9417,48 @@ mutableResources["es-ES"].translation.runtime.files = {
   openFileToView: "Abre un archivo para ver su contenido.",
 };
 
+mutableResources["fr-FR"].translation.runtime.files = {
+  discardUnsaved: "Rejeter les modifications non enregistrées ?",
+  saveFailure: "Échec de l'enregistrement",
+  deleteFileConfirm: 'Supprimer "{{path}}" ?',
+  folder: "dossier",
+  file: "fichier",
+  collapseSidebar: "Réduire la barre latérale",
+  expandSidebar: "Étendre la barre latérale",
+  new: "Nouveau",
+  createPathPlaceholder: "chemin/nom-du-fichier.ext",
+  createFile: "Créer",
+  noVisibleFiles: "Aucun fichier visible ici.",
+  loadingFile: "Chargement du fichier...",
+  sourceCode: "Code source",
+  deleteFile: "Supprimer le fichier",
+  searchPlaceholder: "Rechercher...",
+  truncatedFile: "Fichier tronqué — édition désactivée.",
+  binaryFile: "Fichier binaire — aperçu indisponible.",
+  openFileToView: "Ouvrez un fichier pour voir son contenu.",
+};
+
+mutableResources["de-DE"].translation.runtime.files = {
+  discardUnsaved: "Nicht gespeicherte Änderungen verwerfen?",
+  saveFailure: "Speichern fehlgeschlagen",
+  deleteFileConfirm: '"{{path}}" löschen?',
+  folder: "Ordner",
+  file: "Datei",
+  collapseSidebar: "Seitenleiste einklappen",
+  expandSidebar: "Seitenleiste erweitern",
+  new: "Neu",
+  createPathPlaceholder: "pfad/dateiname.ext",
+  createFile: "Erstellen",
+  noVisibleFiles: "Keine sichtbaren Dateien hier.",
+  loadingFile: "Datei wird geladen...",
+  sourceCode: "Quellcode",
+  deleteFile: "Datei löschen",
+  searchPlaceholder: "Suchen...",
+  truncatedFile: "Gekürzte Datei — Bearbeitung deaktiviert.",
+  binaryFile: "Binärdatei — Vorschau nicht verfügbar.",
+  openFileToView: "Öffnen Sie eine Datei, um den Inhalt zu sehen.",
+};
+
 mutableResources["en-US"].translation.toast = {
   success: "Success",
   error: "Failed",
@@ -5880,6 +9481,22 @@ mutableResources["es-ES"].translation.toast = {
   warning: "Atención",
   info: "Información",
   loading: "Procesando",
+};
+
+mutableResources["fr-FR"].translation.toast = {
+  success: "Succès",
+  error: "Échec",
+  warning: "Avertissement",
+  info: "Information",
+  loading: "Traitement",
+};
+
+mutableResources["de-DE"].translation.toast = {
+  success: "Erfolg",
+  error: "Fehlgeschlagen",
+  warning: "Warnung",
+  info: "Information",
+  loading: "Verarbeitung",
 };
 
 mutableResources["en-US"].translation.controlPlane = {
@@ -5905,9 +9522,9 @@ mutableResources["en-US"].translation.controlPlane = {
     loadTitle: "Failed to load system settings",
     loadDescription: "Could not load global system settings.",
   },
-  bot: {
-    loadTitle: "Failed to load {{botId}}",
-    loadDescription: "Could not load the configuration for bot {{botId}}.",
+  agent: {
+    loadTitle: "Failed to load {{agentId}}",
+    loadDescription: "Could not load the configuration for bot {{agentId}}.",
   },
 };
 
@@ -5934,9 +9551,9 @@ mutableResources["pt-BR"].translation.controlPlane = {
     loadTitle: "Falha ao carregar configurações do sistema",
     loadDescription: "Não foi possível carregar as configurações globais do sistema.",
   },
-  bot: {
-    loadTitle: "Falha ao carregar {{botId}}",
-    loadDescription: "Não foi possível carregar a configuração do bot {{botId}}.",
+  agent: {
+    loadTitle: "Falha ao carregar {{agentId}}",
+    loadDescription: "Não foi possível carregar a configuração do bot {{agentId}}.",
   },
 };
 
@@ -5963,9 +9580,67 @@ mutableResources["es-ES"].translation.controlPlane = {
     loadTitle: "Error al cargar la configuración del sistema",
     loadDescription: "No fue posible cargar la configuración global del sistema.",
   },
-  bot: {
-    loadTitle: "Error al cargar {{botId}}",
-    loadDescription: "No fue posible cargar la configuración del bot {{botId}}.",
+  agent: {
+    loadTitle: "Error al cargar {{agentId}}",
+    loadDescription: "No fue posible cargar la configuración del bot {{agentId}}.",
+  },
+};
+
+mutableResources["fr-FR"].translation.controlPlane = {
+  unavailable: {
+    title: "Plan de contrôle indisponible",
+    pageTitle: "Impossible de charger le plan de contrôle",
+    description:
+      "Vérifiez si l'API du plan de contrôle est active et si le tableau de bord peut joindre le point d'accès configuré avant de réessayer.",
+    retry: "Réessayer",
+  },
+  shared: {
+    saveBar: {
+      saved: "Enregistré avec succès",
+      unsaved: "Modifications non enregistrées",
+      discard: "Rejeter",
+      saving: "Enregistrement",
+    },
+    confirmation: {
+      confirm: "Confirmer",
+    },
+  },
+  system: {
+    loadTitle: "Échec du chargement des paramètres système",
+    loadDescription: "Impossible de charger les paramètres système globaux.",
+  },
+  agent: {
+    loadTitle: "Échec du chargement de {{agentId}}",
+    loadDescription: "Impossible de charger la configuration du bot {{agentId}}.",
+  },
+};
+
+mutableResources["de-DE"].translation.controlPlane = {
+  unavailable: {
+    title: "Steuerungsebene nicht verfügbar",
+    pageTitle: "Steuerungsebene konnte nicht geladen werden",
+    description:
+      "Prüfen Sie, ob die API der Steuerungsebene aktiv ist und ob das Dashboard den konfigurierten Endpunkt erreichen kann, bevor Sie es erneut versuchen.",
+    retry: "Erneut versuchen",
+  },
+  shared: {
+    saveBar: {
+      saved: "Erfolgreich gespeichert",
+      unsaved: "Nicht gespeicherte Änderungen",
+      discard: "Verwerfen",
+      saving: "Speichern",
+    },
+    confirmation: {
+      confirm: "Bestätigen",
+    },
+  },
+  system: {
+    loadTitle: "Systemeinstellungen konnten nicht geladen werden",
+    loadDescription: "Globale Systemeinstellungen konnten nicht geladen werden.",
+  },
+  agent: {
+    loadTitle: "{{agentId}} konnte nicht geladen werden",
+    loadDescription: "Konfiguration für Bot {{agentId}} konnte nicht geladen werden.",
   },
 };
 
@@ -5997,6 +9672,36 @@ mutableResources["es-ES"].translation.runtime.controlCard = {
   live: "En vivo",
   backlogNotice:
     "Hay backlog de cleanup/recovery en al menos un bot visible. La página Runtime muestra el estado completo y permite actuar sin salir del flujo.",
+};
+
+mutableResources["fr-FR"].translation.runtime.controlCard = {
+  eyebrow: "Runtime",
+  title: "Plan de contrôle en direct",
+  description: "Environnements, backlog de récupération et raccourcis directs vers les salles opérationnelles.",
+  openRuntime: "Ouvrir le runtime",
+  active: "Actifs",
+  retained: "Conservés",
+  incidents: "Incidents",
+  loading: "Chargement du runtime pour les bots visibles...",
+  empty: "Aucune tâche opérationnelle publiée dans le runtime actuel.",
+  live: "En direct",
+  backlogNotice:
+    "Il existe un backlog de cleanup/recovery sur au moins un bot visible. La page Runtime affiche l'état complet et vous permet d'agir sans quitter le flux.",
+};
+
+mutableResources["de-DE"].translation.runtime.controlCard = {
+  eyebrow: "Laufzeit",
+  title: "Live-Steuerungsebene",
+  description: "Umgebungen, Recovery-Backlog und direkte Verknüpfungen zu den operativen Räumen.",
+  openRuntime: "Laufzeit öffnen",
+  active: "Aktiv",
+  retained: "Aufbewahrt",
+  incidents: "Vorfälle",
+  loading: "Laufzeit für sichtbare Bots wird geladen...",
+  empty: "In der aktuellen Laufzeit wurde keine operative Aufgabe veröffentlicht.",
+  live: "Live",
+  backlogNotice:
+    "In mindestens einem sichtbaren Bot gibt es Cleanup-/Recovery-Backlog. Die Laufzeit-Seite zeigt den vollständigen Status und ermöglicht Handlungen ohne den Fluss zu verlassen.",
 };
 
 mutableResources["en-US"].translation.tasks = {
@@ -6086,6 +9791,64 @@ mutableResources["es-ES"].translation.tasks = {
   },
 };
 
+mutableResources["fr-FR"].translation.tasks = {
+  table: {
+    headers: {
+      task: "Tâche",
+      status: "Statut",
+      query: "Requête",
+      cost: "Coût",
+      duration: "Durée",
+      attempts: "Tentatives",
+      created: "Créée",
+    },
+    chat: "Discussion {{value}}",
+    noDescription: "Aucune description",
+    noModel: "aucun modèle",
+    session: "Session {{value}}",
+    noTasksFound: "Aucune tâche trouvée.",
+    adjustFilters: "Ajustez les filtres ou attendez de nouvelles exécutions pour voir l'activité.",
+    futureActivity: "Lorsque de nouvelles exécutions seront enregistrées, elles apparaîtront ici par ordre chronologique.",
+  },
+  detail: {
+    dialogTitle: "Détails de la tâche {{id}}",
+    close: "Fermer les détails de la tâche",
+    taskEyebrow: "Tâche #{{id}}",
+    executionFallback: "Exécution {{id}}",
+    copyQuery: "Copier la requête",
+    failure: "Échec",
+  },
+};
+
+mutableResources["de-DE"].translation.tasks = {
+  table: {
+    headers: {
+      task: "Aufgabe",
+      status: "Status",
+      query: "Abfrage",
+      cost: "Kosten",
+      duration: "Dauer",
+      attempts: "Versuche",
+      created: "Erstellt",
+    },
+    chat: "Chat {{value}}",
+    noDescription: "Keine Beschreibung",
+    noModel: "kein Modell",
+    session: "Sitzung {{value}}",
+    noTasksFound: "Keine Aufgabe gefunden.",
+    adjustFilters: "Passen Sie die Filter an oder warten Sie auf neue Ausführungen, um Aktivität zu sehen.",
+    futureActivity: "Sobald neue Ausführungen erfasst werden, erscheinen sie hier in chronologischer Reihenfolge.",
+  },
+  detail: {
+    dialogTitle: "Aufgabendetails {{id}}",
+    close: "Aufgabendetails schließen",
+    taskEyebrow: "Aufgabe #{{id}}",
+    executionFallback: "Ausführung {{id}}",
+    copyQuery: "Abfrage kopieren",
+    failure: "Fehler",
+  },
+};
+
 mutableResources["en-US"].translation.audit = {
   table: {
     dateTime: "Date & time",
@@ -6170,6 +9933,62 @@ mutableResources["es-ES"].translation.audit = {
   },
 };
 
+mutableResources["fr-FR"].translation.audit = {
+  table: {
+    dateTime: "Date et heure",
+    event: "Événement",
+    context: "Contexte",
+    record: "Enregistrement #{{id}}",
+    noDetails: "Aucun détail supplémentaire",
+    noEntries: "Aucun enregistrement d'audit trouvé.",
+    noEntriesDescription: "Les événements techniques apparaîtront ici dès que de nouvelles traces seront émises.",
+    noEntriesMobileDescription: "Lorsque de nouveaux événements techniques seront émis, ils apparaîtront ici.",
+    tool: "Outil {{value}}",
+    model: "Modèle {{value}}",
+    success: "exécution réussie",
+    failure: "exécution échouée",
+    attempt: "tentative {{value}}",
+    task: "Tâche {{value}}",
+    trace: "Trace {{value}}",
+  },
+  detail: {
+    dialogTitle: "Détails de l'événement {{id}}",
+    close: "Fermer les détails de l'événement",
+    eventTitle: "Événement #{{id}}",
+    eventDate: "Date de l'événement",
+    traceability: "Traçabilité",
+    copyJson: "Copier le JSON",
+  },
+};
+
+mutableResources["de-DE"].translation.audit = {
+  table: {
+    dateTime: "Datum und Uhrzeit",
+    event: "Ereignis",
+    context: "Kontext",
+    record: "Datensatz #{{id}}",
+    noDetails: "Keine zusätzlichen Details",
+    noEntries: "Kein Audit-Eintrag gefunden.",
+    noEntriesDescription: "Technische Ereignisse erscheinen hier, sobald neue Traces emittiert werden.",
+    noEntriesMobileDescription: "Wenn neue technische Ereignisse emittiert werden, erscheinen sie hier.",
+    tool: "Tool {{value}}",
+    model: "Modell {{value}}",
+    success: "erfolgreiche Ausführung",
+    failure: "fehlgeschlagene Ausführung",
+    attempt: "Versuch {{value}}",
+    task: "Aufgabe {{value}}",
+    trace: "Trace {{value}}",
+  },
+  detail: {
+    dialogTitle: "Ereignisdetails {{id}}",
+    close: "Ereignisdetails schließen",
+    eventTitle: "Ereignis #{{id}}",
+    eventDate: "Ereignisdatum",
+    traceability: "Nachverfolgbarkeit",
+    copyJson: "JSON kopieren",
+  },
+};
+
 mutableResources["en-US"].translation.dlq.detail = {
   retryNow: "Can retry now",
   retriedAt: "Retried at {{value}}",
@@ -6222,6 +10041,42 @@ mutableResources["es-ES"].translation.dlq.detail = {
   rawPayload: "Payload bruto",
   copyJson: "Copiar JSON",
   emptyMetadata: "Vacío",
+};
+
+mutableResources["fr-FR"].translation.dlq.detail = {
+  retryNow: "Peut être réessayé maintenant",
+  retriedAt: "Réessayé le {{value}}",
+  noRetry: "Aucun réessai disponible",
+  empty: "Échec en attente",
+  dialogTitle: "Détails de l'entrée DLQ {{id}}",
+  close: "Fermer le diagnostic de l'échec",
+  originalQuery: "Requête d'origine",
+  failure: "Échec",
+  operationalContext: "Contexte opérationnel",
+  errorClass: "Classe d'erreur",
+  retryStatus: "Statut du réessai",
+  failedAt: "Échoué le",
+  rawPayload: "Payload brut",
+  copyJson: "Copier le JSON",
+  emptyMetadata: "Vide",
+};
+
+mutableResources["de-DE"].translation.dlq.detail = {
+  retryNow: "Kann jetzt wiederholt werden",
+  retriedAt: "Wiederholt am {{value}}",
+  noRetry: "Keine Wiederholung verfügbar",
+  empty: "Ausstehender Fehler",
+  dialogTitle: "Details zum DLQ-Eintrag {{id}}",
+  close: "Fehlerdiagnose schließen",
+  originalQuery: "Ursprüngliche Abfrage",
+  failure: "Fehler",
+  operationalContext: "Operativer Kontext",
+  errorClass: "Fehlerklasse",
+  retryStatus: "Wiederholungsstatus",
+  failedAt: "Fehlgeschlagen am",
+  rawPayload: "Roh-Payload",
+  copyJson: "JSON kopieren",
+  emptyMetadata: "Leer",
 };
 
 mutableResources["en-US"].translation.executions.detail = {
@@ -6318,6 +10173,70 @@ mutableResources["es-ES"].translation.executions.detail = {
   activity: "Actividad",
   notes: "Notas",
   files: "Archivos",
+};
+
+mutableResources["fr-FR"].translation.executions.detail = {
+  traceRich: "Trace riche",
+  traceRichDescription: "Exécution avec enveloppe complète, outils et artefacts structurés.",
+  reconstructed: "Reconstruite",
+  reconstructedDescription: "Détails reconstruits à partir des tâches, requêtes et journal d'audit hérité.",
+  noTrace: "Aucun trace",
+  noTraceDescription: "Seules les métadonnées basiques sont disponibles pour cette exécution.",
+  responseFromTrace: "Réponse du trace",
+  responseFallbackQueries: "Repli des requêtes",
+  noResponse: "Aucune réponse",
+  structuredTools: "Outils structurés",
+  legacyTools: "Outils hérités",
+  noTools: "Aucun outil",
+  loadErrorTitle: "Impossible de charger les détails de l'exécution",
+  failureRecorded: "Échec enregistré",
+  signals: "Signaux",
+  traceSource: "Source du trace",
+  responseSource: "Source de la réponse",
+  toolsSource: "Source des outils",
+  stopReason: "Motif d'arrêt",
+  notProvided: "non fourni",
+  runtime: "Runtime",
+  openRuntimeRoom: "Ouvrir la salle opérationnelle",
+  input: "Entrée",
+  output: "Sortie",
+  response: "Réponse",
+  steps: "Étapes",
+  activity: "Activité",
+  notes: "Notes",
+  files: "Fichiers",
+};
+
+mutableResources["de-DE"].translation.executions.detail = {
+  traceRich: "Umfangreicher Trace",
+  traceRichDescription: "Ausführung mit vollständigem Envelope, Tools und strukturierten Artefakten.",
+  reconstructed: "Rekonstruiert",
+  reconstructedDescription: "Details rekonstruiert aus Aufgaben, Abfragen und Legacy-Audit-Log.",
+  noTrace: "Kein Trace",
+  noTraceDescription: "Nur grundlegende Metadaten sind für diese Ausführung verfügbar.",
+  responseFromTrace: "Trace-Antwort",
+  responseFallbackQueries: "Abfragen-Fallback",
+  noResponse: "Keine Antwort",
+  structuredTools: "Strukturierte Tools",
+  legacyTools: "Legacy-Tools",
+  noTools: "Keine Tools",
+  loadErrorTitle: "Ausführungsdetails konnten nicht geladen werden",
+  failureRecorded: "Fehler erfasst",
+  signals: "Signale",
+  traceSource: "Trace-Quelle",
+  responseSource: "Antwortquelle",
+  toolsSource: "Tool-Quelle",
+  stopReason: "Stoppgrund",
+  notProvided: "nicht angegeben",
+  runtime: "Laufzeit",
+  openRuntimeRoom: "Operativen Raum öffnen",
+  input: "Eingabe",
+  output: "Ausgabe",
+  response: "Antwort",
+  steps: "Schritte",
+  activity: "Aktivität",
+  notes: "Notizen",
+  files: "Dateien",
 };
 
 mutableResources["en-US"].translation.botDetail = {
@@ -6425,6 +10344,76 @@ mutableResources["es-ES"].translation.botDetail = {
   noSchedule: "Ninguna programación.",
 };
 
+mutableResources["fr-FR"].translation.botDetail = {
+  unavailable: "Bot indisponible",
+  databaseNotInitialized: "Base de données non encore initialisée",
+  noPublishedData: "Aucune donnée publiée",
+  refresh: "Actualiser",
+  activeTitle: "{{bot}} actif",
+  stableTitle: "{{bot}} stable",
+  metrics: {
+    active: "Actifs",
+    completed: "Terminés",
+    failed: "Échecs",
+    queries: "Requêtes",
+    todayCost: "Coût aujourd'hui",
+    totalCost: "Coût total",
+    lastActivity: "Dernière activité",
+    schedules: "Plannings",
+  },
+  tabs: {
+    overview: "Aperçu",
+    tasks: "Exécutions",
+    sessions: "Sessions",
+    cron: "Plannings",
+  },
+  recent: "Récents",
+  entriesCount_one: "{{count}} entrée",
+  entriesCount_other: "{{count}} entrées",
+  noRecentTasks: "Aucune tâche récente.",
+  situation: "Situation",
+  activeSchedules: "Plannings actifs",
+  trackedSessions: "Sessions suivies",
+  noTask: "Aucune tâche.",
+  noSession: "Aucune session.",
+  noSchedule: "Aucun planning.",
+};
+
+mutableResources["de-DE"].translation.botDetail = {
+  unavailable: "Bot nicht verfügbar",
+  databaseNotInitialized: "Datenbank noch nicht initialisiert",
+  noPublishedData: "Keine veröffentlichten Daten",
+  refresh: "Aktualisieren",
+  activeTitle: "{{bot}} aktiv",
+  stableTitle: "{{bot}} stabil",
+  metrics: {
+    active: "Aktiv",
+    completed: "Abgeschlossen",
+    failed: "Fehler",
+    queries: "Abfragen",
+    todayCost: "Kosten heute",
+    totalCost: "Gesamtkosten",
+    lastActivity: "Letzte Aktivität",
+    schedules: "Zeitpläne",
+  },
+  tabs: {
+    overview: "Übersicht",
+    tasks: "Ausführungen",
+    sessions: "Sitzungen",
+    cron: "Zeitpläne",
+  },
+  recent: "Aktuell",
+  entriesCount_one: "{{count}} Eintrag",
+  entriesCount_other: "{{count}} Einträge",
+  noRecentTasks: "Keine aktuelle Aufgabe.",
+  situation: "Lage",
+  activeSchedules: "Aktive Zeitpläne",
+  trackedSessions: "Verfolgte Sitzungen",
+  noTask: "Keine Aufgabe.",
+  noSession: "Keine Sitzung.",
+  noSchedule: "Kein Zeitplan.",
+};
+
 mutableResources["en-US"].translation.memory.map = {
   ...mutableResources["en-US"].translation.memory.map,
   zoomIn: "Zoom in",
@@ -6499,6 +10488,20 @@ mutableResources["es-ES"].translation.sessions.detail = {
 };
 mutableResources["es-ES"].translation.sessions.generatedStepFailure =
   "No fue posible generar una respuesta para esta etapa.";
+
+mutableResources["fr-FR"].translation.sessions.detail = {
+  ...(mutableResources["fr-FR"].translation.sessions.detail ?? {}),
+  dialogTitle: "Détails de la session",
+};
+mutableResources["fr-FR"].translation.sessions.generatedStepFailure =
+  "Impossible de générer une réponse pour cette étape.";
+
+mutableResources["de-DE"].translation.sessions.detail = {
+  ...(mutableResources["de-DE"].translation.sessions.detail ?? {}),
+  dialogTitle: "Sitzungsdetails",
+};
+mutableResources["de-DE"].translation.sessions.generatedStepFailure =
+  "Für diesen Schritt konnte keine Antwort generiert werden.";
 
 Object.assign(literalResources["en-US"], {
   "Nao definidas": "Not set",
@@ -7484,8 +11487,503 @@ mutableResources["es-ES"].translation.setup = {
   },
 };
 
+mutableResources["fr-FR"].translation.setup = {
+  stepper: { of: "{{current}} sur {{total}}" },
+  setupCode: {
+    title: "Collez votre code d'installation",
+    subtitle: "L'installeur l'a imprimé lorsque vous avez exécuté la commande bootstrap.",
+    placeholder: "ABCD-EFGH-JKLM",
+    submit: "Continuer",
+    submitting: "Connexion en cours…",
+    recoveryLink: "Utiliser un jeton de récupération à la place",
+  },
+  registerOwner: {
+    title: "Créer le compte propriétaire",
+    subtitle: "Ce compte se connectera à la console opérateur.",
+    displayName: "Nom affiché",
+    username: "Nom d'utilisateur",
+    email: "E-mail",
+    password: "Mot de passe",
+    submit: "Créer le compte",
+    submitting: "Création du compte…",
+    showPassword: "Afficher le mot de passe",
+    hidePassword: "Masquer le mot de passe",
+  },
+  login: {
+    title: "Connectez-vous pour continuer",
+    subtitle: "Utilisez les identifiants de votre compte propriétaire.",
+    identifier: "Nom d'utilisateur ou e-mail",
+    password: "Mot de passe",
+    submit: "Se connecter",
+    submitting: "Connexion…",
+    recoveryLink: "Utiliser un jeton de récupération à la place",
+  },
+  finishPlatform: {
+    title: "Finaliser la configuration de la plateforme",
+    subtitle: "Définissez accès, fournisseur et éventuellement votre premier agent.",
+    submit: "Terminer la configuration",
+    submitting: "Finalisation…",
+    providerConfigured: "Configuré",
+    providerVerified: "Vérifié",
+    sections: { access: "Accès", provider: "Fournisseur", agent: "Premier agent" },
+    fields: {
+      allowedUserIds: "IDs d'utilisateurs autorisés",
+      ownerName: "Nom du propriétaire",
+      ownerEmail: "E-mail du propriétaire",
+      ownerGithub: "Identifiant GitHub",
+      provider: "Fournisseur",
+      authMode: "Authentification",
+      apiKey: "Clé API",
+      projectId: "ID du projet",
+      baseUrl: "URL de base",
+      createAgentNow: "Créer le premier agent maintenant",
+      agentId: "ID de l'agent",
+      agentDisplayName: "Nom de l'agent",
+      agentTelegramToken: "Jeton Telegram",
+    },
+    authModes: { api_key: "Clé API", local: "Local" },
+    hints: {
+      allowedUserIds: "IDs d'utilisateurs Telegram autorisés à opérer les agents, séparés par des virgules.",
+      apiKeyOptionalWhenConfigured: "Laissez vide pour conserver la clé actuellement configurée.",
+      agentOptional: "Vous pourrez créer des agents plus tard depuis la console Agents.",
+    },
+  },
+  recoveryToken: {
+    title: "Utiliser un jeton de récupération",
+    subtitle: "Collez le jeton de récupération complet imprimé par l'installeur.",
+    placeholder: "koda-recovery-…",
+    submit: "Échanger le jeton",
+    submitting: "Échange en cours…",
+    backToSetupCode: "Utiliser le code d'installation à la place",
+  },
+  errors: {
+    codeRequired: "Saisissez d'abord le code d'installation.",
+    codeInvalid: "Ce code d'installation n'a pas fonctionné. Réessayez ou régénérez-en un.",
+    passwordTooShort: "Le mot de passe doit contenir au moins 8 caractères.",
+    emailInvalid: "Cela ne ressemble pas à un e-mail valide.",
+    usernameRequired: "Le nom d'utilisateur est requis.",
+    credentialsRequired: "Remplissez à la fois l'identifiant et le mot de passe.",
+    bootstrapIncomplete: "Complétez accès et fournisseur avant de terminer.",
+    storageNotReady: "Le stockage n'est pas prêt. Vérifiez la sortie de l'installeur avant de continuer.",
+    generic: "Une erreur est survenue. Veuillez réessayer.",
+  },
+};
+
+mutableResources["de-DE"].translation.setup = {
+  stepper: { of: "{{current}} von {{total}}" },
+  setupCode: {
+    title: "Fügen Sie Ihren Installationscode ein",
+    subtitle: "Der Installer hat ihn ausgegeben, als Sie den Bootstrap-Befehl ausgeführt haben.",
+    placeholder: "ABCD-EFGH-JKLM",
+    submit: "Weiter",
+    submitting: "Verbindung…",
+    recoveryLink: "Stattdessen Wiederherstellungstoken verwenden",
+  },
+  registerOwner: {
+    title: "Besitzerkonto erstellen",
+    subtitle: "Dieses Konto meldet sich an der Operator-Konsole an.",
+    displayName: "Anzeigename",
+    username: "Benutzername",
+    email: "E-Mail",
+    password: "Passwort",
+    submit: "Konto erstellen",
+    submitting: "Konto wird erstellt…",
+    showPassword: "Passwort anzeigen",
+    hidePassword: "Passwort ausblenden",
+  },
+  login: {
+    title: "Melden Sie sich zum Fortfahren an",
+    subtitle: "Verwenden Sie die Zugangsdaten Ihres Besitzerkontos.",
+    identifier: "Benutzername oder E-Mail",
+    password: "Passwort",
+    submit: "Anmelden",
+    submitting: "Anmeldung…",
+    recoveryLink: "Stattdessen Wiederherstellungstoken verwenden",
+  },
+  finishPlatform: {
+    title: "Plattform-Setup abschließen",
+    subtitle: "Legen Sie Zugang, Anbieter und optional Ihren ersten Agenten fest.",
+    submit: "Setup abschließen",
+    submitting: "Abschluss…",
+    providerConfigured: "Konfiguriert",
+    providerVerified: "Verifiziert",
+    sections: { access: "Zugang", provider: "Anbieter", agent: "Erster Agent" },
+    fields: {
+      allowedUserIds: "Zulässige Benutzer-IDs",
+      ownerName: "Name des Besitzers",
+      ownerEmail: "E-Mail des Besitzers",
+      ownerGithub: "GitHub-Benutzername",
+      provider: "Anbieter",
+      authMode: "Authentifizierung",
+      apiKey: "API-Schlüssel",
+      projectId: "Projekt-ID",
+      baseUrl: "Basis-URL",
+      createAgentNow: "Ersten Agenten jetzt erstellen",
+      agentId: "Agent-ID",
+      agentDisplayName: "Agent-Name",
+      agentTelegramToken: "Telegram-Token",
+    },
+    authModes: { api_key: "API-Schlüssel", local: "Lokal" },
+    hints: {
+      allowedUserIds: "Durch Kommas getrennte Telegram-Benutzer-IDs, die Agenten bedienen dürfen.",
+      apiKeyOptionalWhenConfigured: "Leer lassen, um den aktuell konfigurierten Schlüssel zu behalten.",
+      agentOptional: "Sie können Agenten später in der Agenten-Konsole erstellen.",
+    },
+  },
+  recoveryToken: {
+    title: "Wiederherstellungstoken verwenden",
+    subtitle: "Fügen Sie das vollständige Wiederherstellungstoken ein, das der Installer ausgegeben hat.",
+    placeholder: "koda-recovery-…",
+    submit: "Token austauschen",
+    submitting: "Austausch…",
+    backToSetupCode: "Stattdessen Installationscode verwenden",
+  },
+  errors: {
+    codeRequired: "Geben Sie zuerst den Installationscode ein.",
+    codeInvalid: "Dieser Installationscode hat nicht funktioniert. Versuchen Sie es erneut oder generieren Sie einen neuen.",
+    passwordTooShort: "Das Passwort muss mindestens 8 Zeichen lang sein.",
+    emailInvalid: "Das sieht nicht wie eine gültige E-Mail aus.",
+    usernameRequired: "Benutzername ist erforderlich.",
+    credentialsRequired: "Füllen Sie sowohl Kennung als auch Passwort aus.",
+    bootstrapIncomplete: "Schließen Sie Zugang und Anbieter ab, bevor Sie fertigstellen.",
+    storageNotReady: "Der Speicher ist nicht bereit. Prüfen Sie die Installer-Ausgabe, bevor Sie fortfahren.",
+    generic: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+  },
+};
+
+// Memory area translation completeness — added for the neural memory map redesign.
+const MEMORY_SHARED_I18N = {
+  "en-US": {
+    common: { allSessions: "All sessions", allUsers: "All users", filters: "Filters", session: "Session" },
+    empty: {
+      title: "No memories yet",
+      description:
+        "Memories will appear here as a network of connected dots as this agent converses.",
+    },
+    filters: {
+      title: "Filters",
+      search: "Search",
+      searchPlaceholder: "keywords",
+      timeWindow: "Window",
+      includeInactive: "Include inactive",
+      edges: { semantic: "Semantic", session: "Session", source: "Origin" },
+    },
+    page: {
+      noAgentsTitle: "No agents available",
+      noAgentsDescription: "Create or publish at least one agent before opening the map.",
+    },
+    views: { map: "Map", curation: "Curation" },
+    mapExt: { canvasAriaLabel: "Neural memory map", clusters: "Clusters" },
+    inspectorExt: {
+      content: "Content",
+      details: "Details",
+      empty: "No node selected. Explore the map to start.",
+      expiresAt: "Expires",
+      members: "Members",
+      never: "No expiration",
+      recenter: "Recenter",
+      selectPointHint: "Click a point on the graph to see its details here.",
+    },
+  },
+  "pt-BR": {
+    common: {
+      allSessions: "Todas as sessões",
+      allUsers: "Todos os usuários",
+      filters: "Filtros",
+      session: "Sessão",
+    },
+    empty: {
+      title: "Sem memórias ainda",
+      description:
+        "As memórias aparecerão aqui como uma rede de pontos conectados conforme este agente conversa.",
+    },
+    filters: {
+      title: "Filtros",
+      search: "Buscar",
+      searchPlaceholder: "palavras-chave",
+      timeWindow: "Janela",
+      includeInactive: "Incluir inativas",
+      edges: { semantic: "Semânticas", session: "Sessão", source: "Origem" },
+    },
+    page: {
+      noAgentsTitle: "Sem agentes disponíveis",
+      noAgentsDescription: "Crie ou publique ao menos um agente antes de abrir o mapa.",
+    },
+    views: { map: "Mapa", curation: "Curadoria" },
+    mapExt: { canvasAriaLabel: "Mapa neural de memórias", clusters: "Clusters" },
+    inspectorExt: {
+      content: "Conteúdo",
+      details: "Detalhes",
+      empty: "Nenhum nó selecionado. Explore o mapa para começar.",
+      expiresAt: "Expira",
+      members: "Membros",
+      never: "Sem prazo",
+      recenter: "Centralizar",
+      selectPointHint: "Clique em um ponto do grafo para ver seus detalhes aqui.",
+    },
+  },
+  "es-ES": {
+    common: {
+      allSessions: "Todas las sesiones",
+      allUsers: "Todos los usuarios",
+      filters: "Filtros",
+      session: "Sesión",
+    },
+    empty: {
+      title: "Aún no hay memorias",
+      description:
+        "Las memorias aparecerán aquí como una red de puntos conectados a medida que este agente conversa.",
+    },
+    filters: {
+      title: "Filtros",
+      search: "Buscar",
+      searchPlaceholder: "palabras clave",
+      timeWindow: "Ventana",
+      includeInactive: "Incluir inactivas",
+      edges: { semantic: "Semánticas", session: "Sesión", source: "Origen" },
+    },
+    page: {
+      noAgentsTitle: "No hay agentes disponibles",
+      noAgentsDescription: "Crea o publica al menos un agente antes de abrir el mapa.",
+    },
+    views: { map: "Mapa", curation: "Curación" },
+    mapExt: { canvasAriaLabel: "Mapa neuronal de memorias", clusters: "Clústeres" },
+    inspectorExt: {
+      content: "Contenido",
+      details: "Detalles",
+      empty: "Ningún nodo seleccionado. Explora el mapa para empezar.",
+      expiresAt: "Expira",
+      members: "Miembros",
+      never: "Sin expiración",
+      recenter: "Recentrar",
+      selectPointHint: "Haz clic en un punto del grafo para ver sus detalles aquí.",
+    },
+  },
+  "fr-FR": {
+    common: {
+      allSessions: "Toutes les sessions",
+      allUsers: "Tous les utilisateurs",
+      close: "Fermer",
+      filters: "Filtres",
+      session: "Session",
+    },
+    empty: {
+      title: "Aucune mémoire pour l'instant",
+      description:
+        "Les mémoires apparaîtront ici sous forme de réseau de points connectés à mesure que cet agent converse.",
+    },
+    filters: {
+      title: "Filtres",
+      search: "Rechercher",
+      searchPlaceholder: "mots-clés",
+      timeWindow: "Fenêtre",
+      includeInactive: "Inclure inactives",
+      edges: { semantic: "Sémantique", session: "Session", source: "Origine" },
+    },
+    page: {
+      noAgentsTitle: "Aucun agent disponible",
+      noAgentsDescription: "Créez ou publiez au moins un agent avant d'ouvrir la carte.",
+    },
+    views: { map: "Carte", curation: "Curation" },
+    mapExt: {
+      canvasAriaLabel: "Carte neurale des mémoires",
+      clusters: "Groupes",
+      zoomIn: "Zoomer",
+      zoomOut: "Dézoomer",
+      reset: "Recentrer",
+    },
+    inspectorExt: {
+      content: "Contenu",
+      details: "Détails",
+      empty: "Aucun nœud sélectionné. Explorez la carte pour commencer.",
+      expiresAt: "Expire",
+      members: "Membres",
+      never: "Sans expiration",
+      recenter: "Recentrer",
+      selectPointHint: "Cliquez sur un point du graphe pour voir ses détails ici.",
+    },
+  },
+  "de-DE": {
+    common: {
+      allSessions: "Alle Sitzungen",
+      allUsers: "Alle Nutzer",
+      close: "Schließen",
+      filters: "Filter",
+      session: "Sitzung",
+    },
+    empty: {
+      title: "Noch keine Erinnerungen",
+      description:
+        "Erinnerungen erscheinen hier als Netz verbundener Punkte, während dieser Agent kommuniziert.",
+    },
+    filters: {
+      title: "Filter",
+      search: "Suchen",
+      searchPlaceholder: "Stichwörter",
+      timeWindow: "Zeitraum",
+      includeInactive: "Inaktive einbeziehen",
+      edges: { semantic: "Semantisch", session: "Sitzung", source: "Quelle" },
+    },
+    page: {
+      noAgentsTitle: "Keine Agenten verfügbar",
+      noAgentsDescription: "Erstellen oder veröffentlichen Sie mindestens einen Agenten, bevor Sie die Karte öffnen.",
+    },
+    views: { map: "Karte", curation: "Kuration" },
+    mapExt: {
+      canvasAriaLabel: "Neuronale Gedächtniskarte",
+      clusters: "Cluster",
+      zoomIn: "Vergrößern",
+      zoomOut: "Verkleinern",
+      reset: "Zentrieren",
+    },
+    inspectorExt: {
+      content: "Inhalt",
+      details: "Details",
+      empty: "Kein Knoten ausgewählt. Erkunden Sie die Karte, um zu beginnen.",
+      expiresAt: "Läuft ab",
+      members: "Mitglieder",
+      never: "Kein Ablauf",
+      recenter: "Zentrieren",
+      selectPointHint: "Klicken Sie auf einen Punkt im Graph, um seine Details hier zu sehen.",
+    },
+  },
+} as const;
+
+(Object.keys(MEMORY_SHARED_I18N) as Array<keyof typeof MEMORY_SHARED_I18N>).forEach((lang) => {
+  const pack = MEMORY_SHARED_I18N[lang];
+  const tr = mutableResources[lang].translation as Record<string, unknown>;
+  const common = (tr.common ?? {}) as Record<string, unknown>;
+  tr.common = { ...common, ...pack.common };
+  const memory = (tr.memory ?? {}) as Record<string, unknown>;
+  memory.empty = { ...((memory.empty ?? {}) as Record<string, unknown>), ...pack.empty };
+  memory.filters = { ...((memory.filters ?? {}) as Record<string, unknown>), ...pack.filters };
+  memory.page = { ...((memory.page ?? {}) as Record<string, unknown>), ...pack.page };
+  memory.views = { ...((memory.views ?? {}) as Record<string, unknown>), ...pack.views };
+  memory.map = { ...((memory.map ?? {}) as Record<string, unknown>), ...pack.mapExt };
+  memory.inspector = {
+    ...((memory.inspector ?? {}) as Record<string, unknown>),
+    ...pack.inspectorExt,
+  };
+  tr.memory = memory;
+});
+
+const COMMAND_BAR_I18N = {
+  "en-US": {
+    placeholder: "Search agents, pages, actions…",
+    emptyState: "No matches for that query",
+    shortcutHint: "⌘K",
+    modalTitle: "Command bar",
+    agent: { description: "Open agent" },
+    groups: { agents: "Agents", pages: "Pages", actions: "Actions", recents: "Recent" },
+    pages: {
+      home: "Home",
+      controlPlane: "Agents catalog",
+      memory: "Memory",
+      schedules: "Schedules",
+      sessions: "Sessions",
+      tasks: "Tasks",
+      runtime: "Runtime",
+      executions: "Executions",
+      costs: "Costs",
+      dlq: "Dead letter queue",
+    },
+    recents: { noQuery: "Untitled task" },
+  },
+  "pt-BR": {
+    placeholder: "Buscar agentes, páginas, ações…",
+    emptyState: "Nenhum resultado para essa busca",
+    shortcutHint: "⌘K",
+    modalTitle: "Barra de comandos",
+    agent: { description: "Abrir agente" },
+    groups: { agents: "Agentes", pages: "Páginas", actions: "Ações", recents: "Recentes" },
+    pages: {
+      home: "Início",
+      controlPlane: "Catálogo de agentes",
+      memory: "Memória",
+      schedules: "Rotinas",
+      sessions: "Sessões",
+      tasks: "Tarefas",
+      runtime: "Runtime",
+      executions: "Execuções",
+      costs: "Custos",
+      dlq: "Fila de falhas",
+    },
+    recents: { noQuery: "Tarefa sem título" },
+  },
+  "es-ES": {
+    placeholder: "Buscar agentes, páginas, acciones…",
+    emptyState: "Sin resultados para esta búsqueda",
+    shortcutHint: "⌘K",
+    modalTitle: "Barra de comandos",
+    agent: { description: "Abrir agente" },
+    groups: { agents: "Agentes", pages: "Páginas", actions: "Acciones", recents: "Recientes" },
+    pages: {
+      home: "Inicio",
+      controlPlane: "Catálogo de agentes",
+      memory: "Memoria",
+      schedules: "Rutinas",
+      sessions: "Sesiones",
+      tasks: "Tareas",
+      runtime: "Runtime",
+      executions: "Ejecuciones",
+      costs: "Costos",
+      dlq: "Cola de fallos",
+    },
+    recents: { noQuery: "Tarea sin título" },
+  },
+  "fr-FR": {
+    placeholder: "Rechercher agents, pages, actions…",
+    emptyState: "Aucun résultat pour cette recherche",
+    shortcutHint: "⌘K",
+    modalTitle: "Barre de commandes",
+    agent: { description: "Ouvrir l'agent" },
+    groups: { agents: "Agents", pages: "Pages", actions: "Actions", recents: "Récents" },
+    pages: {
+      home: "Accueil",
+      controlPlane: "Catalogue d'agents",
+      memory: "Mémoire",
+      schedules: "Routines",
+      sessions: "Sessions",
+      tasks: "Tâches",
+      runtime: "Runtime",
+      executions: "Exécutions",
+      costs: "Coûts",
+      dlq: "File d'échecs",
+    },
+    recents: { noQuery: "Tâche sans titre" },
+  },
+  "de-DE": {
+    placeholder: "Agents, Seiten, Aktionen suchen…",
+    emptyState: "Keine Ergebnisse für diese Suche",
+    shortcutHint: "⌘K",
+    modalTitle: "Befehlsleiste",
+    agent: { description: "Agent öffnen" },
+    groups: { agents: "Agents", pages: "Seiten", actions: "Aktionen", recents: "Zuletzt" },
+    pages: {
+      home: "Start",
+      controlPlane: "Agent-Katalog",
+      memory: "Gedächtnis",
+      schedules: "Zeitpläne",
+      sessions: "Sitzungen",
+      tasks: "Aufgaben",
+      runtime: "Laufzeit",
+      executions: "Ausführungen",
+      costs: "Kosten",
+      dlq: "Fehlerwarteschlange",
+    },
+    recents: { noQuery: "Unbenannte Aufgabe" },
+  },
+} as const;
+
+(Object.keys(COMMAND_BAR_I18N) as Array<keyof typeof COMMAND_BAR_I18N>).forEach((lang) => {
+  const tr = mutableResources[lang].translation as Record<string, unknown>;
+  tr.commandBar = COMMAND_BAR_I18N[lang];
+});
+
 Object.assign(literalResources["en-US"] as Record<string, string>, generatedLiteralResources["en-US"]);
 Object.assign(literalResources["pt-BR"] as Record<string, string>, generatedLiteralResources["pt-BR"]);
 Object.assign(literalResources["es-ES"] as Record<string, string>, generatedLiteralResources["es-ES"]);
+Object.assign(literalResources["fr-FR"] as Record<string, string>, generatedLiteralResources["fr-FR"]);
+Object.assign(literalResources["de-DE"] as Record<string, string>, generatedLiteralResources["de-DE"]);
 
 export type ResourceLanguages = keyof typeof resources;

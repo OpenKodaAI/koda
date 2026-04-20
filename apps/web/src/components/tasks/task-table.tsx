@@ -3,16 +3,16 @@
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn, formatCost, formatDateTime, formatDuration, formatRelativeTime, truncateText } from "@/lib/utils";
 import type { Task } from "@/lib/types";
-import { getBotColor } from "@/lib/bot-constants";
+import { getAgentColor } from "@/lib/agent-constants";
 import { getSemanticTextStyle, type SemanticTone } from "@/lib/theme-semantic";
 import { ListTodo, ArrowUpRight } from "lucide-react";
 import { StatusPill } from "./status-pill";
 
 interface TaskTableProps {
-  tasks: (Task & { botId?: string })[];
-  showBot?: boolean;
+  tasks: (Task & { agentId?: string })[];
+  showAgent?: boolean;
   loading?: boolean;
-  onTaskClick?: (task: Task & { botId?: string }) => void;
+  onTaskClick?: (task: Task & { agentId?: string }) => void;
   selectedTaskId?: number | null;
 }
 
@@ -57,13 +57,13 @@ function SkeletonRow({ cols }: { cols: number }) {
 
 export function TaskTable({
   tasks,
-  showBot = false,
+  showAgent = false,
   loading = false,
   onTaskClick,
   selectedTaskId,
 }: TaskTableProps) {
   const { t } = useAppI18n();
-  const colCount = showBot ? 8 : 7;
+  const colCount = showAgent ? 8 : 7;
 
   return (
     <>
@@ -71,7 +71,7 @@ export function TaskTable({
         <div className="table-shell overflow-x-auto">
           <table className="glass-table min-w-[1040px] table-fixed">
             <colgroup>
-              {showBot && <col className="w-[108px]" />}
+              {showAgent && <col className="w-[108px]" />}
               <col className="w-[102px]" />
               <col className="w-[126px]" />
               <col className="w-[360px]" />
@@ -82,7 +82,7 @@ export function TaskTable({
             </colgroup>
             <thead>
               <tr>
-                {showBot && <th>{t("common.bot")}</th>}
+                {showAgent && <th>{t("common.agent")}</th>}
                 <th>{t("tasks.table.headers.task")}</th>
                 <th>{t("tasks.table.headers.status")}</th>
                 <th>{t("tasks.table.headers.query")}</th>
@@ -102,7 +102,7 @@ export function TaskTable({
 
                   return (
                     <tr
-                      key={`${task.botId ?? "default"}-${task.id}`}
+                      key={`${task.agentId ?? "default"}-${task.id}`}
                       onClick={() => onTaskClick?.(task)}
                       className={cn(
                         "group transition-[background-color,border-color,box-shadow] duration-150",
@@ -110,22 +110,22 @@ export function TaskTable({
                         onTaskClick && "cursor-pointer"
                       )}
                     >
-                      {showBot && (
+                      {showAgent && (
                         <td>
-                          {task.botId ? (
+                          {task.agentId ? (
                             <span
                               className="inline-flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold tracking-[0.06em] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
                               style={{
-                                backgroundColor: `${getBotColor(task.botId)}10`,
-                                color: getBotColor(task.botId),
-                                borderColor: `${getBotColor(task.botId)}22`,
+                                backgroundColor: `${getAgentColor(task.agentId)}10`,
+                                color: getAgentColor(task.agentId),
+                                borderColor: `${getAgentColor(task.agentId)}22`,
                               }}
                             >
                               <span
                                 className="h-1.5 w-1.5 rounded-full"
-                                style={{ backgroundColor: getBotColor(task.botId) }}
+                                style={{ backgroundColor: getAgentColor(task.agentId) }}
                               />
-                              <span className="truncate">{task.botId}</span>
+                              <span className="truncate">{task.agentId}</span>
                             </span>
                           ) : (
                             <span className="text-subtle">{"\u2014"}</span>
@@ -199,7 +199,7 @@ export function TaskTable({
                 })}
               {tasks.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={showBot ? 8 : 7}>
+                  <td colSpan={showAgent ? 8 : 7}>
                     <div className="empty-state">
                       <ListTodo className="empty-state-icon h-10 w-10" />
                       <p className="empty-state-text">{t("tasks.table.noTasksFound")}</p>
@@ -227,7 +227,7 @@ export function TaskTable({
         {!loading &&
           tasks.map((task) => (
             <button
-              key={`${task.botId ?? "default"}-${task.id}`}
+              key={`${task.agentId ?? "default"}-${task.id}`}
               type="button"
               onClick={() => onTaskClick?.(task)}
               className={cn(
@@ -240,17 +240,17 @@ export function TaskTable({
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill status={task.status} />
-                    {showBot && task.botId && (
+                    {showAgent && task.agentId && (
                       <span
                         className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em]"
                         style={{
-                          backgroundColor: `${getBotColor(task.botId)}12`,
-                          color: getBotColor(task.botId),
-                          borderColor: `${getBotColor(task.botId)}20`,
+                          backgroundColor: `${getAgentColor(task.agentId)}12`,
+                          color: getAgentColor(task.agentId),
+                          borderColor: `${getAgentColor(task.agentId)}20`,
                         }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: getBotColor(task.botId) }} />
-                        {task.botId}
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: getAgentColor(task.agentId) }} />
+                        {task.agentId}
                       </span>
                     )}
                   </div>

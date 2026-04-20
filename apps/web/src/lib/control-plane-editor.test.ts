@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { setCurrentLanguage } from "@/lib/i18n";
 import {
   buildAgentSpecPayload,
-  buildBotMetadataPayload,
+  buildAgentMetadataPayload,
   parseHealthPort,
   parseJsonArray,
   parseJsonObject,
@@ -12,8 +12,8 @@ setCurrentLanguage("pt-BR");
 
 describe("control-plane-editor helpers", () => {
   it("preserves advanced appearance/runtime keys while applying visible fields", () => {
-    const payload = buildBotMetadataPayload({
-      displayName: "UI QA Bot",
+    const payload = buildAgentMetadataPayload({
+      displayName: "UI QA Agent",
       status: "paused",
       storageNamespace: "ui_qa_bot",
       workspaceId: "produto",
@@ -38,7 +38,7 @@ describe("control-plane-editor helpers", () => {
     });
 
     expect(payload.appearance).toEqual({
-      label: "UI QA Bot",
+      label: "UI QA Agent",
       color: "#123456",
       color_rgb: "18, 52, 86",
       badge: "qa",

@@ -142,7 +142,7 @@ export const ScreenTimeCard = ({
         {topApps.length > 0 && <div className="min-w-0 border-t border-[var(--border-subtle)] pt-4 lg:flex lg:flex-col lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-              {t("screenTime.focusBots", { defaultValue: "Bots in focus" })}
+              {t("screenTime.focusAgents", { defaultValue: "Agents in focus" })}
             </p>
             <span className="text-[11px] text-[var(--text-quaternary)]">
               {t("screenTime.items", { count: topApps.length, defaultValue: "{{count}} items" })}

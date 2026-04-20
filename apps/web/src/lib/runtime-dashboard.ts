@@ -1,7 +1,7 @@
 import "server-only";
 
 import {
-  getControlPlaneBots,
+  getControlPlaneAgents,
   getControlPlaneSystemSettings,
 } from "@/lib/control-plane";
 import {
@@ -26,7 +26,7 @@ import type {
   SessionMessage,
   SessionSummary,
   Task,
-  BotStats,
+  AgentStats,
 } from "@/lib/types";
 import type {
   RuntimeEvent,
@@ -43,7 +43,7 @@ type RuntimeTaskSnapshotEnvelope = {
   environment?: Record<string, unknown> | null;
 };
 
-type BotRuntimeCollection = {
+type AgentRuntimeCollection = {
   overview: Awaited<ReturnType<typeof getRuntimeOverview>>;
   rows: RuntimeRoomRow[];
   snapshots: Map<number, RuntimeTaskSnapshotEnvelope>;
@@ -90,11 +90,11 @@ function toRuntimeTask(row: RuntimeRoomRow, task: RuntimeTaskDetail): Task {
   };
 }
 
-function toExecutionSummary(botId: string, row: RuntimeRoomRow, task: RuntimeTaskDetail, warnings: RuntimeWarning[] = []): ExecutionSummary {
+function toExecutionSummary(agentId: string, row: RuntimeRoomRow, task: RuntimeTaskDetail, warnings: RuntimeWarning[] = []): ExecutionSummary {
   const legacyTask = toRuntimeTask(row, task);
   return {
     task_id: legacyTask.id,
-    bot_id: botId,
+    bot_id: agentId,
     status: legacyTask.status,
     query_text: legacyTask.query_text,
     model: legacyTask.model,
@@ -174,22 +174,22 @@ function filterRows(
   return filtered;
 }
 
-async function getBotRuntimeCollection(
-  botId: string,
+async function getAgentRuntimeCollection(
+  agentId: string,
   options: { search?: string | null; status?: string | null; limit?: number | null } = {},
-): Promise<BotRuntimeCollection> {
-  const overview = await getRuntimeOverview(botId);
+): Promise<AgentRuntimeCollection> {
+  const overview = await getRuntimeOverview(agentId);
   const rows = filterRows(buildRuntimeRoomRows([overview]), options);
   const snapshots = await listRuntimeTaskSnapshots(
-    botId,
+    agentId,
     rows.map((row) => row.taskId),
   );
   return { overview, rows, snapshots };
 }
 
-function buildEmptyBotStats(botId: string): BotStats {
+function buildEmptyAgentStats(agentId: string): AgentStats {
   return {
-    botId,
+    agentId,
     totalTasks: 0,
     activeTasks: 0,
     completedTasks: 0,
@@ -204,9 +204,9 @@ function buildEmptyBotStats(botId: string): BotStats {
   };
 }
 
-export async function getOperationalBotStats(botId: string): Promise<BotStats> {
+export async function getOperationalAgentStats(agentId: string): Promise<AgentStats> {
   try {
-    const { overview, rows, snapshots } = await getBotRuntimeCollection(botId, {
+    const { overview, rows, snapshots } = await getAgentRuntimeCollection(agentId, {
       limit: 50,
     });
     const tasks = rows
@@ -239,7 +239,7 @@ export async function getOperationalBotStats(botId: string): Promise<BotStats> {
     }
 
     return {
-      botId,
+      agentId,
       totalTasks: tasks.length,
       activeTasks: overview.snapshot?.active_environments ?? 0,
       completedTasks: tasks.filter((task) => task.runtime.status === "completed").length,
@@ -257,21 +257,21 @@ export async function getOperationalBotStats(botId: string): Promise<BotStats> {
         .map(([date, cost]) => ({ date, cost })),
     };
   } catch {
-    return buildEmptyBotStats(botId);
+    return buildEmptyAgentStats(agentId);
   }
 }
 
-export async function getOperationalBotStatsList() {
-  const bots = await getControlPlaneBots();
-  const stats = await Promise.all(bots.map(async (bot) => getOperationalBotStats(bot.id)));
-  return bots.map((bot) => stats.find((item) => item.botId === bot.id) ?? buildEmptyBotStats(bot.id));
+export async function getOperationalAgentStatsList() {
+  const agents = await getControlPlaneAgents();
+  const stats = await Promise.all(agents.map(async (agent) => getOperationalAgentStats(agent.id)));
+  return agents.map((agent) => stats.find((item) => item.agentId === agent.id) ?? buildEmptyAgentStats(agent.id));
 }
 
-export async function getOperationalBotTasks(
-  botId: string,
+export async function getOperationalAgentTasks(
+  agentId: string,
   options: { search?: string | null; status?: string | null; limit?: number | null } = {},
 ) {
-  const { rows, snapshots } = await getBotRuntimeCollection(botId, options);
+  const { rows, snapshots } = await getAgentRuntimeCollection(agentId, options);
   return rows
     .map((row) => {
       const snapshot = snapshots.get(row.taskId);
@@ -283,15 +283,15 @@ export async function getOperationalBotTasks(
 }
 
 export async function getOperationalExecutions(
-  botId: string,
+  agentId: string,
   options: { search?: string | null; status?: string | null; limit?: number | null } = {},
 ) {
-  const { rows, snapshots } = await getBotRuntimeCollection(botId, options);
+  const { rows, snapshots } = await getAgentRuntimeCollection(agentId, options);
   return rows
     .map((row) => {
       const snapshot = snapshots.get(row.taskId);
       if (!snapshot?.task) return null;
-      return toExecutionSummary(botId, row, snapshot.task, snapshot.warnings ?? []);
+      return toExecutionSummary(agentId, row, snapshot.task, snapshot.warnings ?? []);
     })
     .filter((item): item is ExecutionSummary => Boolean(item))
     .sort((left, right) => toTimestamp(right.created_at) - toTimestamp(left.created_at));
@@ -394,10 +394,10 @@ function collectWarnings(warnings: RuntimeWarning[], guardrails: RuntimeGuardrai
 }
 
 export async function getOperationalExecutionDetail(
-  botId: string,
+  agentId: string,
   taskId: number,
 ) {
-  const bundle = await getRuntimeTaskBundle(botId, taskId);
+  const bundle = await getRuntimeTaskBundle(agentId, taskId);
   if (!bundle.task) {
     throw new Error("Task not found");
   }
@@ -408,7 +408,7 @@ export async function getOperationalExecutionDetail(
 
   return {
     task_id: Number(task.id ?? taskId),
-    bot_id: botId,
+    bot_id: agentId,
     status: (String(task.status || "queued") as ExecutionSummary["status"]),
     query_text: typeof task.query_text === "string" ? task.query_text : null,
     response_text: null,
@@ -460,10 +460,10 @@ export async function getOperationalExecutionDetail(
 }
 
 export async function getOperationalSessions(
-  botId: string,
+  agentId: string,
   options: { search?: string | null; limit?: number | null } = {},
 ) {
-  const executions = await getOperationalExecutions(botId, { search: options.search, limit: 200 });
+  const executions = await getOperationalExecutions(agentId, { search: options.search, limit: 200 });
   const sessionMap = new Map<string, SessionSummary>();
 
   for (const execution of executions) {
@@ -474,7 +474,7 @@ export async function getOperationalSessions(
 
     if (!current) {
       sessionMap.set(sessionId, {
-        bot_id: botId,
+        bot_id: agentId,
         session_id: sessionId,
         name: execution.query_text?.slice(0, 72) || `Runtime session #${execution.task_id}`,
         user_id: execution.user_id,
@@ -522,16 +522,16 @@ export async function getOperationalSessions(
   return items;
 }
 
-export async function getOperationalSessionDetail(botId: string, sessionId: string) {
-  const executions = (await getOperationalExecutions(botId, { limit: 200 }))
+export async function getOperationalSessionDetail(agentId: string, sessionId: string) {
+  const executions = (await getOperationalExecutions(agentId, { limit: 200 }))
     .filter((execution) => (execution.session_id || `runtime-task-${execution.task_id}`) === sessionId)
     .sort((left, right) => toTimestamp(left.created_at) - toTimestamp(right.created_at));
 
-  return buildOperationalSessionDetail(botId, sessionId, executions);
+  return buildOperationalSessionDetail(agentId, sessionId, executions);
 }
 
 export function buildOperationalSessionDetail(
-  botId: string,
+  agentId: string,
   sessionId: string,
   executions: ExecutionSummary[],
 ) {
@@ -541,7 +541,7 @@ export function buildOperationalSessionDetail(
 
   const summaryBase = executions[0];
   const summary: SessionSummary = {
-    bot_id: botId,
+    bot_id: agentId,
     session_id: sessionId,
     name: summaryBase.query_text?.slice(0, 72) || `Runtime session #${summaryBase.task_id}`,
     user_id: summaryBase.user_id,
@@ -592,10 +592,10 @@ export function buildOperationalSessionDetail(
 }
 
 export async function getOperationalDlq(
-  botId: string,
+  agentId: string,
   options: { retryEligible?: boolean | null; limit?: number | null } = {},
 ) {
-  const executions = await getOperationalExecutions(botId, { limit: options.limit ?? 100 });
+  const executions = await getOperationalExecutions(agentId, { limit: options.limit ?? 100 });
   const items = executions
     .filter((execution) => execution.status === "failed")
     .map((execution) => ({
@@ -603,7 +603,7 @@ export async function getOperationalDlq(
       task_id: execution.task_id,
       user_id: execution.user_id,
       chat_id: execution.chat_id,
-      bot_id: botId,
+      bot_id: agentId,
       pod_name: null,
       query_text: execution.query_text || `Runtime task #${execution.task_id}`,
       model: execution.model,
@@ -640,19 +640,19 @@ function classifyTaskType(queryText: string | null, model: string | null) {
 }
 
 export async function getOperationalCostInsights(filters: {
-  botIds?: string[];
+  agentIds?: string[];
   period?: string | null;
   model?: string | null;
   taskType?: string | null;
 }) {
-  const bots = await getControlPlaneBots();
-  const selectedBotIds = (filters.botIds && filters.botIds.length > 0
-    ? filters.botIds
-    : bots.map((bot) => bot.id)
+  const agents = await getControlPlaneAgents();
+  const selectedBotIds = (filters.agentIds && filters.agentIds.length > 0
+    ? filters.agentIds
+    : agents.map((agent) => agent.id)
   ).filter(Boolean);
 
   const executionLists = await Promise.all(
-    selectedBotIds.map(async (botId) => getOperationalExecutions(botId, { limit: 200 })),
+    selectedBotIds.map(async (agentId) => getOperationalExecutions(agentId, { limit: 200 })),
   );
   const executions = executionLists
     .flat()
@@ -696,7 +696,7 @@ export async function getOperationalCostInsights(filters: {
   };
 
   const timeSeriesMap = new Map<string, CostTimePoint>();
-  const botCostMap = new Map<string, number>();
+  const agentCostMap = new Map<string, number>();
   const modelCostMap = new Map<string, number>();
   const taskTypeCostMap = new Map<string, { label: string; cost: number; count: number }>();
 
@@ -721,9 +721,9 @@ export async function getOperationalCostInsights(filters: {
       );
     }
     timeSeriesMap.set(bucket, existingPoint);
-    botCostMap.set(
+    agentCostMap.set(
       entry.execution.bot_id,
-      (botCostMap.get(entry.execution.bot_id) ?? 0) + entry.execution.cost_usd,
+      (agentCostMap.get(entry.execution.bot_id) ?? 0) + entry.execution.cost_usd,
     );
     const taskTypeEntry = taskTypeCostMap.get(entry.taskType.value) ?? {
       label: entry.taskType.label,
@@ -736,14 +736,14 @@ export async function getOperationalCostInsights(filters: {
   }
 
   const totalCost = overview.total_cost_usd || 1;
-  const byBot = Array.from(botCostMap.entries()).map(([botId, cost]) => ({
-    bot_id: botId,
+  const byAgent = Array.from(agentCostMap.entries()).map(([agentId, cost]) => ({
+    bot_id: agentId,
     cost_usd: cost,
     share_pct: (cost / totalCost) * 100,
     resolved_conversations: 0,
     avg_cost_per_resolved_conversation: 0,
-    query_count: filteredEntries.filter((entry) => entry.execution.bot_id === botId && Boolean(entry.execution.query_text)).length,
-    execution_count: filteredEntries.filter((entry) => entry.execution.bot_id === botId).length,
+    query_count: filteredEntries.filter((entry) => entry.execution.bot_id === agentId && Boolean(entry.execution.query_text)).length,
+    execution_count: filteredEntries.filter((entry) => entry.execution.bot_id === agentId).length,
   }));
   const byModel = Array.from(modelCostMap.entries()).map(([model, cost]) => ({
     model,
@@ -762,7 +762,7 @@ export async function getOperationalCostInsights(filters: {
     count: entry.count,
   }));
 
-  overview.top_bot = byBot.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.bot_id ?? null;
+  overview.top_bot = byAgent.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.bot_id ?? null;
   overview.top_model = byModel.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.model ?? null;
   overview.top_task_type =
     byTaskType.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.task_type ?? null;
@@ -839,7 +839,7 @@ export async function getOperationalCostInsights(filters: {
     comparison,
     peak_bucket: peak,
     time_series: Array.from(timeSeriesMap.values()).sort((left, right) => left.bucket.localeCompare(right.bucket)),
-    by_bot: byBot,
+    by_bot: byAgent,
     by_model: byModel,
     by_task_type: byTaskType,
     resolved_conversations: conversationRows

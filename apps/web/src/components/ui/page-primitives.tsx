@@ -150,12 +150,14 @@ export function PageMetricStrip({
 export function PageMetricStripItem({
   label,
   value,
+  hint,
   delta,
   tone = "neutral",
   className,
 }: {
   label: ReactNode;
   value: ReactNode;
+  hint?: ReactNode;
   delta?: ReactNode;
   tone?: "neutral" | "accent" | "warning" | "danger" | "success";
   className?: string;
@@ -175,6 +177,9 @@ export function PageMetricStripItem({
     <div className={cn("metric-strip__item", className)}>
       <span className="metric-label">{label}</span>
       <span className={cn("metric-value", toneClass)}>{value}</span>
+      {hint ? (
+        <span className="text-[0.75rem] leading-[1.45] text-[var(--text-tertiary)]">{hint}</span>
+      ) : null}
       {delta ? (
         <span className="text-[0.75rem] text-[var(--text-tertiary)]">{delta}</span>
       ) : null}
@@ -264,11 +269,13 @@ export function PageSearchField({
   value,
   onChange,
   placeholder,
+  ariaLabel,
   className,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  ariaLabel?: string;
   className?: string;
 }) {
   return (
@@ -277,6 +284,7 @@ export function PageSearchField({
       <input
         type="text"
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />

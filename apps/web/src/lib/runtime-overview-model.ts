@@ -7,7 +7,7 @@ import type {
 export type RuntimeRoomFilter = "all" | "active" | "retained" | "recovery";
 
 export interface RuntimeRoomRow {
-  botId: string;
+  agentId: string;
   taskId: number;
   queryText: string;
   source: "environment" | "queue";
@@ -36,7 +36,7 @@ export function buildRuntimeRoomRows(items: RuntimeOverview[]) {
       const queue = overview.queues.find((item) => item.task_id === environment.task_id) ?? null;
       environmentTaskIds.add(environment.task_id);
       rows.push({
-        botId: overview.botId,
+        agentId: overview.agentId,
         taskId: environment.task_id,
         queryText: String(queue?.query_text || ""),
         source: "environment",
@@ -52,7 +52,7 @@ export function buildRuntimeRoomRows(items: RuntimeOverview[]) {
     overview.queues.forEach((queue) => {
       if (environmentTaskIds.has(queue.task_id)) return;
       rows.push({
-        botId: overview.botId,
+        agentId: overview.agentId,
         taskId: queue.task_id,
         queryText: String(queue.query_text || ""),
         source: "queue",

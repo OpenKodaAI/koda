@@ -1,0 +1,1043 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run validation-only or publish after all gates pass"
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - publish
+      release_ref:
+        description: "Tag or ref to validate or publish from; defaults to the current ref"
+        required: false
+        default: ""
+
+concurrency:
+  group: release-${{ inputs.release_ref != '' && inputs.release_ref || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10.26.2"
+  PYTHON_VERSION: "3.12"
+  RUST_TOOLCHAIN: "stable"
+  UV_VERSION: "0.10.7"
+  RELEASE_BUNDLE_DIR: dist/release
+  NPM_PACKAGE_NAME: "@openkodaai/koda"
+  GHCR_NAMESPACE: ghcr.io/openkodaai
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+      publish: ${{ steps.resolve.outputs.publish }}
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
+      version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      publish_latest: ${{ steps.version.outputs.publish_latest }}
+      npm_dist_tag: ${{ steps.version.outputs.npm_dist_tag }}
+    steps:
+      - name: Resolve release ref and mode
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            release_ref="${GITHUB_REF_NAME}"
+            publish="true"
+            create_tag="false"
+          else
+            release_ref="${{ inputs.release_ref }}"
+            if [ -z "${release_ref}" ]; then
+              release_ref="${GITHUB_REF_NAME}"
+            fi
+            if [ "${{ inputs.mode }}" = "publish" ]; then
+              publish="true"
+            else
+              publish="false"
+            fi
+            create_tag="false"
+          fi
+
+          if [[ "${release_ref}" == v* ]]; then
+            checkout_ref="refs/tags/${release_ref}"
+          else
+            checkout_ref="${release_ref}"
+            if [ "${publish}" = "true" ]; then
+              create_tag="true"
+            fi
+          fi
+
+          {
+            echo "ref=${release_ref}"
+            echo "checkout_ref=${checkout_ref}"
+            echo "publish=${publish}"
+            echo "create_tag=${create_tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ steps.resolve.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Validate release version contract
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          root = Path(".")
+          versions = {
+              "pyproject": tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
+              "cli_package": json.loads((root / "packages" / "cli" / "package.json").read_text(encoding="utf-8"))["version"],
+              "release_manifest": json.loads((root / "packages" / "cli" / "release" / "manifest.json").read_text(encoding="utf-8"))["version"],
+              "python_init": re.search(r'__version__ = "([^"]+)"', (root / "koda" / "__init__.py").read_text(encoding="utf-8")).group(1),
+          }
+
+          unique = sorted(set(versions.values()))
+          if len(unique) != 1:
+              raise SystemExit(f"Version mismatch: {versions}")
+
+          print(unique[0])
+          PY
+          )"
+
+          release_ref="${{ steps.resolve.outputs.ref }}"
+          release_tag="v${version}"
+          if [ "${{ steps.resolve.outputs.publish }}" = "true" ] && [[ "${release_ref}" == v* ]] && [ "${release_ref}" != "${release_tag}" ]; then
+            echo "Tag ${release_ref} does not match repository version ${version}." >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          if [[ "${version}" == *-* ]]; then
+            echo "publish_latest=false" >> "${GITHUB_OUTPUT}"
+            echo "npm_dist_tag=next" >> "${GITHUB_OUTPUT}"
+          else
+            echo "publish_latest=true" >> "${GITHUB_OUTPUT}"
+            echo "npm_dist_tag=latest" >> "${GITHUB_OUTPUT}"
+          fi
+
+  python-quality:
+    name: python-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy type check
+        run: uv run mypy koda/ --ignore-missing-imports
+
+  workflow-quality:
+    name: workflow-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1.7.12
+
+  python-tests:
+    name: python-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Run tests with coverage
+        run: |
+          mkdir -p artifacts/python/${{ matrix.python-version }}
+          uv run pytest \
+            --cov=koda \
+            --cov-report=term-missing \
+            --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.python-version }}/pytest.xml
+        env:
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
+      - name: Upload pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: python-tests-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.python-version }}/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  web-quality:
+    name: web-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint web
+        run: pnpm lint:web
+      - name: Test web
+        run: pnpm test:web -- --maxWorkers=1 --no-file-parallelism
+      - name: Build web
+        run: pnpm build:web
+
+  repo-hygiene:
+    name: repo-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Check repo-map drift
+        run: uv run python3 scripts/generate_repo_map.py --check
+      - name: Check release metadata drift
+        run: uv run python3 scripts/release_metadata.py
+      - name: Check npm README drift
+        run: uv run python3 scripts/sync_npm_readme.py
+      - name: Validate AI docs and open source hygiene
+        run: |
+          uv run pytest -q \
+            tests/test_ai_docs.py \
+            tests/test_repo_map.py \
+            tests/test_open_source_hygiene.py \
+            tests/test_public_docs.py \
+            tests/test_installation_assets.py
+        env:
+          KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
+
+  rust-quality:
+    name: rust-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - name: Rust format check
+        run: cargo +${{ env.RUST_TOOLCHAIN }} fmt --check
+      - name: Rust clippy
+        run: cargo +${{ env.RUST_TOOLCHAIN }} clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo +${{ env.RUST_TOOLCHAIN }} test --workspace
+
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Export pinned Python requirements for audit
+        run: |
+          uv export \
+            --format requirements.txt \
+            --locked \
+            --all-groups \
+            --all-extras \
+            --no-editable \
+            --no-emit-project \
+            --no-emit-workspace \
+            --no-header \
+            --no-annotate \
+            --output-file "${RUNNER_TEMP}/python-audit-requirements.txt"
+      - name: Python dependency audit
+        run: |
+          uv run pip-audit \
+            --strict \
+            --requirement "${RUNNER_TEMP}/python-audit-requirements.txt" \
+            --require-hashes \
+            --disable-pip
+      - name: Node dependency audit
+        run: pnpm audit --audit-level=high
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Rust dependency audit
+        run: cargo audit --file rust/Cargo.lock
+
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: prepare
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Bandit SAST scan
+        run: |
+          set +e
+          mkdir -p artifacts/security
+          uv run bandit -r koda/ -lll -iii --skip B101 -f json -o artifacts/security/bandit.json
+          bandit_status=$?
+          set -e
+          python3 scripts/convert_bandit_json_to_sarif.py artifacts/security/bandit.json artifacts/security/bandit.sarif
+          exit "${bandit_status}"
+      - name: Upload Bandit SARIF
+        if: always() && hashFiles('artifacts/security/bandit.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/bandit.sarif
+          category: bandit
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) ASSET="gitleaks_${VERSION}_linux_x64.tar.gz" ;;
+            aarch64|arm64) ASSET="gitleaks_${VERSION}_linux_arm64.tar.gz" ;;
+            *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+          esac
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/${ASSET}"
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_checksums.txt"
+          grep " ${ASSET}$" "gitleaks_${VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${ASSET}" gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+      - name: Run Gitleaks
+        run: |
+          mkdir -p artifacts/security
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --report-format sarif \
+            --report-path artifacts/security/gitleaks.sarif \
+            --redact \
+            --exit-code 1
+      - name: Upload Gitleaks SARIF
+        if: always() && hashFiles('artifacts/security/gitleaks.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/gitleaks.sarif
+          category: gitleaks
+      - name: Upload SAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: sast-artifacts
+          path: artifacts/security/
+          if-no-files-found: ignore
+          retention-days: 21
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.35.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4.35.1
+        with:
+          category: /language:${{ matrix.language }}
+
+  container-scan:
+    name: container-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: prepare
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Build container images
+        run: |
+          docker build -t koda:release .
+          docker build -f apps/web/Dockerfile -t koda-web:release .
+          docker build -f Dockerfile.memory -t koda-memory:release .
+          docker build -f Dockerfile.security -t koda-security:release .
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          VERSION=0.69.3
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) ASSET="trivy_${VERSION}_Linux-64bit.tar.gz" ;;
+            aarch64|arm64) ASSET="trivy_${VERSION}_Linux-ARM64.tar.gz" ;;
+            *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+          esac
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/${ASSET}"
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_checksums.txt"
+          grep " ${ASSET}$" "trivy_${VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${ASSET}" trivy
+          sudo install trivy /usr/local/bin/trivy
+      - name: Scan container images with Trivy
+        run: |
+          mkdir -p artifacts/security/trivy
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:release
+      - name: Upload Trivy SARIF for koda
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda.sarif
+          category: trivy-koda
+      - name: Upload Trivy SARIF for koda-web
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-web.sarif
+          category: trivy-koda-web
+      - name: Upload Trivy SARIF for koda-memory
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-memory.sarif
+          category: trivy-koda-memory
+      - name: Upload Trivy SARIF for koda-security
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-security.sarif
+          category: trivy-koda-security
+      - name: Upload container scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: container-scan-artifacts
+          path: artifacts/security/trivy/
+          if-no-files-found: ignore
+          retention-days: 21
+
+  docker-smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - prepare
+      - workflow-quality
+      - python-quality
+      - python-tests
+      - web-quality
+      - repo-hygiene
+      - rust-quality
+      - dependency-audit
+      - sast
+      - codeql
+      - container-scan
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Build primary Docker image
+        run: docker build -t koda:ci .
+      - name: Bring up stack and smoke test
+        run: bash scripts/docker_smoke.sh
+      - name: Upload docker smoke artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docker-smoke-artifacts
+          path: artifacts/docker/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  build-release-bundle:
+    name: build-release-artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - prepare
+      - workflow-quality
+      - python-quality
+      - python-tests
+      - web-quality
+      - repo-hygiene
+      - rust-quality
+      - dependency-audit
+      - sast
+      - codeql
+      - container-scan
+      - docker-smoke
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build release artifacts
+        run: |
+          set -euo pipefail
+          python3 scripts/build_release_artifacts.py --output-dir "${RELEASE_BUNDLE_DIR}"
+      - name: Upload release bundle artifact
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: release-bundle-${{ needs.prepare.outputs.version }}
+          path: |
+            ${{ env.RELEASE_BUNDLE_DIR }}/release/
+            ${{ env.RELEASE_BUNDLE_DIR }}/npm/
+            ${{ env.RELEASE_BUNDLE_DIR }}/release-artifacts.json
+            ${{ env.RELEASE_BUNDLE_DIR }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  npm-pack-smoke:
+    name: npm-pack-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - prepare
+      - build-release-bundle
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ needs.prepare.outputs.version }}
+          path: ${{ env.RELEASE_BUNDLE_DIR }}
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Smoke test packaged release install
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_smoke_test.py \
+            --cli-tarball "${RELEASE_BUNDLE_DIR}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" \
+            --install-dir "${RUNNER_TEMP}/koda-release-install"
+
+  ensure-release-tag:
+    name: ensure-release-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - prepare
+      - build-release-bundle
+      - npm-pack-smoke
+    if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    permissions:
+      contents: write
+    outputs:
+      publish_ref: ${{ steps.ensure.outputs.publish_ref }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Configure git author
+        if: needs.prepare.outputs.create_tag == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Ensure release tag exists on the validated commit
+        id: ensure
+        shell: bash
+        env:
+          CREATE_TAG: ${{ needs.prepare.outputs.create_tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          publish_ref="refs/tags/${RELEASE_TAG}"
+          current_sha="$(git rev-parse HEAD)"
+          remote_commit="$(git ls-remote --tags origin "${publish_ref}^{}" | awk 'NR==1 { print $1 }')"
+
+          if [ -z "${remote_commit}" ]; then
+            remote_commit="$(git ls-remote --tags origin "${publish_ref}" | awk 'NR==1 { print $1 }')"
+          fi
+
+          if [ -n "${remote_commit}" ]; then
+            if [ "${remote_commit}" != "${current_sha}" ]; then
+              echo "Tag ${RELEASE_TAG} already exists on ${remote_commit}, expected ${current_sha}." >&2
+              exit 1
+            fi
+            echo "Tag ${RELEASE_TAG} already exists on the validated commit."
+          elif [ "${CREATE_TAG}" = "true" ]; then
+            git tag -a "${RELEASE_TAG}" -m "Koda ${RELEASE_TAG#v}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          else
+            echo "Expected tag ${RELEASE_TAG} to exist on origin before publish." >&2
+            exit 1
+          fi
+
+          echo "publish_ref=${publish_ref}" >> "${GITHUB_OUTPUT}"
+
+  publish-ghcr:
+    name: publish-ghcr
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - prepare
+      - build-release-bundle
+      - npm-pack-smoke
+      - ensure-release-tag
+    if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: koda-app
+            dockerfile: Dockerfile
+            context: .
+          - image: koda-web
+            dockerfile: apps/web/Dockerfile
+            context: .
+          - image: koda-memory
+            dockerfile: Dockerfile.memory
+            context: .
+          - image: koda-security
+            dockerfile: Dockerfile.security
+            context: .
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.ensure-release-tag.outputs.publish_ref }}
+          fetch-depth: 0
+      - name: Resolve image tags
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
+        run: |
+          {
+            echo "IMAGE_TAGS<<EOF"
+            echo "${GHCR_NAMESPACE}/${IMAGE_NAME}:${VERSION}"
+            if [ "${PUBLISH_LATEST}" = "true" ]; then
+              echo "${GHCR_NAMESPACE}/${IMAGE_NAME}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_ENV}"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Buildx builder
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.IMAGE_TAGS }}
+
+  publish-npm:
+    name: publish-npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - prepare
+      - build-release-bundle
+      - npm-pack-smoke
+      - ensure-release-tag
+    if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.ensure-release-tag.outputs.publish_ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ needs.prepare.outputs.version }}
+          path: ${{ env.RELEASE_BUNDLE_DIR }}
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+      - name: Validate npm token fallback identity
+        id: npm_token_status
+        if: env.HAS_NPM_TOKEN == 'true'
+        continue-on-error: true
+        run: npm whoami --registry=https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Check whether npm package version already exists
+        id: npm_status
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          published="$(
+            python3 scripts/npm_registry_metadata.py exists \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}"
+          )"
+          echo "published=${published}" >> "${GITHUB_OUTPUT}"
+      - name: Skip npm publish when version already exists
+        if: steps.npm_status.outputs.published == 'true'
+        run: echo "${NPM_PACKAGE_NAME}@${{ needs.prepare.outputs.version }} is already published; skipping npm publish."
+      - name: Publish scoped npm package with trusted publishing
+        id: publish_trusted
+        if: steps.npm_status.outputs.published != 'true'
+        continue-on-error: ${{ env.HAS_NPM_TOKEN == 'true' }}
+        run: npx --yes npm@11.5.1 publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+      - name: Abort release when trusted publishing fails without token fallback
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN != 'true' && steps.publish_trusted.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "Trusted publishing failed and no NPM_TOKEN fallback is configured." >&2
+          echo "Bind the GitHub trusted publisher in npm or configure NPM_TOKEN before retrying release.yml." >&2
+          exit 1
+      - name: Abort token fallback when npm authentication is invalid
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure' && steps.npm_token_status.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "Trusted publishing failed and the configured NPM_TOKEN did not pass npm whoami." >&2
+          echo "Fix the token or the npm trusted publisher binding before retrying release.yml." >&2
+          exit 1
+      - name: Publish scoped npm package with token fallback
+        if: steps.npm_status.outputs.published != 'true' && env.HAS_NPM_TOKEN == 'true' && steps.publish_trusted.outcome == 'failure'
+        run: npx --yes npm@11.5.1 publish "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz" --access public --provenance --tag "${{ needs.prepare.outputs.npm_dist_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Repair npm dist-tag with token fallback when needed
+        if: env.HAS_NPM_TOKEN == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t registry_state < <(
+            python3 scripts/npm_registry_metadata.py state \
+              --package "${NPM_PACKAGE_NAME}" \
+              --version "${VERSION}" \
+              --dist-tag "${DIST_TAG}"
+          )
+
+          version_state="${registry_state[0]:-}"
+          current_dist_tag_version="${registry_state[1]:-}"
+
+          if [ "${version_state}" != "${VERSION}" ]; then
+            exit 0
+          fi
+
+          if [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+            exit 0
+          fi
+
+          npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}" --registry=https://registry.npmjs.org
+      - name: Verify npm package version and dist-tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}
+        run: |
+          set -euo pipefail
+          for _attempt in $(seq 1 24); do
+            mapfile -t registry_state < <(
+              python3 scripts/npm_registry_metadata.py state \
+                --package "${NPM_PACKAGE_NAME}" \
+                --version "${VERSION}" \
+                --dist-tag "${DIST_TAG}"
+            )
+
+            version_state="${registry_state[0]:-}"
+            current_dist_tag_version="${registry_state[1]:-}"
+
+            if [ "${version_state}" = "${VERSION}" ] && [ "${current_dist_tag_version}" = "${VERSION}" ]; then
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
+          python3 scripts/npm_registry_metadata.py dist-tags \
+            --package "${NPM_PACKAGE_NAME}" || true
+          exit 1
+
+  github-release:
+    name: github-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - prepare
+      - build-release-bundle
+      - npm-pack-smoke
+      - ensure-release-tag
+      - publish-ghcr
+      - publish-npm
+    if: always() && needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download release bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ needs.prepare.outputs.version }}
+          path: ${{ env.RELEASE_BUNDLE_DIR }}
+      - name: Check whether GitHub release already exists
+        id: release_status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Resolve release publication mode
+        id: release_mode
+        shell: bash
+        env:
+          GHCR_RESULT: ${{ needs.publish-ghcr.result }}
+          NPM_RESULT: ${{ needs.publish-npm.result }}
+        run: |
+          set -euo pipefail
+
+          failed_jobs=()
+          if [ "${GHCR_RESULT}" != "success" ]; then
+            failed_jobs+=("publish-ghcr")
+          fi
+          if [ "${NPM_RESULT}" != "success" ]; then
+            failed_jobs+=("publish-npm")
+          fi
+
+          if [ "${#failed_jobs[@]}" -eq 0 ]; then
+            {
+              echo "draft=false"
+              echo "title=Koda v${{ needs.prepare.outputs.version }}"
+              echo "failed_jobs="
+            } >> "${GITHUB_OUTPUT}"
+          else
+            {
+              echo "draft=true"
+              echo "title=Koda v${{ needs.prepare.outputs.version }} (publish recovery required)"
+              echo "failed_jobs=$(IFS=,; echo "${failed_jobs[*]}")"
+            } >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Build release notes body
+        shell: bash
+        env:
+          FAILED_JOBS: ${{ steps.release_mode.outputs.failed_jobs }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+          cat > artifacts/release/body.md <<'EOF'
+          Koda v${{ needs.prepare.outputs.version }} has passed the release gate.
+
+          Validation completed before publish:
+          - Python quality and tests
+          - Web lint, test, and build
+          - Repo hygiene and documentation checks
+          - Rust checks
+          - Dependency audits
+          - SAST and secret scanning
+          - Container scanning
+          - Docker smoke
+          - packaged npm install smoke
+
+          Release artifacts:
+          - Release bundle tarball
+          - npm package tarball
+          - Asset checksums
+          - Release manifest and SBOM
+          EOF
+
+          if [ -n "${FAILED_JOBS}" ]; then
+            cat >> artifacts/release/body.md <<EOF
+
+          Publish status:
+          - This release is intentionally left as a draft because these publish jobs still need recovery: ${FAILED_JOBS}
+          - Rerun \`release.yml\` in \`publish\` mode for \`${{ needs.prepare.outputs.release_tag }}\` after fixing the npm or registry configuration issue.
+          EOF
+          fi
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          name: ${{ steps.release_mode.outputs.title }}
+          generate_release_notes: true
+          body_path: artifacts/release/body.md
+          draft: ${{ steps.release_mode.outputs.draft }}
+          files: |
+            ${{ env.RELEASE_BUNDLE_DIR }}/release/koda-${{ needs.prepare.outputs.version }}.tar.gz
+            ${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz
+            ${{ env.RELEASE_BUNDLE_DIR }}/SHA256SUMS.txt
+            ${{ env.RELEASE_BUNDLE_DIR }}/release-artifacts.json
+            ${{ env.RELEASE_BUNDLE_DIR }}/release/koda-${{ needs.prepare.outputs.version }}/manifest.json
+            ${{ env.RELEASE_BUNDLE_DIR }}/release/koda-${{ needs.prepare.outputs.version }}/bundle/sbom.spdx.json

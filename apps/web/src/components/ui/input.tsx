@@ -9,9 +9,9 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 }
 
 const sizeClasses: Record<NonNullable<InputProps["sizeVariant"]>, string> = {
-  sm: "h-8 px-2.5 text-[0.8125rem]",
+  sm: "h-8 px-2.5 text-[0.75rem]",
   md: "h-9 px-3 text-[0.8125rem]",
-  lg: "h-10 px-3.5 text-[0.875rem]",
+  lg: "h-11 px-4 text-[0.875rem]",
 };
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(

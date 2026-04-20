@@ -5,6 +5,14 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, Lock, Loader2, Puzzle, X, XCircle, Zap } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { SecretInput } from "@/components/ui/secret-controls";
+import {
+  SELECT_ALL_VALUE,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { requestJson } from "@/lib/http-client";
 import type { McpAgentConnection, McpEnvSchemaField, McpServerCatalogEntry } from "@/lib/control-plane";
 
@@ -354,15 +362,19 @@ export function McpConnectionModal({
                   <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-quaternary)]">
                     {tl("Tipo de transporte")}
                   </span>
-                  <select
-                    value={transportOverride}
-                    onChange={(e) => setTransportOverride(e.target.value)}
-                    className="field-shell rounded-lg px-3 py-2 text-sm"
+                  <Select
+                    value={transportOverride === "" ? SELECT_ALL_VALUE : transportOverride}
+                    onValueChange={(v) => setTransportOverride(v === SELECT_ALL_VALUE ? "" : v)}
                   >
-                    <option value="">{tl("Padrao do servidor")}</option>
-                    <option value="stdio">stdio</option>
-                    <option value="http_sse">HTTP SSE</option>
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SELECT_ALL_VALUE}>{tl("Padrao do servidor")}</SelectItem>
+                      <SelectItem value="stdio">stdio</SelectItem>
+                      <SelectItem value="http_sse">HTTP SSE</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </label>
                 {/* URL override (for http_sse) */}
                 {transportOverride === "http_sse" && (

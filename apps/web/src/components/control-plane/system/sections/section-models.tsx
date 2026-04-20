@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -17,7 +16,19 @@ import {
   Unplug,
 } from "lucide-react";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { Button } from "@/components/ui/button";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { SecretInput } from "@/components/ui/secret-controls";
+import {
+  SELECT_ALL_VALUE,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
@@ -194,7 +205,7 @@ export function ProviderLogo({
   if (Icon) {
     return (
       <div
-        className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] transition-colors"
+        className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] transition-colors"
         style={wrapperStyle}
       >
         <Icon
@@ -210,7 +221,7 @@ export function ProviderLogo({
     const renderAsMask = active || accented || MASKED_LOGO_PROVIDERS.has(providerId);
     return (
       <div
-        className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] transition-colors"
+        className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] transition-colors"
         style={wrapperStyle}
       >
         {renderAsMask ? (
@@ -241,7 +252,7 @@ export function ProviderLogo({
 
   return (
     <div
-      className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm font-semibold transition-colors"
+      className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-sm font-semibold transition-colors"
       style={wrapperStyle}
     >
       <span style={{ color: glyphColor }}>
@@ -504,7 +515,7 @@ function ClaudeCodeEntry({
       </div>
       <div className="flex items-center gap-2.5">
         <input
-          className="field-shell min-w-0 flex-1 px-4 py-2.5 font-mono text-sm tracking-[0.08em] text-[var(--text-primary)]"
+          className="field-shell min-w-0 flex-1 font-mono tracking-[0.08em] text-[var(--text-primary)]"
           type="text"
           inputMode="text"
           autoCapitalize="none"
@@ -625,14 +636,11 @@ export function ProviderAuthPanel({
   return (
     <div className={cn("space-y-3", className)}>
       {supportsSubscriptionLogin && !provider.commandPresent ? (
-        <div className="flex items-start gap-3 rounded-2xl border border-[rgba(255,180,76,0.18)] bg-[rgba(255,180,76,0.08)] px-3 py-2.5 text-sm text-[var(--text-secondary)]">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-          <div>
-            {tl(
-              "O runtime oficial deste provider não está disponível neste ambiente. Instale o CLI correspondente antes de concluir a conexão.",
-            )}
-          </div>
-        </div>
+        <InlineAlert tone="warning">
+          {tl(
+            "O runtime oficial deste provider não está disponível neste ambiente. Instale o CLI correspondente antes de concluir a conexão.",
+          )}
+        </InlineAlert>
       ) : null}
 
       {provider.id === "kokoro" ? (
@@ -641,11 +649,9 @@ export function ProviderAuthPanel({
             label="Idioma"
             description="Define o idioma padrão e filtra a lista de vozes."
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={kokoroLanguage}
-              onChange={(event) => {
-                const nextLanguage = event.target.value;
+              onValueChange={(nextLanguage) => {
                 setField("models", {
                   ...draft.values.models,
                   kokoro_default_language: nextLanguage,
@@ -655,12 +661,17 @@ export function ProviderAuthPanel({
                 void loadKokoroVoices(nextLanguage, { force: true });
               }}
             >
-              {kokoroVoiceCatalog.available_languages.map((language) => (
-                <option key={language.id} value={language.id}>
-                  {tl(language.label)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {kokoroVoiceCatalog.available_languages.map((language) => (
+                  <SelectItem key={language.id} value={language.id}>
+                    {tl(language.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FieldShell>
 
           <FieldShell
@@ -668,15 +679,14 @@ export function ProviderAuthPanel({
             description={
               kokoroVoicesLoading
                 ? "Carregando vozes oficiais..."
-                : "Escolha a voz padrão local usada pelos bots."
+                : "Escolha a voz padrão local usada pelos agents."
             }
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-              value={kokoroDefaultVoice}
+            <Select
+              value={kokoroDefaultVoice === "" ? SELECT_ALL_VALUE : kokoroDefaultVoice}
               disabled={kokoroVoicesLoading}
-              onChange={(event) => {
-                const nextVoiceId = event.target.value;
+              onValueChange={(value) => {
+                const nextVoiceId = value === SELECT_ALL_VALUE ? "" : value;
                 const selectedVoice = kokoroVoiceCatalog.items.find(
                   (voice) => voice.voice_id === nextVoiceId,
                 );
@@ -687,21 +697,30 @@ export function ProviderAuthPanel({
                 });
               }}
             >
-              <option value="">
-                {kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"}
-              </option>
-              {kokoroDefaultVoice &&
-              !kokoroVoiceCatalog.items.some((voice) => voice.voice_id === kokoroDefaultVoice) ? (
-                <option value={kokoroDefaultVoice}>
-                  {kokoroDefaultVoiceLabel || kokoroDefaultVoice}
-                </option>
-              ) : null}
-              {kokoroVoiceCatalog.items.map((voice) => (
-                <option key={voice.voice_id} value={voice.voice_id}>
-                  {`${voice.name} — ${tl(voice.language_label)}${voice.downloaded ? ` · ${tl("baixada")}` : ""}`}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SELECT_ALL_VALUE}>
+                  {kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"}
+                </SelectItem>
+                {kokoroDefaultVoice &&
+                !kokoroVoiceCatalog.items.some((voice) => voice.voice_id === kokoroDefaultVoice) ? (
+                  <SelectItem value={kokoroDefaultVoice}>
+                    {kokoroDefaultVoiceLabel || kokoroDefaultVoice}
+                  </SelectItem>
+                ) : null}
+                {kokoroVoiceCatalog.items.map((voice) => (
+                  <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                    {`${voice.name} — ${tl(voice.language_label)}${voice.downloaded ? ` · ${tl("baixada")}` : ""}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FieldShell>
 
           <div className="md:col-span-2 flex flex-wrap items-center gap-3 px-1">
@@ -846,7 +865,7 @@ export function ProviderAuthPanel({
                     {tl("Projeto Google")}
                   </div>
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     type="text"
                     placeholder={tl("meu-projeto-google")}
                     value={connectionDraft?.project_id || ""}
@@ -861,7 +880,7 @@ export function ProviderAuthPanel({
                     {tl("Base URL")}
                   </div>
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     type="text"
                     placeholder="https://ollama.com"
                     value={connectionDraft?.base_url || ""}
@@ -874,13 +893,12 @@ export function ProviderAuthPanel({
                 <div className="grid gap-3 md:grid-cols-2">
                   <FieldShell
                     label="Idioma padrão"
-                    description="Filtra a biblioteca de vozes e define o idioma padrão dos bots."
+                    description="Filtra a biblioteca de vozes e define o idioma padrão dos agents."
                   >
-                    <select
-                      className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-                      value={elevenlabsLanguage}
-                      onChange={(event) => {
-                        const nextLanguage = event.target.value;
+                    <Select
+                      value={elevenlabsLanguage === "" ? SELECT_ALL_VALUE : elevenlabsLanguage}
+                      onValueChange={(value) => {
+                        const nextLanguage = value === SELECT_ALL_VALUE ? "" : value;
                         setField("models", {
                           ...draft.values.models,
                           elevenlabs_default_language: nextLanguage,
@@ -890,13 +908,18 @@ export function ProviderAuthPanel({
                         void loadElevenLabsVoices(nextLanguage, { force: true });
                       }}
                     >
-                      <option value="">{tl("Todos os idiomas")}</option>
-                      {elevenlabsVoiceCatalog.available_languages.map((language) => (
-                        <option key={language.code} value={language.code}>
-                          {language.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_ALL_VALUE}>{tl("Todos os idiomas")}</SelectItem>
+                        {elevenlabsVoiceCatalog.available_languages.map((language) => (
+                          <SelectItem key={language.code} value={language.code}>
+                            {language.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </FieldShell>
 
                   <FieldShell
@@ -904,18 +927,17 @@ export function ProviderAuthPanel({
                     description={
                       elevenlabsVoicesLoading
                         ? "Carregando vozes disponíveis..."
-                        : "Usada como voz default dos bots quando TTS estiver ativo."
+                        : "Usada como voz default dos agents quando TTS estiver ativo."
                     }
                   >
-                    <select
-                      className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-                      value={elevenlabsDefaultVoice}
+                    <Select
+                      value={elevenlabsDefaultVoice === "" ? SELECT_ALL_VALUE : elevenlabsDefaultVoice}
                       disabled={
                         elevenlabsVoicesLoading ||
                         !(connection?.verified || connection?.configured || connection?.api_key_present)
                       }
-                      onChange={(event) => {
-                        const nextVoiceId = event.target.value;
+                      onValueChange={(value) => {
+                        const nextVoiceId = value === SELECT_ALL_VALUE ? "" : value;
                         const selectedVoice = elevenlabsVoiceCatalog.items.find(
                           (voice) => voice.voice_id === nextVoiceId,
                         );
@@ -926,23 +948,28 @@ export function ProviderAuthPanel({
                         });
                       }}
                     >
-                      <option value="">
-                        {elevenlabsVoicesLoading
-                          ? tl("Carregando vozes...")
-                          : tl("Selecione a voz padrão")}
-                      </option>
-                      {elevenlabsDefaultVoice &&
-                      !elevenlabsVoiceCatalog.items.some((voice) => voice.voice_id === elevenlabsDefaultVoice) ? (
-                        <option value={elevenlabsDefaultVoice}>
-                          {elevenlabsDefaultVoiceLabel || elevenlabsDefaultVoice}
-                        </option>
-                      ) : null}
-                      {elevenlabsVoiceCatalog.items.map((voice) => (
-                        <option key={voice.voice_id} value={voice.voice_id}>
-                          {elevenlabsVoiceOptionLabel(voice)}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELECT_ALL_VALUE}>
+                          {elevenlabsVoicesLoading
+                            ? tl("Carregando vozes...")
+                            : tl("Selecione a voz padrão")}
+                        </SelectItem>
+                        {elevenlabsDefaultVoice &&
+                        !elevenlabsVoiceCatalog.items.some((voice) => voice.voice_id === elevenlabsDefaultVoice) ? (
+                          <SelectItem value={elevenlabsDefaultVoice}>
+                            {elevenlabsDefaultVoiceLabel || elevenlabsDefaultVoice}
+                          </SelectItem>
+                        ) : null}
+                        {elevenlabsVoiceCatalog.items.map((voice) => (
+                          <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                            {elevenlabsVoiceOptionLabel(voice)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </FieldShell>
                 </div>
               ) : null}
@@ -963,7 +990,7 @@ export function ProviderAuthPanel({
                     Base URL
                   </div>
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     type="text"
                     placeholder="http://localhost:11434"
                     value={connectionDraft?.base_url || ""}
@@ -991,7 +1018,7 @@ export function ProviderAuthPanel({
                     {tl("Projeto Google")}
                   </div>
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     type="text"
                     placeholder={tl("meu-projeto-google")}
                     value={connectionDraft?.project_id || ""}
@@ -1019,8 +1046,8 @@ export function ProviderAuthPanel({
                 </div>
               </div>
               {ollamaModelCatalog.items.length ? (
-                <div className="max-h-48 overflow-y-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
-                  <div className="divide-y divide-[var(--border-subtle)]">
+                <div className="max-h-48 overflow-y-auto rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]">
+                  <div className="divide-y divide-[var(--divider-hair)]">
                     {ollamaModelCatalog.items.map((item) => {
                       const metadata = [
                         item.family,
@@ -1087,7 +1114,7 @@ export function ProviderAuthPanel({
           {loginSession.status === "awaiting_browser" || loginSession.status === "pending" ? (
             <div className="space-y-3">
               {loginSession.user_code ? (
-                <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3.5">
+                <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
@@ -1105,7 +1132,7 @@ export function ProviderAuthPanel({
                       onClick={() => {
                         void handleCopyLoginCode();
                       }}
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-quaternary)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--text-primary)_4%,transparent)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-soft)] hover:text-[var(--text-secondary)]"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel-soft)] hover:text-[var(--text-secondary)]"
                       aria-label={codeCopied ? tl("Código copiado") : tl("Copiar código de autenticação")}
                       title={codeCopied ? tl("Código copiado") : tl("Copiar código de autenticação")}
                     >
@@ -1169,20 +1196,20 @@ export function ProviderAccordionItem({
 
   return (
     <section
-      className="overflow-hidden rounded-[26px] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] transition-colors"
+      className="overflow-hidden rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] transition-colors"
     >
       <div
         className={cn(
           "group flex items-center gap-3 px-5 py-4 transition-colors",
-          "hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]",
-          isOpen ? "rounded-t-[26px]" : "rounded-[26px]",
+          "hover:bg-[var(--hover-tint)]",
+          isOpen ? "rounded-t-[var(--radius-shell)]" : "rounded-[var(--radius-shell)]",
         )}
       >
         <button
           type="button"
           onClick={onToggle}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-4 rounded-[22px] text-left",
+            "flex min-w-0 flex-1 items-center gap-4 rounded-[var(--radius-panel)] text-left",
           )}
           aria-expanded={isOpen}
         >
@@ -1215,8 +1242,8 @@ export function ProviderAccordionItem({
             type="button"
             onClick={onToggle}
             className={cn(
-              "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-quaternary)] transition-colors",
-              "group-hover:bg-[var(--surface-panel-soft)]",
+              "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] transition-colors",
+              "group-hover:bg-[var(--panel-soft)]",
             )}
             aria-label={
               isOpen
@@ -1326,52 +1353,74 @@ export function SectionModels() {
             label="Provider padrão"
             description="Primeira escolha global entre os providers já verificados."
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-              value={draft.values.models.default_provider}
-              onChange={(event) =>
+            <Select
+              value={
+                draft.values.models.default_provider === ""
+                  ? SELECT_ALL_VALUE
+                  : draft.values.models.default_provider
+              }
+              onValueChange={(value) => {
+                const next = value === SELECT_ALL_VALUE ? "" : value;
                 setField("models", {
                   ...draft.values.models,
-                  default_provider: event.target.value,
+                  default_provider: next,
                   fallback_order: normalizeFallbackOrder(
                     enabledGeneralProviders,
                     draft.values.models.fallback_order,
-                    event.target.value,
+                    next,
                   ),
-                })
-              }
+                });
+              }}
+              disabled={enabledGeneralProviders.length === 0}
             >
-              {enabledGeneralProviders.length === 0 ? (
-                <option value="">{tl("Nenhum provider verificado")}</option>
-              ) : null}
-              {enabledGeneralProviders.map((id) => (
-                <option key={id} value={id}>
-                  {providerLabel(id)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    enabledGeneralProviders.length === 0
+                      ? tl("Nenhum provider verificado")
+                      : undefined
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {enabledGeneralProviders.length === 0 ? (
+                  <SelectItem value={SELECT_ALL_VALUE} disabled>
+                    {tl("Nenhum provider verificado")}
+                  </SelectItem>
+                ) : null}
+                {enabledGeneralProviders.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {providerLabel(id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FieldShell>
 
           <FieldShell
             label="Perfil de uso"
             description="Controla a preferência global entre custo e qualidade."
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={draft.values.models.usage_profile}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setField("models", {
                   ...draft.values.models,
-                  usage_profile: event.target.value,
+                  usage_profile: value,
                 })
               }
             >
-              {draft.catalogs.usage_profiles.map((profile) => (
-                <option key={String(profile.id)} value={String(profile.id)}>
-                  {tl(String(profile.label))}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {draft.catalogs.usage_profiles.map((profile) => (
+                  <SelectItem key={String(profile.id)} value={String(profile.id)}>
+                    {tl(String(profile.label))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FieldShell>
         </div>
 
@@ -1388,7 +1437,7 @@ export function SectionModels() {
                   return (
                     <div
                       key={providerId}
-                      className="flex items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3 py-3"
+                      className="flex items-center gap-3 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-3"
                     >
                       <span className="w-5 shrink-0 text-center text-[11px] font-medium text-[var(--text-quaternary)]">
                         {index + 1}
@@ -1402,22 +1451,28 @@ export function SectionModels() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           onClick={() => moveFallback(providerId, "up")}
                           disabled={index === 0}
-                          className="rounded-xl border border-[var(--border-subtle)] px-2 py-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-elevated)] disabled:opacity-30"
+                          aria-label={tl("Subir")}
+                          className="px-2"
                         >
-                          <ArrowUp className="h-4 w-4" />
-                        </button>
-                        <button
+                          <ArrowUp className="h-4 w-4" strokeWidth={1.75} />
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           onClick={() => moveFallback(providerId, "down")}
                           disabled={index === enabledGeneralProviders.length - 1}
-                          className="rounded-xl border border-[var(--border-subtle)] px-2 py-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-elevated)] disabled:opacity-30"
+                          aria-label={tl("Descer")}
+                          className="px-2"
                         >
-                          <ArrowDown className="h-4 w-4" />
-                        </button>
+                          <ArrowDown className="h-4 w-4" strokeWidth={1.75} />
+                        </Button>
                       </div>
                     </div>
                   );
@@ -1432,7 +1487,7 @@ export function SectionModels() {
         <div className="grid gap-4 xl:grid-cols-2">
           <FieldShell label="Budget por tarefa" description="Limite global por execução individual.">
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               type="number"
               min={0}
               step={0.01}
@@ -1449,7 +1504,7 @@ export function SectionModels() {
 
           <FieldShell label="Budget acumulado" description="Teto global para o uso consolidado.">
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               type="number"
               min={0}
               step={0.01}
@@ -1489,34 +1544,46 @@ export function SectionModels() {
                 label={tl(functionItem.title)}
                 description={tl(functionItem.description)}
               >
-                <select
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-                  value={selectedValue}
-                  onChange={(event) => updateFunctionalDefault(functionItem.id, event.target.value)}
-                >
-                  <option value="">{tl("Selecione um modelo padrão")}</option>
-                  {groupedOptions.map(({ provider, items }) => {
-                    const selectable = isSelectableProvider(
-                      provider,
-                      providerConnections[provider.id],
+                <Select
+                  value={selectedValue === "" ? SELECT_ALL_VALUE : selectedValue}
+                  onValueChange={(value) =>
+                    updateFunctionalDefault(
                       functionItem.id,
-                    );
-                    return (
-                      <optgroup key={provider.id} label={provider.title}>
-                        {items.map((item) => (
-                          <option
-                            key={`${item.provider_id}:${item.model_id}`}
-                            value={`${item.provider_id}:${item.model_id}`}
-                            disabled={!selectable}
-                          >
-                            {item.title}
-                            {!selectable ? ` — ${tl("indisponível no momento")}` : ""}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
+                      value === SELECT_ALL_VALUE ? "" : value,
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={tl("Selecione um modelo padrão")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SELECT_ALL_VALUE}>
+                      {tl("Selecione um modelo padrão")}
+                    </SelectItem>
+                    {groupedOptions.map(({ provider, items }) => {
+                      const selectable = isSelectableProvider(
+                        provider,
+                        providerConnections[provider.id],
+                        functionItem.id,
+                      );
+                      return (
+                        <SelectGroup key={provider.id}>
+                          <SelectLabel>{provider.title}</SelectLabel>
+                          {items.map((item) => (
+                            <SelectItem
+                              key={`${item.provider_id}:${item.model_id}`}
+                              value={`${item.provider_id}:${item.model_id}`}
+                              disabled={!selectable}
+                            >
+                              {item.title}
+                              {!selectable ? ` — ${tl("indisponível no momento")}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </FieldShell>
             );
           })}

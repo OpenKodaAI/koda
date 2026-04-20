@@ -378,6 +378,8 @@ export function McpSection({ agentId }: McpSectionProps) {
         title={tl("Servidores MCP")}
         description={summaryLabel}
         icon={Puzzle}
+        variant="flat"
+        defaultOpen
       >
         {loading && (
           <div className="flex items-center justify-center py-8">

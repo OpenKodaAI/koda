@@ -1,4 +1,4 @@
-import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
+import { redirect } from "next/navigation";
 import { SettingsSidebar } from "@/components/control-plane/system/settings-sidebar";
 import { UnsavedChangesGuard } from "@/components/control-plane/system/unsaved-changes-guard";
 import { SettingsModalHost } from "@/components/control-plane/system/settings-modal-host";
@@ -6,6 +6,7 @@ import { ToastNotification } from "@/components/ui/toast-notification";
 import { SystemSettingsProvider } from "@/hooks/use-system-settings";
 import { ToastProvider } from "@/hooks/use-toast";
 import {
+  ControlPlaneRequestError,
   getControlPlaneCoreIntegrations,
   getGeneralSystemSettings,
 } from "@/lib/control-plane";
@@ -19,12 +20,15 @@ export default async function SystemSettingsLayout({ children }: { children: Rea
       getGeneralSystemSettings(),
       getControlPlaneCoreIntegrations(),
     ]);
-  } catch {
-    return <ControlPlaneUnavailable />;
+  } catch (error) {
+    if (error instanceof ControlPlaneRequestError && error.status === 401) {
+      redirect("/login");
+    }
+    throw error;
   }
 
   if (!settings || !coreIntegrations) {
-    return <ControlPlaneUnavailable />;
+    redirect("/login");
   }
 
   return (

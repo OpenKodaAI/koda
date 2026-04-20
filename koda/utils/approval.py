@@ -1938,6 +1938,7 @@ async def request_agent_cmd_approval(
     session_id: str | None = None,
     requests: list[dict[str, Any]] | None = None,
     preview_text: str | None = None,
+    task_id: int | None = None,
 ) -> str:
     """Show inline keyboard for agent-cmd write approval. Returns op_id."""
     await _ensure_persistence_loaded()
@@ -1955,6 +1956,7 @@ async def request_agent_cmd_approval(
         "agent_id": agent_id,
         "session_id": session_id,
         "chat_id": chat_id,
+        "task_id": task_id,
         "requests": list(requests or []),
         "grants": [],
         "preview_text": preview_text or "",
@@ -1996,6 +1998,19 @@ async def request_agent_cmd_approval(
         parse_mode=ParseMode.HTML,
     )
 
+    try:
+        from koda.services.approval_broker import publish_approval_required
+
+        await publish_approval_required(
+            approval_id=op_id,
+            session_id=session_id,
+            task_id=task_id,
+            description=description,
+            preview_text=preview_text,
+        )
+    except Exception:
+        log.debug("approval_broker_publish_failed", exc_info=True)
+
     return op_id
 
 
@@ -2007,6 +2022,17 @@ def resolve_agent_cmd_approval(op_id: str, decision: str, *, grants: list[dict[s
         if grants is not None:
             op["grants"] = list(grants)
         op["event"].set()
+        try:
+            from koda.services.approval_broker import spawn_publish_resolved
+
+            spawn_publish_resolved(
+                approval_id=op_id,
+                decision=decision,
+                session_id=str(op.get("session_id") or "").strip() or None,
+                task_id=op.get("task_id"),
+            )
+        except Exception:
+            log.debug("approval_broker_spawn_resolved_failed", exc_info=True)
 
 
 def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:

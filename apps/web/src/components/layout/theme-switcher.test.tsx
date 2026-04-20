@@ -74,9 +74,9 @@ function mockMatchMedia(initialMatches: boolean): MatchMediaController {
   };
 }
 
-function renderThemeSwitcher() {
+function renderThemeSwitcher(initialPreference: "system" | "light" | "dark" = "system") {
   return render(
-    <ThemeProvider initialThemePreference="system">
+    <ThemeProvider initialThemePreference={initialPreference}>
       <I18nProvider initialLanguage="en-US">
         <ThemeSwitcher />
       </I18nProvider>
@@ -92,7 +92,7 @@ describe("ThemeSwitcher", () => {
     document.documentElement.style.colorScheme = "";
   });
 
-  it("defaults to the system preference and reacts to OS changes", async () => {
+  it("derives the initial document theme from the system preference", async () => {
     const media = mockMatchMedia(false);
 
     renderThemeSwitcher();
@@ -100,7 +100,6 @@ describe("ThemeSwitcher", () => {
     await waitFor(() => {
       expect(document.documentElement.dataset.theme).toBe("light");
     });
-    expect(window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe(JSON.stringify("system"));
 
     act(() => {
       media.setMatches(true);
@@ -112,7 +111,7 @@ describe("ThemeSwitcher", () => {
     });
   });
 
-  it("updates the document theme and persists an explicit choice", async () => {
+  it("toggles between light and dark on click and persists the choice", async () => {
     mockMatchMedia(true);
     renderThemeSwitcher();
 
@@ -120,28 +119,33 @@ describe("ThemeSwitcher", () => {
       expect(document.documentElement.dataset.theme).toBe("dark");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Theme/i }));
-
-    const lightOption = await screen.findByRole("option", { name: /Light/i });
-    fireEvent.click(lightOption);
+    const button = screen.getByRole("button", { name: /Theme/i });
+    fireEvent.click(button);
 
     await waitFor(() => {
       expect(document.documentElement.dataset.theme).toBe("light");
       expect(window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe(JSON.stringify("light"));
     });
-  });
-
-  it("closes when clicking outside of the menu", async () => {
-    mockMatchMedia(false);
-    renderThemeSwitcher();
 
     fireEvent.click(screen.getByRole("button", { name: /Theme/i }));
 
-    await screen.findByRole("option", { name: /System/i });
-    fireEvent.mouseDown(document.body);
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe(JSON.stringify("dark"));
+    });
+  });
+
+  it("reflects the active state through aria-pressed", async () => {
+    mockMatchMedia(false);
+    renderThemeSwitcher("light");
+
+    const button = await screen.findByRole("button", { name: /Theme/i });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.queryByRole("listbox", { name: /Theme/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Theme/i })).toHaveAttribute("aria-pressed", "true");
     });
   });
 });

@@ -16,7 +16,9 @@ Use [`repo-map.yaml`](repo-map.yaml) for the quick index of configuration surfac
 - prompt building
 - defaults for budgets, timeouts, tools, memory, browser, TTS, and integrations
 
-Avoid adding direct `os.environ` reads outside this file unless there is a clear reason.
+[`../../koda/control_plane/settings.py`](../../koda/control_plane/settings.py) owns control-plane settings (auth mode, rate limits, session TTL, master-key files). It also hosts first-run auth policy: `KODA_ENV`, `ALLOW_LOOPBACK_BOOTSTRAP`, `CONTROL_PLANE_BOOTSTRAP_CODE`, `CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH` (default 12), and `CONTROL_PLANE_RECOVERY_CODES_PER_USER` (default 10). `KODA_ENV=production` hard-fails when `CONTROL_PLANE_AUTH_MODE ∈ {development, open}` or `ALLOW_LOOPBACK_BOOTSTRAP=true`.
+
+Avoid adding direct `os.environ` reads outside these files unless there is a clear reason.
 
 [`../../koda/memory/config.py`](../../koda/memory/config.py) is the source of truth for memory-specific provider/model selection, including which provider performs post-response extraction.
 

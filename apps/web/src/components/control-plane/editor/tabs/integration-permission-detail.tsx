@@ -482,7 +482,7 @@ export function IntegrationPermissionDetail({
                   updateGrantPatch({ allowed_domains: parseConstraintList(event.target.value) })
                 }
                 placeholder="googleapis.com, api.github.com"
-                className="field-shell px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="field-shell text-[var(--text-primary)]"
               />
             </label>
 
@@ -497,7 +497,7 @@ export function IntegrationPermissionDetail({
                   updateGrantPatch({ allowed_paths: parseConstraintList(event.target.value) })
                 }
                 placeholder="/workspace/project, /tmp/reports"
-                className="field-shell px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="field-shell text-[var(--text-primary)]"
               />
             </label>
 
@@ -512,7 +512,7 @@ export function IntegrationPermissionDetail({
                   updateGrantPatch({ allowed_db_envs: parseConstraintList(event.target.value) })
                 }
                 placeholder="dev, staging, readonly"
-                className="field-shell px-3 py-2 text-sm text-[var(--text-primary)]"
+                className="field-shell text-[var(--text-primary)]"
               />
             </label>
 

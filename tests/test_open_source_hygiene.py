@@ -61,6 +61,17 @@ DISALLOWED_TRACKED_PATH_PATTERNS = (
     re.compile(r"(^|/).*\.pickle$"),
 )
 
+SECURITY_SCAN_MANIFEST_ALLOWLIST = {
+    "apps/web/package.json",
+    "package.json",
+    "packages/cli/package.json",
+    "pnpm-lock.yaml",
+    "pyproject.toml",
+    "rust/Cargo.lock",
+    "rust/Cargo.toml",
+    "uv.lock",
+}
+
 
 def _tracked_repo_files() -> list[Path]:
     result = subprocess.run(
@@ -124,3 +135,34 @@ def test_repo_tracks_no_local_runtime_or_cache_artifacts() -> None:
     assert not violations, "Tracked local/runtime/cache artifacts must not be committed:\n" + "\n".join(
         sorted(violations)
     )
+
+
+def test_tracked_package_manager_manifests_are_whitelisted_for_security_scans() -> None:
+    manifests = {
+        path.relative_to(ROOT).as_posix()
+        for path in _tracked_repo_files()
+        if path.name
+        in {
+            "Cargo.lock",
+            "Cargo.toml",
+            "composer.json",
+            "composer.lock",
+            "package-lock.json",
+            "package.json",
+            "pnpm-lock.yaml",
+            "pyproject.toml",
+            "uv.lock",
+            "yarn.lock",
+        }
+    }
+
+    manifest_names = {Path(path).name for path in manifests}
+    allowed_manifests = {
+        path
+        for path in manifests
+        if path in SECURITY_SCAN_MANIFEST_ALLOWLIST or (path.startswith("rust/") and path.endswith("/Cargo.toml"))
+    }
+
+    assert "composer.json" not in manifest_names
+    assert "composer.lock" not in manifest_names
+    assert manifests <= allowed_manifests, sorted(manifests - allowed_manifests)

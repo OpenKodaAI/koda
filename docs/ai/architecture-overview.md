@@ -63,6 +63,15 @@ For the canonical machine-readable file, flow, and test index, start with [`repo
 - [`../../koda/memory`](../../koda/memory) adds recall before a provider run and extraction after a response is produced.
 - The memory layer is intentionally best-effort and should never block the core runtime path.
 
+### Auth Layer
+
+- [`../../koda/control_plane/operator_auth.py`](../../koda/control_plane/operator_auth.py) owns single-user authentication: Argon2 password hashing, 32-byte session tokens, account lockout, recovery codes, password change, and recovery-code regeneration.
+- [`../../koda/control_plane/password_policy.py`](../../koda/control_plane/password_policy.py) enforces a 12-char minimum, 3-of-4 composition, identifier-substring rejection, a top-500 common-passwords deny list, and a Shannon-entropy floor.
+- [`../../koda/control_plane/bootstrap_file.py`](../../koda/control_plane/bootstrap_file.py) writes and consumes the first-boot bootstrap code in `state/control_plane/bootstrap.txt` (mode `0600`), and detects loopback-trust eligibility.
+- [`../../koda/control_plane/rate_limit.py`](../../koda/control_plane/rate_limit.py) adds dedicated buckets for sensitive auth endpoints on top of the per-IP quotas.
+- The web layer seals the session token into the `koda_operator_session` cookie via [`../../apps/web/src/lib/web-operator-session.ts`](../../apps/web/src/lib/web-operator-session.ts) and enforces origin, security headers, and CSP in [`../../apps/web/middleware.ts`](../../apps/web/middleware.ts).
+- End-user contract is documented in [`../security/authentication.md`](../security/authentication.md). The first-run flow no longer bundles provider / Telegram / agent configuration; those are optional dashboard tasks surfaced by the `SetupChecklistCard`.
+
 ## Package Map
 
 - [`../../koda/auth.py`](../../koda/auth.py): authorization checks

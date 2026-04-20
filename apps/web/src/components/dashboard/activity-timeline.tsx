@@ -1,7 +1,7 @@
 "use client";
 
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { getBotColor, getBotLabel } from "@/lib/bot-constants";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { getSemanticStyle, type SemanticTone } from "@/lib/theme-semantic";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
@@ -30,7 +30,7 @@ function getActivityTone(type: string): SemanticTone {
 }
 
 interface Activity {
-  botId: string;
+  agentId: string;
   type: string;
   description: string;
   timestamp: string;
@@ -96,7 +96,7 @@ export function ActivityTimeline({
                 <div className="relative flex justify-center">
                   <span
                     className="relative z-10 mt-1.5 block h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: getBotColor(activity.botId) }}
+                    style={{ backgroundColor: getAgentColor(activity.agentId) }}
                   />
                   {index < displayedActivities.length - 1 && (
                     <div className="absolute top-[18px] bottom-[-14px] w-px bg-[var(--border-subtle)]" />
@@ -115,15 +115,15 @@ export function ActivityTimeline({
                         <span
                           className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]"
                           style={{
-                            backgroundColor: `${getBotColor(activity.botId)}14`,
-                            borderColor: `${getBotColor(activity.botId)}24`,
+                            backgroundColor: `${getAgentColor(activity.agentId)}14`,
+                            borderColor: `${getAgentColor(activity.agentId)}24`,
                           }}
                         >
                           <span
                             className="h-1.5 w-1.5 rounded-full"
-                            style={{ backgroundColor: getBotColor(activity.botId) }}
+                            style={{ backgroundColor: getAgentColor(activity.agentId) }}
                           />
-                          {getBotLabel(activity.botId)}
+                          {getAgentLabel(activity.agentId)}
                         </span>
                         <span
                           className="inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]"

@@ -1,73 +1,52 @@
 import { redirect } from "next/navigation";
-import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
 import { CatalogLayout } from "@/components/control-plane/catalog/catalog-layout";
 import {
   getControlPlaneAuthStatus,
   ControlPlaneRequestError,
-  getControlPlaneBots,
-  getControlPlaneCoreProviders,
-  getControlPlaneOnboardingStatus,
-  getGeneralSystemSettings,
+  getControlPlaneAgents,
   getControlPlaneWorkspaces,
 } from "@/lib/control-plane";
 
+function redirectToAuth(hasOwner: boolean): never {
+  redirect(hasOwner ? "/login" : "/setup");
+}
+
 export default async function ControlPlanePage() {
   let authStatus;
-  let onboardingStatus;
 
   try {
-    [authStatus, onboardingStatus] = await Promise.all([
-      getControlPlaneAuthStatus(),
-      getControlPlaneOnboardingStatus(),
-    ]);
+    authStatus = await getControlPlaneAuthStatus();
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <ControlPlaneUnavailable />;
+      redirect("/login");
     }
-    return <ControlPlaneUnavailable />;
+    throw error;
   }
 
-  // If setup is not complete, hand off to the dedicated /setup route.
-  // The middleware + /setup page own the full first-run journey.
-  if (!authStatus.authenticated || !onboardingStatus.steps.onboarding_complete) {
-    redirect("/setup");
+  if (!authStatus.authenticated) {
+    redirectToAuth(authStatus.has_owner);
   }
 
-  let payload:
-    | {
-        bots: Awaited<ReturnType<typeof getControlPlaneBots>>;
-        coreProviders: Awaited<ReturnType<typeof getControlPlaneCoreProviders>>;
-        workspaces: Awaited<ReturnType<typeof getControlPlaneWorkspaces>>;
-        generalSettings: Awaited<ReturnType<typeof getGeneralSystemSettings>> | null;
-      }
-    | null = null;
+  let payload: {
+    agents: Awaited<ReturnType<typeof getControlPlaneAgents>>;
+    workspaces: Awaited<ReturnType<typeof getControlPlaneWorkspaces>>;
+  };
 
   try {
-    const [bots, coreProviders, workspaces, generalSettings] = await Promise.all([
-      getControlPlaneBots(),
-      getControlPlaneCoreProviders(),
+    const [agents, workspaces] = await Promise.all([
+      getControlPlaneAgents(),
       getControlPlaneWorkspaces(),
-      getGeneralSystemSettings().catch(() => null),
     ]);
 
-    payload = { bots, coreProviders, workspaces, generalSettings };
+    payload = { agents, workspaces };
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <ControlPlaneUnavailable />;
+      redirect("/login");
     }
-    return <ControlPlaneUnavailable />;
-  }
-
-  if (!payload) {
-    return <ControlPlaneUnavailable />;
+    throw error;
   }
 
   return (
-    <CatalogLayout
-      bots={payload.bots}
-      coreProviders={payload.coreProviders}
-      workspaces={payload.workspaces}
-      generalSettings={payload.generalSettings}
-    />
+    <CatalogLayout agents={payload.agents} workspaces={payload.workspaces} />
   );
 }

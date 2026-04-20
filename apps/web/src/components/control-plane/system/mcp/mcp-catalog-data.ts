@@ -266,7 +266,7 @@ export const MCP_SUGGESTED_SERVERS: McpSuggestedServer[] = [
     transport_type: "stdio",
     command_template: ["npx", "-y", "@modelcontextprotocol/server-slack"],
     env_fields: [
-      { key: "SLACK_BOT_TOKEN", label: "Bot User OAuth Token (xoxb-*)", required: true },
+      { key: "SLACK_BOT_TOKEN", label: "Agent User OAuth Token (xoxb-*)", required: true },
       { key: "SLACK_TEAM_ID", label: "Workspace ID (T*)", required: true },
     ],
     category: "productivity",

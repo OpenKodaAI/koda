@@ -86,7 +86,7 @@ describe("Sidebar", () => {
     expect(isSidebarItemActive("/control-plane/system", generalSettingsItem)).toBe(true);
   });
 
-  it("prefetches heavy routes on intent and shows pending feedback on click", () => {
+  it("prefetches heavy routes on intent", () => {
     vi.useFakeTimers();
 
     render(
@@ -111,7 +111,7 @@ describe("Sidebar", () => {
     const homeLink = screen.getByRole("link", { name: /Início/i });
     fireEvent.click(homeLink);
 
-    expect(homeLink).toHaveAttribute("aria-busy", "true");
+    expect(homeLink).not.toHaveAttribute("aria-busy");
 
     vi.useRealTimers();
   });

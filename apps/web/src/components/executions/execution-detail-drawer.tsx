@@ -9,7 +9,7 @@ import {
   useBodyScrollLock,
   useEscapeToClose,
 } from "@/hooks/use-animated-presence";
-import { getBotColor } from "@/lib/bot-constants";
+import { getAgentColor } from "@/lib/agent-constants";
 import {
   ExecutionDetailContent,
   getExecutionDisplayDetail,
@@ -51,8 +51,8 @@ export function ExecutionDetailDrawer({
       ? renderedDetail
       : null;
   const data = getExecutionDisplayDetail(renderedExecution, matchedDetail);
-  const botColor = data ? getBotColor(data.bot_id) : null;
-  const fallbackBotColor = botColor ?? "#A7ADB4";
+  const agentColor = data ? getAgentColor(data.bot_id) : null;
+  const fallbackAgentColor = agentColor ?? "#A7ADB4";
 
   useBodyScrollLock(presence.shouldRender);
   useEscapeToClose(presence.shouldRender, onClose);
@@ -113,7 +113,7 @@ export function ExecutionDetailDrawer({
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="metric-label">{t("tasks.detail.executionFallback", { id: data.task_id })}</span>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: fallbackBotColor }} />
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: fallbackAgentColor }} />
                 <span className="font-mono text-xs text-[var(--text-tertiary)]">{data.bot_id}</span>
               </div>
               <h2 className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]">

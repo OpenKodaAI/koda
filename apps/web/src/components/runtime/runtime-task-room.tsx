@@ -56,7 +56,7 @@ type RoomTab = "activity" | "terminal" | "browser" | "files";
 type DetailTab = "details" | "logs" | "diagnostics";
 
 interface RuntimeTaskRoomProps {
-  botId: string;
+  agentId: string;
   taskId: number;
 }
 
@@ -74,10 +74,10 @@ function toneToDot(tone: SemanticTone): StatusDotTone {
   return "neutral";
 }
 
-export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
+export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
   const { t, tl } = useAppI18n();
   const { bundle, loading, error, connected, mutate, fetchResource, refresh } =
-    useRuntimeTask(botId, taskId);
+    useRuntimeTask(agentId, taskId);
   const [activeTab, setActiveTab] = useState<RoomTab>("terminal");
   const [detailTab, setDetailTab] = useState<DetailTab>("details");
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -225,7 +225,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
         <div className="min-w-0 space-y-3">
           <div className="flex items-center gap-2.5">
             <Link
-              href={`/runtime?bot=${botId}`}
+              href={`/runtime?agent=${agentId}`}
               className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
               aria-label={t("common.back")}
             >
@@ -413,7 +413,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
 
           {activeTab === "browser" ? (
             <RuntimeBrowserPanel
-              botId={botId}
+              agentId={agentId}
               taskId={taskId}
               browser={bundle.browser}
               mutate={mutate}
@@ -515,7 +515,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
           {detailTab === "details" ? (
             <div className="space-y-5">
               <SharedDetailGrid>
-                <SharedDetailDatum label={t("common.bot")} value={botId} />
+                <SharedDetailDatum label={t("common.agent")} value={agentId} />
                 <SharedDetailDatum label={t("common.task")} value={`#${taskId}`} />
                 <SharedDetailDatum
                   label={t("common.status")}

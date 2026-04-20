@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-export function useSSE(botId: string, enabled: boolean = true) {
+export function useSSE(agentId: string, enabled: boolean = true) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [connected, setConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -20,7 +20,7 @@ export function useSSE(botId: string, enabled: boolean = true) {
   }, []);
 
   useEffect(() => {
-    if (!enabled || !botId) {
+    if (!enabled || !agentId) {
       cleanup();
       return;
     }
@@ -28,7 +28,7 @@ export function useSSE(botId: string, enabled: boolean = true) {
     function connect() {
       cleanup();
 
-      const es = new EventSource(`/api/runtime/bots/${botId}/stream`);
+      const es = new EventSource(`/api/runtime/agents/${agentId}/stream`);
       eventSourceRef.current = es;
 
       es.onopen = () => {
@@ -64,7 +64,7 @@ export function useSSE(botId: string, enabled: boolean = true) {
     return () => {
       cleanup();
     };
-  }, [botId, enabled, cleanup]);
+  }, [agentId, enabled, cleanup]);
 
   return { data, connected };
 }

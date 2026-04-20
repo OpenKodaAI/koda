@@ -118,9 +118,9 @@ module_areas:
       - "apps/web/src/lib"
     related_tests:
       - "apps/web/src/app/sessions/page.test.tsx"
-      - "apps/web/src/components/control-plane/catalog/bot-catalog.test.tsx"
+      - "apps/web/src/components/control-plane/catalog/agent-catalog.test.tsx"
       - "apps/web/src/components/memory/memory-dashboard-api.test.ts"
-      - "apps/web/src/hooks/use-bot-editor.test.tsx"
+      - "apps/web/src/hooks/use-agent-editor.test.tsx"
       - "apps/web/src/lib/runtime-api.test.ts"
     related_docs:
       - "README.md"
@@ -200,6 +200,7 @@ module_areas:
     paths:
       - "koda/services/agent_asset_registry.py"
       - "koda/services/agent_settings.py"
+      - "koda/services/approval_broker.py"
       - "koda/services/artifact_ingestion.py"
       - "koda/services/atlassian_client.py"
       - "koda/services/audit.py"
@@ -265,6 +266,7 @@ module_areas:
     related_tests:
       - "tests/test_services/test_agent_asset_registry.py"
       - "tests/test_services/test_agent_loop.py"
+      - "tests/test_services/test_approval_broker.py"
       - "tests/test_services/test_artifact_ingestion.py"
       - "tests/test_services/test_atlassian_client.py"
       - "tests/test_services/test_audit_cleanup.py"
@@ -1085,6 +1087,7 @@ test_targets:
     source_paths:
       - "koda/services/agent_asset_registry.py"
       - "koda/services/agent_settings.py"
+      - "koda/services/approval_broker.py"
       - "koda/services/artifact_ingestion.py"
       - "koda/services/atlassian_client.py"
       - "koda/services/audit.py"
@@ -1150,6 +1153,7 @@ test_targets:
     test_paths:
       - "tests/test_services/test_agent_asset_registry.py"
       - "tests/test_services/test_agent_loop.py"
+      - "tests/test_services/test_approval_broker.py"
       - "tests/test_services/test_artifact_ingestion.py"
       - "tests/test_services/test_atlassian_client.py"
       - "tests/test_services/test_audit_cleanup.py"

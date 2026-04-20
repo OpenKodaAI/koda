@@ -5,6 +5,13 @@ import { createPortal } from "react-dom";
 import { Lock, Trash2, X } from "lucide-react";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { renderIntegrationLogo } from "@/components/control-plane/system/integrations/integration-logos";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
@@ -185,17 +192,18 @@ export function CoreConnectionModal({
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
                   {tl("Modo de autenticação")}
                 </span>
-                <select
-                  value={authMethod}
-                  onChange={(event) => setAuthMethod(event.target.value)}
-                  className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
-                >
-                  {authModes.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {formatAuthModeLabel(mode, tl)}
-                    </option>
-                  ))}
-                </select>
+                <Select value={authMethod} onValueChange={setAuthMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {authModes.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {formatAuthModeLabel(mode, tl)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
             ) : null}
 

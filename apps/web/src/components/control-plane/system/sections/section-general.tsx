@@ -5,6 +5,13 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { sourceBadgeLabel, sourceBadgeTone } from "@/lib/system-settings-model";
 import type { GeneralSystemSettingsValueSource } from "@/lib/control-plane";
 
@@ -67,7 +74,7 @@ export function SectionGeneral() {
             description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
           >
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               value={account.scheduler_default_timezone}
               onChange={(e) => update({ scheduler_default_timezone: e.target.value })}
               placeholder="Ex.: America/Sao_Paulo"
@@ -82,16 +89,22 @@ export function SectionGeneral() {
             label="Formato de hora"
             description="Define como os horários são exibidos na interface e nos relatórios."
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={(account as Record<string, unknown>).time_format as string ?? "24h"}
-              onChange={(e) => update({ time_format: e.target.value } as Partial<typeof account>)}
+              onValueChange={(v) => update({ time_format: v } as Partial<typeof account>)}
               disabled={isEnvSourced("account.time_format")}
-              title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
             >
-              <option value="24h">24 horas (14:30)</option>
-              <option value="12h">12 horas (2:30 PM)</option>
-            </select>
+              <SelectTrigger
+               
+                title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24h">24 horas (14:30)</SelectItem>
+                <SelectItem value="12h">12 horas (2:30 PM)</SelectItem>
+              </SelectContent>
+            </Select>
           </FieldShell>
         </FieldWithBadge>
       </SettingsFieldGroup>

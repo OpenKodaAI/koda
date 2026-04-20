@@ -256,7 +256,7 @@ export function IntegrationDetailView({
     {
       id: "type",
       label: tl("Tipo"),
-      value: entry.metadata.type,
+      value: tl(entry.metadata.type),
     },
   ];
 
@@ -538,8 +538,8 @@ export function IntegrationDetailView({
             {entry.capabilities.map((capability, index) => (
               <CapabilityRow
                 key={capability.id}
-                label={capability.label}
-                description={capability.description}
+                label={tl(capability.label)}
+                description={tl(capability.description)}
                 iconKey={capability.icon}
                 index={index}
               />

@@ -5,28 +5,28 @@ import dynamic from "next/dynamic";
 import { useState, useCallback, useMemo } from "react";
 import { Workflow } from "lucide-react";
 import { ExecutionTable } from "@/components/executions/execution-table";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import {
-  PageFilterChips,
   PageMetricStrip,
   PageMetricStripItem,
   PageQueryState,
   PageSearchField,
 } from "@/components/ui/page-primitives";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
-import { resolveBotSelection } from "@/lib/bot-selection";
+import { resolveAgentSelection } from "@/lib/agent-selection";
 import {
   fetchControlPlaneDashboardJson,
   fetchControlPlaneDashboardJsonAllowError,
 } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 import type { ExecutionDetail, ExecutionSummary } from "@/lib/types";
-import { cn, formatCost, formatDuration } from "@/lib/utils";
+import { formatCost, formatDuration } from "@/lib/utils";
 
 const ExecutionDetailDrawer = dynamic(
   () =>
@@ -46,16 +46,16 @@ const ExecutionDetailModal = dynamic(
 
 export default function ExecutionsPage() {
   const { t, language } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const [selectedExecution, setSelectedExecution] = useState<ExecutionSummary | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
   const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(search.trim(), 260);
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
   const executionsQuery = useControlPlaneQuery<{
@@ -64,7 +64,7 @@ export default function ExecutionsPage() {
   }>({
     tier: "live",
     queryKey: queryKeys.dashboard.executions({
-      botIds: visibleBotIds,
+      agentIds: visibleBotIds,
       status: statusFilter,
       search: debouncedSearch,
       limit: 100,
@@ -82,7 +82,7 @@ export default function ExecutionsPage() {
         {
           signal,
           params: {
-            bot: visibleBotIds,
+            agent: visibleBotIds,
             status: statusFilter || null,
             search: debouncedSearch || null,
             limit: 100,
@@ -160,9 +160,9 @@ export default function ExecutionsPage() {
     setSelectedExecution(null);
     setIsExecutionModalOpen(false);
   }, []);
-  const handleBotSelectionChange = useCallback((botIds: string[]) => {
+  const handleAgentSelectionChange = useCallback((agentIds: string[]) => {
     clearSelection();
-    setSelectedBotIds(botIds);
+    setSelectedBotIds(agentIds);
   }, [clearSelection]);
   const handleSearchChange = useCallback((value: string) => {
     clearSelection();
@@ -202,78 +202,68 @@ export default function ExecutionsPage() {
   return (
     <>
       <div className="min-w-0 space-y-4" {...tourRoute("executions", tourVariant)}>
-        <div className="flex flex-col gap-4 md:flex-row md:flex-wrap xl:flex-nowrap xl:items-center">
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
           <div
-            className="w-full md:max-w-[350px] md:min-w-[200px] xl:w-[320px] xl:flex-none"
-            {...tourAnchor("executions.bot-switcher")}
+            className="w-full md:w-[220px] md:flex-none"
+            {...tourAnchor("executions.agent-switcher")}
           >
-            <BotSwitcher
+            <AgentSwitcher
               multiple
+              singleRow
+              className="agent-switcher--compact"
               selectedBotIds={selectedBotIds}
-              onSelectionChange={handleBotSelectionChange}
+              onSelectionChange={handleAgentSelectionChange}
             />
           </div>
-          <div className="flex min-w-0 flex-col gap-4 md:flex-1 md:flex-row md:flex-wrap md:items-center md:justify-end">
-            <div className="w-full md:min-w-[240px] md:flex-1 md:max-w-[24rem]" {...tourAnchor("executions.search")}>
-              <PageSearchField
-                className="w-full md:max-w-[24rem] xl:w-[320px]"
-                value={search}
-                onChange={handleSearchChange}
-                placeholder={t("executions.searchPlaceholder")}
-              />
-            </div>
-            <div className="w-full md:w-auto md:max-w-full" {...tourAnchor("executions.status-filters")}>
-              <PageFilterChips className="w-full justify-start md:w-auto md:max-w-full md:justify-end">
-                {statuses.map((status) => (
-                  <button
-                    key={status.value}
-                    type="button"
-                    onClick={() => handleStatusFilterChange(status.value)}
-                    className={cn("button-pill", statusFilter === status.value && "is-active")}
-                  >
-                    {status.label}
-                  </button>
-                ))}
-              </PageFilterChips>
-            </div>
+          <div className="w-full md:min-w-[200px] md:flex-1" {...tourAnchor("executions.search")}>
+            <PageSearchField
+              className="w-full"
+              value={search}
+              onChange={handleSearchChange}
+              placeholder={t("executions.searchPlaceholder")}
+            />
+          </div>
+          <div className="w-full md:w-auto md:shrink-0" {...tourAnchor("executions.status-filters")}>
+            <SoftTabs
+              items={statuses.map((status) => ({
+                id: status.value || "__all__",
+                label: status.label,
+              }))}
+              value={statusFilter || "__all__"}
+              onChange={(id) => handleStatusFilterChange(id === "__all__" ? "" : id)}
+              ariaLabel={t("executions.page.statusAll")}
+            />
           </div>
         </div>
 
         <div {...tourAnchor("executions.metrics")}>
           <PageMetricStrip>
-          {showInitialSkeleton ? (
-            Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="metric-strip__item">
-                <div className="skeleton h-3 w-16 rounded-xl" />
-                <div className="mt-2 skeleton h-6 w-20 rounded-xl" />
-              </div>
-            ))
-          ) : (
-            <>
-              <PageMetricStripItem
-                label={t("executions.page.metrics.cost")}
-                value={totalCostDisplay}
-              />
-              <PageMetricStripItem
-                label={t("executions.page.metrics.avgDuration")}
-                value={avgDurationDisplay}
-              />
-              <PageMetricStripItem
-                label={t("executions.page.metrics.tools")}
-                value={totalToolsDisplay}
-              />
-              <PageMetricStripItem
-                label={t("executions.page.metrics.warnings")}
-                value={totalWarningsDisplay}
-              />
-            </>
-          )}
+            <PageMetricStripItem
+              label={t("executions.page.metrics.cost")}
+              value={showInitialSkeleton ? "—" : totalCostDisplay}
+              hint={t("executions.page.metrics.costHint")}
+            />
+            <PageMetricStripItem
+              label={t("executions.page.metrics.avgDuration")}
+              value={showInitialSkeleton ? "—" : avgDurationDisplay}
+              hint={t("executions.page.metrics.avgDurationHint")}
+            />
+            <PageMetricStripItem
+              label={t("executions.page.metrics.tools")}
+              value={showInitialSkeleton ? "—" : totalToolsDisplay}
+              hint={t("executions.page.metrics.toolsHint")}
+            />
+            <PageMetricStripItem
+              label={t("executions.page.metrics.warnings")}
+              value={showInitialSkeleton ? "—" : totalWarningsDisplay}
+              hint={t("executions.page.metrics.warningsHint")}
+            />
           </PageMetricStrip>
         </div>
 
         {showInitialSkeleton ? (
           <div {...tourAnchor("executions.table")}>
-            <ExecutionTable executions={[]} showBot loading />
+            <ExecutionTable executions={[]} showAgent loading />
           </div>
         ) : executionsQuery.error ? (
           <div {...tourAnchor("executions.unavailable")}>
@@ -294,7 +284,7 @@ export default function ExecutionsPage() {
           <div {...tourAnchor("executions.table")}>
             <ExecutionTable
               executions={executions}
-              showBot={visibleBotIds.length !== 1}
+              showAgent={visibleBotIds.length !== 1}
               onExecutionClick={setSelectedExecution}
               selectedExecutionId={selectedExecution?.task_id ?? null}
             />

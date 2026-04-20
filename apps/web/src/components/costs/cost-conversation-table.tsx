@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { getBotColor, getBotLabel } from "@/lib/bot-constants";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { getSemanticTextStyle, getSemanticTone, getSemanticVars } from "@/lib/theme-semantic";
 import type { CostConversationRow } from "@/lib/types";
 import { cn, formatCost, formatRelativeTime, truncateText } from "@/lib/utils";
@@ -121,13 +121,13 @@ export function CostConversationTable({ rows, className }: CostConversationTable
                     </p>
                     <span
                       className="inline-flex items-center gap-2 text-[12px] font-medium"
-                      style={{ color: getBotColor(row.bot_id) }}
+                      style={{ color: getAgentColor(row.bot_id) }}
                     >
                       <span
                         className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: getBotColor(row.bot_id) }}
+                        style={{ backgroundColor: getAgentColor(row.bot_id) }}
                       />
-                      {getBotLabel(row.bot_id)}
+                      {getAgentLabel(row.bot_id)}
                     </span>
                     <span className="inline-flex items-center gap-2 text-[12px]" style={getSemanticTextStyle(tone)}>
                       <span

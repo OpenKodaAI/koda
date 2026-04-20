@@ -3,17 +3,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clock3, DatabaseZap } from "lucide-react";
 import { CronTable } from "@/components/schedules/cron-table";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   PageEmptyState,
+  PageMetricStrip,
+  PageMetricStripItem,
   PageSection,
   PageSectionHeader,
-  PageStatCard,
-  PageStatGrid,
 } from "@/components/ui/page-primitives";
-import { formatBotSelectionLabel, resolveBotSelection } from "@/lib/bot-selection";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { StatusDot } from "@/components/ui/status-dot";
+import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import type { CronJob, ScheduleDetail } from "@/lib/types";
 
@@ -48,23 +57,25 @@ function getLifecycleAction(job: CronJob | null): "pause" | "resume" | "validate
   }
 }
 
-function getLifecycleLabel(job: CronJob | null): string {
+function getLifecycleLabelKey(job: CronJob | null): string {
   if (!job) {
-    return "Update job";
+    return "schedules.inspector.lifecycle.update";
   }
   switch (job.status) {
     case "active":
-      return "Pause job";
+      return "schedules.inspector.lifecycle.pause";
     case "paused":
-      return "Resume job";
+      return "schedules.inspector.lifecycle.resume";
     case "validated":
-      return "Activate job";
+      return "schedules.inspector.lifecycle.activate";
     case "failed_open":
-      return "Resume failed-open job";
+      return "schedules.inspector.lifecycle.resumeFailedOpen";
     case "validation_pending":
-      return "Queue validation";
+      return "schedules.inspector.lifecycle.queueValidation";
     default:
-      return job.enabled === 1 ? "Pause job" : "Activate or resume";
+      return job.enabled === 1
+        ? "schedules.inspector.lifecycle.pause"
+        : "schedules.inspector.lifecycle.activateOrResume";
   }
 }
 
@@ -125,9 +136,9 @@ function buildPatch(detail: ScheduleDetail, draft: ScheduleEditDraft) {
 
 export default function SchedulesPage() {
   const { t } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
-  const [jobsByBot, setJobsByBot] = useState<Record<string, CronJob[]>>({});
+  const [jobsByAgent, setJobsByAgent] = useState<Record<string, CronJob[]>>({});
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -138,12 +149,12 @@ export default function SchedulesPage() {
   const [busyJobId, setBusyJobId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<ScheduleEditDraft | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
-  const selectionLabel = formatBotSelectionLabel(visibleBotIds, bots);
+  const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
 
   useEffect(() => {
     async function fetchSchedules() {
@@ -151,15 +162,15 @@ export default function SchedulesPage() {
       setUnavailable(false);
       try {
         const response = await fetchControlPlaneDashboardJsonAllowError<CronJob[]>("/schedules", {
-          params: { bot: visibleBotIds },
+          params: { agent: visibleBotIds },
           fallbackError: t("schedules.page.unavailableDescription", {
             defaultValue: "Unable to load canonical schedules.",
           }),
         });
 
         const results: Record<string, CronJob[]> = {};
-        for (const bot of bots) {
-          results[bot.id] = [];
+        for (const agent of agents) {
+          results[agent.id] = [];
         }
 
         for (const job of Array.isArray(response.data) ? response.data : []) {
@@ -169,10 +180,10 @@ export default function SchedulesPage() {
           results[job.bot_id].push(job);
         }
 
-        setJobsByBot(results);
+        setJobsByAgent(results);
         setUnavailable(!response.ok);
       } catch {
-        setJobsByBot({});
+        setJobsByAgent({});
         setUnavailable(true);
       } finally {
         setLoading(false);
@@ -180,7 +191,7 @@ export default function SchedulesPage() {
     }
 
     void fetchSchedules();
-  }, [bots, t, visibleBotIds, refreshNonce]);
+  }, [agents, t, visibleBotIds, refreshNonce]);
 
   async function loadDetail(job: CronJob) {
     if (!job.bot_id) return;
@@ -188,7 +199,7 @@ export default function SchedulesPage() {
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const response = await fetch(`/api/runtime/bots/${job.bot_id}/schedules/${job.id}`, {
+      const response = await fetch(`/api/runtime/agents/${job.bot_id}/schedules/${job.id}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as ScheduleDetail | { error?: string };
@@ -212,7 +223,7 @@ export default function SchedulesPage() {
     setBusyJobId(job.id);
     setStatusMessage(null);
     try {
-      const response = await fetch(`/api/runtime/bots/${job.bot_id}/schedules/${job.id}/actions/${action}`, {
+      const response = await fetch(`/api/runtime/agents/${job.bot_id}/schedules/${job.id}/actions/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: job.user_id }),
@@ -246,13 +257,13 @@ export default function SchedulesPage() {
     setBusyJobId(selectedJob.id);
     setStatusMessage(null);
     try {
-      const response = await fetch(`/api/runtime/bots/${selectedJob.bot_id}/schedules/${selectedJob.id}`, {
+      const response = await fetch(`/api/runtime/agents/${selectedJob.bot_id}/schedules/${selectedJob.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: selectedDetail.job.user_id,
           expected_config_version: selectedDetail.job.config_version,
-          reason: "Updated from schedules page",
+          reason: t("schedules.inspector.messages.updateReason"),
           patch: buildPatch(selectedDetail, editDraft),
         }),
       });
@@ -260,9 +271,10 @@ export default function SchedulesPage() {
         | ({ message?: string } & Partial<ScheduleDetail>)
         | { error?: string };
       if (!response.ok) {
-        throw new Error("error" in payload ? payload.error || "Unable to update schedule" : "Unable to update schedule");
+        const fallback = t("schedules.inspector.messages.updateFailed");
+        throw new Error("error" in payload ? payload.error || fallback : fallback);
       }
-      setStatusMessage((payload as { message?: string }).message || "Schedule updated.");
+      setStatusMessage((payload as { message?: string }).message || t("schedules.inspector.messages.updated"));
       if ("job" in payload && payload.job) {
         setSelectedDetail(payload as ScheduleDetail);
         setSelectedJob((payload as ScheduleDetail).job);
@@ -270,100 +282,91 @@ export default function SchedulesPage() {
       }
       setRefreshNonce((value) => value + 1);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Unable to update schedule");
+      setStatusMessage(
+        error instanceof Error ? error.message : t("schedules.inspector.messages.updateFailed"),
+      );
     } finally {
       setBusyJobId(null);
     }
   }
 
-  const visibleBots = useMemo(
+  const visibleAgents = useMemo(
     () =>
-      bots.filter((bot) => visibleBotIds.includes(bot.id)).map((bot) => ({
-        bot,
-        jobs: jobsByBot[bot.id] || [],
+      agents.filter((agent) => visibleBotIds.includes(agent.id)).map((agent) => ({
+        agent,
+        jobs: jobsByAgent[agent.id] || [],
       })),
-    [bots, jobsByBot, visibleBotIds]
+    [agents, jobsByAgent, visibleBotIds]
   );
 
-  const totalJobs = visibleBots.reduce((sum, entry) => sum + entry.jobs.length, 0);
-  const enabledJobs = visibleBots.reduce(
+  const totalJobs = visibleAgents.reduce((sum, entry) => sum + entry.jobs.length, 0);
+  const enabledJobs = visibleAgents.reduce(
     (sum, entry) => sum + entry.jobs.filter((job) => job.enabled === 1).length,
     0
   );
   const disabledJobs = totalJobs - enabledJobs;
-  const botsWithJobs = visibleBots.filter((entry) => entry.jobs.length > 0);
+  const botsWithJobs = visibleAgents.filter((entry) => entry.jobs.length > 0);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-4 md:flex-row md:flex-wrap xl:flex-nowrap xl:items-center">
-        <div className="w-full md:max-w-[350px] md:min-w-[200px] xl:w-[320px] xl:flex-none">
-          <BotSwitcher multiple selectedBotIds={selectedBotIds} onSelectionChange={setSelectedBotIds} />
-        </div>
-        <div className="flex flex-1 flex-wrap items-center justify-start gap-2 md:justify-end">
-          <span className="chip">
-            {loading
-              ? t("common.loading")
-              : t("schedules.jobs", { count: totalJobs, defaultValue: "{{count}} schedules" })}
-          </span>
-          <span className="chip">{t("schedules.active", { count: enabledJobs, defaultValue: "{{count}} active" })}</span>
-          <span className="chip">{selectionLabel}</span>
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+        <div className="w-full md:w-[220px] md:flex-none">
+          <AgentSwitcher
+            multiple
+            singleRow
+            className="agent-switcher--compact"
+            selectedBotIds={selectedBotIds}
+            onSelectionChange={setSelectedBotIds}
+          />
         </div>
       </div>
 
       {statusMessage ? (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-          {statusMessage}
-        </div>
+        <InlineAlert tone="info">{statusMessage}</InlineAlert>
       ) : null}
 
       {loading ? (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="glass-card-sm p-5">
-                <div className="skeleton skeleton-text mb-3" style={{ width: "40%" }} />
-                <div className="skeleton skeleton-heading mb-2" style={{ width: "50%" }} />
-                <div className="skeleton skeleton-text" style={{ width: "65%" }} />
+              <div
+                key={index}
+                className="flex h-[72px] animate-pulse flex-col gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-4"
+              >
+                <div className="h-3 w-16 rounded bg-[var(--panel-strong)]" />
+                <div className="h-5 w-12 rounded bg-[var(--panel-strong)]" />
               </div>
             ))}
           </div>
-          <div className="app-section min-h-[400px] p-5 sm:p-6" />
+          <div className="min-h-[400px]" />
         </div>
       ) : (
         <>
-          <PageStatGrid className="app-kpi-grid--four-up animate-in stagger-1">
-            <PageStatCard label={t("schedules.page.visibleBots")} value={`${visibleBots.length}`} hint={selectionLabel} />
-            <PageStatCard
+          <PageMetricStrip className="animate-in stagger-1">
+            <PageMetricStripItem
+              label={t("schedules.page.visibleAgents")}
+              value={`${visibleAgents.length}`}
+              hint={selectionLabel}
+            />
+            <PageMetricStripItem
               label={t("schedules.page.withSchedule")}
               value={`${botsWithJobs.length}`}
               hint={t("schedules.page.withAtLeastOne")}
             />
-            <PageStatCard
+            <PageMetricStripItem
               label={t("schedules.page.enabled")}
               value={`${enabledJobs}`}
               hint={t("schedules.page.runningNormally")}
             />
-            <PageStatCard
+            <PageMetricStripItem
               label={t("schedules.page.paused")}
               value={`${disabledJobs}`}
               hint={t("schedules.page.registeredDisabled")}
             />
-          </PageStatGrid>
+          </PageMetricStrip>
 
-          <PageSection className="animate-in stagger-2 px-5 py-5 lg:px-6">
-            <PageSectionHeader
-              eyebrow={t("routeMeta.schedules.title")}
-              title={t("schedules.page.title")}
-              description={t("schedules.page.description")}
-              meta={
-                <div className="app-filter-row">
-                  <span className="chip">{t("schedules.page.routines", { count: totalJobs })}</span>
-                  <span className="chip">{t("schedules.page.active", { count: enabledJobs })}</span>
-                </div>
-              }
-            />
-
-            {unavailable ? (
+          {unavailable ? (
+            <div className="animate-in stagger-2 py-6">
               <PageEmptyState
                 icon={DatabaseZap}
                 title={t("schedules.page.unavailable", {
@@ -371,110 +374,101 @@ export default function SchedulesPage() {
                 })}
                 description={t("schedules.page.unavailableDescription", {
                   defaultValue:
-                    "The control-plane/runtime APIs do not expose per-bot cron inventory in this deployment.",
+                    "The control-plane/runtime APIs do not expose per-agent cron inventory in this deployment.",
                 })}
               />
-            ) : botsWithJobs.length === 0 ? (
+            </div>
+          ) : botsWithJobs.length === 0 ? (
+            <div className="animate-in stagger-2 py-6">
               <PageEmptyState
                 icon={Clock3}
                 title={t("schedules.page.noVisible")}
                 description={t("schedules.page.noVisibleDescription")}
               />
-            ) : (
-              <section
-                className={`grid gap-4 ${
-                  botsWithJobs.length > 1 ? "xl:grid-cols-2" : "grid-cols-1"
-                }`}
-              >
-                {botsWithJobs.map((entry, index) => {
-                  const activeCount = entry.jobs.filter((job) => job.enabled === 1).length;
-                  const pausedCount = entry.jobs.length - activeCount;
+            </div>
+          ) : (
+            <section
+              className={`animate-in stagger-2 grid gap-4 ${
+                botsWithJobs.length > 1 ? "xl:grid-cols-2" : "grid-cols-1"
+              }`}
+            >
+              {botsWithJobs.map((entry) => {
+                return (
+                  <div key={entry.agent.id} className="flex flex-col gap-3">
+                    <header className="flex items-baseline justify-between px-1">
+                      <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                        {entry.agent.label}
+                      </span>
+                      <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                        {t("schedules.page.configured", {
+                          count: entry.jobs.length,
+                          defaultValue: "{{count}} configured",
+                        })}
+                      </span>
+                    </header>
 
-                  return (
-                    <div
-                      key={entry.bot.id}
-                      className={`app-section animate-in stagger-${Math.min(index + 1, 6)} overflow-hidden px-0 py-0`}
-                    >
-                      <div className="border-b border-[var(--border-subtle)] px-5 py-4 lg:px-6">
-                        <PageSectionHeader
-                          eyebrow={entry.bot.label}
-                          title={t("schedules.page.configured", {
-                            count: entry.jobs.length,
-                            defaultValue: "{{count}} configured",
-                          })}
-                          description={t("schedules.page.configuredDescription")}
-                          meta={
-                            <div className="app-filter-row">
-                              <span className="chip">{t("schedules.page.active", { count: activeCount })}</span>
-                              <span className="chip">{t("schedules.page.pausedCount", { count: pausedCount })}</span>
-                            </div>
-                          }
-                          className="mb-0"
-                        />
-                      </div>
-
-                      <div className="p-5 lg:p-6">
-                        <CronTable
-                          jobs={entry.jobs}
-                          botLabel={entry.bot.label}
-                          botColor={entry.bot.color}
-                          busyJobId={busyJobId}
-                          onInspect={(job) => void loadDetail(job)}
-                          onEdit={(job) => void loadDetail(job)}
-                          onRun={(job) => void runAction(job, "run")}
-                          onLifecycleAction={(job, action) => void runAction(job, action)}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </section>
-            )}
-          </PageSection>
+                    <CronTable
+                      jobs={entry.jobs}
+                      agentLabel={entry.agent.label}
+                      agentColor={entry.agent.color}
+                      busyJobId={busyJobId}
+                      onInspect={(job) => void loadDetail(job)}
+                      onEdit={(job) => void loadDetail(job)}
+                      onRun={(job) => void runAction(job, "run")}
+                      onLifecycleAction={(job, action) => void runAction(job, action)}
+                    />
+                  </div>
+                );
+              })}
+            </section>
+          )}
 
           {selectedJob ? (
             <PageSection className="animate-in stagger-3 px-5 py-5 lg:px-6">
               <PageSectionHeader
-                eyebrow="Inspector"
-                title={`Job #${selectedJob.id}`}
-                description={selectedJob.summary || selectedJob.command || "Schedule detail"}
-                meta={
-                  <div className="app-filter-row">
-                    <span className="chip">{selectedJob.job_type || "job"}</span>
-                    <span className="chip">{selectedJob.trigger_type || "trigger"}</span>
-                    <span className="chip">{selectedJob.status || "unknown"}</span>
-                  </div>
+                eyebrow={t("schedules.inspector.eyebrow")}
+                title={t("schedules.inspector.jobTitle", { id: selectedJob.id })}
+                description={
+                  selectedJob.summary ||
+                  selectedJob.command ||
+                  t("schedules.inspector.detailFallback")
                 }
               />
 
               {detailLoading ? (
-                <div className="text-sm text-[var(--text-secondary)]">Loading schedule detail…</div>
+                <div className="text-sm text-[var(--text-secondary)]">{t("schedules.inspector.loadingDetail")}</div>
               ) : detailError ? (
                 <div className="text-sm text-[var(--text-secondary)]">{detailError}</div>
               ) : selectedDetail && editDraft ? (
-                <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                  <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
+                <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+                  <section className="flex flex-col gap-4">
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="text-sm text-[var(--text-secondary)]">
-                        Trigger
-                        <select
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                          value={editDraft.triggerType}
-                          onChange={(event) =>
-                            setEditDraft((current) =>
-                              current ? { ...current, triggerType: event.target.value } : current
-                            )
-                          }
-                        >
-                          <option value="one_shot">One-shot</option>
-                          <option value="interval">Interval</option>
-                          <option value="cron">Cron</option>
-                        </select>
+                        {t("schedules.inspector.trigger")}
+                        <div className="mt-1">
+                          <Select
+                            value={editDraft.triggerType}
+                            onValueChange={(v) =>
+                              setEditDraft((current) =>
+                                current ? { ...current, triggerType: v } : current,
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="one_shot">{t("schedules.inspector.triggerTypes.one_shot")}</SelectItem>
+                              <SelectItem value="interval">{t("schedules.inspector.triggerTypes.interval")}</SelectItem>
+                              <SelectItem value="cron">{t("schedules.inspector.triggerTypes.cron")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </label>
                       <label className="text-sm text-[var(--text-secondary)]">
-                        Timezone
+                        {t("schedules.inspector.timezone")}
                         <input
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                          className="field-shell mt-1 text-[var(--text-primary)]"
                           value={editDraft.timezone}
                           onChange={(event) =>
                             setEditDraft((current) =>
@@ -484,9 +478,9 @@ export default function SchedulesPage() {
                         />
                       </label>
                       <label className="text-sm text-[var(--text-secondary)] md:col-span-2">
-                        Schedule expression
+                        {t("schedules.inspector.scheduleExpression")}
                         <input
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                          className="field-shell mt-1 text-[var(--text-primary)]"
                           value={editDraft.scheduleExpr}
                           onChange={(event) =>
                             setEditDraft((current) =>
@@ -497,12 +491,12 @@ export default function SchedulesPage() {
                       </label>
                       <label className="text-sm text-[var(--text-secondary)] md:col-span-2">
                         {selectedDetail.job.job_type === "reminder"
-                          ? "Reminder text"
+                          ? t("schedules.inspector.reminderText")
                           : selectedDetail.job.job_type === "shell_command"
-                            ? "Command"
-                            : "Query"}
+                            ? t("schedules.inspector.command")
+                            : t("schedules.inspector.query")}
                         <textarea
-                          className="mt-1 min-h-[120px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                          className="field-shell mt-1 min-h-[120px] text-[var(--text-primary)]"
                           value={editDraft.content}
                           onChange={(event) =>
                             setEditDraft((current) =>
@@ -513,9 +507,9 @@ export default function SchedulesPage() {
                       </label>
                       {selectedDetail.job.job_type === "shell_command" ? (
                         <label className="text-sm text-[var(--text-secondary)] md:col-span-2">
-                          Description
+                          {t("schedules.inspector.description")}
                           <input
-                            className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                            className="field-shell mt-1 text-[var(--text-primary)]"
                             value={editDraft.description}
                             onChange={(event) =>
                               setEditDraft((current) =>
@@ -526,9 +520,9 @@ export default function SchedulesPage() {
                         </label>
                       ) : null}
                       <label className="text-sm text-[var(--text-secondary)]">
-                        Work dir
+                        {t("schedules.inspector.workDir")}
                         <input
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                          className="field-shell mt-1 text-[var(--text-primary)]"
                           value={editDraft.workDir}
                           onChange={(event) =>
                             setEditDraft((current) =>
@@ -538,35 +532,47 @@ export default function SchedulesPage() {
                         />
                       </label>
                       <label className="text-sm text-[var(--text-secondary)]">
-                        Notification mode
-                        <select
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                          value={editDraft.notificationMode}
-                          onChange={(event) =>
-                            setEditDraft((current) =>
-                              current ? { ...current, notificationMode: event.target.value } : current
-                            )
-                          }
-                        >
-                          <option value="summary_complete">summary_complete</option>
-                          <option value="failures_only">failures_only</option>
-                          <option value="none">none</option>
-                        </select>
+                        {t("schedules.inspector.notificationMode")}
+                        <div className="mt-1">
+                          <Select
+                            value={editDraft.notificationMode}
+                            onValueChange={(v) =>
+                              setEditDraft((current) =>
+                                current ? { ...current, notificationMode: v } : current,
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="summary_complete">summary_complete</SelectItem>
+                              <SelectItem value="failures_only">failures_only</SelectItem>
+                              <SelectItem value="none">none</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </label>
                       <label className="text-sm text-[var(--text-secondary)]">
-                        Verification mode
-                        <select
-                          className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                          value={editDraft.verificationMode}
-                          onChange={(event) =>
-                            setEditDraft((current) =>
-                              current ? { ...current, verificationMode: event.target.value } : current
-                            )
-                          }
-                        >
-                          <option value="post_write_if_any">post_write_if_any</option>
-                          <option value="task_success">task_success</option>
-                        </select>
+                        {t("schedules.inspector.verificationMode")}
+                        <div className="mt-1">
+                          <Select
+                            value={editDraft.verificationMode}
+                            onValueChange={(v) =>
+                              setEditDraft((current) =>
+                                current ? { ...current, verificationMode: v } : current,
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="post_write_if_any">post_write_if_any</SelectItem>
+                              <SelectItem value="task_success">task_success</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </label>
                     </div>
 
@@ -577,7 +583,7 @@ export default function SchedulesPage() {
                         onClick={() => void saveEdit()}
                         disabled={busyJobId === selectedJob.id}
                       >
-                        Save changes
+                        {t("schedules.inspector.actions.saveChanges")}
                       </button>
                       <button
                         type="button"
@@ -585,7 +591,7 @@ export default function SchedulesPage() {
                         onClick={() => void runAction(selectedJob, "validate")}
                         disabled={busyJobId === selectedJob.id}
                       >
-                        Queue validation
+                        {t("schedules.inspector.actions.queueValidation")}
                       </button>
                       <button
                         type="button"
@@ -598,7 +604,7 @@ export default function SchedulesPage() {
                         }}
                         disabled={busyJobId === selectedJob.id}
                       >
-                        {getLifecycleLabel(selectedDetail.job)}
+                        {t(getLifecycleLabelKey(selectedDetail.job))}
                       </button>
                       <button
                         type="button"
@@ -606,7 +612,7 @@ export default function SchedulesPage() {
                         onClick={() => void runAction(selectedJob, "delete")}
                         disabled={busyJobId === selectedJob.id}
                       >
-                        Archive job
+                        {t("schedules.inspector.actions.archiveJob")}
                       </button>
                       <button
                         type="button"
@@ -614,86 +620,153 @@ export default function SchedulesPage() {
                         onClick={() => void loadDetail(selectedJob)}
                         disabled={busyJobId === selectedJob.id}
                       >
-                        Refresh detail
+                        {t("schedules.inspector.actions.refreshDetail")}
                       </button>
                     </div>
                   </section>
 
-                  <section className="space-y-4">
-                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
-                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Current status</h3>
-                      <div className="mt-3 space-y-1 text-xs text-[var(--text-secondary)]">
-                        <p>Status: {selectedDetail.job.status || "unknown"}</p>
-                        <p>Next run: {selectedDetail.job.next_run_at || "pending validation"}</p>
-                        <p>Version: {selectedDetail.job.config_version || 1}</p>
+                  <section className="flex flex-col divide-y divide-[color:var(--divider-hair)]">
+                    <div className="pb-5">
+                      <h3 className="m-0 mb-3 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                        {t("schedules.inspector.currentStatus")}
+                      </h3>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[0.8125rem]">
+                        <dt className="text-[var(--text-quaternary)]">{t("schedules.inspector.status")}</dt>
+                        <dd className="m-0 inline-flex items-center gap-1.5 text-[var(--text-primary)]">
+                          <StatusDot
+                            tone={
+                              selectedDetail.job.status === "active"
+                                ? "success"
+                                : selectedDetail.job.status === "failed_open"
+                                  ? "danger"
+                                  : selectedDetail.job.status === "validation_pending"
+                                    ? "warning"
+                                    : "neutral"
+                            }
+                            pulse={selectedDetail.job.status === "active"}
+                          />
+                          {selectedDetail.job.status || t("schedules.inspector.unknown")}
+                        </dd>
+                        <dt className="text-[var(--text-quaternary)]">{t("schedules.inspector.nextRun")}</dt>
+                        <dd className="m-0 truncate font-mono text-[var(--text-primary)]">
+                          {selectedDetail.job.next_run_at || t("schedules.inspector.pendingValidation")}
+                        </dd>
+                        <dt className="text-[var(--text-quaternary)]">{t("schedules.inspector.version")}</dt>
+                        <dd className="m-0 font-mono text-[var(--text-primary)]">
+                          {selectedDetail.job.config_version || 1}
+                        </dd>
                         {selectedDetail.latest_task_runtime ? (
                           <>
-                            <p>
-                              Runtime task: {String(selectedDetail.latest_task_runtime.task_id || "n/a")}
-                            </p>
-                            <p>
-                              Runtime phase: {String(selectedDetail.latest_task_runtime.current_phase || "n/a")}
-                            </p>
-                            <p>
-                              Runtime status: {String(selectedDetail.latest_task_runtime.status || "n/a")}
-                            </p>
+                            <dt className="text-[var(--text-quaternary)]">{t("schedules.inspector.runtimeTask")}</dt>
+                            <dd className="m-0 font-mono text-[var(--text-primary)]">
+                              {String(selectedDetail.latest_task_runtime.task_id || "—")}
+                            </dd>
+                            <dt className="text-[var(--text-quaternary)]">{t("schedules.inspector.phase")}</dt>
+                            <dd className="m-0 font-mono text-[var(--text-primary)]">
+                              {String(selectedDetail.latest_task_runtime.current_phase || "—")}
+                            </dd>
                           </>
                         ) : null}
-                      </div>
+                      </dl>
                     </div>
 
-                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
-                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Recent runs</h3>
-                      <div className="mt-3 space-y-2">
-                        {selectedDetail.runs.slice(0, 8).map((run) => (
-                          <article
-                            key={run.id}
-                            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] p-3 text-xs text-[var(--text-secondary)]"
-                          >
-                            <div className="flex flex-wrap items-center gap-2 text-[var(--text-primary)]">
-                              <span>#{run.id}</span>
-                              <span>{run.status}</span>
-                              <span>{run.trigger_reason}</span>
-                            </div>
-                            <p className="mt-2">Trace: {run.trace_id || "n/a"}</p>
-                            <p>Task: {run.task_id || "n/a"}</p>
-                            <p>
-                              Attempt: {run.attempt}/{run.max_attempts}
-                            </p>
-                            {run.error_message ? <p>Error: {run.error_message}</p> : null}
-                            {run.summary_text ? <p>Summary: {run.summary_text}</p> : null}
-                          </article>
-                        ))}
-                      </div>
+                    <div className="py-5">
+                      <h3 className="m-0 mb-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                        {t("schedules.inspector.recentRuns")}
+                      </h3>
+                      <ol className="flex flex-col">
+                        {selectedDetail.runs.slice(0, 8).map((run) => {
+                          const runTone =
+                            run.status === "completed" || run.status === "success"
+                              ? "success"
+                              : run.status === "failed"
+                                ? "danger"
+                                : run.status === "running"
+                                  ? "info"
+                                  : "neutral";
+                          return (
+                            <li
+                              key={run.id}
+                              className="grid grid-cols-[auto_1fr_auto] items-start gap-3 border-b border-[color:var(--divider-hair)] py-2.5 last:border-b-0"
+                            >
+                              <StatusDot tone={runTone} pulse={run.status === "running"} />
+                              <div className="min-w-0">
+                                <p className="m-0 truncate text-[0.8125rem] text-[var(--text-secondary)]">
+                                  <span className="font-mono text-[var(--text-quaternary)]">
+                                    #{run.id}
+                                  </span>
+                                  {run.trigger_reason ? (
+                                    <> · <span>{run.trigger_reason}</span></>
+                                  ) : null}
+                                </p>
+                                {run.error_message ? (
+                                  <p className="m-0 truncate text-[0.6875rem] text-[var(--tone-danger-dot)]">
+                                    {run.error_message}
+                                  </p>
+                                ) : run.summary_text ? (
+                                  <p className="m-0 truncate text-[0.6875rem] text-[var(--text-quaternary)]">
+                                    {run.summary_text}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                                {run.attempt}/{run.max_attempts}
+                              </span>
+                            </li>
+                          );
+                        })}
+                        {selectedDetail.runs.length === 0 ? (
+                          <li className="py-2.5 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                            {t("schedules.inspector.noRunsYet")}
+                          </li>
+                        ) : null}
+                      </ol>
                     </div>
 
-                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] p-4">
-                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Audit trail</h3>
-                      <div className="mt-3 space-y-2">
+                    <div className="py-5">
+                      <h3 className="m-0 mb-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                        {t("schedules.inspector.auditTrail")}
+                      </h3>
+                      <ol className="flex flex-col">
                         {selectedDetail.events.slice(0, 10).map((event) => (
-                          <article
+                          <li
                             key={event.id}
-                            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--field-bg)] p-3 text-xs text-[var(--text-secondary)]"
+                            className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-[color:var(--divider-hair)] py-2.5 last:border-b-0"
                           >
-                            <div className="flex flex-wrap items-center gap-2 text-[var(--text-primary)]">
-                              <span>{event.event_type}</span>
-                              <span>{event.created_at || "n/a"}</span>
-                            </div>
-                            {event.reason ? <p className="mt-2">Reason: {event.reason}</p> : null}
-                            {event.trace_id ? <p>Trace: {event.trace_id}</p> : null}
-                            {event.status_from || event.status_to ? (
-                              <p>
-                                State: {event.status_from || "n/a"} → {event.status_to || "n/a"}
+                            <div className="min-w-0">
+                              <p className="m-0 truncate text-[0.8125rem] text-[var(--text-secondary)]">
+                                {event.event_type}
+                                {event.status_from || event.status_to ? (
+                                  <>
+                                    {" · "}
+                                    <span className="font-mono text-[var(--text-quaternary)]">
+                                      {event.status_from || "—"} → {event.status_to || "—"}
+                                    </span>
+                                  </>
+                                ) : null}
                               </p>
-                            ) : null}
-                          </article>
+                              {event.reason ? (
+                                <p className="m-0 truncate text-[0.6875rem] text-[var(--text-quaternary)]">
+                                  {event.reason}
+                                </p>
+                              ) : null}
+                            </div>
+                            <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                              {event.created_at || "—"}
+                            </span>
+                          </li>
                         ))}
-                      </div>
+                        {selectedDetail.events.length === 0 ? (
+                          <li className="py-2.5 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                            {t("schedules.inspector.noEventsYet")}
+                          </li>
+                        ) : null}
+                      </ol>
                     </div>
                   </section>
                 </div>
               ) : (
-                <div className="text-sm text-[var(--text-secondary)]">Select a job to inspect or edit it.</div>
+                <div className="text-sm text-[var(--text-secondary)]">{t("schedules.inspector.selectToInspect")}</div>
               )}
             </PageSection>
           ) : null}

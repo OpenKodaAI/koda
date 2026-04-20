@@ -33,7 +33,7 @@ describe("RuntimeBrowserPanel", () => {
     render(
       <I18nProvider initialLanguage="pt-BR">
         <RuntimeBrowserPanel
-          botId="ATLAS"
+          agentId="ATLAS"
           taskId={7}
           browser={{
             status: "running",
@@ -49,7 +49,7 @@ describe("RuntimeBrowserPanel", () => {
 
     await waitFor(() =>
       expect(mockFetch).toHaveBeenCalledWith(
-        "/api/runtime/bots/ATLAS/tasks/7/browser",
+        "/api/runtime/agents/ATLAS/tasks/7/browser",
         expect.objectContaining({ cache: "no-store" })
       )
     );

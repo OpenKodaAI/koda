@@ -159,7 +159,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                 <DrawerMetric label={t("common.model")} value={truncateText(renderedEntry.model ?? "—", 18)} mono />
                 <DrawerMetric label={t("common.attempts")} value={`${renderedEntry.attempt_count}`} mono />
                 <DrawerMetric label={t("common.pod")} value={truncateText(renderedEntry.pod_name ?? "—", 18)} mono />
-                <DrawerMetric label={t("common.bot")} value={renderedEntry.bot_id ?? "—"} mono />
+                <DrawerMetric label={t("common.agent")} value={renderedEntry.bot_id ?? "—"} mono />
               </div>
 
               <div className="app-code-panel">

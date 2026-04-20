@@ -6,6 +6,13 @@ import { cn } from "@/lib/utils";
 import type { GeneralSystemSettingsVariable } from "@/lib/control-plane";
 import { FieldShell } from "./field-shell";
 import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export function VariableEditorModal({
@@ -59,7 +66,7 @@ export function VariableEditorModal({
         <div className="grid gap-3 px-6 py-5 md:grid-cols-2">
           <FieldShell label={tl("Nome")} description={tl("Use um nome em formato de variável de ambiente.")}>
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               value={draft.key}
               onChange={(event) => onChange({ ...draft, key: event.target.value })}
               placeholder="TEAM_NAME"
@@ -67,41 +74,42 @@ export function VariableEditorModal({
           </FieldShell>
 
           <FieldShell label={tl("Tipo")} description={tl("Segredos ficam criptografados e mascarados em leitura.")}>
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={draft.type}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  type: event.target.value === "secret" ? "secret" : "text",
-                  clear: false,
-                })
+              onValueChange={(v) =>
+                onChange({ ...draft, type: v === "secret" ? "secret" : "text", clear: false })
               }
             >
-              <option value="text">{tl("Texto")}</option>
-              <option value="secret">{tl("Segredo")}</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">{tl("Texto")}</SelectItem>
+                <SelectItem value="secret">{tl("Segredo")}</SelectItem>
+              </SelectContent>
+            </Select>
           </FieldShell>
 
           <FieldShell label={tl("Escopo")} description={tl("Controle se o valor pode ser concedido explicitamente a bots.")}>
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={draft.scope}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  scope: event.target.value === "bot_grant" ? "bot_grant" : "system_only",
-                })
+              onValueChange={(v) =>
+                onChange({ ...draft, scope: v === "bot_grant" ? "bot_grant" : "system_only" })
               }
             >
-              <option value="system_only">{tl("Somente sistema")}</option>
-              <option value="bot_grant">{tl("Disponível para bots mediante grant")}</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="system_only">{tl("Somente sistema")}</SelectItem>
+                <SelectItem value="bot_grant">{tl("Disponível para bots mediante grant")}</SelectItem>
+              </SelectContent>
+            </Select>
           </FieldShell>
 
           <FieldShell label={tl("Descrição")} description={tl("Contexto curto para o operador lembrar o propósito.")}>
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               value={draft.description}
               onChange={(event) => onChange({ ...draft, description: event.target.value })}
               placeholder={tl("Fila operacional do time")}
@@ -129,7 +137,7 @@ export function VariableEditorModal({
                   />
                 ) : (
                   <input
-                    className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                    className="field-shell text-[var(--text-primary)]"
                     type="text"
                     value={draft.value}
                     onChange={(event) => onChange({ ...draft, value: event.target.value, clear: false })}

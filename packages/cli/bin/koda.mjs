@@ -12,6 +12,7 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLED_RELEASE_ROOT = join(PACKAGE_ROOT, "release");
 const BUNDLED_MANIFEST_PATH = join(BUNDLED_RELEASE_ROOT, "manifest.json");
 const DEFAULT_INSTALL_DIR = join(homedir(), ".koda");
+const LOOPBACK_HOST = "localhost";
 
 async function main() {
   const [command = "help", ...rest] = process.argv.slice(2);
@@ -201,6 +202,10 @@ async function readInstallEnv(installDir) {
   return parseEnvFile(text);
 }
 
+function loopbackUrl(port, path = "") {
+  return `http://${LOOPBACK_HOST}:${port}${path}`;
+}
+
 function composeArgs(installDir) {
   return [
     "compose",
@@ -280,12 +285,15 @@ async function collectDoctorPayload(installDir) {
   const env = await readInstallEnv(installDir);
   const controlPlanePort = env.CONTROL_PLANE_PORT || "8090";
   const webPort = env.WEB_PORT || "3000";
+  const dashboardUrl = loopbackUrl(webPort);
   const payload = {
     install_dir: installDir,
-    control_plane_url: `http://127.0.0.1:${controlPlanePort}`,
-    health_url: `http://127.0.0.1:${controlPlanePort}/health`,
-    dashboard_url: `http://127.0.0.1:${webPort}`,
-    setup_url: `http://127.0.0.1:${webPort}/control-plane`,
+    control_plane_url: loopbackUrl(controlPlanePort),
+    health_url: loopbackUrl(controlPlanePort, "/health"),
+    dashboard_url: dashboardUrl,
+    setup_url: loopbackUrl(controlPlanePort, "/setup"),
+    dashboard_setup_url: `${dashboardUrl}/control-plane/setup`,
+    legacy_setup_url: loopbackUrl(controlPlanePort, "/setup"),
   };
 
   const checks = {};
@@ -342,7 +350,7 @@ async function issueBootstrapCode(installDir) {
   if (!recoveryToken) {
     throw new Error("CONTROL_PLANE_API_TOKEN is required to issue a setup code.");
   }
-  const response = await fetch(`http://127.0.0.1:${controlPlanePort}/api/control-plane/auth/bootstrap/codes`, {
+  const response = await fetch(loopbackUrl(controlPlanePort, "/api/control-plane/auth/bootstrap/codes"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${recoveryToken}`,
@@ -356,7 +364,7 @@ async function issueBootstrapCode(installDir) {
     throw new Error(String(payload.error || "Could not issue a setup code."));
   }
   return {
-    url: `http://127.0.0.1:${webPort}/control-plane`,
+    url: `${loopbackUrl(webPort)}/control-plane/setup`,
     code: payload.code,
     expires_at: payload.expires_at || null,
   };
@@ -397,8 +405,8 @@ async function installCommand(args) {
   runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
 
   const env = await readInstallEnv(installDir);
-  await waitForHttp(`http://127.0.0.1:${env.CONTROL_PLANE_PORT || "8090"}/health`, "the control plane");
-  await waitForHttp(`http://127.0.0.1:${env.WEB_PORT || "3000"}`, "the web dashboard");
+  await waitForHttp(loopbackUrl(env.CONTROL_PLANE_PORT || "8090", "/health"), "the control plane");
+  await waitForHttp(loopbackUrl(env.WEB_PORT || "3000"), "the web dashboard");
 
   await doctorCommand(["--dir", installDir]);
   const bootstrap = await issueBootstrapCode(installDir);

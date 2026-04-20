@@ -1,6 +1,14 @@
 "use client";
 
 import { Archive, Check, Clock3, GitMerge, RotateCcw, Trash2 } from "lucide-react";
+import {
+  SELECT_ALL_VALUE,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
@@ -108,24 +116,29 @@ export function MemoryCurationActions({
       {kind === "memory" && canMerge ? (
         <div className="flex items-center gap-2">
           {mergeTargetOptions.length > 0 && onMergeTargetChange ? (
-            <select
-              value={mergeTargetId ?? ""}
-              onChange={(event) =>
-                onMergeTargetChange(event.target.value ? Number(event.target.value) : null)
+            <Select
+              value={mergeTargetId != null ? String(mergeTargetId) : SELECT_ALL_VALUE}
+              onValueChange={(v) =>
+                onMergeTargetChange(v === SELECT_ALL_VALUE ? null : Number(v))
               }
-              className={cn(
-                "field-shell w-[13rem] shrink-0 px-3 py-2 text-sm text-[var(--text-primary)]",
-                compact && "w-[11.5rem]"
-              )}
               disabled={busy}
             >
-              <option value="">{t("memory.curation.actions.mergeTarget")}</option>
-              {mergeTargetOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                className={cn("w-[13rem] shrink-0", compact && "w-[11.5rem]")}
+              >
+                <SelectValue placeholder={t("memory.curation.actions.mergeTarget")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SELECT_ALL_VALUE}>
+                  {t("memory.curation.actions.mergeTarget")}
+                </SelectItem>
+                {mergeTargetOptions.map((option) => (
+                  <SelectItem key={option.value} value={String(option.value)}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : null}
 
           <button

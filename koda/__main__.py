@@ -150,7 +150,7 @@ def main() -> None:
     if not ALLOWED_USER_IDS:
         log.warning(
             "allowed_user_ids_empty",
-            msg="ALLOWED_USER_IDS is not configured — bot will reject all messages until allowed user IDs are set "
+            msg="ALLOWED_USER_IDS is not configured — agent will reject all messages until allowed user IDs are set "
             "in the channel settings.",
         )
 

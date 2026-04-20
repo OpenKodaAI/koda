@@ -45,10 +45,10 @@ const buttonVariants = cva(
         dashed: "",
       },
       size: {
-        lg: "h-9 gap-1.5 rounded-[var(--radius-panel-sm)] px-4 text-[0.875rem] [&_svg:not([class*=size-])]:size-4",
-        md: "h-8 gap-1.5 rounded-[var(--radius-panel-sm)] px-3 text-[0.8125rem] [&_svg:not([class*=size-])]:size-4",
-        sm: "h-7 gap-1.25 rounded-[var(--radius-panel-sm)] px-2.5 text-xs [&_svg:not([class*=size-])]:size-3.5",
-        icon: "size-8 shrink-0 rounded-[var(--radius-panel-sm)] p-0 [&_svg:not([class*=size-])]:size-4",
+        lg: "h-11 gap-2 rounded-[var(--radius-panel-sm)] px-[1.125rem] text-[0.9375rem] [&_svg:not([class*=size-])]:size-4",
+        md: "h-10 gap-2 rounded-[var(--radius-panel-sm)] px-3.5 text-[0.875rem] [&_svg:not([class*=size-])]:size-4",
+        sm: "h-9 gap-1.5 rounded-[var(--radius-panel-sm)] px-3 text-[0.8125rem] [&_svg:not([class*=size-])]:size-3.5",
+        icon: "size-10 shrink-0 rounded-[var(--radius-panel-sm)] p-0 [&_svg:not([class*=size-])]:size-4",
       },
       autoHeight: {
         true: "",
@@ -75,17 +75,17 @@ const buttonVariants = cva(
       {
         size: "md",
         autoHeight: true,
-        className: "h-auto min-h-8",
+        className: "h-auto min-h-10",
       },
       {
         size: "sm",
         autoHeight: true,
-        className: "h-auto min-h-7",
+        className: "h-auto min-h-9",
       },
       {
         size: "lg",
         autoHeight: true,
-        className: "h-auto min-h-9",
+        className: "h-auto min-h-11",
       },
       {
         variant: "outline",
@@ -114,7 +114,7 @@ const buttonVariants = cva(
       {
         size: "icon",
         mode: "icon",
-        className: "size-8 p-0",
+        className: "size-10 p-0",
       },
     ],
     defaultVariants: {

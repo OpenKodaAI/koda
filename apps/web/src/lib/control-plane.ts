@@ -16,13 +16,11 @@ export class ControlPlaneRequestError extends Error {
   }
 }
 
-export type ControlPlaneBotOrganization = {
+export type ControlPlaneAgentOrganization = {
   workspace_id?: string | null;
   workspace_name?: string | null;
-  workspace_color?: string | null;
   squad_id?: string | null;
   squad_name?: string | null;
-  squad_color?: string | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -45,7 +43,6 @@ export type ControlPlaneWorkspaceSquad = {
   workspace_id: string;
   name: string;
   description: string;
-  color: string;
   bot_count: number;
   spec?: SquadSpec;
   documents?: ScopePromptDocuments;
@@ -57,7 +54,6 @@ export type ControlPlaneWorkspace = {
   id: string;
   name: string;
   description: string;
-  color: string;
   bot_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;
@@ -85,7 +81,7 @@ export type ControlPlaneWorkspaceTree = {
   total_bot_count: number;
 };
 
-export type ControlPlaneBotSummary = {
+export type ControlPlaneAgentSummary = {
   id: string;
   display_name: string;
   status: string;
@@ -97,7 +93,7 @@ export type ControlPlaneBotSummary = {
   storage_namespace: string;
   runtime_endpoint: Record<string, unknown>;
   metadata: Record<string, unknown>;
-  organization: ControlPlaneBotOrganization;
+  organization: ControlPlaneAgentOrganization;
   default_model_provider_id?: string;
   default_model_provider_label?: string;
   default_model_id?: string;
@@ -578,7 +574,7 @@ export type ControlPlaneCoreCapabilities = {
   providers: Array<Record<string, unknown>>;
 };
 
-export type ControlPlaneBot = ControlPlaneBotSummary & {
+export type ControlPlaneAgent = ControlPlaneAgentSummary & {
   sections: Record<string, Record<string, unknown>>;
   documents: Record<string, string>;
   knowledge_assets: Array<Record<string, unknown>>;
@@ -932,6 +928,9 @@ export type ControlPlaneAuthStatus = {
   auth_mode: string;
   session_required: boolean;
   recovery_available: boolean;
+  onboarding_complete?: boolean;
+  loopback_trust_enabled?: boolean;
+  bootstrap_file_path?: string;
   session_subject?: string | null;
   operator?: {
     id?: string | null;
@@ -1083,9 +1082,9 @@ export async function controlPlaneFetchJson<T>(
   return sanitizeControlPlanePayload(pathname, payload as T);
 }
 
-export async function getControlPlaneBots() {
+export async function getControlPlaneAgents() {
   const payload = await controlPlaneFetchJson<{
-    items: ControlPlaneBotSummary[];
+    items: ControlPlaneAgentSummary[];
   }>("/api/control-plane/agents", {}, {
     tier: "catalog",
     tags: [CONTROL_PLANE_CACHE_TAGS.catalog],
@@ -1104,9 +1103,9 @@ export async function getControlPlaneWorkspaces() {
   );
 }
 
-export async function getControlPlaneBot(botId: string) {
-  return controlPlaneFetchJson<ControlPlaneBot>(
-    `/api/control-plane/agents/${botId}`,
+export async function getControlPlaneAgent(agentId: string) {
+  return controlPlaneFetchJson<ControlPlaneAgent>(
+    `/api/control-plane/agents/${agentId}`,
     {},
     {
       tier: "live",
@@ -1114,41 +1113,41 @@ export async function getControlPlaneBot(botId: string) {
   );
 }
 
-export async function getControlPlaneCompiledPrompt(botId: string) {
+export async function getControlPlaneCompiledPrompt(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneCompiledPrompt>(
-    `/api/control-plane/agents/${botId}/compiled-prompt`,
+    `/api/control-plane/agents/${agentId}/compiled-prompt`,
     {},
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
 
-export async function getControlPlaneExecutionPolicy(botId: string) {
+export async function getControlPlaneExecutionPolicy(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneExecutionPolicyPayload>(
-    `/api/control-plane/agents/${botId}/execution-policy`,
+    `/api/control-plane/agents/${agentId}/execution-policy`,
     {},
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
 
-export async function getControlPlaneExecutionPolicyCatalog(botId: string) {
+export async function getControlPlaneExecutionPolicyCatalog(agentId: string) {
   return controlPlaneFetchJson<{
     agent_id: string;
     catalog: ControlPlaneExecutionPolicyCatalog;
     policy: ControlPlaneExecutionPolicy;
-  }>(`/api/control-plane/agents/${botId}/policy-catalog`, {}, {
+  }>(`/api/control-plane/agents/${agentId}/policy-catalog`, {}, {
     tier: "detail",
-    tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+    tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
   });
 }
 
 export async function evaluateControlPlaneExecutionPolicy(
-  botId: string,
+  agentId: string,
   payload: {
     policy?: ControlPlaneExecutionPolicy;
     action?: Record<string, unknown>;
@@ -1157,14 +1156,14 @@ export async function evaluateControlPlaneExecutionPolicy(
   },
 ) {
   return controlPlaneFetchJson<ControlPlaneExecutionPolicyEvaluation>(
-    `/api/control-plane/agents/${botId}/execution-policy/evaluate`,
+    `/api/control-plane/agents/${agentId}/execution-policy/evaluate`,
     {
       method: "POST",
       body: JSON.stringify(payload),
     },
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
@@ -1201,9 +1200,9 @@ export async function getGeneralSystemSettings() {
   );
 }
 
-export async function getControlPlaneRuntimeAccess(botId: string) {
+export async function getControlPlaneRuntimeAccess(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneRuntimeAccess>(
-    `/api/control-plane/agents/${botId}/runtime-access`,
+    `/api/control-plane/agents/${agentId}/runtime-access`,
     {},
     {
       tier: "live",
@@ -1217,7 +1216,7 @@ type ControlPlaneRuntimeAccessRequest = {
 };
 
 export async function getServerControlPlaneRuntimeAccess(
-  botId: string,
+  agentId: string,
   options: ControlPlaneRuntimeAccessRequest = {},
 ) {
   const searchParams = new URLSearchParams();
@@ -1229,7 +1228,7 @@ export async function getServerControlPlaneRuntimeAccess(
   }
   const suffix = searchParams.size ? `?${searchParams.toString()}` : "";
   const response = await controlPlaneFetch(
-    `/api/control-plane/agents/${botId}/runtime-access${suffix}`,
+    `/api/control-plane/agents/${agentId}/runtime-access${suffix}`,
     {},
     {
       tier: "live",

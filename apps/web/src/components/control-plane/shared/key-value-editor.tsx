@@ -53,14 +53,14 @@ export function KeyValueEditor({
               type="text"
               value={entry.key}
               onChange={(e) => updateEntry(i, "key", e.target.value)}
-              className="field-shell flex-1 px-3 py-2 text-sm text-[var(--text-primary)] font-mono"
+              className="field-shell flex-1 font-mono text-[var(--text-primary)]"
               placeholder={tl("chave")}
             />
             <input
               type="text"
               value={entry.value}
               onChange={(e) => updateEntry(i, "value", e.target.value)}
-              className="field-shell flex-1 px-3 py-2 text-sm text-[var(--text-primary)]"
+              className="field-shell flex-1 text-[var(--text-primary)]"
               placeholder={tl("valor")}
             />
             <button

@@ -62,7 +62,8 @@ export function Drawer({
         <DialogPrimitive.Content
           aria-describedby={description ? undefined : undefined}
           className={cn(
-            "fixed inset-y-0 z-[71] flex h-full flex-col border-l border-[var(--border-subtle)] bg-[var(--panel-strong)] shadow-[var(--shadow-floating)] outline-none",
+            "fixed inset-y-0 z-[71] flex h-full flex-col border-l border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-modal-bg)] shadow-[var(--shadow-floating)] outline-none",
+            "backdrop-blur-[24px] backdrop-saturate-[150%]",
             positionClass,
             "duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             className,

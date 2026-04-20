@@ -314,7 +314,7 @@
         "summary": "Current operator-facing general settings model",
         "responses": {
           "200": {
-            "description": "General settings payload used by the dashboard. Includes provider connections, connection-default toggles, and global settings. Per-bot integration grants remain part of each agent spec under resource_access_policy.integration_grants."
+            "description": "General settings payload used by the dashboard. Includes provider connections, connection-default toggles, and global settings. Per-agent integration grants remain part of each agent spec under resource_access_policy.integration_grants."
           }
         }
       },
@@ -332,7 +332,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated general settings payload. Global settings can enable integration surfaces, but canonical core connection state lives under the connection-default routes and per-bot authorization still lives in each agent spec."
+            "description": "Updated general settings payload. Global settings can enable integration surfaces, but canonical core connection state lives under the connection-default routes and per-agent authorization still lives in each agent spec."
           }
         }
       }

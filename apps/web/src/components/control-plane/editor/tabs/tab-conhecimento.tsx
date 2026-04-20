@@ -6,7 +6,7 @@ import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { ToggleField } from "@/components/control-plane/shared/toggle-field";
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
 import { ModelSelector } from "@/components/control-plane/shared/model-selector";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   parseKnowledgePolicy,
@@ -25,7 +25,7 @@ export function TabConhecimento() {
     state,
     updateDocument,
     updateAgentSpecField,
-  } = useBotEditor();
+  } = useAgentEditor();
   const { tl } = useAppI18n();
 
   const memoryPolicy = useMemo(
@@ -115,6 +115,7 @@ export function TabConhecimento() {
         icon={BookOpen}
         dirty={state.dirty.agentSpec}
         defaultOpen
+        variant="flat"
       >
         <ToggleField
           label={tl("Conhecimento ativo")}

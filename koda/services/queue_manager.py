@@ -3610,6 +3610,7 @@ async def _run_agent_loop(
                         }
                     ],
                     preview_text=policy_evaluation.preview_text,
+                    task_id=ctx.task_id,
                 )
                 try:
                     from koda.utils.approval import _PENDING_AGENT_CMD_OPS

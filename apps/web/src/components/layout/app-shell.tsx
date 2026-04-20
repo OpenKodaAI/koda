@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { usePathname } from "next/navigation";
+import { CommandBarModal } from "@/components/command-bar/command-bar-modal";
 import { RouteStage } from "@/components/layout/route-stage";
 import { Sidebar } from "@/components/layout/sidebar";
 import { WorkspaceTopbar } from "@/components/layout/workspace-topbar";
@@ -17,6 +18,7 @@ const SIDEBAR_COLLAPSED_WIDTH = "3.5rem";
 
 interface AppShellProps {
   children: React.ReactNode;
+  serverPathname?: string;
 }
 
 function ShellViewportFrame({
@@ -71,13 +73,23 @@ function ShellViewportFrame({
   );
 }
 
-export function AppShell({ children }: AppShellProps) {
-  const pathname = usePathname();
-  const isSetupRoute = pathname === "/setup" || pathname.startsWith("/setup/");
+const FULL_SCREEN_AUTH_ROUTES: ReadonlyArray<string> = ["/setup", "/login", "/forgot-password"];
+
+function isFullScreenAuthRoute(pathname: string): boolean {
+  return FULL_SCREEN_AUTH_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
+
+export function AppShell({ children, serverPathname }: AppShellProps) {
+  const clientPathname = usePathname();
+  // During SSR, usePathname() returns null. Fall back to the server-provided
+  // pathname (read from the request headers in layout.tsx) so the shell
+  // doesn't flash around /setup, /login, or /forgot-password.
+  const pathname = clientPathname || serverPathname || "";
+  const isAuthRoute = isFullScreenAuthRoute(pathname);
   const isSessionsRoute = pathname.startsWith("/sessions");
   const isControlPlaneCatalogRoute = pathname === "/control-plane";
   const isControlPlaneAgentRoute =
-    pathname.startsWith("/control-plane/agents/") || pathname.startsWith("/control-plane/bots/");
+    pathname.startsWith("/control-plane/agents/") || pathname.startsWith("/control-plane/agents/");
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage(
     "ui:sidebar-collapsed",
@@ -101,8 +113,9 @@ export function AppShell({ children }: AppShellProps) {
     document.documentElement.style.setProperty("--shell-sidebar-width", sidebarWidth);
   }, [sidebarWidth]);
 
-  // Full-screen bypass: the setup flow owns the viewport until completed.
-  if (isSetupRoute) {
+  // Full-screen bypass: the auth flows (setup, login, forgot-password) own the
+  // viewport — no sidebar, no topbar, no shell frame.
+  if (isAuthRoute) {
     return <>{children}</>;
   }
 
@@ -139,6 +152,7 @@ export function AppShell({ children }: AppShellProps) {
             {children}
           </ShellViewportFrame>
           <ToastNotification />
+          <CommandBarModal />
         </div>
       </AppTourProvider>
     </ToastProvider>

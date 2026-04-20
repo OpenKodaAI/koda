@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { BotStats } from "@/lib/types";
+import type { AgentStats } from "@/lib/types";
 
 export interface DailyActivityCell {
   date: string;
@@ -40,7 +40,7 @@ function bucketIntensity(cost: number, count: number, maxCost: number): DailyAct
 }
 
 export function useDailyActivity(
-  statsList: Array<{ stats?: BotStats | null }>,
+  statsList: Array<{ stats?: AgentStats | null }>,
   options: { weeks?: number } = {},
 ): DailyActivityResult {
   const weeks = options.weeks ?? DEFAULT_WEEKS;

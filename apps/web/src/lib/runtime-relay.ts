@@ -4,7 +4,7 @@ import { ValidationError } from "@/lib/errors";
 export interface RuntimeRelayDescriptor {
   id: string;
   kind: "terminal" | "browser" | "novnc";
-  botId: string;
+  agentId: string;
   taskId: number;
   upstreamUrl: string;
   upstreamHeaders?: Record<string, string>;

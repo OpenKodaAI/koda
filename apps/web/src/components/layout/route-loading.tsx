@@ -12,21 +12,63 @@ export function OverviewRouteLoading() {
   return (
     <div className="space-y-4" data-testid="overview-route-loading">
       <div className="app-toolbar-card">
-        <SkeletonLine className="h-11 w-full max-w-[22rem]" />
+        <SkeletonLine className="h-9 w-full max-w-[22rem] rounded-[var(--radius-input)]" />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div key={index} className="glass-card-sm p-5">
-            <SkeletonLine className="mb-3 h-3.5 w-20" />
-            <SkeletonLine className="mb-4 h-8 w-28" />
-            <SkeletonLine className="h-4 w-32" />
+            <SkeletonLine className="mb-3 h-3 w-20 rounded" />
+            <SkeletonLine className="mb-4 h-7 w-28 rounded" />
+            <SkeletonLine className="h-3 w-32 rounded" />
           </div>
         ))}
       </div>
-      <div className="glass-card min-h-[280px] p-6" />
+      <div className="glass-card p-6">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="space-y-1.5">
+            <SkeletonLine className="h-3 w-32 rounded" />
+            <SkeletonLine className="h-5 w-56 rounded" />
+          </div>
+          <SkeletonLine className="h-9 w-32 rounded-[var(--radius-input)]" />
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="flex items-center gap-3">
+              <SkeletonLine className="h-2.5 w-2.5 rounded-full" />
+              <SkeletonLine className="h-3 w-[72%] rounded" />
+              <SkeletonLine className="ml-auto h-3 w-12 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.85fr)]">
-        <div className="glass-card min-h-[380px] p-6" />
-        <div className="glass-card min-h-[380px] p-6" />
+        <div className="glass-card p-6">
+          <SkeletonLine className="mb-4 h-3 w-28 rounded" />
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <SkeletonLine className="h-8 w-8 rounded-full" />
+                <div className="flex-1 space-y-1.5">
+                  <SkeletonLine className="h-3 w-[68%] rounded" />
+                  <SkeletonLine className="h-2.5 w-[45%] rounded" />
+                </div>
+                <SkeletonLine className="h-3 w-14 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="glass-card p-6">
+          <SkeletonLine className="mb-4 h-3 w-24 rounded" />
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <SkeletonLine className="h-2.5 w-2.5 rounded-full" />
+                <SkeletonLine className="h-3 flex-1 rounded" />
+                <SkeletonLine className="h-3 w-10 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -84,10 +126,10 @@ export function RuntimeRouteLoading() {
           <div className="runtime-panel__header">
             <SkeletonLine className="h-4 w-16" />
           </div>
-          <div className="runtime-bot-rail">
+          <div className="runtime-agent-rail">
             {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="runtime-bot-row">
-                <div className="runtime-bot-row__identity">
+              <div key={index} className="runtime-agent-row">
+                <div className="runtime-agent-row__identity">
                   <SkeletonLine className="h-2.5 w-2.5 rounded-full" />
                   <SkeletonLine className="h-3 w-24" />
                 </div>
@@ -107,7 +149,7 @@ export function RuntimeRouteLoading() {
 export function TableRouteLoading() {
   return (
     <div className="min-w-0 space-y-4" data-testid="table-route-loading">
-      {/* Controls bar — matches real: BotSwitcher + search + filter row */}
+      {/* Controls bar — matches real: AgentSwitcher + search + filter row */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="max-w-[350px] min-w-[200px]">
           <div className="skeleton h-11 w-full rounded-xl" />
@@ -271,19 +313,50 @@ export function MemoryRouteLoading() {
       {/* Controls bar */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="max-w-[350px] min-w-[200px]">
-          <div className="skeleton h-11 w-full rounded-xl" />
+          <div className="skeleton h-9 w-full rounded-[var(--radius-input)]" />
         </div>
         <div className="flex items-center gap-2">
-          <div className="skeleton h-9 w-24 rounded-lg" />
-          <div className="skeleton h-9 w-24 rounded-lg" />
+          <div className="skeleton h-9 w-24 rounded-[var(--radius-input)]" />
+          <div className="skeleton h-9 w-24 rounded-[var(--radius-input)]" />
         </div>
       </div>
 
       {/* Filter section */}
-      <div className="glass-card min-h-[120px] p-5 sm:p-6" />
+      <div className="glass-card p-5 sm:p-6">
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="skeleton h-9 w-24 rounded-full" />
+          ))}
+        </div>
+      </div>
 
-      {/* Main content */}
-      <div className="glass-card min-h-[560px] p-5 sm:p-6" />
+      {/* Main content — list of memory cards */}
+      <div className="glass-card p-5 sm:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="skeleton h-3 w-40 rounded" />
+          <div className="skeleton h-3 w-20 rounded" />
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={index}
+              className="flex items-start gap-3 border-t border-[color:var(--divider-hair)] pt-3 first:border-0 first:pt-0"
+            >
+              <div className="skeleton-circle h-2 w-2 mt-2" />
+              <div className="flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="skeleton h-3 w-24 rounded" />
+                  <div className="skeleton h-3 w-16 rounded-full" />
+                  <div className="skeleton h-3 w-10 rounded" />
+                </div>
+                <div className="skeleton h-3 w-[85%] rounded" />
+                <div className="skeleton h-3 w-[62%] rounded" />
+              </div>
+              <div className="skeleton h-3 w-10 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -389,25 +462,91 @@ export function ControlPlaneSystemLoading() {
   );
 }
 
-export function BotEditorRouteLoading() {
+export function AgentEditorRouteLoading() {
   return (
-    <div className="space-y-6" data-testid="bot-editor-route-loading">
-      <div className="space-y-4">
-        <SkeletonLine className="h-3.5 w-28" />
-        <div className="flex items-center gap-4">
-          <SkeletonLine className="h-12 w-12 rounded-2xl" />
-          <div className="space-y-3">
-            <SkeletonLine className="h-7 w-56" />
-            <SkeletonLine className="h-6 w-24 rounded-full" />
+    <div
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--surface-canvas)]"
+      data-testid="agent-editor-route-loading"
+    >
+      {/* Topbar — mirrors EditorHeader: back link, sigil, breadcrumb, title, action buttons */}
+      <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <SkeletonLine className="h-7 w-7 rounded-lg" />
+            <SkeletonLine className="h-9 w-9 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <SkeletonLine className="h-2.5 w-32 rounded" />
+              <SkeletonLine className="h-5 w-48 rounded" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 xl:justify-end">
+            <SkeletonLine className="h-9 w-20 rounded-xl" />
+            <SkeletonLine className="h-9 w-24 rounded-xl" />
+          </div>
+        </div>
+      </header>
+
+      <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[auto_minmax(0,1fr)]">
+        {/* Step rail — mirrors the left FLUXO nav */}
+        <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:border-b-0 lg:border-r">
+          <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
+            <div className="mb-2 px-1.5">
+              <SkeletonLine className="h-2.5 w-12 rounded" />
+            </div>
+            <div className="flex flex-1 flex-col gap-1.5 pr-1">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+                  <SkeletonLine className="h-7 w-7 rounded-md" />
+                  <SkeletonLine className="h-3 w-24 rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* Content area — mirrors ActiveStepRenderer padding */}
+        <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-8 lg:py-6">
+            <div className="flex max-w-[900px] flex-col gap-6">
+              {/* Soft tabs placeholder */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <SkeletonLine className="h-9 w-56 rounded-full" />
+                <SkeletonLine className="h-3 w-40 rounded" />
+              </div>
+
+              {/* Section header */}
+              <div className="flex items-center gap-2.5">
+                <SkeletonLine className="h-3.5 w-3.5 rounded" />
+                <div className="flex-1 space-y-1.5">
+                  <SkeletonLine className="h-2.5 w-24 rounded" />
+                  <SkeletonLine className="h-3.5 w-64 rounded" />
+                </div>
+              </div>
+
+              {/* Content body — a few input-shaped lines mirroring form controls */}
+              <div className="flex flex-col gap-4">
+                <div className="space-y-1.5">
+                  <SkeletonLine className="h-2.5 w-20 rounded" />
+                  <SkeletonLine className="h-9 w-full rounded-[var(--radius-input)]" />
+                </div>
+                <div className="space-y-1.5">
+                  <SkeletonLine className="h-2.5 w-28 rounded" />
+                  <SkeletonLine className="h-9 w-full rounded-[var(--radius-input)]" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="space-y-1.5">
+                      <SkeletonLine className="h-2.5 w-20 rounded" />
+                      <SkeletonLine className="h-9 w-full rounded-[var(--radius-input)]" />
+                    </div>
+                  ))}
+                </div>
+                <SkeletonLine className="h-[220px] w-full rounded-[var(--radius-input)]" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <SkeletonLine key={index} className="h-10 w-28 rounded-full" />
-        ))}
-      </div>
-      <div className="glass-card min-h-[560px] p-6" />
     </div>
   );
 }

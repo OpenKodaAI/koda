@@ -96,7 +96,7 @@ export function FormInput({
       error={error}
     >
       <input
-        className={`field-shell px-4 py-3 text-sm text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell px-3 text-[var(--text-primary)] ${className ?? ""}`}
         {...rest}
         placeholder={typeof rest.placeholder === "string" ? tl(rest.placeholder) : rest.placeholder}
       />
@@ -172,7 +172,7 @@ export function FormCurrencyInput({
         {...rest}
         inputMode="decimal"
         autoComplete="off"
-        className={`field-shell px-4 py-3 text-sm text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell px-3 text-[var(--text-primary)] ${className ?? ""}`}
         value={renderedValue}
         onFocus={(event) => {
           setIsFocused(true);
@@ -368,7 +368,7 @@ export function FormTextarea({
       error={error}
     >
       <textarea
-        className={`field-shell w-full rounded-[22px] px-5 py-4 text-sm leading-7 text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell w-full px-3 py-2 leading-6 text-[var(--text-primary)] ${className ?? ""}`}
         spellCheck
         {...rest}
         placeholder={typeof rest.placeholder === "string" ? tl(rest.placeholder) : rest.placeholder}

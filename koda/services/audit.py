@@ -199,25 +199,31 @@ def _insert_audit(event: AuditEvent) -> None:
 def emit(event: AuditEvent) -> None:
     """Fire-and-forget audit event emission.
 
-    Runs the DB insert in the default executor to avoid blocking the event loop.
-    Failures are silently logged — audit must never break the request path.
+    Runs the DB insert off the request path whenever possible. Failures are
+    silently logged — audit must never break the request path itself.
+
+    Note on loop/thread safety: callers frequently run inside a sync handler
+    that was itself bridged from aiohttp via `run_coro_sync` on a different
+    thread/loop. Scheduling `create_task` against the aiohttp loop from that
+    nested context produces "Future attached to a different loop" errors and
+    can corrupt concurrent asyncpg operations. We therefore dispatch through
+    `run_in_executor` unconditionally so the async insert gets a fresh loop
+    in a worker thread, independent of the caller's context.
     """
     global _dropped_events
     try:
         backend = _primary_audit_backend()
-        if backend is not None:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_insert_audit_primary(event))
-        else:
-            loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, _insert_audit, event)
-    except RuntimeError:
-        # No running loop (e.g., during shutdown) — run sync
-        try:
+        if backend is None:
             _insert_audit(event)
-        except Exception:
-            _dropped_events += 1
-            log.warning("audit_event_dropped", event_type=event.event_type, total_dropped=_dropped_events)
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.run_in_executor(None, _insert_audit, event)
+        else:
+            _insert_audit(event)
     except Exception:
         _dropped_events += 1
         log.warning("audit_event_dropped", event_type=event.event_type, total_dropped=_dropped_events)

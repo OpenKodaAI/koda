@@ -5,7 +5,6 @@ import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
-import { WorkspaceTopbarActions } from "@/components/layout/workspace-topbar-actions";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getRouteMeta } from "@/lib/route-meta";
@@ -95,12 +94,9 @@ export function WorkspaceTopbar({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <ThemeSwitcher className="shrink-0" />
+        <div className="flex items-center gap-2">
           <LanguageSwitcher className="shrink-0" />
-          <div className="hidden lg:flex">
-            <WorkspaceTopbarActions key={pathname} />
-          </div>
+          <ThemeSwitcher className="shrink-0" />
         </div>
       </div>
     </header>

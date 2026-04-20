@@ -7,17 +7,25 @@ import { CostConversationTable } from "@/components/costs/cost-conversation-tabl
 import { CostDonutChart, type CostDonutMode } from "@/components/costs/cost-donut-chart";
 import { CostKpiRail } from "@/components/costs/cost-kpi-rail";
 import { CostTimeChart, type CostTimelineMode } from "@/components/costs/cost-time-chart";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { resolveBotSelection } from "@/lib/bot-selection";
-import { getBotColor, getBotLabel } from "@/lib/bot-constants";
+import { resolveAgentSelection } from "@/lib/agent-selection";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 import type { CostGroupBy, CostInsightsResponse } from "@/lib/types";
-import { cn, formatCost } from "@/lib/utils";
+import { formatCost } from "@/lib/utils";
 
 const PERIOD_VALUES = ["7d", "30d", "90d"] as const;
 
@@ -47,17 +55,17 @@ function buildModelItems(
   );
 }
 
-function buildBotItems(
+function buildAgentItems(
   insights: CostInsightsResponse | null,
   tl: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
     insights?.by_bot?.map((entry) => ({
       id: entry.bot_id,
-      label: getBotLabel(entry.bot_id),
+      label: getAgentLabel(entry.bot_id),
       value: entry.cost_usd,
       share: entry.share_pct,
-      color: getBotColor(entry.bot_id),
+      color: getAgentColor(entry.bot_id),
       meta: tl("{{resolved}} resolvidas · {{cost}} por conversa", {
         resolved: entry.resolved_conversations,
         cost: formatCost(entry.avg_cost_per_resolved_conversation),
@@ -124,15 +132,15 @@ function PageSkeleton() {
 
 export default function CostsPage() {
   const { t, tl, language } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const [period, setPeriod] = useState<(typeof PERIOD_VALUES)[number]>("30d");
   const [groupBy] = useState<CostGroupBy>("auto");
-  const [timelineMode, setTimelineMode] = useState<CostTimelineMode>("bot");
+  const [timelineMode, setTimelineMode] = useState<CostTimelineMode>("agent");
   const [allocationMode, setAllocationMode] = useState<CostDonutMode>("task");
   const [modelFilter, setModelFilter] = useState("all");
   const [taskTypeFilter, setTaskTypeFilter] = useState("all");
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const periodOptions = useMemo(
     () =>
       PERIOD_VALUES.map((value) => ({
@@ -142,14 +150,14 @@ export default function CostsPage() {
     [t]
   );
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
 
   const insightsQuery = useControlPlaneQuery<CostInsightsResponse>({
     tier: "detail",
     queryKey: queryKeys.dashboard.costs({
-      botIds: selectedBotIds.length > 0 ? visibleBotIds : [],
+      agentIds: selectedBotIds.length > 0 ? visibleBotIds : [],
       period,
       groupBy,
       model: modelFilter,
@@ -165,7 +173,7 @@ export default function CostsPage() {
           params: {
             period,
             groupBy,
-            bot: selectedBotIds.length > 0 ? visibleBotIds : null,
+            agent: selectedBotIds.length > 0 ? visibleBotIds : null,
             model: modelFilter !== "all" ? modelFilter : null,
             taskType: taskTypeFilter !== "all" ? taskTypeFilter : null,
             lang: language,
@@ -192,15 +200,15 @@ export default function CostsPage() {
       : taskTypeFilter;
 
   const overview = insights?.overview;
-  const byBotItems = useMemo(() => buildBotItems(insights, tl), [insights, tl]);
+  const byAgentItems = useMemo(() => buildAgentItems(insights, tl), [insights, tl]);
   const byModelItems = useMemo(() => buildModelItems(insights, tl), [insights, tl]);
   const byTaskItems = useMemo(() => buildTaskItems(insights, tl), [insights, tl]);
 
   const allocationItems = useMemo(() => {
-    if (allocationMode === "bot") return byBotItems;
+    if (allocationMode === "agent") return byAgentItems;
     if (allocationMode === "model") return byModelItems;
     return byTaskItems;
-  }, [allocationMode, byBotItems, byModelItems, byTaskItems]);
+  }, [allocationMode, byAgentItems, byModelItems, byTaskItems]);
 
   const allocationRange = useMemo(() => {
     const series = insights?.time_series;
@@ -229,65 +237,61 @@ export default function CostsPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header: Bot selector + filters */}
-      <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(260px,350px)_minmax(280px,1fr)_minmax(220px,280px)_minmax(220px,280px)]">
-        <div className="min-w-0">
-          <BotSwitcher
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+        <div className="w-full md:w-[220px] md:flex-none">
+          <AgentSwitcher
             multiple
+            singleRow
+            className="agent-switcher--compact"
             selectedBotIds={selectedBotIds}
             onSelectionChange={setSelectedBotIds}
           />
         </div>
 
-        <div className="min-w-0 self-stretch">
-          <div className="segmented-control segmented-control--single-row costs-page__period-toggle h-full min-h-[44px]">
-            {periodOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setPeriod(option.value)}
-                className={cn("segmented-control__option", period === option.value && "is-active")}
-                aria-pressed={period === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+        <SoftTabs
+          items={periodOptions.map((option) => ({ id: option.value, label: option.label }))}
+          value={period}
+          onChange={(id) => setPeriod(id as (typeof PERIOD_VALUES)[number])}
+          ariaLabel={t("costs.filters.period", { defaultValue: "Period" })}
+        />
+
+        <div className="w-full md:w-auto md:flex-none md:ml-auto">
+          <Select value={effectiveModelFilter} onValueChange={setModelFilter}>
+            <SelectTrigger
+              aria-label={t("costs.filters.model")}
+              className="min-w-[180px] md:w-auto"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("common.allModels")}</SelectItem>
+              {(insights.available_models ?? []).map((model) => (
+                <SelectItem key={model} value={model}>
+                  {model}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <label className="min-w-0 self-stretch">
-          <span className="sr-only">{t("costs.filters.model")}</span>
-          <select
-            aria-label={t("costs.filters.model")}
-            className="field-shell h-full min-h-[44px] px-4 text-sm"
-            value={effectiveModelFilter}
-            onChange={(event) => setModelFilter(event.target.value)}
-          >
-            <option value="all">{t("common.allModels")}</option>
-            {(insights.available_models ?? []).map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="min-w-0 self-stretch">
-          <span className="sr-only">{t("costs.filters.taskType")}</span>
-          <select
-            aria-label={t("costs.filters.taskType")}
-            className="field-shell h-full min-h-[44px] px-4 text-sm"
-            value={effectiveTaskTypeFilter}
-            onChange={(event) => setTaskTypeFilter(event.target.value)}
-          >
-            <option value="all">{t("common.allTypes")}</option>
-            {(insights.available_task_types ?? []).map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="w-full md:w-auto md:flex-none">
+          <Select value={effectiveTaskTypeFilter} onValueChange={setTaskTypeFilter}>
+            <SelectTrigger
+              aria-label={t("costs.filters.taskType")}
+              className="min-w-[180px] md:w-auto"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("common.allTypes")}</SelectItem>
+              {(insights.available_task_types ?? []).map((type) => (
+                <SelectItem key={type.value} value={type.value}>
+                  {type.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <section className="space-y-4">
@@ -318,24 +322,15 @@ export default function CostsPage() {
 
       <section className="grid gap-4 xl:grid-cols-3">
         <CostBreakdownCard
-          title={t("costs.page.breakdowns.byBotTitle", { defaultValue: "Distribution by bot" })}
-          subtitle={t("costs.page.breakdowns.byBotSubtitle", {
-            defaultValue: "Who concentrates the cost and what the efficiency per resolved conversation is.",
-          })}
-          items={byBotItems}
+          title={t("costs.page.breakdowns.byAgentTitle", { defaultValue: "Distribution by agent" })}
+          items={byAgentItems}
         />
         <CostBreakdownCard
           title={t("costs.page.breakdowns.byModelTitle", { defaultValue: "Distribution by model" })}
-          subtitle={t("costs.page.breakdowns.byModelSubtitle", {
-            defaultValue: "Where model allocation is weighing on the current cut.",
-          })}
           items={byModelItems}
         />
         <CostBreakdownCard
           title={t("costs.page.breakdowns.byTaskTitle", { defaultValue: "Distribution by task type" })}
-          subtitle={t("costs.page.breakdowns.byTaskSubtitle", {
-            defaultValue: "Dominant task type and average pressure per occurrence.",
-          })}
           items={byTaskItems}
         />
       </section>

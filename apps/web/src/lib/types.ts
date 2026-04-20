@@ -4,7 +4,7 @@ export interface Task {
   id: number;
   user_id: number;
   chat_id: number;
-  status: "queued" | "running" | "completed" | "failed" | "retrying";
+  status: "queued" | "running" | "completed" | "failed" | "retrying" | "paused" | "cancelled";
   query_text: string | null;
   model: string | null;
   work_dir: string | null;
@@ -162,6 +162,7 @@ export interface ExecutionSummary {
   answer_citation_coverage?: number | null;
   answer_gate_status?: string | null;
   answer_gate_reasons?: string[];
+  pending_approval_id?: string | null;
   post_write_review_required?: boolean;
   stale_sources_present?: boolean;
   ungrounded_operationally?: boolean;
@@ -209,6 +210,7 @@ export interface ExecutionDetail {
   answer_citation_coverage?: number | null;
   answer_gate_status?: string | null;
   answer_gate_reasons?: string[];
+  pending_approval_id?: string | null;
   post_write_review_required?: boolean;
   stale_sources_present?: boolean;
   ungrounded_operationally?: boolean;
@@ -416,7 +418,7 @@ export interface CostTimePoint {
   by_model: Record<string, number>;
 }
 
-export interface CostByBotItem {
+export interface CostByAgentItem {
   bot_id: string;
   cost_usd: number;
   share_pct: number;
@@ -508,7 +510,7 @@ export interface CostInsightsResponse {
   comparison: CostComparison;
   peak_bucket: CostPeakBucket | null;
   time_series: CostTimePoint[];
-  by_bot: CostByBotItem[];
+  by_bot: CostByAgentItem[];
   by_model: CostByModelItem[];
   by_task_type: CostByTaskTypeItem[];
   resolved_conversations: ResolvedConversationCostItem[];
@@ -763,8 +765,8 @@ export interface UserCost {
   updated_at: string;
 }
 
-export interface BotStats {
-  botId: string;
+export interface AgentStats {
+  agentId: string;
   totalTasks: number;
   activeTasks: number;
   completedTasks: number;

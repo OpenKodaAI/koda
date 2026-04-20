@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Check, Cpu, Server, Volume2 } from "lucide-react";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   FormCurrencyInput,
@@ -142,7 +142,7 @@ function ProviderLogo({
 }
 
 export function TabRecursos() {
-  const { state, core, developerMode, updateAgentSpecField, updateDocument } = useBotEditor();
+  const { state, core, developerMode, updateAgentSpecField, updateDocument } = useAgentEditor();
   const { tl } = useAppI18n();
 
   const modelPolicy = useMemo(
@@ -354,6 +354,8 @@ export function TabRecursos() {
         description={`${currentProviderLabel} · ${currentModelLabel}`}
         icon={Cpu}
         dirty={state.dirty.agentSpec}
+        variant="flat"
+        defaultOpen
       >
         <div className="flex flex-wrap gap-2">
           <span className="chip text-xs">{currentProviderLabel}</span>
@@ -527,6 +529,7 @@ export function TabRecursos() {
         title={tl("Voz")}
         description={voiceModeLabel}
         icon={Volume2}
+        variant="flat"
       >
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
           <FormSelect

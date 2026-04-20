@@ -14,12 +14,16 @@ const LANGUAGE_SHORT_LABELS: Record<AppLanguage, string> = {
   "en-US": "EN",
   "pt-BR": "PT-BR",
   "es-ES": "ES",
+  "fr-FR": "FR",
+  "de-DE": "DE",
 };
 
 const LANGUAGE_FLAGS: Record<AppLanguage, string> = {
   "en-US": "🇺🇸",
   "pt-BR": "🇧🇷",
   "es-ES": "🇪🇸",
+  "fr-FR": "🇫🇷",
+  "de-DE": "🇩🇪",
 };
 
 export function LanguageSwitcher({ className }: { className?: string }) {

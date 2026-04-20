@@ -57,19 +57,13 @@ export function FieldShell({
 }) {
   const { tl } = useAppI18n();
   return (
-    <label className="flex flex-col gap-2 px-1 py-1">
-      <div className="flex min-h-[3.1rem] flex-col">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-            {tl(label)}
-          </div>
-          {description ? (
-            <p className="mt-0.5 max-w-[42rem] text-[11px] leading-snug text-[var(--text-quaternary)]">
-              {tl(description)}
-            </p>
-          ) : null}
-        </div>
-      </div>
+    <label className="flex flex-col gap-1.5">
+      <span className="eyebrow">{tl(label)}</span>
+      {description ? (
+        <span className="max-w-[42rem] text-xs leading-relaxed text-[var(--text-quaternary)]">
+          {tl(description)}
+        </span>
+      ) : null}
       {localizeNode(children, tl)}
     </label>
   );

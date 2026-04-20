@@ -1,17 +1,17 @@
 "use client";
 
-import { Clock, FolderTree, Pencil, Play, TerminalSquare } from "lucide-react";
+import { Clock, Pencil, Play } from "lucide-react";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { CronJob } from "@/lib/types";
-import { getSemanticDotStyle, getSemanticStyle } from "@/lib/theme-semantic";
-import { truncateText } from "@/lib/utils";
+import { cn, truncateText } from "@/lib/utils";
 
 type ScheduleLifecycleAction = "pause" | "resume" | "validate";
 
 interface CronTableProps {
   jobs: CronJob[];
-  botLabel: string;
-  botColor: string;
+  agentLabel: string;
+  agentColor: string;
   busyJobId?: number | null;
   onInspect?: (job: CronJob) => void;
   onEdit?: (job: CronJob) => void;
@@ -36,14 +36,18 @@ function getLifecycleAction(job: CronJob): {
     case "validation_pending":
       return { action: null, label: "Validation pending", disabled: true };
     default:
-      return { action: job.enabled === 1 ? "pause" : "resume", label: job.enabled === 1 ? "Pause" : "Activate", disabled: false };
+      return {
+        action: job.enabled === 1 ? "pause" : "resume",
+        label: job.enabled === 1 ? "Pause" : "Activate",
+        disabled: false,
+      };
   }
 }
 
 export function CronTable({
   jobs,
-  botLabel,
-  botColor,
+  agentLabel,
+  agentColor,
   busyJobId = null,
   onInspect,
   onEdit,
@@ -53,50 +57,65 @@ export function CronTable({
   const { t } = useAppI18n();
   if (jobs.length === 0) {
     return (
-      <div className="app-section px-6 py-8 text-center">
-        <Clock className="mx-auto h-10 w-10 text-[var(--text-tertiary)]" />
-        <p className="mt-4 text-sm font-medium text-[var(--text-primary)]">
-          <span style={{ color: botColor }}>{t("schedules.table.noRoutine", { bot: botLabel })}</span>
+      <div className="flex flex-col items-center gap-2 py-10 text-center">
+        <Clock
+          className="icon-lg text-[var(--text-quaternary)]"
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+          <span style={{ color: agentColor }}>
+            {t("schedules.table.noRoutine", { agent: agentLabel })}
+          </span>
         </p>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+        <p className="m-0 text-[0.75rem] text-[var(--text-tertiary)]">
           {t("schedules.table.noRoutineDescription")}
         </p>
       </div>
     );
   }
 
+  const thClass =
+    "py-2.5 pr-4 text-left font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
+  const thRightClass = `${thClass} text-right`;
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 md:hidden">
+    <div>
+      <div className="flex flex-col md:hidden">
         {jobs.map((job) => (
-          <article key={job.id} className="app-card-row">
+          <article
+            key={job.id}
+            className="flex flex-col gap-2 border-b border-[color:var(--divider-hair)] py-3 last:border-b-0"
+          >
             <div className="flex items-start justify-between gap-3">
-              <span className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[11px] text-[var(--text-primary)]">
+              <span className="font-mono text-[0.75rem] text-[var(--text-primary)]">
                 {job.cron_expression}
               </span>
               <StatusBadge status={job.status} />
             </div>
             <p
-              className="mt-3 text-sm font-medium leading-6 text-[var(--text-primary)]"
+              className="m-0 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
               title={job.command}
             >
               {truncateText(job.command, 72)}
             </p>
-            <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
-              {job.description || t("schedules.table.noSummary")}
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-2.5">
-              <MobileScheduleStat
-                icon={TerminalSquare}
-                label={t("schedules.table.routine")}
-                value={truncateText(job.command, 30)}
-              />
-              <MobileScheduleStat
-                icon={FolderTree}
-                label={t("schedules.table.scope")}
-                value={job.work_dir ?? t("schedules.table.noDirectory")}
-                mono
-              />
+            {job.description ? (
+              <p className="m-0 text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
+                {job.description}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              {job.work_dir ? (
+                <span>
+                  dir: <span className="text-[var(--text-secondary)]">{job.work_dir}</span>
+                </span>
+              ) : null}
+              <span>
+                next:{" "}
+                <span className="text-[var(--text-secondary)]">
+                  {job.next_run_at || "pending"}
+                </span>
+              </span>
             </div>
             <JobActions
               job={job}
@@ -111,56 +130,58 @@ export function CronTable({
       </div>
 
       <div className="hidden md:block">
-        <div className="table-shell overflow-x-auto">
-          <table className="glass-table">
+        <div className="overflow-x-auto">
+          <table className="w-full">
             <thead>
-              <tr>
-                <th>{t("schedules.table.schedule")}</th>
-                <th>{t("schedules.table.routine")}</th>
-                <th>{t("common.summary")}</th>
-                <th>{t("schedules.table.nextRun", { defaultValue: "Next run" })}</th>
-                <th className="text-right">{t("common.status")}</th>
-                <th>{t("schedules.table.scope")}</th>
-                <th className="text-right">{t("common.actions", { defaultValue: "Actions" })}</th>
+              <tr className="border-b border-[color:var(--divider-hair)]">
+                <th className={thClass}>{t("schedules.table.schedule")}</th>
+                <th className={thClass}>{t("schedules.table.routine")}</th>
+                <th className={thClass}>{t("common.summary")}</th>
+                <th className={thClass}>
+                  {t("schedules.table.nextRun", { defaultValue: "Next run" })}
+                </th>
+                <th className={thRightClass}>{t("common.status")}</th>
+                <th className={thClass}>{t("schedules.table.scope")}</th>
+                <th className={thRightClass}>
+                  {t("common.actions", { defaultValue: "Actions" })}
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[color:var(--divider-hair)]">
               {jobs.map((job) => (
-                <tr key={job.id}>
-                  <td>
-                    <span className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[11px] text-[var(--text-primary)]">
+                <tr key={job.id} className="transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]">
+                  <td className="py-3 pr-4">
+                    <span className="font-mono text-[0.75rem] text-[var(--text-primary)]">
                       {job.cron_expression}
                     </span>
                   </td>
-                  <td>
-                    <div className="min-w-[16rem]">
-                      <p
-                        className="text-[13px] font-medium leading-6 text-[var(--text-primary)]"
-                        title={job.command}
-                      >
-                        {truncateText(job.command, 58)}
-                      </p>
-                    </div>
+                  <td className="py-3 pr-4">
+                    <p
+                      className="m-0 line-clamp-1 text-[0.8125rem] text-[var(--text-primary)]"
+                      title={job.command}
+                    >
+                      {truncateText(job.command, 58)}
+                    </p>
                   </td>
-                  <td>
-                    <span className="text-[13px] leading-6 text-[var(--text-secondary)]">
+                  <td className="py-3 pr-4">
+                    <span className="text-[0.8125rem] text-[var(--text-secondary)]">
                       {job.description || t("schedules.table.noSummary")}
                     </span>
                   </td>
-                  <td>
-                    <span className="text-[13px] leading-6 text-[var(--text-secondary)]">
-                      {job.next_run_at || "pending validation"}
+                  <td className="py-3 pr-4">
+                    <span className="font-mono text-[0.75rem] text-[var(--text-secondary)]">
+                      {job.next_run_at || "pending"}
                     </span>
                   </td>
-                  <td className="text-right">
+                  <td className="py-3 pr-4 text-right">
                     <StatusBadge status={job.status} />
                   </td>
-                  <td>
-                    <span className="font-mono text-xs text-[var(--text-tertiary)]">
+                  <td className="py-3 pr-4">
+                    <span className="font-mono text-[0.75rem] text-[var(--text-tertiary)]">
                       {job.work_dir ?? t("schedules.table.noDirectory")}
                     </span>
                   </td>
-                  <td className="text-right">
+                  <td className="py-3 text-right">
                     <JobActions
                       job={job}
                       busy={busyJobId === job.id}
@@ -198,22 +219,26 @@ function JobActions({
   onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
   compact?: boolean;
 }) {
-  const baseClass =
-    "inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50";
+  const baseClass = cn(
+    "inline-flex h-8 items-center gap-1 rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-transparent px-2.5 text-[0.75rem] font-medium text-[var(--text-secondary)]",
+    "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+    "hover:border-[color:var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+    "disabled:cursor-not-allowed disabled:opacity-50",
+  );
   const lifecycle = getLifecycleAction(job);
 
   return (
-    <div className={`mt-4 flex ${compact ? "justify-end" : "flex-wrap"} gap-2`}>
+    <div className={cn("flex gap-1.5", compact ? "justify-end" : "flex-wrap")}>
       <button type="button" className={baseClass} onClick={() => onInspect?.(job)} disabled={busy}>
-        <Clock className="h-3.5 w-3.5" />
+        <Clock className="icon-xs" strokeWidth={1.75} aria-hidden />
         {compact ? "Inspect" : "Detalhes"}
       </button>
       <button type="button" className={baseClass} onClick={() => onEdit?.(job)} disabled={busy}>
-        <Pencil className="h-3.5 w-3.5" />
+        <Pencil className="icon-xs" strokeWidth={1.75} aria-hidden />
         Edit
       </button>
       <button type="button" className={baseClass} onClick={() => onRun?.(job)} disabled={busy}>
-        <Play className="h-3.5 w-3.5" />
+        <Play className="icon-xs" strokeWidth={1.75} aria-hidden />
         Run
       </button>
       <button
@@ -230,13 +255,15 @@ function JobActions({
 
 function StatusBadge({ status }: { status?: string | null }) {
   const { t } = useAppI18n();
-  let tone: Parameters<typeof getSemanticStyle>[0] = "neutral";
+  let tone: StatusDotTone = "neutral";
   let label = status || "unknown";
+  let pulse = false;
 
   switch (status ?? "") {
     case "active":
       tone = "success";
       label = t("common.active");
+      pulse = true;
       break;
     case "paused":
       tone = "neutral";
@@ -245,6 +272,7 @@ function StatusBadge({ status }: { status?: string | null }) {
     case "validation_pending":
       tone = "warning";
       label = "Validating";
+      pulse = true;
       break;
     case "validated":
       tone = "info";
@@ -257,42 +285,9 @@ function StatusBadge({ status }: { status?: string | null }) {
   }
 
   return (
-    <span
-      className="inline-flex min-h-[28px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10.5px] font-semibold"
-      style={getSemanticStyle(tone)}
-    >
-      <span className="h-1.5 w-1.5 rounded-full" style={getSemanticDotStyle(tone)} />
+    <span className="inline-flex items-center gap-1.5 text-[0.75rem] text-[var(--text-secondary)]">
+      <StatusDot tone={tone} pulse={pulse} />
       {label}
     </span>
-  );
-}
-
-function MobileScheduleStat({
-  icon: Icon,
-  label,
-  value,
-  mono = false,
-}: {
-  icon: typeof Clock;
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-3 py-2.5">
-      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </p>
-      <p
-        className={
-          mono
-            ? "mt-1 break-all font-mono text-[12px] text-[var(--text-secondary)]"
-            : "mt-1 text-[12px] text-[var(--text-secondary)]"
-        }
-      >
-        {value}
-      </p>
-    </div>
   );
 }

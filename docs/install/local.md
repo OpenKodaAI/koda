@@ -57,41 +57,59 @@ Persistent volumes are managed by Docker Compose and are intended to survive con
 
 ## First Boot
 
-When the installer finishes, open the dashboard setup URL it prints:
+When the installer finishes, open the dashboard:
 
-- `http://127.0.0.1:3000/control-plane`
-- `http://127.0.0.1:3000`
+- `http://127.0.0.1:3000/setup`
 
-At that point the infrastructure is already ready for use:
+The flow is deliberately minimal — two screens, no provider or GitHub or Telegram required
+up-front. Everything else is configured from the dashboard after first login.
 
-- the dashboard UI is reachable
-- Postgres is available
-- object storage is available
-- bootstrap secrets exist
-- the control plane is reachable
-- health checks are in place
+### 1. Create the owner account (`/setup`)
 
-Use the dashboard control plane to complete product configuration:
+Fill in:
 
-1. review platform health and bootstrap status
-2. configure owner and access policy
-3. connect and verify the providers you want to use
-4. connect and verify the integrations you want to expose globally
-5. optionally connect the first Telegram agent
-6. continue ongoing configuration in the control plane
+- email
+- password (minimum 12 characters, 3 of 4 classes: upper / lower / digit / symbol)
+- confirm password
 
-After provider and integration setup, each bot still needs its own grants. In practice the operator flow is:
+The `username` is derived from the email local-part and can be renamed later.
 
-- configure the provider or integration in the control plane
-- run `verify` and inspect the resulting `connection_status` / `checked_via`
-- open the bot editor and grant only the required tools and `resource_access_policy.integration_grants`
+By default, `ALLOW_LOOPBACK_BOOTSTRAP=true` in development, which means no setup code is
+required when the request originates from `127.0.0.1` with no proxy hop. If loopback trust is
+disabled, the page shows an additional **setup code** field; read the value from
+`${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (the file is created on first boot with mode
+`0600` and is echoed to the control-plane log once). The file is deleted automatically after
+the owner is registered.
 
-The quickstart now provisions `WEB_OPERATOR_SESSION_SECRET` automatically so operator sessions
-survive web restarts instead of depending on ephemeral in-memory state.
-Daily operator access should start from the printed setup code, local owner account, and HTTP-only
-browser session. `CONTROL_PLANE_API_TOKEN` remains recovery-only.
+### 2. Save your recovery codes
 
-The quickstart path does not require per-agent env configuration, provider credentials in `.env`, or manual Telegram runtime wiring before first boot.
+After registration, the dashboard shows **ten** one-time recovery codes. Copy, download, or
+print them — they are never shown again. Tick the confirmation checkbox and continue to the
+dashboard.
+
+Recovery codes let you reset the password without SMTP:
+
+- visit `/forgot-password`
+- enter your email + any unused recovery code + a new password
+- all existing sessions are revoked, and **every remaining recovery code is invalidated** (you
+  must regenerate a new batch from Settings › Security)
+
+### 3. Optional configuration in the dashboard
+
+A `SetupChecklistCard` on the dashboard home points to three opt-in steps:
+
+- connect an AI provider
+- create your first agent
+- connect Telegram (or any other channel)
+
+Each item opens a Drawer with its dedicated wizard. None of them block normal operation, and
+the card dismisses itself once all three are complete.
+
+`CONTROL_PLANE_API_TOKEN` stays blank by default and is only used as a break-glass CLI
+credential. It is no longer part of the default setup flow.
+
+The quickstart path does not require per-agent env configuration, provider credentials in
+`.env`, or manual Telegram runtime wiring before first boot.
 
 ## Doctor
 

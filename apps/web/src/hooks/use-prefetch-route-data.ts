@@ -24,10 +24,10 @@ export function usePrefetchRouteData() {
         prefetchers.push(
           queryClient.prefetchQuery({
             ...getTierQueryOptions("live"),
-            queryKey: queryKeys.dashboard.botStatsSummary(),
+            queryKey: queryKeys.dashboard.agentStatsSummary(),
             queryFn: () =>
               fetchControlPlaneDashboardJson("/agents/summary", {
-                fallbackError: "Unable to prefetch bot stats.",
+                fallbackError: "Unable to prefetch agent stats.",
               }),
           }),
         );
@@ -37,7 +37,7 @@ export function usePrefetchRouteData() {
         prefetchers.push(
           queryClient.prefetchQuery({
             ...getTierQueryOptions("live"),
-            queryKey: queryKeys.dashboard.executions({ limit: 100, botIds: [] }),
+            queryKey: queryKeys.dashboard.executions({ limit: 100, agentIds: [] }),
             queryFn: () =>
               fetchControlPlaneDashboardJson<ExecutionSummary[]>("/executions", {
                 params: { limit: 100 },
@@ -53,7 +53,7 @@ export function usePrefetchRouteData() {
             ...getTierQueryOptions("detail"),
             queryKey: queryKeys.dashboard.costs({
               period: "30d",
-              botIds: [],
+              agentIds: [],
               groupBy: "auto",
               language,
             }),
@@ -70,7 +70,7 @@ export function usePrefetchRouteData() {
         prefetchers.push(
           queryClient.prefetchQuery({
             ...getTierQueryOptions("live"),
-            queryKey: queryKeys.dashboard.dlq({ botIds: [], retryFilter: "", limit: 100 }),
+            queryKey: queryKeys.dashboard.dlq({ agentIds: [], retryFilter: "", limit: 100 }),
             queryFn: () =>
               fetchControlPlaneDashboardJson<DLQEntry[]>("/dlq", {
                 params: { limit: 100 },

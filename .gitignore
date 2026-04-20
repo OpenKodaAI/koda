@@ -52,6 +52,7 @@ logs/
 models/
 agent_memory_*/
 rust/target/
+target/
 downloads/
 
 # Credentials and secrets

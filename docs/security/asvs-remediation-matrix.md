@@ -16,7 +16,7 @@ This matrix is intentionally pragmatic. It maps Koda's current hardening work to
 | V8 Data Protection | Improved | Sensitive attach data removed from browser payloads, operator tokens avoided in query strings, stronger default handling of session and integration secrets. |
 | V9 Communications | Improved | Production web security headers, stronger CSP/connect policy, DB TLS validation, SSH host-key validation, runtime attach relays replacing direct credential-bearing URLs. |
 | V10 Malicious Code | Partial | Curated MCP catalog no longer relies on floating `@latest` for hardened entries; additional dependency governance and artifact signing still depend on CI/CD and release operations. |
-| V11 Business Logic | Partial | Explicit operator session and per-bot grant model reduce privilege confusion, but destructive agent workflows still require continuous review of approval flows and prompts. |
+| V11 Business Logic | Partial | Explicit operator session and per-agent grant model reduce privilege confusion, but destructive agent workflows still require continuous review of approval flows and prompts. |
 | V12 Files and Resources | Partial | Safe-path and tool guardrails remain part of the runtime, but production filesystem isolation and host hardening remain deployment responsibilities. |
 | V13 API and Web Service | Improved | Control-plane proxy no longer treats backend tokens as browser auth, runtime attach APIs return relays instead of raw websocket credentials, fail-closed auth posture is stronger by default. |
 | V14 Configuration | Improved | Quickstart now provisions a stable web operator secret, control-plane auth defaults to token mode, public docs reflect secure bootstrap expectations. |

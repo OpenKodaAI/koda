@@ -33,7 +33,7 @@ interface BrowserAttachPayload {
 }
 
 interface RuntimeBrowserPanelProps {
-  botId: string;
+  agentId: string;
   taskId: number;
   browser: RuntimeBrowserState;
   mutate: RuntimeMutate;
@@ -41,7 +41,7 @@ interface RuntimeBrowserPanelProps {
 }
 
 export function RuntimeBrowserPanel({
-  botId,
+  agentId,
   taskId,
   browser,
   mutate,
@@ -80,7 +80,7 @@ export function RuntimeBrowserPanel({
   const refreshSnapshot = useCallback(async () => {
     try {
       const response = await fetch(
-        `/api/runtime/bots/${botId}/tasks/${taskId}/browser`,
+        `/api/runtime/agents/${agentId}/tasks/${taskId}/browser`,
         { cache: "no-store" }
       );
       if (!response.ok) {
@@ -100,7 +100,7 @@ export function RuntimeBrowserPanel({
     } catch {
       return null;
     }
-  }, [botId, taskId, t]);
+  }, [agentId, taskId, t]);
 
   const refreshScreenshot = useCallback(async () => {
     if (snapshot.novnc_port != null) {
@@ -110,7 +110,7 @@ export function RuntimeBrowserPanel({
     }
 
     const response = await fetch(
-      `/api/runtime/bots/${botId}/tasks/${taskId}/browser/screenshot?ts=${Date.now()}`,
+      `/api/runtime/agents/${agentId}/tasks/${taskId}/browser/screenshot?ts=${Date.now()}`,
       {
         cache: "no-store",
       }
@@ -144,7 +144,7 @@ export function RuntimeBrowserPanel({
     setScreenshotUrl(nextUrl);
     setScreenshotError(null);
     return true;
-  }, [botId, releaseScreenshot, snapshot.novnc_port, taskId, t]);
+  }, [agentId, releaseScreenshot, snapshot.novnc_port, taskId, t]);
 
   const connectBrowser = useCallback(async () => {
     setError(null);

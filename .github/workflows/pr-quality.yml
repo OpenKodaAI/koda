@@ -126,7 +126,9 @@ jobs:
       - name: Install dependencies
         run: pip install ".[dev]"
       - name: Check repo-map drift
-        run: python3 scripts/generate_repo_map.py --check
+        run: uv run python3 scripts/generate_repo_map.py --check
+      - name: Check npm README drift
+        run: uv run python3 scripts/sync_npm_readme.py
       - name: Validate AI docs and open source hygiene
         run: pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
 

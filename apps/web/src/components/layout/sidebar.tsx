@@ -2,17 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import {
   buildSidebarFooterSections,
   buildSidebarPrimarySections,
   isSidebarItemActive,
   type SidebarNavItem,
-  type SidebarNavSection,
 } from "@/components/layout/sidebar-nav";
 import { KodaMark } from "@/components/layout/koda-mark";
-import { SidebarRecents } from "@/components/layout/sidebar-recents";
 import { useAppTour } from "@/hooks/use-app-tour";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { usePrefetchRouteData } from "@/hooks/use-prefetch-route-data";
@@ -38,20 +36,17 @@ function isPlainLeftClick(event: React.MouseEvent<HTMLAnchorElement>) {
 function SidebarNavLink({
   item,
   pathname,
-  pendingHref,
   collapsed,
   onNavigate,
   onIntentPrefetch,
 }: {
   item: SidebarNavItem;
   pathname: string;
-  pendingHref: string | null;
   collapsed: boolean;
   onNavigate: (href: string) => void;
   onIntentPrefetch: (item: SidebarNavItem) => void;
 }) {
   const isActive = isSidebarItemActive(pathname, item);
-  const isPending = pendingHref === item.href && !isActive;
 
   return (
     <Link
@@ -70,14 +65,11 @@ function SidebarNavLink({
       className={cn(
         "app-sidebar__link group",
         isActive && "is-active",
-        isPending && "is-pending",
         collapsed &&
           "lg:h-12 lg:min-h-0 lg:w-12 lg:self-center lg:justify-center lg:gap-0 lg:rounded-lg lg:px-0",
       )}
       aria-current={isActive ? "page" : undefined}
-      aria-busy={isPending || undefined}
-      data-pending={isPending ? "true" : undefined}
-      title={isPending ? item.loadingLabel : item.label}
+      title={item.label}
     >
       <item.icon className="app-sidebar__link-icon" />
       <span
@@ -92,17 +84,15 @@ function SidebarNavLink({
   );
 }
 
-function SidebarNavSectionGroup({
-  section,
+function SidebarNavList({
+  items,
   pathname,
-  pendingHref,
   collapsed,
   onNavigate,
   onIntentPrefetch,
 }: {
-  section: SidebarNavSection;
+  items: SidebarNavItem[];
   pathname: string;
-  pendingHref: string | null;
   collapsed: boolean;
   onNavigate: (href: string) => void;
   onIntentPrefetch: (item: SidebarNavItem) => void;
@@ -110,29 +100,20 @@ function SidebarNavSectionGroup({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1",
-        collapsed && "lg:items-center lg:gap-1.5",
+        "flex flex-col gap-0.5",
+        collapsed && "lg:items-center lg:gap-1",
       )}
     >
-      {!collapsed ? (
-        <div className="app-sidebar__section-label px-3 pb-1">
-          {section.label}
-        </div>
-      ) : null}
-
-      <div className={cn("flex flex-col gap-0.5", collapsed && "lg:items-center lg:gap-1")}>
-        {section.items.map((item) => (
-          <SidebarNavLink
-            key={item.href}
-            item={item}
-            pathname={pathname}
-            pendingHref={pendingHref}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-            onIntentPrefetch={onIntentPrefetch}
-          />
-        ))}
-      </div>
+      {items.map((item) => (
+        <SidebarNavLink
+          key={item.href}
+          item={item}
+          pathname={pathname}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+          onIntentPrefetch={onIntentPrefetch}
+        />
+      ))}
     </div>
   );
 }
@@ -146,10 +127,9 @@ export function Sidebar({
   const { currentStep, status } = useAppTour();
   const pathname = usePathname();
   const router = useRouter();
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const prefetchRouteData = usePrefetchRouteData();
-  const primarySections = buildSidebarPrimarySections(t);
-  const footerSections = buildSidebarFooterSections(t);
+  const primaryItems = buildSidebarPrimarySections(t).flatMap((section) => section.items);
+  const footerItems = buildSidebarFooterSections(t).flatMap((section) => section.items);
 
   const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -265,7 +245,6 @@ export function Sidebar({
               href="/runtime"
               aria-label={t("sidebar.newSessionLabel")}
               onClick={() => {
-                setPendingHref("/runtime");
                 onMobileOpenChange(false);
               }}
               className={cn(
@@ -280,53 +259,25 @@ export function Sidebar({
             </Link>
           </div>
 
-          <nav className={cn("mt-5 flex flex-col gap-3", collapsed && "lg:mt-3 lg:items-center lg:gap-3")}>
-            {primarySections.map((section) => (
-              <SidebarNavSectionGroup
-                key={section.label}
-                section={section}
-                pathname={pathname}
-                pendingHref={pendingHref}
-                collapsed={collapsed}
-                onNavigate={(href) => {
-                  setPendingHref(href);
-                  onMobileOpenChange(false);
-                }}
-                onIntentPrefetch={handleIntentPrefetch}
-              />
-            ))}
+          <nav className={cn("mt-5", collapsed && "lg:mt-3 lg:items-center")}>
+            <SidebarNavList
+              items={primaryItems}
+              pathname={pathname}
+              collapsed={collapsed}
+              onNavigate={() => onMobileOpenChange(false)}
+              onIntentPrefetch={handleIntentPrefetch}
+            />
           </nav>
 
-          <div className={cn("mt-4", collapsed && "lg:hidden")}>
-            <SidebarRecents
-              collapsed={collapsed}
-              onNavigate={(href) => {
-                setPendingHref(href);
-                onMobileOpenChange(false);
-              }}
-            />
-          </div>
-
-          <div
-            className={cn(
-              "mt-auto pt-4",
-            )}
-          >
-            <nav className={cn("flex flex-col gap-3", collapsed && "lg:items-center lg:gap-2")}>
-              {footerSections.map((section) => (
-                <SidebarNavSectionGroup
-                  key={section.label}
-                  section={section}
-                  pathname={pathname}
-                  pendingHref={pendingHref}
-                  collapsed={collapsed}
-                  onNavigate={(href) => {
-                    setPendingHref(href);
-                    onMobileOpenChange(false);
-                  }}
-                  onIntentPrefetch={handleIntentPrefetch}
-                />
-              ))}
+          <div className="mt-auto pt-4">
+            <nav className={cn(collapsed && "lg:items-center")}>
+              <SidebarNavList
+                items={footerItems}
+                pathname={pathname}
+                collapsed={collapsed}
+                onNavigate={() => onMobileOpenChange(false)}
+                onIntentPrefetch={handleIntentPrefetch}
+              />
             </nav>
           </div>
         </div>

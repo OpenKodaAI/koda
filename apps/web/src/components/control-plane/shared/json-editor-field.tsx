@@ -67,7 +67,7 @@ export function JsonEditorField({
         <textarea
           value={value}
           onChange={(e) => handleChange(e.target.value)}
-          className="field-shell w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)] resize-y"
+          className="field-shell resize-y font-mono text-xs text-[var(--text-primary)]"
           style={{ minHeight: resolvedMinHeight }}
           spellCheck={false}
         />

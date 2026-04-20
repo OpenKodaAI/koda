@@ -111,6 +111,16 @@ struct PersistUploadedRecordRequest<'a> {
     size_bytes: u64,
 }
 
+/// Maximum number of bytes accepted per artifact upload. Controlled by
+/// `ARTIFACT_MAX_UPLOAD_BYTES`. Returns `None` when unset, which disables
+/// the limit (legacy behaviour for tests and one-off development runs).
+fn max_upload_bytes() -> Option<u64> {
+    match std::env::var("ARTIFACT_MAX_UPLOAD_BYTES") {
+        Ok(raw) => raw.trim().parse::<u64>().ok().filter(|value| *value > 0),
+        Err(_) => None,
+    }
+}
+
 fn mime_type_for(path: &Path) -> String {
     match path
         .extension()
@@ -660,6 +670,7 @@ impl ArtifactEngineService for ArtifactServer {
         &self,
         request: Request<tonic::Streaming<PutArtifactRequest>>,
     ) -> Result<Response<PutArtifactResponse>, Status> {
+        let max_upload_bytes = max_upload_bytes();
         let mut stream = request.into_inner();
         let first = stream
             .message()
@@ -702,11 +713,19 @@ impl ArtifactEngineService for ArtifactServer {
         let mut hasher = Sha256::new();
         let mut size_bytes = 0u64;
         if !first.data.is_empty() {
+            size_bytes += first.data.len() as u64;
+            if let Some(limit) = max_upload_bytes {
+                if size_bytes > limit {
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(Status::resource_exhausted(format!(
+                        "artifact upload exceeds ARTIFACT_MAX_UPLOAD_BYTES ({limit} bytes)"
+                    )));
+                }
+            }
             file.write_all(&first.data).await.map_err(|error| {
                 Status::internal(format!("failed to write upload chunk: {error}"))
             })?;
             hasher.update(&first.data);
-            size_bytes += first.data.len() as u64;
         }
         while let Some(chunk) = stream.message().await.map_err(|error| {
             Status::internal(format!("failed to read artifact upload stream: {error}"))
@@ -757,11 +776,19 @@ impl ArtifactEngineService for ArtifactServer {
                 ));
             }
             if !chunk.data.is_empty() {
+                size_bytes += chunk.data.len() as u64;
+                if let Some(limit) = max_upload_bytes {
+                    if size_bytes > limit {
+                        let _ = fs::remove_file(&staging_path).await;
+                        return Err(Status::resource_exhausted(format!(
+                            "artifact upload exceeds ARTIFACT_MAX_UPLOAD_BYTES ({limit} bytes)"
+                        )));
+                    }
+                }
                 file.write_all(&chunk.data).await.map_err(|error| {
                     Status::internal(format!("failed to write upload chunk: {error}"))
                 })?;
                 hasher.update(&chunk.data);
-                size_bytes += chunk.data.len() as u64;
             }
         }
         file.flush().await.map_err(|error| {

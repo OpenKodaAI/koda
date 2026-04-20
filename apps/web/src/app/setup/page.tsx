@@ -1,35 +1,41 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SetupScreen } from "@/components/setup/setup-screen";
-import {
-  ControlPlaneRequestError,
-  getControlPlaneAuthStatus,
-  getControlPlaneOnboardingStatus,
-} from "@/lib/control-plane";
+import { ControlPlaneRequestError, getControlPlaneAuthStatus } from "@/lib/control-plane";
+import { PENDING_RECOVERY_COOKIE } from "@/lib/web-operator-session-constants";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
   let authStatus;
-  let onboardingStatus;
 
   try {
-    [authStatus, onboardingStatus] = await Promise.all([
-      getControlPlaneAuthStatus(),
-      getControlPlaneOnboardingStatus(),
-    ]);
+    authStatus = await getControlPlaneAuthStatus();
   } catch (error) {
-    // If the control plane itself is unreachable we still render the setup shell —
-    // the user can at least see the first step (setup code) and try to exchange one.
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <SetupScreen authStatus={null} onboardingStatus={null} />;
+      return <SetupScreen authStatus={null} />;
     }
-    return <SetupScreen authStatus={null} onboardingStatus={null} />;
+    return <SetupScreen authStatus={null} />;
   }
 
-  // Already fully onboarded → leave the setup route for the real app.
-  if (authStatus.authenticated && onboardingStatus.steps.onboarding_complete) {
+  const store = await cookies();
+  const hasPendingRecovery = store.get(PENDING_RECOVERY_COOKIE)?.value === "1";
+
+  if (authStatus.authenticated) {
+    if (hasPendingRecovery) {
+      // Let the client finish the recovery-codes step; it re-hydrates codes
+      // from sessionStorage and calls /auth/recovery-codes/acknowledge on
+      // confirmation, which clears the marker cookie.
+      return <SetupScreen authStatus={authStatus} />;
+    }
     redirect("/");
   }
+  if (authStatus.has_owner) {
+    // Owner already exists — send returning user to /login. The
+    // `koda_has_owner` hint cookie is set by the /api/control-plane/[...path]
+    // proxy when it observes has_owner=true from the control plane.
+    redirect("/login");
+  }
 
-  return <SetupScreen authStatus={authStatus} onboardingStatus={onboardingStatus} />;
+  return <SetupScreen authStatus={authStatus} />;
 }

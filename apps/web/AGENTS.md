@@ -66,7 +66,7 @@ For every `useControlPlaneQuery` that polls:
 - `notifyOnChangeProps: ["data", "error"]`.
 - `placeholderData: keepPreviousData`.
 - `refetchOnWindowFocus/Mount/Reconnect: false`.
-- Stabilize data identity via `useContentStable` (JSON-based memo) — see [`src/hooks/use-bot-stats.ts`](src/hooks/use-bot-stats.ts).
+- Stabilize data identity via `useContentStable` (JSON-based memo) — see [`src/hooks/use-agent-stats.ts`](src/hooks/use-agent-stats.ts).
 - Wrap heavy list/grid consumers in `React.memo` with content comparators.
 - Never `content-visibility: auto` on polled sections (causes paint flashes).
 
@@ -100,6 +100,13 @@ For every `useControlPlaneQuery` that polls:
 3. Preserve hooks/data flow; render-tree changes only.
 4. Preserve test assertions (IDs, role selectors, labels).
 5. `pnpm lint:web && pnpm test:web && pnpm build:web`.
+
+## Auth screens (`/setup`, `/login`, `/forgot-password`, `/settings/account`)
+
+- Tighter CSP: `script-src 'self' 'unsafe-inline'` (Next.js bootstrap needs it), but no third-party origins, no framing, no `<object>`. Do not introduce `dangerouslySetInnerHTML` on these routes.
+- Every auth error is funneled through a single generic i18n key — never branch on specific upstream errors.
+- Setup is 2 screens (`step-create-account` → `step-recovery-codes`). Do not add provider / GitHub / Telegram / allowed-user fields back into the wizard; those belong to the opt-in dashboard checklist.
+- Canonical contract: [`../../docs/security/authentication.md`](../../docs/security/authentication.md).
 
 ## Related
 

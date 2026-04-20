@@ -1348,9 +1348,12 @@ class PostgresRuntimeStore:
         self,
         *,
         task_id: int | None = None,
+        task_ids: list[int] | None = None,
         env_id: int | None = None,
         after_seq: int = 0,
     ) -> list[dict[str, Any]]:
+        if task_ids is not None and not task_ids:
+            return []
         query = """
             SELECT id, task_id, env_id, attempt, phase, event_type, severity, payload_json,
                    artifact_refs_json, resource_snapshot_ref, created_at
@@ -1361,6 +1364,9 @@ class PostgresRuntimeStore:
         if task_id is not None:
             query += " AND task_id = ?"
             params.append(task_id)
+        elif task_ids is not None:
+            query += f" AND task_id IN ({', '.join('?' for _ in task_ids)})"
+            params.extend(task_ids)
         if env_id is not None:
             query += " AND env_id = ?"
             params.append(env_id)
@@ -1381,6 +1387,17 @@ class PostgresRuntimeStore:
             }
             for row in rows
         ]
+
+    def list_task_ids_for_session(self, session_id: str) -> list[int]:
+        rows = self._fetch_all(
+            """
+            SELECT id FROM tasks
+             WHERE agent_id = ? AND session_id = ?
+             ORDER BY id ASC
+            """,
+            (self._agent_scope, session_id),
+        )
+        return [int(row["id"]) for row in rows if row.get("id") is not None]
 
     def list_artifacts(self, task_id: int) -> list[dict[str, Any]]:
         rows = self._fetch_all(

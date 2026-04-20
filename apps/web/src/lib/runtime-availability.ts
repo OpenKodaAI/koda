@@ -1,7 +1,7 @@
 import type {
   RuntimeAvailability,
   RuntimeAvailabilityStatus,
-  RuntimeBotHealth,
+  RuntimeAgentHealth,
   RuntimeEnvironment,
   RuntimeQueueItem,
   RuntimeReadiness,
@@ -16,7 +16,7 @@ export interface RuntimeEndpointSnapshot<T> {
 
 interface RuntimeAvailabilityInputs {
   readiness: RuntimeEndpointSnapshot<RuntimeReadiness>;
-  health: RuntimeEndpointSnapshot<RuntimeBotHealth>;
+  health: RuntimeEndpointSnapshot<RuntimeAgentHealth>;
   queues: RuntimeEndpointSnapshot<{ items?: RuntimeQueueItem[] }>;
   environments: RuntimeEndpointSnapshot<{ items?: RuntimeEnvironment[] }>;
   hasRuntimeToken: boolean;

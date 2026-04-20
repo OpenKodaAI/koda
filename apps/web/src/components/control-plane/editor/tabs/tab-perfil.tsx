@@ -1,38 +1,51 @@
 "use client";
 
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useMemo } from "react";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { BotAgentGlyph } from "@/components/dashboard/bot-agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { ColorPickerField } from "@/components/control-plane/shared/color-picker-field";
 import { FormInput } from "@/components/control-plane/shared/form-field";
 import { ChannelConnectionArea } from "@/components/control-plane/editor/channel-connection-area";
+import {
+  parseMissionProfile,
+  serializeMissionProfile,
+} from "@/lib/policy-serializers";
 
 export function TabPerfil() {
-  const { state, updateField } = useBotEditor();
+  const { state, updateField, updateAgentSpecField } = useAgentEditor();
   const { tl } = useAppI18n();
 
-  const botId = state.bot.id;
+  const agentId = state.agent.id;
+
+  const missionProfile = useMemo(
+    () => parseMissionProfile(state.missionProfileJson),
+    [state.missionProfileJson],
+  );
+
+  function updateMission(nextMission: string) {
+    updateAgentSpecField(
+      "missionProfileJson",
+      serializeMissionProfile({ ...missionProfile, mission: nextMission }),
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Identity — compact horizontal layout */}
       <section className="flex items-start gap-5">
-        {/* Avatar */}
         <div className="flex flex-col items-center gap-1.5 shrink-0 pt-1">
-          <BotAgentGlyph
-            botId={botId}
+          <AgentSigil
+            agentId={agentId}
+            label={state.displayName || agentId}
             color={state.color || "#8B8B93"}
-            className="h-14 w-14 rounded-[0.9rem] bot-swatch--animated"
-            active={state.status === "active"}
-            variant="card"
-            shape="swatch"
+            status={state.status}
+            size="lg"
           />
           <span className="text-[9px] text-[var(--text-quaternary)] font-mono">
-            {botId}
+            {agentId}
           </span>
         </div>
 
-        {/* Name + Color inline */}
         <div className="flex flex-col gap-3 flex-1 min-w-0">
           <FormInput
             label={tl("Nome do Agente")}
@@ -40,6 +53,13 @@ export function TabPerfil() {
             value={state.displayName}
             onChange={(event) => updateField("displayName", event.target.value)}
             placeholder={tl("Ex: Assistente de Vendas")}
+          />
+          <FormInput
+            label={tl("Missao")}
+            description={tl("Uma frase curta sobre o que o agente faz. Aparece no prompt e no catalogo.")}
+            value={missionProfile.mission}
+            onChange={(event) => updateMission(event.target.value)}
+            placeholder={tl("Ex: Resolver tickets com grounding")}
           />
           <ColorPickerField
             label={tl("Cor")}
@@ -51,7 +71,6 @@ export function TabPerfil() {
         </div>
       </section>
 
-      {/* Channels */}
       <section className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-6">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">

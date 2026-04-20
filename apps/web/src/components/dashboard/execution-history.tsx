@@ -1,9 +1,9 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { BotAgentGlyph } from "@/components/dashboard/bot-agent-glyph";
-import type { BotDisplay } from "@/lib/bot-constants";
-import type { BotStats, Task } from "@/lib/types";
+import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import type { AgentDisplay } from "@/lib/agent-constants";
+import type { AgentStats, Task } from "@/lib/types";
 import { truncateText } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -15,8 +15,8 @@ export type ExecutionHistoryStatus =
   | "queued";
 
 export interface ExecutionHistoryEntry {
-  bot: BotDisplay;
-  stats?: BotStats;
+  agent: AgentDisplay;
+  stats?: AgentStats;
 }
 
 export interface ExecutionHistoryStrings {
@@ -29,7 +29,7 @@ interface ExecutionHistoryProps {
   entries: ExecutionHistoryEntry[];
   strings: ExecutionHistoryStrings;
   limit?: number;
-  onSelectBot?: (botId: string) => void;
+  onSelectAgent?: (agentId: string) => void;
   className?: string;
 }
 
@@ -50,7 +50,7 @@ const STATUS_TONE: Record<ExecutionHistoryStatus, string> = {
 };
 
 interface Row {
-  bot: BotDisplay;
+  agent: AgentDisplay;
   task: Task;
   status: ExecutionHistoryStatus;
   sortValue: number;
@@ -98,7 +98,7 @@ function ExecutionHistoryComponent({
   entries,
   strings,
   limit = 10,
-  onSelectBot,
+  onSelectAgent,
   className,
 }: ExecutionHistoryProps) {
   const rows = useMemo<Row[]>(() => {
@@ -107,7 +107,7 @@ function ExecutionHistoryComponent({
       const tasks = entry.stats?.recentTasks ?? [];
       for (const task of tasks) {
         all.push({
-          bot: entry.bot,
+          agent: entry.agent,
           task,
           status: resolveTaskStatus(task),
           sortValue: taskTimestamp(task),
@@ -135,17 +135,17 @@ function ExecutionHistoryComponent({
       role="list"
       aria-label="Execution history"
     >
-      {rows.map(({ bot, task, status }, index) => {
+      {rows.map(({ agent, task, status }, index) => {
         const query = truncateText(task.query_text?.trim() || strings.noMessage, 96);
         const timestamp = formatCompactRelative(
           task.completed_at ?? task.started_at ?? task.created_at,
         );
 
         return (
-          <li key={`${bot.id}-${task.id}`}>
+          <li key={`${agent.id}-${task.id}`}>
             <button
               type="button"
-              onClick={() => onSelectBot?.(bot.id)}
+              onClick={() => onSelectAgent?.(agent.id)}
               className={cn(
                 "grid w-full items-center gap-5 px-3 py-3.5 text-left outline-none",
                 "grid-cols-[200px_minmax(0,1fr)_auto]",
@@ -157,15 +157,15 @@ function ExecutionHistoryComponent({
             >
               {/* Column 1: agent identity */}
               <div className="flex min-w-0 items-center gap-3">
-                <BotAgentGlyph
-                  botId={bot.id}
-                  color={bot.color}
+                <AgentGlyph
+                  agentId={agent.id}
+                  color={agent.color}
                   variant="list"
                   shape="swatch"
                   className="h-6 w-6 shrink-0"
                 />
                 <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
-                  {bot.label}
+                  {agent.label}
                 </span>
               </div>
 
@@ -205,13 +205,13 @@ function ExecutionHistoryComponent({
 function arePropsEqual(prev: ExecutionHistoryProps, next: ExecutionHistoryProps): boolean {
   if (prev.className !== next.className) return false;
   if (prev.limit !== next.limit) return false;
-  if (prev.onSelectBot !== next.onSelectBot) return false;
+  if (prev.onSelectAgent !== next.onSelectAgent) return false;
   if (prev.strings !== next.strings) return false;
   if (prev.entries.length !== next.entries.length) return false;
   for (let i = 0; i < prev.entries.length; i += 1) {
     const a = prev.entries[i]!;
     const b = next.entries[i]!;
-    if (a.bot.id !== b.bot.id) return false;
+    if (a.agent.id !== b.agent.id) return false;
     const aTasks = a.stats?.recentTasks ?? [];
     const bTasks = b.stats?.recentTasks ?? [];
     if (aTasks.length !== bTasks.length) return false;

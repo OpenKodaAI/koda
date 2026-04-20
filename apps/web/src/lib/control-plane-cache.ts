@@ -6,8 +6,8 @@ export const CONTROL_PLANE_CACHE_TAGS = {
   system: "control-plane:system",
   systemGeneral: "control-plane:system-general",
   core: "control-plane:core",
-  botCatalog: "dashboard:bot-catalog",
-  bot: (botId: string) => `control-plane:bot:${botId.toUpperCase()}`,
+  agentCatalog: "dashboard:agent-catalog",
+  agent: (agentId: string) => `control-plane:agent:${agentId.toUpperCase()}`,
 } as const;
 
 const CONTROL_PLANE_REVALIDATE_SECONDS = {
@@ -52,16 +52,13 @@ export function getControlPlaneMutationInvalidation(pathSegments: string[]) {
   const paths = new Set<string>(["/control-plane"]);
 
   const [root, maybeBotId, ...rest] = pathSegments;
-  const isAgentRoot = root === "agents" || root === "bots";
-
-  if (isAgentRoot) {
+  if (root === "agents") {
     tags.add(CONTROL_PLANE_CACHE_TAGS.catalog);
-    tags.add(CONTROL_PLANE_CACHE_TAGS.botCatalog);
+    tags.add(CONTROL_PLANE_CACHE_TAGS.agentCatalog);
 
     if (maybeBotId && !["clone"].includes(maybeBotId)) {
-      tags.add(CONTROL_PLANE_CACHE_TAGS.bot(maybeBotId));
+      tags.add(CONTROL_PLANE_CACHE_TAGS.agent(maybeBotId));
       paths.add(`/control-plane/agents/${maybeBotId}`);
-      paths.add(`/control-plane/bots/${maybeBotId}`);
     }
 
     if (rest.includes("runtime-access")) {

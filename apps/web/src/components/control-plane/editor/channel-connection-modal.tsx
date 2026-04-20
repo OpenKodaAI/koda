@@ -101,26 +101,26 @@ type ValidateResponse = {
   error?: string;
 };
 
-type BotInfo = { username: string; name: string };
+type AgentInfo = { username: string; name: string };
 
 /* ------------------------------------------------------------------ */
 /*  Modal                                                              */
 /* ------------------------------------------------------------------ */
 
 export function ChannelConnectionModal({
-  botId,
+  agentId,
   channel,
   status: initialStatus,
-  botInfo: initialBotInfo,
+  agentInfo: initialAgentInfo,
   onClose,
   onStatusChange,
 }: {
-  botId: string;
+  agentId: string;
   channel: ChannelDefinition;
   status: ChannelStatus;
-  botInfo: BotInfo | null;
+  agentInfo: AgentInfo | null;
   onClose: () => void;
-  onStatusChange: (status: ChannelStatus, botUsername?: string, botName?: string) => void;
+  onStatusChange: (status: ChannelStatus, agentUsername?: string, agentName?: string) => void;
 }) {
   const { tl } = useAppI18n();
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
@@ -133,21 +133,21 @@ export function ChannelConnectionModal({
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [localBotInfo, setLocalBotInfo] = useState<BotInfo | null>(initialBotInfo);
+  const [localAgentInfo, setLocalAgentInfo] = useState<AgentInfo | null>(initialAgentInfo);
   const [localStatus, setLocalStatus] = useState<ChannelStatus>(initialStatus);
 
   const isConnected = localStatus === "connected";
-  const [loadingBotInfo, setLoadingBotInfo] = useState(false);
+  const [loadingAgentInfo, setLoadingAgentInfo] = useState(false);
   const [allowedUsers, setAllowedUsers] = useState<{ id: string; name: string }[]>([]);
   const [loadedAllowedUsers, setLoadedAllowedUsers] = useState(false);
   const [editingUserIds, setEditingUserIds] = useState<string | null>(null);
   const [savingUserIds, setSavingUserIds] = useState(false);
-  const statusUrl = `/api/channels/${encodeURIComponent(botId)}/${channel.key}/status`;
+  const statusUrl = `/api/channels/${encodeURIComponent(agentId)}/${channel.key}/status`;
 
-  /* ---- Fetch bot info when connected but missing ---- */
+  /* ---- Fetch agent info when connected but missing ---- */
   useEffect(() => {
-    if (!isConnected || localBotInfo || loadingBotInfo) return;
-    setLoadingBotInfo(true);
+    if (!isConnected || localAgentInfo || loadingAgentInfo) return;
+    setLoadingAgentInfo(true);
     fetch(statusUrl, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -155,7 +155,7 @@ export function ChannelConnectionModal({
         const username = data.display_id ?? data.bot_username;
         const name = data.display_name ?? data.bot_name ?? "";
         if (username) {
-          setLocalBotInfo({ username, name });
+          setLocalAgentInfo({ username, name });
           onStatusChange("connected", username, name);
         }
         if (Array.isArray(data.allowed_users)) {
@@ -164,11 +164,11 @@ export function ChannelConnectionModal({
         }
       })
       .catch(() => {})
-      .finally(() => setLoadingBotInfo(false));
+      .finally(() => setLoadingAgentInfo(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, localBotInfo, botId, channel.key]);
+  }, [isConnected, localAgentInfo, agentId, channel.key]);
 
-  /* ---- Always fetch allowed users when connected (even if bot info was cached) ---- */
+  /* ---- Always fetch allowed users when connected (even if agent info was cached) ---- */
   useEffect(() => {
     if (!isConnected || loadedAllowedUsers) return;
     fetch(statusUrl, { cache: "no-store" })
@@ -231,7 +231,7 @@ export function ChannelConnectionModal({
         const value = fieldValues[field.key]?.trim();
         if (!value) continue;
         await requestJson(
-          `/api/control-plane/agents/${botId}/secrets/${field.key}?scope=agent`,
+          `/api/control-plane/agents/${agentId}/secrets/${field.key}?scope=agent`,
           {
             method: "PUT",
             body: JSON.stringify({ value }),
@@ -244,7 +244,7 @@ export function ChannelConnectionModal({
         channel.fields.filter((f) => f.type !== "tags").map((f) => [f.key, fieldValues[f.key]?.trim() ?? ""]),
       );
       const { ok, data, error: validateError } = await requestJsonAllowError<ValidateResponse>(
-        `/api/channels/${botId}/${channel.key}/validate`,
+        `/api/channels/${agentId}/${channel.key}/validate`,
         {
           method: "POST",
           body: JSON.stringify({ credentials }),
@@ -257,7 +257,7 @@ export function ChannelConnectionModal({
           username: result.display_id ?? result.bot_username ?? "",
           name: result.display_name ?? result.bot_name ?? "",
         };
-        setLocalBotInfo(info);
+        setLocalAgentInfo(info);
         setLocalStatus("connected");
         onStatusChange("connected", info.username, info.name);
       } else {
@@ -281,11 +281,11 @@ export function ChannelConnectionModal({
       // Delete ALL secrets for this channel
       for (const field of channel.fields) {
         await requestJson(
-          `/api/control-plane/agents/${botId}/secrets/${field.key}?scope=agent`,
+          `/api/control-plane/agents/${agentId}/secrets/${field.key}?scope=agent`,
           { method: "DELETE" },
         );
       }
-      setLocalBotInfo(null);
+      setLocalAgentInfo(null);
       setLocalStatus("disconnected");
       setFieldValues(() => {
         const cleared: Record<string, string> = {};
@@ -360,12 +360,12 @@ export function ChannelConnectionModal({
 
           {/* Body */}
           <div className="px-6 pb-5">
-            {isConnected && loadingBotInfo ? (
-              /* ---- Loading bot info ---- */
+            {isConnected && loadingAgentInfo ? (
+              /* ---- Loading agent info ---- */
               <div className="flex items-center justify-center py-6">
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--border-subtle)] border-t-[var(--text-primary)]" />
               </div>
-            ) : isConnected && localBotInfo ? (
+            ) : isConnected && localAgentInfo ? (
               /* ---- Connected state ---- */
               <div className="flex flex-col gap-4">
                 <div
@@ -380,11 +380,11 @@ export function ChannelConnectionModal({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-[var(--text-primary)]">
-                      {localBotInfo.username ? `@${localBotInfo.username}` : tl("Conectado")}
+                      {localAgentInfo.username ? `@${localAgentInfo.username}` : tl("Conectado")}
                     </div>
-                    {localBotInfo.name && (
+                    {localAgentInfo.name && (
                       <div className="text-xs text-[var(--text-tertiary)]">
-                        {localBotInfo.name}
+                        {localAgentInfo.name}
                       </div>
                     )}
                   </div>
@@ -439,12 +439,12 @@ export function ChannelConnectionModal({
                               const value = editingUserIds.trim();
                               if (value) {
                                 await requestJson(
-                                  `/api/control-plane/agents/${botId}/secrets/ALLOWED_USER_IDS?scope=agent`,
+                                  `/api/control-plane/agents/${agentId}/secrets/ALLOWED_USER_IDS?scope=agent`,
                                   { method: "PUT", body: JSON.stringify({ value }) },
                                 );
                               } else {
                                 await requestJson(
-                                  `/api/control-plane/agents/${botId}/secrets/ALLOWED_USER_IDS?scope=agent`,
+                                  `/api/control-plane/agents/${agentId}/secrets/ALLOWED_USER_IDS?scope=agent`,
                                   { method: "DELETE" },
                                 ).catch(() => {});
                               }

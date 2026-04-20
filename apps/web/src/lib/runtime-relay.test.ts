@@ -19,7 +19,7 @@ describe("runtime relay descriptor storage", () => {
 
     const relay = await createRuntimeRelayDescriptor({
       kind: "terminal",
-      botId: "ATLAS",
+      agentId: "ATLAS",
       taskId: 12,
       terminalId: 4,
       upstreamUrl: "ws://127.0.0.1:8123/ws",
@@ -40,7 +40,7 @@ describe("runtime relay descriptor storage", () => {
 
     const relay = await createRuntimeRelayDescriptor({
       kind: "browser",
-      botId: "ATLAS",
+      agentId: "ATLAS",
       taskId: 12,
       upstreamUrl: "ws://127.0.0.1:8123/ws",
       expiresAt: new Date(Date.now() - 1_000).toISOString(),

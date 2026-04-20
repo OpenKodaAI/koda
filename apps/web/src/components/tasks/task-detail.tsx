@@ -15,12 +15,12 @@ import {
 } from "@/hooks/use-animated-presence";
 import { StatusPill } from "./status-pill";
 import { SyntaxHighlight } from "../shared/syntax-highlight";
-import { getBotColor } from "@/lib/bot-constants";
+import { getAgentColor } from "@/lib/agent-constants";
 import { DetailRow } from "../shared/detail-row";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 interface TaskDetailProps {
-  task: (Task & { botId?: string }) | null;
+  task: (Task & { agentId?: string }) | null;
   onClose: () => void;
 }
 
@@ -39,7 +39,7 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
   const { t, tl } = useAppI18n();
   const presence = useAnimatedPresence(Boolean(task), { task }, { duration: 180 });
   const renderedTask = presence.renderedValue.task;
-  const botColor = renderedTask?.botId ? getBotColor(renderedTask.botId) : null;
+  const agentColor = renderedTask?.agentId ? getAgentColor(renderedTask.agentId) : null;
 
   useBodyScrollLock(presence.shouldRender);
   useEscapeToClose(presence.shouldRender, onClose);
@@ -84,21 +84,21 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="app-card-row__eyebrow">{t("tasks.detail.taskEyebrow", { id: renderedTask.id })}</span>
                   <StatusPill status={renderedTask.status} />
-                  {renderedTask.botId && (
+                  {renderedTask.agentId && (
                     <span
                       className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em]"
                       style={{
-                        backgroundColor: botColor
-                          ? `color-mix(in srgb, ${botColor} 18%, var(--surface-panel-soft))`
+                        backgroundColor: agentColor
+                          ? `color-mix(in srgb, ${agentColor} 18%, var(--surface-panel-soft))`
                           : "var(--surface-panel-soft)",
-                        color: botColor ?? "var(--text-secondary)",
-                        borderColor: botColor
-                          ? `color-mix(in srgb, ${botColor} 36%, var(--border-subtle))`
+                        color: agentColor ?? "var(--text-secondary)",
+                        borderColor: agentColor
+                          ? `color-mix(in srgb, ${agentColor} 36%, var(--border-subtle))`
                           : "var(--border-subtle)",
                       }}
                     >
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: botColor ?? "var(--text-secondary)" }} />
-                      {renderedTask.botId}
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: agentColor ?? "var(--text-secondary)" }} />
+                      {renderedTask.agentId}
                     </span>
                   )}
                 </div>
@@ -158,8 +158,8 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                 <DetailRow label={t("common.model")}>
                   <span className="font-mono">{renderedTask.model ?? "\u2014"}</span>
                 </DetailRow>
-                <DetailRow label={t("common.bot")}>
-                  <span className="font-mono">{renderedTask.botId ?? "\u2014"}</span>
+                <DetailRow label={t("common.agent")}>
+                  <span className="font-mono">{renderedTask.agentId ?? "\u2014"}</span>
                 </DetailRow>
                 <DetailRow label={t("common.user")}>
                   <span className="font-mono">{renderedTask.user_id}</span>

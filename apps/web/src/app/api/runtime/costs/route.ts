@@ -5,14 +5,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const botIds = request.nextUrl.searchParams.getAll("bot").filter(Boolean);
+  const agentIds = request.nextUrl.searchParams.getAll("agent").filter(Boolean);
   const period = request.nextUrl.searchParams.get("period");
   const model = request.nextUrl.searchParams.get("model");
   const taskType = request.nextUrl.searchParams.get("taskType");
 
   try {
     const payload = await getOperationalCostInsights({
-      botIds,
+      agentIds,
       period,
       model,
       taskType,

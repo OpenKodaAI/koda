@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { KodaMark } from "@/components/layout/koda-mark";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { GooeyFilter } from "@/components/ui/gooey-filter";
@@ -55,11 +54,7 @@ export function SetupFrame({ children, top, className }: SetupFrameProps) {
         aria-hidden="true"
       />
 
-      <header className="relative z-10 flex h-14 shrink-0 items-center justify-between px-5 pointer-events-none">
-        <div className="pointer-events-auto inline-flex items-center gap-2 text-[var(--text-primary)]">
-          <KodaMark className="h-7 w-7" />
-          <span className="text-[0.9375rem] font-medium tracking-[-0.02em]">Koda</span>
-        </div>
+      <header className="relative z-10 flex h-14 shrink-0 items-center justify-end px-5 pointer-events-none">
         <div className="pointer-events-auto flex items-center gap-2">
           <LanguageSwitcher className="shrink-0" />
           <ThemeSwitcher className="shrink-0" />

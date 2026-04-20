@@ -15,16 +15,14 @@ describe("tour helpers", () => {
   it("matches static and dynamic tour routes", () => {
     expect(matchesTourRoutePattern("/", "/")).toBe(true);
     expect(matchesTourRoutePattern("/control-plane", "/control-plane")).toBe(true);
-    expect(matchesTourRoutePattern("/control-plane/agents/ATLAS", "/control-plane/agents/:botId")).toBe(true);
-    expect(matchesTourRoutePattern("/control-plane/bots/ATLAS", "/control-plane/agents/:botId")).toBe(true);
-    expect(matchesTourRoutePattern("/control-plane/agents/ATLAS/runs", "/control-plane/agents/:botId")).toBe(false);
+    expect(matchesTourRoutePattern("/control-plane/agents/ATLAS", "/control-plane/agents/:agentId")).toBe(true);
+    expect(matchesTourRoutePattern("/control-plane/agents/ATLAS/runs", "/control-plane/agents/:agentId")).toBe(false);
   });
 
   it("maps representative paths to the expected chapters", () => {
     expect(getTourChapterForPathname("/")).toBe("overview");
     expect(getTourChapterForPathname("/control-plane")).toBe("control_plane_catalog");
     expect(getTourChapterForPathname("/control-plane/agents/ATLAS")).toBe("control_plane_editor");
-    expect(getTourChapterForPathname("/control-plane/bots/ATLAS")).toBe("control_plane_editor");
     expect(getTourChapterForPathname("/runtime/any")).toBe("runtime");
     expect(getTourChapterForPathname("/sessions")).toBe("sessions");
   });
