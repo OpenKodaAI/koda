@@ -7640,6 +7640,42 @@ class ControlPlaneManager:
         )
         return True
 
+    # Tables that hold per-agent state and must be purged on hard delete.
+    # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
+    # is written last so the main row survives if any cascade step fails.
+    _AGENT_CASCADE_TABLES: tuple[str, ...] = (
+        "cp_agent_sections",
+        "cp_agent_documents",
+        "cp_agent_config_versions",
+        "cp_apply_operations",
+        "cp_knowledge_assets",
+        "cp_template_assets",
+        "cp_skill_assets",
+        "cp_mcp_agent_connections",
+        "cp_mcp_tool_policies",
+        "cp_mcp_discovered_tools",
+        "cp_mcp_oauth_tokens",
+        "cp_mcp_oauth_sessions",
+        "cp_agent_connections",
+    )
+
+    def delete_agent(self, agent_id: str) -> bool:
+        """Hard-delete an agent and every dependent cp_* row.
+
+        Returns True if the agent existed and was removed, False if it was
+        already gone (idempotent — repeated DELETE calls should not raise).
+        Runtime / audit tables (tasks, query_history, audit_events) are
+        intentionally left alone so historical records survive.
+        """
+        try:
+            normalized, _ = self._require_agent_row(agent_id)
+        except KeyError:
+            return False
+        for table in self._AGENT_CASCADE_TABLES:
+            execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
+        execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
+        return True
+
     def clone_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         source = self.get_agent(agent_id)
         if source is None:

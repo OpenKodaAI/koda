@@ -485,8 +485,8 @@ async def delete_squad(request: web.Request) -> web.Response:
 
 
 async def delete_agent(request: web.Request) -> web.Response:
-    _manager().archive_agent(request.match_info["agent_id"])
-    return web.json_response({"ok": True})
+    removed = _manager().delete_agent(request.match_info["agent_id"])
+    return web.json_response({"ok": True, "deleted": removed})
 
 
 async def list_dashboard_agent_summaries_route(request: web.Request) -> web.Response:
