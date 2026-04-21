@@ -277,9 +277,7 @@ PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
 DEFAULT_MODEL: str = PROVIDER_DEFAULT_MODELS.get(DEFAULT_PROVIDER, CLAUDE_DEFAULT_MODEL)
 AVAILABLE_MODELS: list[str] = [model for models in PROVIDER_MODELS.values() for model in models]
 PROVIDER_FALLBACK_ORDER: list[str] = [
-    provider
-    for provider in _env_csv("PROVIDER_FALLBACK_ORDER", "")
-    if provider in AVAILABLE_PROVIDERS
+    provider for provider in _env_csv("PROVIDER_FALLBACK_ORDER", "") if provider in AVAILABLE_PROVIDERS
 ]
 TRANSCRIPT_REPLAY_LIMIT: int = int(_env("TRANSCRIPT_REPLAY_LIMIT", "10"))
 MODEL_PRICING_USD: dict = _env_json_object("MODEL_PRICING_USD")

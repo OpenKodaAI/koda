@@ -81,8 +81,7 @@ def _migrate_agent_sections(*, dry_run: bool) -> tuple[int, int]:
         print(f"  {agent_id}[{section}] → {changes} variable(s) rewritten")
         if not dry_run:
             execute(
-                "UPDATE cp_agent_sections SET data_json = ?, updated_at = ? "
-                "WHERE agent_id = ? AND section = ?",
+                "UPDATE cp_agent_sections SET data_json = ?, updated_at = ? WHERE agent_id = ? AND section = ?",
                 (json_dump(updated), now_iso(), agent_id, section),
             )
     return touched, total_changes

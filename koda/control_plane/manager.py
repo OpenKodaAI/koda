@@ -9811,7 +9811,8 @@ class ControlPlaneManager:
         # propagate to process_env so the spawned worker binds the same port the supervisor
         # expects to poll for liveness/idle checks. Without this the worker falls back to
         # config.HEALTH_PORT default (8080) while the supervisor polls the per-agent value.
-        effective_health_port = int(runtime_endpoint.get("health_port") or health_port)
+        _hp = runtime_endpoint.get("health_port")
+        effective_health_port = int(_hp) if isinstance(_hp, (int, str)) else int(health_port)
         runtime_endpoint["health_port"] = effective_health_port
         runtime_endpoint["health_url"] = f"http://127.0.0.1:{effective_health_port}/health"
         runtime_endpoint["runtime_base_url"] = f"http://127.0.0.1:{effective_health_port}"

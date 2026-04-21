@@ -386,10 +386,6 @@ _OPS_COMMANDS = frozenset(
         "jira",
         "confluence",
         "http_request",
-        "cron_list",
-        "cron_add",
-        "cron_delete",
-        "cron_toggle",
         "write",
         "edit",
         "rm",
@@ -863,16 +859,6 @@ def _canonical_operational_request(command_name: str, raw_args: str) -> tuple[st
             tokens = args.split(maxsplit=2)
             if len(tokens) >= 2:
                 return "http_request", args
-        if normalized_command == "cron":
-            action = _first_token(args)
-            if action == "list":
-                return "cron_list", args
-            if action == "add":
-                return "cron_add", args
-            if action == "del":
-                return "cron_delete", args
-            if action in {"enable", "disable"}:
-                return "cron_toggle", args
         return normalized_command, args
     return "gws", canonicalize_gws_command_args(service, args)
 

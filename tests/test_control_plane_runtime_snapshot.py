@@ -166,9 +166,9 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
                 "version": 1,
                 "rules": [
                     {
-                        "id": "allow-cron-write",
+                        "id": "allow-job-create",
                         "decision": "require_approval",
-                        "selectors": {"tool_id": ["cron_add"]},
+                        "selectors": {"tool_id": ["job_create"]},
                     }
                 ],
             },
@@ -185,7 +185,7 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
     )
 
     compiled_prompt = str(payload.get("compiled_prompt") or "")
-    assert "`cron_add`" in compiled_prompt
+    assert "`job_create`" in compiled_prompt
     assert "## Integration Grants" in compiled_prompt
     assert "`gws`" in compiled_prompt
 

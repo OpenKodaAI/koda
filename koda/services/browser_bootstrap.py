@@ -35,10 +35,7 @@ def _chromium_present(browsers_path: Path) -> bool:
     """Return True when a usable chromium build is under ``browsers_path``."""
     if not browsers_path.is_dir():
         return False
-    return any(
-        candidate.is_file()
-        for candidate in browsers_path.glob("chromium-*/chrome-linux/chrome")
-    )
+    return any(candidate.is_file() for candidate in browsers_path.glob("chromium-*/chrome-linux/chrome"))
 
 
 def ensure_browser_installed() -> None:

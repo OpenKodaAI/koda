@@ -170,9 +170,7 @@ class PostgresRuntimeStore:
             # Explicit casts keep Postgres from treating every VALUES column
             # as TEXT — without them the WHERE target.task_id = source.task_id
             # fails with "operator does not exist: bigint = text".
-            values_sql.append(
-                "(?::text, ?::bigint, ?::text, ?::integer, ?::text, ?::integer, ?::text, ?::text)"
-            )
+            values_sql.append("(?::text, ?::bigint, ?::text, ?::integer, ?::text, ?::integer, ?::text, ?::text)")
             params.extend(
                 [
                     self._agent_scope,
