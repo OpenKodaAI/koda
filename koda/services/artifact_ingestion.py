@@ -948,7 +948,7 @@ def _extract_docx(ref: ArtifactRef, path: Path) -> ExtractedArtifact:
 
 def _extract_pdf(ref: ArtifactRef, path: Path) -> ExtractedArtifact:
     try:
-        import fitz
+        from pypdf import PdfReader
     except ImportError as exc:
         return _unsupported_dependency(ref, exc)
 
@@ -959,25 +959,21 @@ def _extract_pdf(ref: ArtifactRef, path: Path) -> ExtractedArtifact:
     status = ArtifactStatus.COMPLETE
 
     try:
-        document = fitz.open(str(path))
+        document = PdfReader(str(path), strict=False)
     except Exception as exc:  # pragma: no cover - parser-specific behavior
         return _unresolved_from_exception(ref, exc)
 
-    page_count = len(document)
+    page_count = len(document.pages)
     max_pages = min(page_count, _DEFAULT_MAX_PDF_PAGES)
     if page_count > _DEFAULT_MAX_PDF_PAGES:
         status = ArtifactStatus.PARTIAL
         warnings.append(f"PDF truncated to first {_DEFAULT_MAX_PDF_PAGES} pages for extraction.")
 
     for index in range(max_pages):
-        page = document[index]
-        text = _normalize_text(page.get_text("text"))
-        if len(text) < 80:
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            text = _normalize_text(_ocr_image_bytes(pix.tobytes("png")))
-            if text:
-                warnings.append(f"OCR applied on page {index + 1}.")
+        page = document.pages[index]
+        text = _normalize_text(page.extract_text() or "")
         if not text:
+            warnings.append(f"No readable text extracted from page {index + 1}.")
             continue
         page_texts.append(f"[page {index + 1}] {text}")
         citation = f"{path.name} p.{index + 1}"

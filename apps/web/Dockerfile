@@ -55,7 +55,8 @@ COPY --from=builder /workspace/apps/web ./apps/web
 
 WORKDIR /app/apps/web
 
-RUN addgroup --system --gid 1001 nodejs && \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack && \
+    addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextuser && \
     chown -R nextuser:nodejs /app
 
@@ -63,4 +64,4 @@ USER nextuser
 
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+CMD ["node", "server.mjs"]

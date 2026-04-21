@@ -9,9 +9,10 @@
 
 ## Installation
 
-- The official product path is now `npm install -g koda` or `npx koda@latest install`.
+- The official product path is now `npm install -g @openkodaai/koda` or `npx @openkodaai/koda@latest install`.
 - Releases ship only the runtime bundle: compose, manifest, bootstrap env template, migration notes,
   proxy template, and SBOM metadata.
+- The npm package embeds that exact product bundle, while GitHub Releases mirror the same archive and checksums.
 - Developer hot-reload stays in the source repository and is not part of the product bundle.
 
 ## Update Behavior

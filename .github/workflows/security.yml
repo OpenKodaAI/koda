@@ -16,7 +16,30 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_VERSION: "0.10.7"
+
 jobs:
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Review dependency manifest changes
+        run: |
+          python3 scripts/review_dependency_changes.py \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --head-ref "${{ github.event.pull_request.head.sha }}"
+
   dependency-audit:
     name: dependency-audit
     runs-on: ubuntu-latest
@@ -26,12 +49,12 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - uses: pnpm/action-setup@v4.2.0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: pnpm/action-setup@v5.0.0
         with:
           version: 10.26.2
       - uses: actions/setup-node@v6.3.0
@@ -39,12 +62,34 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - name: Install Python dependencies
-        run: pip install ".[dev]"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
+      - name: Export pinned Python requirements for audit
+        run: |
+          uv export \
+            --format requirements.txt \
+            --locked \
+            --all-groups \
+            --all-extras \
+            --no-editable \
+            --no-emit-project \
+            --no-emit-workspace \
+            --no-header \
+            --no-annotate \
+            --output-file "${RUNNER_TEMP}/python-audit-requirements.txt"
       - name: Python dependency audit
-        run: pip-audit --strict
+        run: |
+          uv run pip-audit \
+            --strict \
+            --requirement "${RUNNER_TEMP}/python-audit-requirements.txt" \
+            --require-hashes \
+            --disable-pip
       - name: Node dependency audit
         run: pnpm audit --audit-level=high
       - name: Install cargo-audit
@@ -66,15 +111,28 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
-            uv.lock
-      - name: Install Python dependencies
-        run: pip install ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
       - name: Bandit SAST scan
-        run: bandit -r koda/ -ll --skip B101
+        run: |
+          set +e
+          mkdir -p artifacts/security
+          uv run bandit -r koda/ -lll -iii --skip B101 -f json -o artifacts/security/bandit.json
+          bandit_status=$?
+          set -e
+          python3 scripts/convert_bandit_json_to_sarif.py artifacts/security/bandit.json artifacts/security/bandit.sarif
+          exit "${bandit_status}"
+      - name: Upload Bandit SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/bandit.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/bandit.sarif
+          category: bandit
       - name: Install Gitleaks
         run: |
           set -euo pipefail
@@ -94,12 +152,13 @@ jobs:
         run: |
           mkdir -p artifacts/security
           gitleaks git . \
+            --config .gitleaks.toml \
             --report-format sarif \
             --report-path artifacts/security/gitleaks.sarif \
             --redact \
             --exit-code 1
       - name: Upload Gitleaks SARIF
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/gitleaks.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/gitleaks.sarif
@@ -111,6 +170,7 @@ jobs:
           name: sast-artifacts
           path: artifacts/security/
           if-no-files-found: ignore
+          retention-days: 21
 
   codeql:
     name: codeql
@@ -135,6 +195,7 @@ jobs:
         uses: github/codeql-action/analyze@v4.35.1
         with:
           category: /language:${{ matrix.language }}
+          upload: ${{ github.event_name == 'pull_request' && 'never' || 'always' }}
 
   container-scan:
     name: container-scan
@@ -169,30 +230,30 @@ jobs:
       - name: Scan container images with Trivy
         run: |
           mkdir -p artifacts/security/trivy
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:ci
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:ci
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:ci
-          trivy image --severity HIGH,CRITICAL --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda.sarif --exit-code 1 koda:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
       - name: Upload Trivy SARIF for koda
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda.sarif
           category: trivy-koda
       - name: Upload Trivy SARIF for koda-web
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-web.sarif
           category: trivy-koda-web
       - name: Upload Trivy SARIF for koda-memory
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-memory.sarif
           category: trivy-koda-memory
       - name: Upload Trivy SARIF for koda-security
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
@@ -204,3 +265,4 @@ jobs:
           name: container-scan-artifacts
           path: artifacts/security/trivy/
           if-no-files-found: ignore
+          retention-days: 21

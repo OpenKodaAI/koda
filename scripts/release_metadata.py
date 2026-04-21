@@ -86,6 +86,7 @@ def build_package_json(version: str) -> dict:
             NPM_BIN_NAME: "./bin/koda.mjs",
         },
         "files": [
+            "README.md",
             "bin",
             "release",
         ],

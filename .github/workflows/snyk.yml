@@ -67,7 +67,7 @@ jobs:
 
       - name: Sync Python dependencies
         if: env.SNYK_TOKEN != ''
-        run: uv sync --locked
+        run: uv sync --locked --all-groups --all-extras
 
       - name: Install web dependencies
         if: env.SNYK_TOKEN != ''
@@ -102,7 +102,7 @@ jobs:
           snyk test \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release \
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/node-open-source.sarif
           status=$?
@@ -118,6 +118,8 @@ jobs:
           snyk test \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/python-open-source.sarif
           status=$?
@@ -138,16 +140,42 @@ jobs:
           sarif_file: artifacts/security/snyk/python-open-source.sarif
           category: snyk-open-source-python
 
-      - name: Monitor projects in Snyk
+      - name: Monitor Node manifests in Snyk
         if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: node_monitor
+        continue-on-error: true
         run: |
           snyk monitor \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release \
+            --skip-unresolved=true
+
+      - name: Monitor exported Python requirements in Snyk
+        if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: python_monitor
+        continue-on-error: true
+        run: |
           snyk monitor \
             --file=artifacts/security/snyk/python-requirements.txt \
-            --package-manager=pip
+            --package-manager=pip \
+            --command=.venv/bin/python \
+            --skip-unresolved=true
+
+      - name: Summarize Snyk monitor snapshot status
+        if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if [[ "${{ steps.node_monitor.outcome }}" == "failure" || "${{ steps.python_monitor.outcome }}" == "failure" ]]; then
+            {
+              echo "## Snyk Monitor Warning"
+              echo
+              echo "At least one Snyk monitor snapshot failed. Security tests and SARIF uploads still completed, but the continuous-monitoring snapshot should be retried."
+              echo
+              echo "- Node monitor outcome: ${{ steps.node_monitor.outcome }}"
+              echo "- Python monitor outcome: ${{ steps.python_monitor.outcome }}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''
@@ -162,7 +190,11 @@ jobs:
         if: env.SNYK_TOKEN != ''
         shell: bash
         run: |
-          if [ "${{ steps.node_scan.outputs.status }}" != "0" ] || [ "${{ steps.python_scan.outputs.status }}" != "0" ]; then
+          node_status="${{ steps.node_scan.outputs.status }}"
+          python_status="${{ steps.python_scan.outputs.status }}"
+          if [ "${node_status}" != "0" ] || [ "${python_status}" != "0" ]; then
+            echo "Snyk Node scan status: ${node_status}" >&2
+            echo "Snyk Python scan status: ${python_status}" >&2
             echo "Snyk reported high-severity issues or a scan failure." >&2
             exit 1
           fi

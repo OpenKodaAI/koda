@@ -65,5 +65,5 @@ def extract_youtube_id(url: str) -> str | None:
 
 
 def url_hash(url: str) -> str:
-    """Generate a short hash for callback_data (md5[:10])."""
-    return hashlib.md5(url.encode()).hexdigest()[:10]
+    """Generate a short, stable hash for callback_data."""
+    return hashlib.blake2s(url.encode(), digest_size=5).hexdigest()

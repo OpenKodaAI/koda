@@ -15,9 +15,9 @@ This checklist is the minimum operational baseline for running Koda with a secur
 
 ## Agent And Integration Governance
 
-- Grant write-capable tools only when an agent truly needs them.
+- Grant write-capable tools only when a bot truly needs them.
 - Treat shell, git, file mutation, browser-write, webhooks, workflows, plugins, and MCP-write as privileged capabilities.
-- Require explicit integration grants per agent and review them during publication and release changes.
+- Require explicit integration grants per bot and review them during publication and release changes.
 - Re-validate grants after major prompt or workflow changes, not only after integration setup.
 - Keep private-network browser access disabled unless a runtime flow explicitly depends on internal services.
 
@@ -48,7 +48,7 @@ This checklist is the minimum operational baseline for running Koda with a secur
 
 Escalate immediately when any of the following occurs:
 
-- unexpected operator-session invalidation or suspicious repeated operator login failures
+- unexpected operator-session invalidation or suspicious repeated web-auth failures
 - runtime attach sessions appearing without matching operator intent
 - MCP or integration traffic toward internal network ranges
 - unexplained creation of destructive grants or policy broadening

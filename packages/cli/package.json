@@ -1,6 +1,6 @@
 {
-  "name": "koda",
-  "version": "1.0.0",
+  "name": "@openkodaai/koda",
+  "version": "1.0.6",
   "description": "Official Koda Docker-first installer and lifecycle CLI",
   "license": "Apache-2.0",
   "type": "module",
@@ -8,6 +8,7 @@
     "koda": "./bin/koda.mjs"
   },
   "files": [
+    "README.md",
     "bin",
     "release"
   ],
