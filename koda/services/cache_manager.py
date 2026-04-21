@@ -64,7 +64,7 @@ _PROVIDER_ERROR_INDICATORS = re.compile(
         r"failed to authenticate|authentication(?:_error)?|invalid authentication credentials|"
         r"api error:\s*401|not logged in|login required|"
         r"claude authentication failed|codex authentication failed|"
-        r"<b>autenticação</b>|o provedor está sem credenciais válidas|"
+        r"<b>authentication</b>|the provider is missing valid credentials|"
         r"unexpected argument|unrecognized option|unknown option|"
         r"usage:\s+(?:claude|codex)\b"
     ),

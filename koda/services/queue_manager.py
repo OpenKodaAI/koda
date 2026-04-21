@@ -2179,7 +2179,7 @@ async def _prepare_query_context(
             log.exception("memory_recall_error")
             _query_warnings.append("memory unavailable")
         _metrics.MEMORY_RECALL_DURATION.labels(agent_id=_agent_id_label).observe(time.time() - _recall_start)
-        if memory_context and "## Memória Procedural" in memory_context:
+        if memory_context and "## Procedural Memory" in memory_context:
             _metrics.PROCEDURAL_HITS.labels(agent_id=_agent_id_label).inc()
         else:
             _metrics.PROCEDURAL_MISSES.labels(agent_id=_agent_id_label).inc()

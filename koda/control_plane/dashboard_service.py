@@ -937,14 +937,14 @@ def list_dashboard_audit(
 
 def _task_type_label(task_type: str) -> str:
     mapping = {
-        "reply": "Resposta",
-        "research": "Pesquisa",
-        "summarization": "Resumo",
+        "reply": "Reply",
+        "research": "Research",
+        "summarization": "Summary",
         "jira_update": "Jira",
-        "triage": "Triagem",
-        "memory_lookup": "Memória",
-        "content_generation": "Geração",
-        "other": "Outro",
+        "triage": "Triage",
+        "memory_lookup": "Memory",
+        "content_generation": "Generation",
+        "other": "Other",
     }
     return mapping.get(task_type, task_type)
 

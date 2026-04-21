@@ -149,7 +149,7 @@ class TestBuildAnalysisPrompt:
         )
         prompt = build_analysis_prompt("summary", meta)
         assert "https://example.com" in prompt
-        assert "resumo" in prompt.lower()
+        assert "summary" in prompt.lower()
         assert "Test" in prompt
 
     def test_transcript_prompt(self):

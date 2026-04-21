@@ -75,8 +75,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Supabase",
         tagline="Backend completo com banco, auth e edge functions",
         description=(
-            "Conecte ao Supabase para executar queries SQL, gerenciar tabelas, listar "
-            "funções e inspecionar a configuração do projeto diretamente pela conversa."
+            "Connect to Supabase to run SQL queries, manage tables, list functions, "
+            "and inspect project configuration directly from the chat."
         ),
         category="cloud",
         documentation_url="https://supabase.com/docs/guides/getting-started/mcp",
@@ -98,7 +98,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     label="Project Reference (escopo)",
                     required=False,
                     input_type="text",
-                    help="Opcional: limita o acesso a um único projeto Supabase.",
+                    help="Optional: restricts access to a single Supabase project.",
                 ),
             ),
         ),
@@ -106,12 +106,12 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tools=(
             _r("list_tables", "Listar todas as tabelas do projeto"),
             _r("get_table_schema", "Inspecionar schema de uma tabela"),
-            _d("execute_sql", "Executar queries SQL no banco"),
-            _r("list_functions", "Listar funções Postgres"),
-            _r("get_project_info", "Recuperar configuração do projeto"),
-            _d("apply_migration", "Aplicar migration no banco"),
-            _r("list_extensions", "Listar extensões instaladas"),
-            _r("list_migrations", "Listar migrations aplicadas"),
+            _d("execute_sql", "Run SQL queries on the database"),
+            _r("list_functions", "List Postgres functions"),
+            _r("get_project_info", "Retrieve project configuration"),
+            _d("apply_migration", "Apply a migration on the database"),
+            _r("list_extensions", "List installed extensions"),
+            _r("list_migrations", "List applied migrations"),
         ),
         tier="mandatory",
     ),
@@ -120,8 +120,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Stripe",
         tagline="Pagamentos, assinaturas e faturamento",
         description=(
-            "Gerencie clientes, cobranças, assinaturas e reembolsos no Stripe. Crie "
-            "payment links, inspecione invoices e consulte a documentação da API."
+            "Manage customers, charges, subscriptions, and refunds on Stripe. Create "
+            "payment links, inspect invoices, and query the API documentation."
         ),
         category="data",
         documentation_url="https://docs.stripe.com/mcp",
@@ -148,12 +148,12 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("list_customers", "Listar clientes"),
             _w("create_invoice", "Criar fatura"),
             _d("finalize_invoice", "Finalizar fatura para pagamento"),
-            _w("create_payment_link", "Gerar link de pagamento"),
-            _r("list_payment_intents", "Listar intenções de pagamento"),
-            _r("list_subscriptions", "Listar assinaturas"),
+            _w("create_payment_link", "Create payment link"),
+            _r("list_payment_intents", "List payment intents"),
+            _r("list_subscriptions", "List subscriptions"),
             _d("cancel_subscription", "Cancelar assinatura"),
-            _d("create_refund", "Processar reembolso"),
-            _r("search_stripe_documentation", "Buscar na documentação Stripe"),
+            _d("create_refund", "Process refund"),
+            _r("search_stripe_documentation", "Search the Stripe documentation"),
         ),
         tier="mandatory",
     ),
@@ -178,8 +178,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _w("import_scene", "Importar cena de arquivo"),
             _r("describe_scene", "Descrever elementos do diagrama"),
             _d("clear_canvas", "Limpar canvas"),
-            _r("snapshot_scene", "Criar snapshot do diagrama"),
-            _w("set_viewport", "Ajustar área de visualização"),
+            _r("snapshot_scene", "Create diagram snapshot"),
+            _w("set_viewport", "Adjust viewport"),
         ),
         tier="mandatory",
     ),
@@ -188,8 +188,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Vercel",
         tagline="Deploy, logs e preview deployments",
         description=(
-            "Gerencie deployments, consulte logs de build e runtime, verifique "
-            "domínios e monitore status dos projetos na Vercel."
+            "Manage deployments, inspect build and runtime logs, check domains, and monitor project status on Vercel."
         ),
         category="development",
         documentation_url="https://vercel.com/docs/mcp",
@@ -208,16 +207,16 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("get_deployment", "Detalhes de um deployment"),
             _r("get_deployment_build_logs", "Logs de build"),
             _r("get_runtime_logs", "Logs de runtime"),
-            _w("deploy_to_vercel", "Criar novo deployment"),
-            _r("check_domain_availability_and_price", "Verificar disponibilidade de domínio"),
+            _w("deploy_to_vercel", "Create new deployment"),
+            _r("check_domain_availability_and_price", "Check domain availability"),
         ),
         tier="mandatory",
     ),
     McpServerSpec(
         server_key="granola",
         display_name="Granola",
-        tagline="Meeting notes e transcrições",
-        description=("Acesse notas de reuniões, transcrições e eventos de calendário capturados pelo Granola."),
+        tagline="Meeting notes and transcripts",
+        description=("Access meeting notes, transcripts, and calendar events captured by Granola."),
         category="productivity",
         documentation_url="https://github.com/btn0s/granola-mcp",
         logo_key="granola",
@@ -227,16 +226,16 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             strategy="local_app",
             local_app_name="Granola",
             local_app_detection_hint=(
-                "Instale o app Granola e faça login. O MCP lê as credenciais de "
+                "Install the Granola app and log in. The MCP reads credentials from "
                 "`~/Library/Application Support/Granola/supabase.json`."
             ),
         ),
         tools=(
-            _r("list_meetings", "Listar reuniões recentes"),
-            _r("get_meeting_transcript", "Obter transcrição de reunião"),
-            _r("query_granola_meetings", "Buscar reuniões por critérios"),
-            _r("list_meeting_folders", "Listar pastas de reuniões"),
-            _r("get_meetings", "Obter detalhes de reuniões"),
+            _r("list_meetings", "List recent meetings"),
+            _r("get_meeting_transcript", "Get meeting transcript"),
+            _r("query_granola_meetings", "Search meetings by criteria"),
+            _r("list_meeting_folders", "List meeting folders"),
+            _r("get_meetings", "Get meeting details"),
         ),
         tier="mandatory",
     ),
@@ -246,8 +245,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Sentry",
         tagline="Monitoramento de erros e stack traces",
         description=(
-            "Investigue erros em produção, analise stack traces, busque issues e "
-            "monitore a saúde dos projetos com integração direta ao Sentry."
+            "Investigate production errors, analyze stack traces, search issues, and "
+            "monitor project health with direct Sentry integration."
         ),
         category="development",
         documentation_url="https://docs.sentry.io/product/sentry-mcp/",
@@ -270,10 +269,10 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tools=(
             _r("get_issues", "Recuperar issues de erro"),
             _r("get_issue_details", "Detalhes completos de uma issue"),
-            _r("search_issues", "Buscar issues com filtros"),
-            _r("list_projects", "Listar projetos monitorados"),
-            _r("get_project_info", "Configuração do projeto"),
-            _w("create_issue", "Criar nova issue"),
+            _r("search_issues", "Search issues com filtros"),
+            _r("list_projects", "List monitored projects"),
+            _r("get_project_info", "Project configuration"),
+            _w("create_issue", "Create new issue"),
             _w("update_issue", "Atualizar status de issue"),
         ),
         tier="recommended",
@@ -281,10 +280,10 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
     McpServerSpec(
         server_key="linear",
         display_name="Linear",
-        tagline="Gestão de projetos e issues",
+        tagline="Project and issue management",
         description=(
-            "Gerencie issues, projetos e ciclos no Linear. Crie tickets, atualize "
-            "status, adicione comentários e acompanhe o progresso das equipes."
+            "Manage issues, projects, and cycles on Linear. Create tickets, update "
+            "status, add comments, and track team progress."
         ),
         category="productivity",
         documentation_url="https://linear.app/docs/mcp",
@@ -311,13 +310,13 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             ),
         ),
         tools=(
-            _r("get_ticket", "Recuperar detalhes de um ticket"),
-            _r("get_my_issues", "Issues atribuídas ao usuário atual"),
-            _r("search_issues", "Buscar issues"),
-            _w("create_issue", "Criar nova issue"),
-            _w("update_issue", "Atualizar propriedades de issue"),
-            _w("add_comment", "Adicionar comentário"),
-            _r("get_teams", "Listar equipes"),
+            _r("get_ticket", "Retrieve ticket details"),
+            _r("get_my_issues", "Issues assigned to the current user"),
+            _r("search_issues", "Search issues"),
+            _w("create_issue", "Create new issue"),
+            _w("update_issue", "Update issue properties"),
+            _w("add_comment", "Add comment"),
+            _r("get_teams", "List teams"),
             _r("list_projects", "Listar projetos"),
         ),
         tier="recommended",
@@ -326,9 +325,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         server_key="brave_search",
         display_name="Brave Search",
         tagline="Busca web com privacidade",
-        description=(
-            "Realize buscas na web, notícias, imagens e vídeos usando a API do Brave Search com foco em privacidade."
-        ),
+        description=("Search the web, news, images, and videos using the Brave Search API with a privacy-first focus."),
         category="data",
         documentation_url="https://brave.com/search/api/",
         logo_key="brave",
@@ -339,12 +336,12 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             fields=(ConnectionField(key="BRAVE_API_KEY", label="Brave Search API Key", input_type="password"),),
         ),
         tools=(
-            _r("brave_web_search", "Busca geral na web"),
-            _r("brave_local_search", "Busca de negócios locais"),
-            _r("brave_news_search", "Notícias recentes"),
-            _r("brave_image_search", "Busca de imagens"),
-            _r("brave_video_search", "Busca de vídeos"),
-            _r("brave_summarizer", "Resumo de resultados gerado por IA"),
+            _r("brave_web_search", "General web search"),
+            _r("brave_local_search", "Local business search"),
+            _r("brave_news_search", "Recent news"),
+            _r("brave_image_search", "Image search"),
+            _r("brave_video_search", "Video search"),
+            _r("brave_summarizer", "AI-generated results summary"),
         ),
         tier="recommended",
     ),
@@ -353,8 +350,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Slack",
         tagline="Mensagens, canais e threads",
         description=(
-            "Envie mensagens, leia histórico de canais, responda em threads e consulte "
-            "perfis de usuários no Slack do seu workspace."
+            "Send messages, read channel history, reply in threads, and look up user profiles in your Slack workspace."
         ),
         category="productivity",
         documentation_url="https://docs.slack.dev/ai/slack-mcp-server/",
@@ -387,24 +383,24 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             ),
         ),
         tools=(
-            _r("slack_list_channels", "Listar canais disponíveis"),
-            _w("slack_post_message", "Enviar mensagem no canal"),
-            _w("slack_reply_to_thread", "Responder em thread"),
-            _w("slack_add_reaction", "Adicionar reação com emoji"),
-            _r("slack_get_channel_history", "Histórico de mensagens"),
-            _r("slack_get_thread_replies", "Respostas de uma thread"),
-            _r("slack_get_users", "Listar usuários do workspace"),
-            _r("slack_get_user_profile", "Perfil de um usuário"),
+            _r("slack_list_channels", "List available channels"),
+            _w("slack_post_message", "Send message to channel"),
+            _w("slack_reply_to_thread", "Reply in thread"),
+            _w("slack_add_reaction", "Add emoji reaction"),
+            _r("slack_get_channel_history", "Message history"),
+            _r("slack_get_thread_replies", "Replies of a thread"),
+            _r("slack_get_users", "List workspace users"),
+            _r("slack_get_user_profile", "User profile"),
         ),
         tier="recommended",
     ),
     McpServerSpec(
         server_key="notion",
         display_name="Notion",
-        tagline="Páginas, data sources e knowledge base",
+        tagline="Pages, data sources, and knowledge base",
         description=(
-            "Busque, crie e edite páginas e data sources no Notion. Consulte conteúdo, "
-            "adicione blocos e gerencie sua base de conhecimento."
+            "Search, create, and edit pages and data sources on Notion. Read content, "
+            "add blocks, and manage your knowledge base."
         ),
         category="productivity",
         documentation_url="https://github.com/makenotion/notion-mcp-server",
@@ -425,20 +421,20 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         ),
         tools=(
             _r("search_notion", "Busca full-text no workspace"),
-            _r("query_data_source", "Consultar data source (v2)"),
-            _r("get_page", "Recuperar conteúdo de página"),
-            _w("create_page", "Criar nova página"),
-            _w("update_page", "Atualizar propriedades de página"),
-            _w("append_block", "Adicionar conteúdo a página"),
+            _r("query_data_source", "Query data source (v2)"),
+            _r("get_page", "Retrieve page content"),
+            _w("create_page", "Create new page"),
+            _w("update_page", "Update page properties"),
+            _w("append_block", "Append content to page"),
             _r("get_data_source", "Schema de um data source"),
-            _r("list_pages", "Listar páginas do workspace"),
+            _r("list_pages", "List workspace pages"),
         ),
         tier="recommended",
     ),
     McpServerSpec(
         server_key="cloudflare",
         display_name="Cloudflare",
-        tagline="DNS, Workers e segurança cloud",
+        tagline="DNS, Workers, and cloud security",
         description=(
             "Gerencie zonas DNS, deploy de Workers, configure regras de firewall e "
             "monitore a infraestrutura Cloudflare."
@@ -459,8 +455,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             ),
         ),
         tools=(
-            _r("list_zones", "Listar domínios/zonas"),
-            _r("get_zone_details", "Detalhes de configuração da zona"),
+            _r("list_zones", "List domains/zones"),
+            _r("get_zone_details", "Zone configuration details"),
             _r("list_dns_records", "Listar registros DNS"),
             _w("create_dns_record", "Criar registro DNS"),
             _w("update_dns_record", "Atualizar registro DNS"),
@@ -476,7 +472,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Google Maps",
         tagline="Geocoding, rotas e Places API",
         description=(
-            "Consulte a documentação do Google Maps Platform e gere código integrado "
+            "Consult Google Maps Platform documentation and generate integrated code "
             "com Maps, Places, Directions e Geocoding."
         ),
         category="cloud",
@@ -495,8 +491,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             ),
         ),
         tools=(
-            _r("retrieve-google-maps-platform-docs", "Consultar documentação oficial"),
-            _r("retrieve-instructions", "Guia de instruções para o agente"),
+            _r("retrieve-google-maps-platform-docs", "Consult official documentation"),
+            _r("retrieve-instructions", "Instruction guide for the agent"),
         ),
         tier="high_impact",
     ),
@@ -505,7 +501,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Todoist",
         tagline="Tarefas e projetos pessoais",
         description=(
-            "Gerencie tarefas, projetos, seções e labels no Todoist. Crie, complete, reabra e organize tarefas."
+            "Manage tasks, projects, sections, and labels on Todoist. Create, complete, reopen, and organize tasks."
         ),
         category="productivity",
         documentation_url="https://developer.todoist.com/",
@@ -525,16 +521,16 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tools=(
             _r("listTasks", "Listar tarefas com filtros"),
             _w("createTask", "Criar nova tarefa"),
-            _w("updateTask", "Atualizar propriedades da tarefa"),
-            _w("completeTask", "Marcar tarefa como concluída"),
-            _w("reopenTask", "Reabrir tarefa concluída"),
-            _d("deleteTask", "Remover tarefa permanentemente"),
+            _w("updateTask", "Update task properties"),
+            _w("completeTask", "Mark task as completed"),
+            _w("reopenTask", "Reopen completed task"),
+            _d("deleteTask", "Remove task permanently"),
             _r("listProjects", "Listar projetos"),
-            _w("createProject", "Criar novo projeto"),
-            _r("listSections", "Listar seções de um projeto"),
-            _w("createSection", "Criar seção em projeto"),
-            _w("createLabel", "Criar nova label"),
-            _w("addComment", "Adicionar comentário a tarefa"),
+            _w("createProject", "Create new project"),
+            _r("listSections", "List sections of a project"),
+            _w("createSection", "Create section in project"),
+            _w("createLabel", "Create new label"),
+            _w("addComment", "Add comment a tarefa"),
         ),
         tier="high_impact",
     ),
@@ -543,8 +539,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Obsidian",
         tagline="Second brain e knowledge management local",
         description=(
-            "Acesse, busque e edite notas do seu vault Obsidian. Leia frontmatter, "
-            "liste tags e pesquise conteúdo em toda a base."
+            "Access, search, and edit notes in your Obsidian vault. Read frontmatter, "
+            "list tags, and search content across the vault."
         ),
         category="productivity",
         documentation_url="https://www.npmjs.com/package/@mauricio.wolff/mcp-obsidian",
@@ -562,8 +558,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         ),
         runtime_constraints=("allowed_paths",),
         tools=(
-            _r("readFile", "Ler conteúdo de uma nota"),
-            _w("writeFile", "Criar ou atualizar nota"),
+            _r("readFile", "Read note content"),
+            _w("writeFile", "Create or update note"),
             _d("deleteFile", "Remover nota do vault"),
             _r("listVault", "Navegar estrutura do vault"),
             _r("searchVault", "Busca full-text no vault"),
@@ -577,7 +573,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="MongoDB",
         tagline="Banco de dados NoSQL e Atlas",
         description=(
-            "Execute queries, gerencie coleções e índices no MongoDB. Suporta MongoDB "
+            "Run queries, manage collections and indexes on MongoDB. Supports MongoDB "
             "Atlas para provisionamento de clusters."
         ),
         category="data",
@@ -592,7 +588,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     key="MDB_MCP_CONNECTION_STRING",
                     label="Connection URI",
                     input_type="password",
-                    help="Formato: mongodb+srv://usuário:senha@host/banco",
+                    help="Format: mongodb+srv://user:password@host/database",
                 ),
             ),
             read_only_toggle=ConnectionField(
@@ -604,20 +600,20 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         ),
         runtime_constraints=("allowed_db_envs", "read_only_mode"),
         tools=(
-            _r("find", "Consultar documentos com filtros"),
-            _r("listCollections", "Listar coleções disponíveis"),
-            _w("insertOne", "Inserir documento"),
+            _r("find", "Query documents with filters"),
+            _r("listCollections", "List available collections"),
+            _w("insertOne", "Insert document"),
             _w("updateOne", "Atualizar documento"),
-            _d("deleteOne", "Remover documento"),
-            _w("createIndex", "Criar índice"),
-            _d("dropIndex", "Remover índice"),
-            _r("indexes", "Listar índices existentes"),
-            _r("atlas-list-clusters", "Listar clusters Atlas"),
+            _d("deleteOne", "Remove document"),
+            _w("createIndex", "Create index"),
+            _d("dropIndex", "Remove index"),
+            _r("indexes", "List existing indexes"),
+            _r("atlas-list-clusters", "List Atlas clusters"),
             _r("atlas-list-projects", "Listar projetos Atlas"),
             _r("atlas-inspect-cluster", "Detalhes do cluster"),
-            _d("atlas-create-free-cluster", "Provisionar cluster gratuito"),
-            _r("atlas-list-db-users", "Listar usuários do banco"),
-            _w("atlas-create-db-user", "Criar usuário do banco"),
+            _d("atlas-create-free-cluster", "Provision free cluster"),
+            _r("atlas-list-db-users", "List database users"),
+            _w("atlas-create-db-user", "Create database user"),
         ),
         tier="high_impact",
     ),
@@ -659,11 +655,11 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("searchDeals", "Buscar deals"),
             _r("getTicket", "Recuperar ticket de suporte"),
             _r("searchTickets", "Buscar tickets"),
-            _r("getInvoice", "Detalhes de fatura"),
-            _r("getProduct", "Informações de produto"),
-            _r("getLineItem", "Detalhes de item"),
-            _r("getQuote", "Detalhes de cotação"),
-            _r("getOrder", "Detalhes de pedido"),
+            _r("getInvoice", "Invoice details"),
+            _r("getProduct", "Product information"),
+            _r("getLineItem", "Line item details"),
+            _r("getQuote", "Quote details"),
+            _r("getOrder", "Order details"),
         ),
         tier="verticals",
     ),
@@ -697,19 +693,19 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("getComponentInfo", "Detalhes e propriedades de componentes"),
             _r("downloadImages", "Exportar assets de design"),
             _r("getVariables", "Extrair design tokens"),
-            _r("getStyles", "Recuperar estilos do design system"),
-            _r("analyzeComponents", "Análise de componentes para code generation"),
-            _r("extractAssets", "Exportar todos os assets do arquivo"),
+            _r("getStyles", "Retrieve design system styles"),
+            _r("analyzeComponents", "Component analysis for code generation"),
+            _r("extractAssets", "Export all assets from the file"),
         ),
         tier="verticals",
     ),
     McpServerSpec(
         server_key="twilio",
         display_name="Twilio",
-        tagline="SMS, voz e comunicação programática",
+        tagline="SMS, voice, and programmable communication",
         description=(
-            "Envie SMS, faça chamadas de voz e gerencie recursos de comunicação do "
-            "Twilio incluindo messaging, chat e funções serverless."
+            "Send SMS, make voice calls, and manage Twilio communication resources "
+            "including messaging, chat, and serverless functions."
         ),
         category="cloud",
         documentation_url="https://github.com/twilio-labs/mcp",
@@ -734,17 +730,17 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tools=(
             _w("sendSms", "Enviar mensagem SMS"),
             _w("makeCall", "Iniciar chamada de voz"),
-            _r("listMessages", "Listar mensagens enviadas/recebidas"),
-            _r("getAccount", "Informações da conta Twilio"),
-            _r("listPhoneNumbers", "Listar números de telefone"),
-            _w("createMessagingService", "Criar serviço de messaging"),
+            _r("listMessages", "List sent/received messages"),
+            _r("getAccount", "Twilio account information"),
+            _r("listPhoneNumbers", "List phone numbers"),
+            _w("createMessagingService", "Create messaging service"),
         ),
         tier="verticals",
     ),
     McpServerSpec(
         server_key="postgres_mcp",
         display_name="PostgreSQL (MCP)",
-        tagline="Queries SQL e inspeção de schema",
+        tagline="SQL queries and schema inspection",
         description=(
             "Conecte a qualquer banco PostgreSQL externo para executar queries e inspecionar schema via protocolo MCP."
         ),
@@ -760,7 +756,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     key="DATABASE_URL",
                     label="PostgreSQL Connection String",
                     input_type="password",
-                    help="Formato: postgresql://usuário:senha@host:5432/banco",
+                    help="Format: postgresql://user:password@host:5432/database",
                 ),
             ),
             read_only_toggle=ConnectionField(
@@ -775,16 +771,16 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("queryDatabase", "Executar queries SQL"),
             _r("inspectSchema", "Inspecionar schema do banco"),
             _r("listTables", "Listar todas as tabelas"),
-            _r("getTableInfo", "Detalhes de colunas e constraints"),
-            _r("list_schemas", "Listar schemas disponíveis"),
-            _r("list_objects", "Navegar tabelas, views, sequences"),
-            _r("get_object_details", "Detalhes de colunas e constraints"),
-            _r("execute_sql", "Executar SQL (respeitando modo read-only)"),
-            _r("explain_query", "Analisar plano de execução"),
-            _r("get_top_queries", "Identificar queries mais lentas"),
-            _r("analyze_workload_indexes", "Recomendar índices para a carga"),
-            _r("analyze_query_indexes", "Otimizar índices de uma query"),
-            _r("analyze_db_health", "Checar health do banco"),
+            _r("getTableInfo", "Column and constraint details"),
+            _r("list_schemas", "List available schemas"),
+            _r("list_objects", "Browse tables, views, sequences"),
+            _r("get_object_details", "Column and constraint details"),
+            _r("execute_sql", "Execute SQL (respecting read-only mode)"),
+            _r("explain_query", "Analyze execution plan"),
+            _r("get_top_queries", "Identify slowest queries"),
+            _r("analyze_workload_indexes", "Recommend indexes for the workload"),
+            _r("analyze_query_indexes", "Optimize indexes for a query"),
+            _r("analyze_db_health", "Check database health"),
         ),
         tier="verticals",
     ),

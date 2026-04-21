@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from types import SimpleNamespace
@@ -765,80 +766,87 @@ def test_submit_provider_login_code_rejects_oversized_payload(monkeypatch):
     assert written_chunks == []
 
 
-def test_submit_provider_login_code_terminates_cli_once_verification_succeeds(monkeypatch):
-    """Once ``claude auth status --json`` reports loggedIn=true the token is
-    already on disk, so the manager should terminate the CLI subprocess
-    immediately instead of waiting for the TUI to drain. Without this the
-    operator sees a spinner that hangs until the full 45s deadline elapses.
+def test_submit_provider_login_code_short_circuits_on_oauth_error_line(monkeypatch):
+    """When the CLI prints an ``OAuth error:`` line (Anthropic rejected the
+    code), the submit loop must return immediately — continuing to sleep
+    until the deadline blocks the HTTP response and leaves the spinner on
+    screen for several extra seconds, even though the outcome is already
+    known.
     """
     import koda.control_plane.manager as manager_mod
 
     manager, _rows, _meta, _secrets, _login_sessions = _make_manager(monkeypatch)
-    # Shorten deadlines so the test is fast without hitting real sleeps.
-    manager_mod.ControlPlaneManager._PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS = 2.0
-    manager_mod.ControlPlaneManager._PROVIDER_LOGIN_SUBMIT_VERIFY_INTERVAL_SECONDS = 0.0
+    # Keep the deadline high so we can prove the short-circuit is what ends
+    # the loop, not the deadline timeout.
+    manager_mod.ControlPlaneManager._PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS = 30.0
 
-    written: list[str] = []
-    terminated = {"called": False}
+    # Simulate the CLI printing the error line only on the third output read.
+    outputs = iter(
+        [
+            "Paste code here if prompted>\n",
+            "Paste code here if prompted>\n*****TEST*****\n",
+            (
+                "Paste code here if prompted>\n*****TEST*****\n"
+                "OAuth error: Request failed with status code 400\n"
+                "Press Enter to retry.\n"
+            ),
+        ]
+    )
+    current_output = [""]
+
+    def fake_output():
+        with contextlib.suppress(StopIteration):
+            current_output[0] = next(outputs)
+        return current_output[0]
+
     handle = SimpleNamespace(
         provider_id="claude",
         command=("claude", "setup-token"),
-        write=lambda text: written.append(text),
-        process=SimpleNamespace(poll=lambda: None),  # process never exits on its own
-        terminate=lambda: terminated.__setitem__("called", True),
+        write=lambda text: None,
+        normalized_output=fake_output,
+        process=SimpleNamespace(poll=lambda: None, returncode=None),
+        terminate=lambda: None,
     )
     manager._provider_login_processes["sess-claude"] = handle
-
-    synced: dict[str, Any] = {}
     manager._sync_provider_login_session = lambda provider_id, session_id: {  # type: ignore[attr-defined]
-        **synced,
         "session_id": session_id,
-        "status": "completed",
+        "status": "error",
+        "last_error": "Claude Code rejected the authentication code. Start over.",
     }
 
-    verify_calls: list[str] = []
-
-    def fake_verify(provider_id, project_id="", base_env=None, work_dir=""):
-        verify_calls.append(provider_id)
-        return ProviderVerificationResult(
-            provider_id=provider_id,
-            auth_mode="subscription_login",
-            verified=True,
-            account_label="Claude",
-            checked_via="auth_status",
-        )
-
-    monkeypatch.setattr(manager_mod, "verify_provider_subscription_login", fake_verify)
-
+    start = time.monotonic()
     result = manager_mod.ControlPlaneManager.submit_provider_login_code(
         manager,
         "claude",
         "sess-claude",
         {"code": "fakecode#statepart"},
     )
+    elapsed = time.monotonic() - start
 
-    assert written == ["fakecode#statepart\n"]
-    assert verify_calls == ["claude"]
-    assert terminated["called"] is True, "CLI must be terminated once verification reports success"
-    assert result["status"] == "completed"
+    assert result["status"] == "error"
+    assert "rejected" in result["last_error"].lower()
+    assert elapsed < 2.0, (
+        f"submit must short-circuit on OAuth error line but took {elapsed:.2f}s "
+        "(deadline is 30s — if we'd hit it this test would take much longer)"
+    )
 
 
 def test_submit_provider_login_code_returns_when_cli_exits_on_its_own(monkeypatch):
-    """If the CLI happens to exit cleanly before our verify poll fires, the
-    manager must not keep polling — it has to break out of the loop
-    immediately so the HTTP response returns to the browser.
+    """The submit loop must break as soon as the CLI exits on its own.
+    Otherwise we'd keep polling the handle past the process's lifetime and
+    block the HTTP response longer than necessary.
     """
     import koda.control_plane.manager as manager_mod
 
     manager, _rows, _meta, _secrets, _login_sessions = _make_manager(monkeypatch)
     manager_mod.ControlPlaneManager._PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS = 5.0
-    manager_mod.ControlPlaneManager._PROVIDER_LOGIN_SUBMIT_VERIFY_INTERVAL_SECONDS = 10.0
 
     poll_results = iter([None, None, 0])  # exits on the third poll
     handle = SimpleNamespace(
         provider_id="claude",
         command=("claude", "setup-token"),
         write=lambda text: None,
+        normalized_output=lambda: "Paste code here if prompted>\n",
         process=SimpleNamespace(poll=lambda: next(poll_results, 0), returncode=0),
         terminate=lambda: None,
     )
@@ -1124,6 +1132,39 @@ def test_claude_setup_token_parser_surfaces_invalid_code_retry():
 
     assert state.status == "awaiting_browser"
     assert state.last_error.startswith("Claude Code rejected the authentication code.")
+    assert state.message == state.last_error
+
+
+def test_claude_parser_marks_session_error_when_cli_exits_after_oauth_failure():
+    """When ``claude setup-token`` exchanges the pasted code with Anthropic and
+    the provider rejects it, the CLI prints an ``OAuth error`` line and then
+    exits cleanly (returncode 0). The parser must translate that to
+    ``status=error`` so the UI surfaces the rejection — keeping the session
+    in ``awaiting_browser`` with a dead CLI leaves the wizard stuck on the
+    authorize step forever because no retry is possible.
+    """
+    import koda.services.provider_auth as auth_mod
+
+    handle = SimpleNamespace(
+        provider_id="claude",
+        auth_mode="subscription_login",
+        command=("claude", "setup-token"),
+        process=SimpleNamespace(poll=lambda: 0),  # CLI exited cleanly
+        normalized_output=lambda: (
+            "Welcome to Claude Code\n"
+            "Browser didn't open? Use the url below to sign in\n"
+            "https://claude.com/cai/oauth/authorize?code=true&state=test\n"
+            "Paste code here if prompted>\n"
+            "****************TE_XYZ\n"
+            "OAuth error: Request failed with status code 400\n"
+            "Press Enter to retry.\n"
+        ),
+    )
+
+    state = auth_mod.parse_login_session_state("sess-exit-with-error", handle)
+
+    assert state.status == "error"
+    assert state.last_error, "parser must populate last_error when CLI exits after OAuth failure"
     assert state.message == state.last_error
 
 
@@ -1472,8 +1513,8 @@ def test_general_review_warns_when_default_or_fallback_uses_unverified_provider(
         },
     )
 
-    assert "O provider padrão precisa estar conectado e verificado." in warnings
-    assert "A ordem de fallback inclui providers que ainda não foram verificados." in warnings
+    assert "The default provider must be connected and verified." in warnings
+    assert "The fallback order includes providers that have not yet been verified." in warnings
 
 
 def test_purge_provider_global_secrets_wipes_every_scoped_env_key(monkeypatch):

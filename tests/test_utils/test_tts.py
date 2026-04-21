@@ -12,7 +12,7 @@ class TestStripForTts:
         text = "Hello\n```python\nprint('hi')\n```\nWorld"
         result = strip_for_tts(text)
         assert "print" not in result
-        assert "bloco de código omitido" in result
+        assert "code block omitted" in result
         assert "Hello" in result
         assert "World" in result
 

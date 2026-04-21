@@ -123,13 +123,13 @@ class TestParseAgentCommands:
         assert clean == text
 
     def test_invalid_json_skipped(self):
-        text = '<agent_cmd tool="cron_add">{invalid json}</agent_cmd> rest'
+        text = '<agent_cmd tool="job_create">{invalid json}</agent_cmd> rest'
         calls, clean = parse_agent_commands(text)
         assert calls == []
         assert "rest" in clean
 
     def test_multiline_json(self):
-        text = '<agent_cmd tool="cron_add">{\n"expression": "0 3 * * *",\n"command": "echo hi"\n}</agent_cmd>'
+        text = '<agent_cmd tool="job_create">{\n"expression": "0 3 * * *",\n"command": "echo hi"\n}</agent_cmd>'
         calls, clean = parse_agent_commands(text)
         assert len(calls) == 1
         assert calls[0].params["expression"] == "0 3 * * *"

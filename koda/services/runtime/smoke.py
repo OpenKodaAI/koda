@@ -101,9 +101,9 @@ def runtime_smoke_suggested_actions(prerequisites: dict[str, Any]) -> list[str]:
     """Return actionable next steps for the current machine."""
     actions: list[str] = []
     if not prerequisites.get("playwright_python_available"):
-        actions.append('Instale as dependências Python do projeto com `.venv/bin/pip install -e ".[dev]"`.')
+        actions.append('Install Python dependencies with `.venv/bin/pip install -e ".[dev]"`.')
     if prerequisites.get("playwright_python_available") and not prerequisites.get("playwright_browser_ready"):
-        actions.append("Instale o navegador do Playwright com `.venv/bin/python -m playwright install chromium`.")
+        actions.append("Install the Playwright browser with `.venv/bin/python -m playwright install chromium`.")
     effective_transport = str(prerequisites.get("effective_browser_transport") or "")
     if effective_transport == "local_headful":
         actions.append("Com `RUNTIME_BROWSER_TRANSPORT=local_headful`, o navegador visual roda localmente.")

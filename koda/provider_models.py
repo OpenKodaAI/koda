@@ -640,7 +640,7 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
         "eleven_multilingual_v2",
         "Eleven Multilingual v2",
         "audio",
-        "Modelo multilíngue estavel para TTS.",
+        "Stable multilingual TTS model.",
     ),
     ProviderModelDefinition(
         "elevenlabs",
@@ -669,14 +669,14 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
         "eleven_multilingual_sts_v2",
         "Eleven Multilingual STS v2",
         "audio",
-        "Speech-to-speech multilíngue.",
+        "Multilingual speech-to-speech.",
     ),
     ProviderModelDefinition(
         "elevenlabs",
         "eleven_multilingual_ttv_v2",
         "Eleven Multilingual TTV v2",
         "audio",
-        "Text-to-voice designer multilíngue.",
+        "Multilingual text-to-voice designer.",
     ),
     ProviderModelDefinition(
         "elevenlabs",
@@ -697,7 +697,7 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
         "eleven_multilingual_v1",
         "Eleven Multilingual v1",
         "audio",
-        "Modelo multilíngue anterior.",
+        "Previous multilingual model.",
         status="deprecated",
     ),
     ProviderModelDefinition(

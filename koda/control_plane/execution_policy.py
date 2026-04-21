@@ -716,6 +716,14 @@ def compile_legacy_execution_policy(
     *,
     feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
+    """Compile v1 tool/autonomy/resource policies into a v2 execution_policy.
+
+    Used only by ``scripts/migrate_execution_policies.py`` as a one-shot migration
+    helper. The runtime path (``resolve_execution_policy``) no longer falls back
+    here: an agent without an explicit ``execution_policy`` receives an empty
+    policy. After all persisted agent specs have been migrated, this function can
+    be deleted.
+    """
     normalized_spec = {
         "tool_policy": _safe_object(agent_spec.get("tool_policy")),
         "autonomy_policy": _safe_object(agent_spec.get("autonomy_policy")),

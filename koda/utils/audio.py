@@ -494,5 +494,5 @@ def transcribe_audio_sync(
 def build_audio_prompt(transcription: str, caption: str | None = None) -> str:
     """Build prompt with audio transcription for provider execution."""
     if caption:
-        return f"[Transcrição do áudio]:\n{transcription}\n\n{caption}"
-    return f"[Transcrição do áudio]:\n{transcription}\n\nResponda ao conteúdo do áudio acima."
+        return f"[Audio transcript]:\n{transcription}\n\n{caption}"
+    return f"[Audio transcript]:\n{transcription}\n\nRespond to the audio content above."

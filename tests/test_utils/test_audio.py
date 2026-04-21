@@ -29,12 +29,12 @@ class TestBuildAudioPrompt:
         prompt = build_audio_prompt("Olá, tudo bem?", "What does this say?")
         assert "Olá, tudo bem?" in prompt
         assert "What does this say?" in prompt
-        assert "Transcrição do áudio" in prompt
+        assert "Audio transcript" in prompt
 
     def test_without_caption(self):
         prompt = build_audio_prompt("Olá, tudo bem?")
         assert "Olá, tudo bem?" in prompt
-        assert "Responda ao conteúdo" in prompt
+        assert "Respond to the audio content" in prompt
 
 
 class TestIsFfmpegAvailable:

@@ -72,9 +72,9 @@ async def test_build_procedural_context_groups_success_and_caution() -> None:
 
     context = await build_procedural_context(store, "deploy", 111)
 
-    assert "Memória Procedural" in context
-    assert "Procedimentos Validados" in context
-    assert "Cautelas" in context
+    assert "Procedural Memory" in context
+    assert "Validated Procedures" in context
+    assert "Cautions" in context
     assert "task #7" in context
     assert "task #8" in context
 

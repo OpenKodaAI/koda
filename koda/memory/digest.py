@@ -42,30 +42,30 @@ def build_digest(user_id: int, *, agent_id: str | None = None) -> str | None:
     recent = get_recent_memories(user_id, since, limit=10, agent_id=agent_id)
     if recent:
         lines = [f"  • [{m.created_at.strftime('%H:%M')}] {m.content}" for m in recent]
-        sections["📝 Memórias Recentes"] = "\n".join(lines)
+        sections["📝 Recent Memories"] = "\n".join(lines)
 
     tasks = get_memories_by_types(user_id, ["task"], limit=10, agent_id=agent_id)
     if tasks:
-        sections["✅ Tarefas Ativas"] = "\n".join(f"  • {m.content}" for m in tasks)
+        sections["✅ Active Tasks"] = "\n".join(f"  • {m.content}" for m in tasks)
 
     events = get_memories_by_types(user_id, ["event"], limit=10, agent_id=agent_id)
     if events:
-        sections["📅 Eventos"] = "\n".join(f"  • {m.content}" for m in events)
+        sections["📅 Events"] = "\n".join(f"  • {m.content}" for m in events)
 
     query_count = _get_query_count_24h(user_id, agent_id=agent_id)
     if query_count > 0:
-        sections["📊 Atividade"] = f"  {query_count} consultas nas últimas 24h"
+        sections["📊 Activity"] = f"  {query_count} queries in the last 24h"
 
     expiring = get_expiring_soon(user_id, within_days=7, agent_id=agent_id)
     if expiring:
         lines = [f"  • [{m.expires_at.strftime('%Y-%m-%d') if m.expires_at else '?'}] {m.content}" for m in expiring]
-        sections["⏳ Expirando em Breve"] = "\n".join(lines)
+        sections["⏳ Expiring Soon"] = "\n".join(lines)
 
     stats = get_stats(user_id, agent_id=agent_id)
     if stats["active"] > 0:
         type_parts = [f"{t}: {c}" for t, c in sorted(stats["by_type"].items())]
         n = stats["active"]
-        label = "memória ativa" if n == 1 else "memórias ativas"
+        label = "active memory" if n == 1 else "active memories"
         sections["🧠 Stats"] = f"  {n} {label} ({', '.join(type_parts)})"
 
     if not sections:

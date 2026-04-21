@@ -1,5 +1,5 @@
 <div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%;">
-  <img src="docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
+  <img src="docs/assets/brand/koda_hero.jpeg" alt="Koda" width="450" style="max-width: 100%; height: auto; border-radius: 8px;" />
 </div>
 
 <p align="center">
@@ -111,14 +111,53 @@ The operational UI is part of the product itself. The dashboard runs as the offi
 
 ## How The Platform Is Structured
 
+```text
+       [ External Interfaces ]
+             (Telegram)
+                 │
+                 ▼
+  ┌─────────────────────────────┐     [ Control Plane ]
+  │ Presentation & Operations   │ ──> (Setup, Config, Agents,
+  │ (Next.js Web / Handlers)    │      Policies, Onboarding)
+  └──────────────┬──────────────┘         │
+                 │                        │
+                 ▼                        ▼
+           ┌───────────────────────────────────┐
+           │          Runtime Engine           │
+           │ (Queue, Orchestration, Tool Loop) │
+           └─────────────┬─────────────────────┘
+                         │
+     ┌───────────────────┼───────────────────────────┐
+     │                   │                           │
+     ▼                   ▼                           ▼
+  [ LLMs ]     [ Memory & Knowledge ]         [ Integrations ]
+  (Claude,     (Retrieval, Memory,            (Browser, DB,
+   Codex,       Governance, Graph,             DevOps, JIRA,
+   Ollama)      Expert Skills)                 Libraries)
+     │                   │                           │
+     └───────────────────┼───────────────────────────┘
+                         │
+                         ▼
+             [ Rust Microservices ]
+      (gRPC: Security, Memory, Artifact, Kernel)
+                         │
+                         ▼
+            [ State & Infrastructure ]
+          (Postgres + pgvector, SeaweedFS S3)
+```
+
+### Component Breakdown
+
 Koda is organized around a few stable layers:
 
-- **Web UI:** Next.js operator interface in `apps/web`
-- **Control plane:** setup, policy, secrets, provider connections, agent definitions, and public onboarding routes
-- **Runtime:** execution supervision, queue orchestration, runtime APIs, and agent tool dispatch
-- **Knowledge and memory:** retrieval, recall, curation, and context assembly
-- **Artifacts and storage:** durable metadata, object-backed binaries, and evidence generation
-- **Infrastructure:** Docker, Postgres, bundled S3-compatible storage, health checks, and operator tooling
+- **Web UI & Presentations**: The Next.js operator interface in `apps/web` and Telegram handlers provide human access to monitoring, setup, and prompts.
+- **Control Plane**: Handles access policies, secrets, provider connections, agent definitions, and onboarding flows.
+- **Runtime Engine**: The execution supervisor. Orchestrates tasks, queues requests, dispatches generic tool usage, and controls LLM fallback modes.
+- **LLM Providers**: External AI engines (Claude, Codex, Gemini, Ollama) that generate actual cognitive responses based on the compiled context.
+- **Memory & Knowledge**: The intelligence backend. Handles semantic retrieval, procedural/episodic memory capture, curation, and context assembly. "Skills" are stored expert prompts providing specific technical abilities.
+- **Integrations**: Extensions empowering the agents. Encompass browser interactions, data gathering (Jira, Google Workspace), and database connection handlers (MySQL, Mongo, Redis).
+- **Rust Microservices**: Native extensions using gRPC for high-performance needs like the security core, memory/vector engine, artifact loading, and sandboxed runtimes.
+- **State & Infrastructure**: Local operations and durable elements like PostgreSQL with `pgvector` for embeddings, and SeaweedFS representing an S3-compatible object storage layer for files and binary artifacts.
 
 For a public architecture walkthrough, start with [Documentation Index](docs/README.md), [Architecture Overview](docs/architecture/overview.md), and [Runtime Architecture](docs/architecture/runtime.md).
 

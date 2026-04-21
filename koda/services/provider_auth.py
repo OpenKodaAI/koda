@@ -641,8 +641,24 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
             message = "Preparing Gemini CLI authorization."
 
     if not running:
-        if returncode == 0:
+        # Detect CLI failure from output BEFORE deciding the status. The CLI
+        # can exit with returncode=0 even when Anthropic rejected the code
+        # (the TUI catches the error and quits cleanly) — treating that as
+        # "awaiting_browser" leaves the operator stuck on the authorize step
+        # forever because the subprocess is already dead.
+        cli_reported_error = "oauth error:" in compact_lower or "invalid code" in compact_lower
+        if cli_reported_error:
+            status = "error"
+            if not last_error:
+                last_error = "Claude Code rejected the authentication code. Start over and paste a fresh code."
+            if not message:
+                message = last_error
+        elif returncode == 0:
             if handle.provider_id in {"claude", "codex", "gemini"} and (auth_url or user_code):
+                # CLI exited cleanly but the caller (_sync_provider_login_session)
+                # must re-verify with ``auth status --json`` before marking this
+                # completed — the PTY buffer still contains the auth URL, so we
+                # cannot tell the flow outcome from output alone.
                 status = "awaiting_browser"
                 message = message or "Authorize in the browser to complete the login."
             else:

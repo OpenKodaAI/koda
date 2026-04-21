@@ -60,7 +60,7 @@ def test_invoke_raises_with_configured_selection(monkeypatch: pytest.MonkeyPatch
     assert excinfo.value.selection.model_id == "gpt-image-1"
     message = str(excinfo.value)
     assert "openai/gpt-image-1" in message
-    assert "runtime ainda não implementado" in message
+    assert "runtime not yet implemented" in message
 
 
 def test_invoke_raises_with_unconfigured_hint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,7 +69,7 @@ def test_invoke_raises_with_unconfigured_hint(monkeypatch: pytest.MonkeyPatch) -
         stubs.invoke_video_generation("prompt")
     assert excinfo.value.selection.present is False
     message = str(excinfo.value)
-    assert "sem provider padrão configurado" in message
+    assert "no default provider configured" in message
     assert "/control-plane/system/models" in message
 
 

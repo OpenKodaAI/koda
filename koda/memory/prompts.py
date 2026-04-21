@@ -104,18 +104,18 @@ def get_extraction_prompt() -> str:
 
 EXTRACTION_PROMPT = get_extraction_prompt()
 
-RECALL_HEADER = "## Memória de Longo Prazo\nInformações relevantes de conversas anteriores:\n"
+RECALL_HEADER = "## Long-term Memory\nRelevant information from previous conversations:\n"
 
 RECALL_TYPE_HEADERS: dict[str, str] = {
-    "event": "### Eventos Recentes",
-    "fact": "### Fatos Relevantes",
-    "task": "### Tarefas Ativas",
-    "decision": "### Decisões",
-    "procedure": "### Procedimentos Reutilizáveis",
-    "preference": "### Preferências",
-    "problem": "### Problemas Conhecidos",
-    "commit": "### Commits Recentes",
-    "relationship": "### Relações",
+    "event": "### Recent Events",
+    "fact": "### Relevant Facts",
+    "task": "### Active Tasks",
+    "decision": "### Decisions",
+    "procedure": "### Reusable Procedures",
+    "preference": "### Preferences",
+    "problem": "### Known Problems",
+    "commit": "### Recent Commits",
+    "relationship": "### Relationships",
 }
 
-PROACTIVE_HEADER = "## Lembretes Proativos\nInformações recentes que podem ser relevantes agora:\n"
+PROACTIVE_HEADER = "## Proactive Reminders\nRecent information that may be relevant now:\n"

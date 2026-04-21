@@ -838,9 +838,6 @@ def _resolve_operational_command(
             path=resolved_action.path,
         )
 
-    if command in {"cron_list", "cron_add", "cron_delete", "cron_toggle"}:
-        return _operational_resolution_from_contract(command, raw_args=args)
-
     return None
 
 

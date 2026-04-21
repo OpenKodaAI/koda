@@ -19,8 +19,8 @@ integrations. It exposes:
 * ``invoke_{image,video,music}_generation()`` — explicitly raises
   :class:`GenerationServiceNotImplemented` with a structured message. The
   error surfaces the configured selection so the UI / logs can report
-  accurately: *"configurado como openai/gpt-image-1 mas geração não
-  implementada"*. This replaces the previous silent absence with a
+  accurately: *"configured as openai/gpt-image-1 but generation not
+  implemented"*. This replaces the previous silent absence with a
   fail-closed contract that future implementations can satisfy.
 
 Keeping the configuration wired to observable surface area makes the UI
@@ -63,13 +63,13 @@ class GenerationServiceNotImplemented(NotImplementedError):
         self.selection = selection
         if selection.present:
             detail = (
-                f"Geração de {slot} configurada como "
-                f"{selection.provider_id}/{selection.model_id} — runtime ainda não implementado."
+                f"{slot.capitalize()} generation configured as "
+                f"{selection.provider_id}/{selection.model_id} — runtime not yet implemented."
             )
         else:
             detail = (
-                f"Geração de {slot} não implementada e sem provider padrão configurado. "
-                "Defina um default em /control-plane/system/models."
+                f"{slot.capitalize()} generation not implemented and no default provider configured. "
+                "Set a default under /control-plane/system/models."
             )
         super().__init__(detail)
 

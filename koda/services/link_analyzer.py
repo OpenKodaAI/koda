@@ -267,66 +267,67 @@ def build_link_keyboard(meta: LinkMetadata) -> InlineKeyboardMarkup:
 
 def build_analysis_prompt(action: str, meta: LinkMetadata, transcript_text: str | None = None) -> str:
     """Build a prompt for provider execution based on the selected action."""
-    base = f"Analise o conteúdo do link: {meta.url}"
+    base = f"Analyze the content at this link: {meta.url}"
     if meta.title:
-        base += f"\nTítulo: {meta.title}"
+        base += f"\nTitle: {meta.title}"
     if meta.description:
-        base += f"\nDescrição: {meta.description[:300]}"
+        base += f"\nDescription: {meta.description[:300]}"
 
     prompts = {
         "summary": (
             f"{base}\n\n"
-            "Faça um resumo conciso e bem estruturado do conteúdo.\n"
-            "1. Comece com uma frase que capture a essência do conteúdo.\n"
-            "2. Liste os principais pontos abordados com bullet points.\n"
-            "3. Inclua dados, números ou citações relevantes quando houver.\n"
-            "4. Termine com as conclusões ou takeaways práticos.\n"
-            "Mantenha o resumo objetivo e informativo — o leitor deve entender o conteúdo sem precisar acessar o link."
+            "Write a concise, well-structured summary of the content.\n"
+            "1. Start with one sentence that captures the essence of the content.\n"
+            "2. List the main points covered as bullet points.\n"
+            "3. Include relevant data, numbers, or quotes when available.\n"
+            "4. End with conclusions or practical takeaways.\n"
+            "Keep the summary objective and informative — the reader should understand the content without needing "
+            "to open the link."
         ),
         "main_idea": (
             f"{base}\n\n"
-            "Identifique e explique a ideia principal/tese central do conteúdo em 2-3 parágrafos.\n"
-            "Seja direto: qual é a mensagem mais importante que o autor quer transmitir?\n"
-            "Se houver argumentos que sustentam essa tese, mencione os mais fortes."
+            "Identify and explain the main idea / central thesis of the content in 2–3 paragraphs.\n"
+            "Be direct: what is the most important message the author is trying to convey?\n"
+            "If supporting arguments are present, mention the strongest ones."
         ),
         "key_points": (
             f"{base}\n\n"
-            "Liste os pontos-chave do conteúdo em formato de bullet points.\n"
-            "Foque em: fatos verificáveis, dados quantitativos, argumentos centrais e conclusões.\n"
-            "Ordene por relevância (mais importante primeiro). Omita detalhes secundários."
+            "List the key points of the content as bullet points.\n"
+            "Focus on: verifiable facts, quantitative data, core arguments, and conclusions.\n"
+            "Order by relevance (most important first). Omit secondary details."
         ),
         "structure": (
             f"{base}\n\n"
-            "Descreva como o conteúdo está organizado:\n"
-            "- Quais são as seções/capítulos/tópicos principais?\n"
-            "- Como eles se conectam (sequência lógica, progressão, comparação)?\n"
-            "- Qual é o fio condutor que liga as partes?\n"
-            "Isso ajuda a entender a lógica do autor sem ler o conteúdo completo."
+            "Describe how the content is organized:\n"
+            "- What are the main sections / chapters / topics?\n"
+            "- How do they connect (logical sequence, progression, comparison)?\n"
+            "- What is the thread that ties the parts together?\n"
+            "This helps understand the author's logic without reading the full content."
         ),
         "full": (
             f"{base}\n\n"
-            "Faça uma análise completa e detalhada do conteúdo:\n"
-            "1. Resumo geral (2-3 parágrafos)\n"
-            "2. Pontos-chave (bullet points dos fatos e argumentos principais)\n"
-            "3. Ideia principal/tese central\n"
-            "4. Pontos fortes (o que o conteúdo faz bem)\n"
-            "5. Pontos fracos ou lacunas (o que falta ou poderia ser melhor)\n"
-            "6. Conclusões e takeaways práticos para o leitor"
+            "Produce a complete, detailed analysis of the content:\n"
+            "1. Overall summary (2–3 paragraphs)\n"
+            "2. Key points (bullet points of the main facts and arguments)\n"
+            "3. Main idea / central thesis\n"
+            "4. Strengths (what the content does well)\n"
+            "5. Weaknesses or gaps (what is missing or could be better)\n"
+            "6. Conclusions and practical takeaways for the reader"
         ),
     }
 
     if action == "transcript" and transcript_text:
         return (
             f"{base}\n\n"
-            "Abaixo está a transcrição do vídeo. Formate-a de forma clara e legível:\n"
-            "1. Organize por tópicos/seções quando houver mudança de assunto.\n"
-            "2. Mantenha timestamps relevantes para os pontos principais.\n"
-            "3. Corrija erros óbvios de transcrição automática.\n"
-            "4. Remova repetições e hesitações desnecessárias.\n\n"
+            "Below is the video transcript. Format it in a clear, readable way:\n"
+            "1. Group by topic / section when the subject changes.\n"
+            "2. Keep timestamps relevant to the main points.\n"
+            "3. Correct obvious auto-transcription errors.\n"
+            "4. Remove unnecessary repetition and hesitations.\n\n"
             f"<transcript>\n{transcript_text}\n</transcript>"
         )
 
-    return prompts.get(action, f"{base}\n\nAnalise este conteúdo.")
+    return prompts.get(action, f"{base}\n\nAnalyze this content.")
 
 
 def meta_to_dict(meta: LinkMetadata) -> dict:

@@ -666,7 +666,7 @@ _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
         title="ElevenLabs",
         vendor="ElevenLabs",
         runtime_adapter="elevenlabs_runner",
-        description="Síntese de voz e música com qualidade premium.",
+        description="Premium-quality voice and music synthesis.",
         category="voice",
         supports_streaming=True,
         supports_native_resume=False,
@@ -685,7 +685,7 @@ _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
         title="Kokoro",
         vendor="Kokoro",
         runtime_adapter="kokoro_runner",
-        description="Vozes leves e rápidas para TTS.",
+        description="Lightweight and fast voices for TTS.",
         category="voice",
         supports_streaming=True,
         supports_native_resume=False,
@@ -721,7 +721,7 @@ _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
         title="Sora",
         vendor="OpenAI",
         runtime_adapter="sora_runner",
-        description="Geração de imagens e vídeos via OpenAI.",
+        description="Image and video generation via OpenAI.",
         category="media",
         supports_streaming=False,
         supports_native_resume=False,
@@ -795,7 +795,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
             fields=(
                 ConnectionField(
                     key="GOOGLE_APPLICATION_CREDENTIALS",
-                    label="Service Account JSON (caminho ou conteúdo)",
+                    label="Service Account JSON (path or content)",
                     required=True,
                     input_type="textarea",
                     help="Cole o JSON do service account ou o caminho absoluto do arquivo.",
@@ -818,8 +818,8 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         connection_profile=ConnectionProfile(
             strategy="api_key",
             fields=(
-                ConnectionField(key="JIRA_URL", label="URL do site Jira", input_type="text"),
-                ConnectionField(key="JIRA_USERNAME", label="Usuário (email)", input_type="text"),
+                ConnectionField(key="JIRA_URL", label="Jira site URL", input_type="text"),
+                ConnectionField(key="JIRA_USERNAME", label="Username (email)", input_type="text"),
                 ConnectionField(key="JIRA_API_TOKEN", label="API Token", input_type="password"),
             ),
         ),
@@ -838,8 +838,8 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         connection_profile=ConnectionProfile(
             strategy="api_key",
             fields=(
-                ConnectionField(key="CONFLUENCE_URL", label="URL do site Confluence", input_type="text"),
-                ConnectionField(key="CONFLUENCE_USERNAME", label="Usuário (email)", input_type="text"),
+                ConnectionField(key="CONFLUENCE_URL", label="Confluence site URL", input_type="text"),
+                ConnectionField(key="CONFLUENCE_USERNAME", label="Username (email)", input_type="text"),
                 ConnectionField(key="CONFLUENCE_API_TOKEN", label="API Token", input_type="password"),
             ),
         ),
@@ -859,7 +859,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
             fields=(
                 ConnectionField(key="AWS_ACCESS_KEY_ID", label="Access Key ID", input_type="password"),
                 ConnectionField(key="AWS_SECRET_ACCESS_KEY", label="Secret Access Key", input_type="password"),
-                ConnectionField(key="AWS_DEFAULT_REGION", label="Região padrão", input_type="text"),
+                ConnectionField(key="AWS_DEFAULT_REGION", label="Default region", input_type="text"),
             ),
             scope_fields=(
                 ConnectionField(
@@ -925,7 +925,7 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
                     label="Personal Access Token (fallback)",
                     required=False,
                     input_type="password",
-                    help="Opcional: use apenas quando `gh auth login` não for viável.",
+                    help="Optional: only use when `gh auth login` is not viable.",
                 ),
             ),
         ),
