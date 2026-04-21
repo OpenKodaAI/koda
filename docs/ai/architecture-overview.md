@@ -9,7 +9,6 @@ For the canonical machine-readable file, flow, and test index, start with [`repo
 ## Entry Points
 
 - [`../../koda/__main__.py`](../../koda/__main__.py): main application startup and handler registration
-- [`../../agent.py`](../../agent.py): compatibility wrapper that imports and runs `koda.__main__.main`
 - [`../../launcher.py`](../../launcher.py): starts multiple named agents as separate processes
 - [`../../docker-compose.yml`](../../docker-compose.yml): container runtime definition
 

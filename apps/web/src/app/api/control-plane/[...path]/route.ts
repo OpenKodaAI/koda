@@ -31,7 +31,6 @@ const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "auth/bootstrap/exchange",
   "auth/login",
   "auth/register-owner",
-  "auth/legacy/exchange",
 ]);
 
 function isPublicControlPlanePath(path: string[]) {

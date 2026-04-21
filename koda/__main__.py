@@ -167,7 +167,7 @@ def main() -> None:
     except Exception:
         pass
     try:
-        import koda.state_primary as _sp
+        import koda.state.primary as _sp
 
         _sp._BRIDGE_LOOP = None
         _sp._BRIDGE_THREAD = None

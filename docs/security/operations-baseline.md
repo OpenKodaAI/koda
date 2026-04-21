@@ -48,7 +48,7 @@ This checklist is the minimum operational baseline for running Koda with a secur
 
 Escalate immediately when any of the following occurs:
 
-- unexpected operator-session invalidation or suspicious repeated web-auth failures
+- unexpected operator-session invalidation or suspicious repeated operator login failures
 - runtime attach sessions appearing without matching operator intent
 - MCP or integration traffic toward internal network ranges
 - unexplained creation of destructive grants or policy broadening

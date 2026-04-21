@@ -770,14 +770,7 @@ def test_personal_tokens_and_sessions_can_be_listed_and_revoked(
     assert service.resolve_bearer_token(payload["session_token"]) is None
 
 
-def test_legacy_break_glass_exchange_remains_available(fake_operator_db: FakeOperatorAuthDb) -> None:
+def test_legacy_exchange_method_is_removed() -> None:
     service = operator_auth_mod.OperatorAuthService()
 
-    payload = service.exchange_legacy_token("legacy-break-glass")
-    context = service.resolve_bearer_token(payload["session_token"])
-
-    assert payload["auth"]["authenticated"] is True
-    assert payload["auth"]["session_subject"] == "break_glass"
-    assert payload["auth"]["operator"] is None
-    assert context is not None
-    assert context.subject_type == "break_glass"
+    assert not hasattr(service, "exchange_legacy_token")

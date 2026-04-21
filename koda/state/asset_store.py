@@ -8,7 +8,7 @@ from typing import Any
 
 from koda.config import AGENT_ID
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_one,

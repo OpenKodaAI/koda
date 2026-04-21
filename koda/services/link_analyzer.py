@@ -239,26 +239,26 @@ def build_link_keyboard(meta: LinkMetadata) -> InlineKeyboardMarkup:
     if meta.link_type == LinkType.VIDEO:
         rows = [
             [
-                InlineKeyboardButton("📜 Transcrição", callback_data=f"link:transcript:{h}"),
+                InlineKeyboardButton("📜 Transcript", callback_data=f"link:transcript:{h}"),
                 InlineKeyboardButton("🖼 Thumbnail", callback_data=f"link:thumbnail:{h}"),
             ],
             [
-                InlineKeyboardButton("📝 Resumo", callback_data=f"link:summary:{h}"),
-                InlineKeyboardButton("💡 Ideia Principal", callback_data=f"link:main_idea:{h}"),
+                InlineKeyboardButton("📝 Summary", callback_data=f"link:summary:{h}"),
+                InlineKeyboardButton("💡 Main Idea", callback_data=f"link:main_idea:{h}"),
             ],
             [
-                InlineKeyboardButton("📋 Estrutura", callback_data=f"link:structure:{h}"),
-                InlineKeyboardButton("🔍 Análise Completa", callback_data=f"link:full:{h}"),
+                InlineKeyboardButton("📋 Structure", callback_data=f"link:structure:{h}"),
+                InlineKeyboardButton("🔍 Full Analysis", callback_data=f"link:full:{h}"),
             ],
         ]
     else:
         rows = [
             [
-                InlineKeyboardButton("📝 Resumo", callback_data=f"link:summary:{h}"),
-                InlineKeyboardButton("🔑 Pontos-Chave", callback_data=f"link:key_points:{h}"),
+                InlineKeyboardButton("📝 Summary", callback_data=f"link:summary:{h}"),
+                InlineKeyboardButton("🔑 Key Points", callback_data=f"link:key_points:{h}"),
             ],
             [
-                InlineKeyboardButton("🔍 Análise Completa", callback_data=f"link:full:{h}"),
+                InlineKeyboardButton("🔍 Full Analysis", callback_data=f"link:full:{h}"),
             ],
         ]
 

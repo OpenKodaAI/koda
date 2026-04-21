@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 _SHARED_POSTGRES_BACKENDS: dict[tuple[str, str, str, int], KnowledgeV2PostgresBackend] = {}
+_SHARED_BACKENDS_OWNER_PID: int | None = None
 
 
 class KnowledgeBackendLifecycle:
@@ -65,7 +67,24 @@ def get_shared_postgres_backend(
     schema: str,
     embedding_dimension: int,
 ) -> KnowledgeV2PostgresBackend:
-    """Reuse one primary backend per agent/schema tuple inside this process."""
+    """Reuse one primary backend per agent/schema tuple inside this process.
+
+    PID-awareness: if the cache was populated in a parent process (e.g. via
+    any future ``os.fork``-based spawn), the inherited asyncpg pool points at
+    the parent's event loop and its sockets — using it from the child would
+    corrupt state. Drop the cache when we detect we've moved processes.
+    ``subprocess_exec`` re-imports this module in a fresh interpreter, so
+    this branch is primarily defensive for future callers.
+    """
+    global _SHARED_BACKENDS_OWNER_PID
+
+    current_pid = os.getpid()
+    if _SHARED_BACKENDS_OWNER_PID is None:
+        _SHARED_BACKENDS_OWNER_PID = current_pid
+    elif current_pid != _SHARED_BACKENDS_OWNER_PID:
+        _SHARED_POSTGRES_BACKENDS.clear()
+        _SHARED_BACKENDS_OWNER_PID = current_pid
+
     key = (
         (agent_id or "default").upper(),
         dsn.strip(),

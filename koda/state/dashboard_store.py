@@ -12,8 +12,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from koda.memory.types import MemoryStatus
-from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_one,
@@ -101,9 +100,21 @@ def _now_iso() -> str:
 
 
 def _normalize_scope(agent_id: str) -> str:
-    scope = normalize_agent_scope(agent_id)
-    if not scope:
+    """Return the canonical uppercase agent scope used across dashboard tables.
+
+    The tasks / sessions / audit_events / query_history schemas store
+    ``agent_id`` matching ``cp_agent_definitions.id`` (uppercase). The
+    memory-side scope helper (``normalize_agent_scope``) lowercases for
+    agent-local collection isolation, which is valid for memory but not
+    for dashboard queries — using the lowercased value here made every
+    dashboard read miss rows written with the canonical uppercase
+    convention, returning 404 on execution detail and empty lists on
+    sessions / DLQ / audit / schedule routes.
+    """
+    raw = str(agent_id or "").strip()
+    if not raw:
         raise ValueError("invalid agent_id")
+    scope = raw.upper()
     require_primary_state_backend(agent_id=scope, error="dashboard_primary_backend_unavailable")
     return scope
 
@@ -210,7 +221,11 @@ def _task_activity_iso(row: dict[str, Any]) -> str | None:
 
 
 def _public_agent_id(agent_id: str | None) -> str:
-    return normalize_agent_scope(agent_id, fallback=agent_id)
+    # Emit the canonical uppercase form so dashboard responses match the
+    # rest of the API (cp_agent_definitions.id, tasks.agent_id after the
+    # case-fix migration). The legacy lowercase form broke joins on the
+    # frontend's agent catalog lookup.
+    return str(agent_id or "").strip().upper() or "DEFAULT"
 
 
 def _latest_execution_trace_event(audit_events: list[dict[str, Any]]) -> dict[str, Any] | None:

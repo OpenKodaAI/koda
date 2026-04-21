@@ -29,30 +29,38 @@ class _Request:
         return dict(self._payload)
 
 
-def test_resolve_execution_policy_compiles_legacy_tool_and_integration_grants() -> None:
+def test_resolve_execution_policy_returns_explicit_policy_only() -> None:
     catalog = build_policy_catalog()
     tool_id = catalog["tool_ids"][0]
 
+    explicit = {
+        "version": 1,
+        "rules": [
+            {
+                "name": f"allow_{tool_id}",
+                "priority": 100,
+                "match": {"tool_id": tool_id},
+                "decision": "allow",
+            }
+        ],
+        "defaults": {"default_approval_mode": "guarded"},
+    }
+
+    policy = resolve_execution_policy({"execution_policy": explicit})
+
+    assert policy["rules"][0]["match"]["tool_id"] == tool_id
+    assert policy["defaults"]["default_approval_mode"] == "guarded"
+
+
+def test_resolve_execution_policy_returns_empty_when_no_explicit_policy() -> None:
     policy = resolve_execution_policy(
         {
-            "tool_policy": {"allowed_tool_ids": [tool_id]},
-            "resource_access_policy": {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.send"],
-                        "allowed_domains": ["googleapis.com"],
-                        "allow_private_network": True,
-                    }
-                }
-            },
+            "tool_policy": {"allowed_tool_ids": ["http_request"]},
             "autonomy_policy": {"default_approval_mode": "guarded"},
         }
     )
 
-    assert policy["source"] == "compiled_legacy"
-    assert any(rule["match"].get("tool_id") == tool_id for rule in policy["rules"])
-    assert any(rule["match"].get("integration_id") == "gws" for rule in policy["rules"])
-    assert policy["defaults"]["default_approval_mode"] == "guarded"
+    assert policy == {}
 
 
 def test_build_policy_catalog_exposes_action_entries_and_groupings() -> None:

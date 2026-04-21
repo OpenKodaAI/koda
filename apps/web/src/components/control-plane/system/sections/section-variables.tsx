@@ -11,12 +11,13 @@ import { SettingsFieldGroup } from "@/components/control-plane/system/settings-f
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { FADE_TRANSITION } from "@/components/control-plane/shared/motion-constants";
 import { Button } from "@/components/ui/button";
-import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import { SecretInput } from "@/components/ui/secret-controls";
 import {
   removeVariable,
   sanitizeVariableDraft,
   upsertVariable,
 } from "@/lib/system-settings-model";
+import { findFieldError } from "@/lib/system-settings-schema";
 import type { GeneralSystemSettingsVariable } from "@/lib/control-plane";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,7 @@ type DraftState = {
   value: string;
   description: string;
   type: "text" | "secret";
-  scope: "system_only" | "bot_grant";
+  scope: "system_only" | "agent_grant";
   clear: boolean;
   valuePresent: boolean;
   preview: string;
@@ -43,10 +44,11 @@ const INITIAL_DRAFT: DraftState = {
 };
 
 export function SectionVariables() {
-  const { draft, setField } = useSystemSettings();
+  const { draft, setField, sectionErrors } = useSystemSettings();
   const { tl } = useAppI18n();
   const { showToast } = useToast();
   const variables = draft.values.variables;
+  const variableErrors = sectionErrors.variables;
 
   const [entryDraft, setEntryDraft] = useState<DraftState>(INITIAL_DRAFT);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -55,6 +57,32 @@ export function SectionVariables() {
     () => [...variables].sort((a, b) => a.key.localeCompare(b.key)),
     [variables],
   );
+
+  // Map error field path "variables.{index}.x" back to the key, so we can flag
+  // the offending row in the list even though save ordered them alphabetically.
+  const errorKeysByIndex = useMemo(() => {
+    const keys = new Set<string>();
+    for (const err of variableErrors) {
+      const match = /^variables\.(\d+)(?:\.|$)/.exec(err.field);
+      if (!match) continue;
+      const idx = Number(match[1]);
+      if (Number.isInteger(idx) && idx >= 0 && idx < variables.length) {
+        keys.add(variables[idx]!.key);
+      }
+    }
+    return keys;
+  }, [variableErrors, variables]);
+
+  const draftKeyError = useMemo(() => {
+    if (!editingKey) return undefined;
+    const idx = variables.findIndex((variable) => variable.key === editingKey);
+    if (idx < 0) return undefined;
+    return (
+      findFieldError(variableErrors, `variables.${idx}.key`)?.message ??
+      findFieldError(variableErrors, `variables.${idx}.type`)?.message ??
+      findFieldError(variableErrors, `variables.${idx}.scope`)?.message
+    );
+  }, [editingKey, variables, variableErrors]);
 
   const isEditing = editingKey !== null;
 
@@ -145,7 +173,12 @@ export function SectionVariables() {
                 <span className="eyebrow">{tl("Chave")}</span>
                 <input
                   type="text"
-                  className="field-shell font-mono text-[var(--text-primary)]"
+                  className={cn(
+                    "field-shell font-mono text-[var(--text-primary)]",
+                    draftKeyError
+                      ? "border-[var(--tone-danger-border)] focus:border-[var(--tone-danger-border)]"
+                      : "",
+                  )}
                   value={entryDraft.key}
                   onChange={(event) =>
                     setEntryDraft((prev) => ({
@@ -155,7 +188,13 @@ export function SectionVariables() {
                   }
                   placeholder="TEAM_NAME"
                   disabled={isEditing && entryDraft.type === "secret"}
+                  aria-invalid={draftKeyError ? true : undefined}
                 />
+                {draftKeyError ? (
+                  <span role="alert" className="text-xs text-[var(--tone-danger-text)]">
+                    {tl(draftKeyError)}
+                  </span>
+                ) : null}
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="eyebrow">
@@ -206,7 +245,16 @@ export function SectionVariables() {
 
             {entryDraft.type === "secret" && entryDraft.valuePresent ? (
               <div className="flex flex-col gap-2">
-                <MaskedSecretPreview preview={entryDraft.preview} />
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                    {tl("Armazenada")}
+                  </span>
+                  <span className="text-xs text-[var(--text-tertiary)]">
+                    {tl(
+                      "O valor atual nunca é exibido. Digite uma nova chave para substituir ou marque para remover.",
+                    )}
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() =>
@@ -260,23 +308,23 @@ export function SectionVariables() {
                   onClick={() =>
                     setEntryDraft((prev) => ({
                       ...prev,
-                      scope: prev.scope === "bot_grant" ? "system_only" : "bot_grant",
+                      scope: prev.scope === "agent_grant" ? "system_only" : "agent_grant",
                     }))
                   }
-                  aria-pressed={entryDraft.scope === "bot_grant"}
+                  aria-pressed={entryDraft.scope === "agent_grant"}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer",
-                    entryDraft.scope === "bot_grant"
+                    entryDraft.scope === "agent_grant"
                       ? "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]"
                       : "border-[var(--border-subtle)] bg-transparent text-[var(--text-tertiary)] hover:border-[var(--border-strong)]",
                   )}
                 >
-                  {entryDraft.scope === "bot_grant" ? (
+                  {entryDraft.scope === "agent_grant" ? (
                     <Users size={12} strokeWidth={1.75} />
                   ) : (
                     <Lock size={12} strokeWidth={1.75} />
                   )}
-                  {entryDraft.scope === "bot_grant"
+                  {entryDraft.scope === "agent_grant"
                     ? tl("Disponível por grant")
                     : tl("Somente sistema")}
                 </button>
@@ -304,6 +352,7 @@ export function SectionVariables() {
               <AnimatePresence initial={false}>
                 {sortedVariables.map((variable) => {
                   const isRowEditing = editingKey === variable.key;
+                  const rowHasError = errorKeysByIndex.has(variable.key);
                   return (
                     <motion.div
                       key={variable.key}
@@ -315,9 +364,11 @@ export function SectionVariables() {
                       <div
                         className={cn(
                           "flex flex-col gap-1 rounded-[var(--radius-panel-sm)] border px-3.5 py-2.5 transition-colors",
-                          isRowEditing
-                            ? "border-[var(--border-strong)] bg-[var(--hover-tint)]"
-                            : "border-[var(--border-subtle)] bg-[var(--panel-soft)]",
+                          rowHasError
+                            ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)]"
+                            : isRowEditing
+                              ? "border-[var(--border-strong)] bg-[var(--hover-tint)]"
+                              : "border-[var(--border-subtle)] bg-[var(--panel-soft)]",
                         )}
                       >
                         <div className="flex items-center gap-3">
@@ -338,18 +389,18 @@ export function SectionVariables() {
                             <span
                               className={cn(
                                 "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                                variable.scope === "bot_grant"
+                                variable.scope === "agent_grant"
                                   ? "bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]"
                                   : "bg-[var(--hover-tint)] text-[var(--text-quaternary)]",
                               )}
                             >
-                              {variable.scope === "bot_grant" ? tl("grant") : tl("system")}
+                              {variable.scope === "agent_grant" ? tl("grant") : tl("system")}
                             </span>
                           </div>
 
                           <span className="hidden max-w-[220px] truncate font-mono text-xs text-[var(--text-quaternary)] md:inline">
                             {variable.type === "secret"
-                              ? variable.preview || "••••••••"
+                              ? tl("(segredo armazenado)")
                               : variable.value}
                           </span>
 

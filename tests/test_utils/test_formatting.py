@@ -224,30 +224,30 @@ class TestMarkdownToTelegramHtml:
 class TestFormatErrorMessage:
     def test_authentication_error(self):
         result = format_error_message("Failed to authenticate. API Error: 401 Invalid authentication credentials")
-        assert "Autenticação" in result
-        assert "credenciais válidas" in result or "perdeu a sessão" in result
+        assert "Authentication" in result
+        assert "valid credentials" in result or "login session expired" in result
 
     def test_timeout_error(self):
         result = format_error_message("Request timed out after 60s")
         assert "Timeout" in result
-        assert "O provedor demorou demais" in result
+        assert "took too long" in result
         assert "/model auto" in result
         assert "Claude" not in result
 
     def test_budget_error(self):
         result = format_error_message("Budget limit exceeded: cost too high")
-        assert "Or\u00e7amento" in result or "Orçamento" in result
+        assert "Budget" in result
         assert "/resetcost" in result
         assert "/model haiku" not in result
 
     def test_overloaded_error(self):
         result = format_error_message("API is overloaded, please try later")
-        assert "Sobrecarregado" in result
-        assert "indispon" in result
+        assert "Overloaded" in result
+        assert "unavailable" in result
 
     def test_generic_error(self):
         result = format_error_message("Something unexpected happened")
-        assert "Erro" in result
+        assert "Error" in result
         assert "/retry" in result
         assert "Something unexpected happened" in result
 

@@ -2,7 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { User, Cpu, Plug, Brain, Key } from "lucide-react";
+import { User, Cpu, Plug, Brain, Key, Clock } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import { SETTINGS_SECTIONS, STEP_TO_SECTION, type SettingsSectionId } from "@/lib/system-settings-model";
@@ -11,7 +11,7 @@ import { TabBar } from "@/components/control-plane/shared/tab-bar";
 import { cn } from "@/lib/utils";
 
 const SECTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  User, Cpu, Plug, Brain, Key,
+  User, Cpu, Plug, Brain, Key, Clock,
 };
 
 export function SettingsSidebar() {

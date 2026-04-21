@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import { SecretInput } from "@/components/ui/secret-controls";
 
 describe("secret controls", () => {
   it("toggles secret input visibility without changing the value", async () => {
@@ -21,26 +21,5 @@ describe("secret controls", () => {
       screen.getByRole("button", { name: /esconder valor|hide value/i }),
     );
     expect(input.type).toBe("password");
-  });
-
-  it("keeps saved previews masked and lets the user hide or show the masked reference", async () => {
-    const user = userEvent.setup();
-    render(<MaskedSecretPreview preview="sk-******1234" />);
-
-    expect(screen.getByText("sk-******1234")).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", {
-        name: /ocultar valor mascarado|hide masked value/i,
-      }),
-    );
-    expect(screen.getByText("••••••••••")).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", {
-        name: /mostrar valor mascarado|show masked value/i,
-      }),
-    );
-    expect(screen.getByText("sk-******1234")).toBeInTheDocument();
   });
 });

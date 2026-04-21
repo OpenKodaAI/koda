@@ -768,23 +768,23 @@ def _notification_text(
         f"⏱ Job #{job['id']} • run #{run['id']}",
         f"Status: {run.get('status')}",
         f"Trace: {run.get('trace_id') or 'n/a'}",
-        f"Planejado: {planned}",
-        f"Executado: {actual}",
-        f"Duração: {duration_label}",
-        f"Provider/modelo: {provider} / {model}",
-        f"Verificação: {run.get('verification_status')}",
-        f"Tarefa: {run.get('task_id') or 'n/a'}",
+        f"Planned: {planned}",
+        f"Executed: {actual}",
+        f"Duration: {duration_label}",
+        f"Provider/model: {provider} / {model}",
+        f"Verification: {run.get('verification_status')}",
+        f"Task: {run.get('task_id') or 'n/a'}",
     ]
     if summary_text:
-        lines.append(f"Resumo: {summary_text}")
+        lines.append(f"Summary: {summary_text}")
     if error_message:
-        lines.append(f"Erro: {error_message}")
+        lines.append(f"Error: {error_message}")
     if next_retry_at:
-        lines.append(f"Próxima tentativa: {next_retry_at}")
+        lines.append(f"Next retry: {next_retry_at}")
     metadata = run.get("metadata") or {}
     artifacts = metadata.get("artifacts") or []
     if artifacts:
-        lines.append(f"Artefatos: {', '.join(str(path) for path in artifacts[:5])}")
+        lines.append(f"Artifacts: {', '.join(str(path) for path in artifacts[:5])}")
     fallback_chain = metadata.get("fallback_chain") or []
     if fallback_chain:
         lines.append(f"Fallback: {' -> '.join(str(step) for step in fallback_chain)}")

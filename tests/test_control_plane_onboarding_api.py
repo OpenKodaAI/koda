@@ -120,7 +120,7 @@ def test_setup_control_plane_routes_registers_onboarding_surfaces() -> None:
     assert "/api/control-plane/auth/register-owner" in canonicals
     assert "/api/control-plane/auth/login" in canonicals
     assert "/api/control-plane/auth/logout" in canonicals
-    assert "/api/control-plane/auth/legacy/exchange" in canonicals
+    assert "/api/control-plane/auth/legacy/exchange" not in canonicals
     assert "/api/control-plane/auth/tokens" in canonicals
     assert "/api/control-plane/auth/tokens/{token_id}" in canonicals
     assert "/api/control-plane/auth/sessions" in canonicals

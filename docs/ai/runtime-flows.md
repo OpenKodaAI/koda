@@ -100,7 +100,7 @@ The agent has a second execution loop beyond native provider CLI tools.
   - or execute a read-only `shell_command` scheduled job
 - Scheduled agent execution routes back through the same agent runtime, which means provider fallback, canonical sessions, memory, knowledge retrieval, approvals, and queue behavior still apply.
 - Completion updates the scheduled run ledger with task ids, provider/model, verification result, retries, notifications, and fallback metadata.
-- Legacy cron commands remain available through [`../../koda/services/cron_store.py`](../../koda/services/cron_store.py), but they are now compatibility wrappers over the unified scheduler.
+- The Telegram `/cron` command in [`../../koda/handlers/automation.py`](../../koda/handlers/automation.py) still writes through [`../../koda/services/cron_store.py`](../../koda/services/cron_store.py); those rows are reconciled by the unified scheduler and surfaced alongside scheduled jobs. No parallel `cron_*` agent tools are exposed to the runtime — agents manage recurring work through the `job_*` family only.
 - Digest and maintenance schedulers in [`../../koda/memory`](../../koda/memory) follow the same general pattern: schedule outside the main request path, execute without blocking normal message handling.
 
 ## 7. Failure Handling Principles

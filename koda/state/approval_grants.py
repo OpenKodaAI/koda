@@ -9,7 +9,7 @@ from typing import Any
 
 import koda.config as config_module
 from koda.logging_config import get_logger
-from koda.state_primary import get_primary_state_backend, primary_execute, primary_fetch_all, run_coro_sync
+from koda.state.primary import get_primary_state_backend, primary_execute, primary_fetch_all, run_coro_sync
 
 log = get_logger(__name__)
 

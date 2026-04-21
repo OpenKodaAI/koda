@@ -1170,8 +1170,8 @@ class TestQueueOrdering:
             assert task_id == 2
             update.message.reply_text.assert_awaited_once()
             feedback = update.message.reply_text.await_args.args[0]
-            assert "coloquei na fila" in feedback.lower()
-            assert "tarefa atual" in feedback.lower()
+            assert "queued it" in feedback.lower()
+            assert "current task" in feedback.lower()
             assert "#2" in feedback
         finally:
             _user_tasks.pop(user_id, None)

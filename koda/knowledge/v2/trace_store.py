@@ -7,7 +7,7 @@ from typing import Any, cast
 from koda.knowledge.repository import KnowledgeRepository
 from koda.knowledge.types import RetrievalTrace
 from koda.knowledge.v2.common import V2StoreSupport
-from koda.state_primary import run_coro_sync
+from koda.state.primary import run_coro_sync
 
 
 class KnowledgeTraceStore(V2StoreSupport):

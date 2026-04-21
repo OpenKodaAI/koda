@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -11,7 +10,7 @@ from typing import Any, cast
 from koda.config import AGENT_ID
 from koda.services.provider_env import validate_runtime_path
 from koda.services.runtime.redaction import redact_json_dumps, redact_value
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_one,
@@ -29,8 +28,15 @@ def _agent_scope() -> str:
     return normalized or "default"
 
 
-def _redacted_json(value: Any) -> Any:
-    return json.loads(redact_json_dumps(value))
+def _redacted_json(value: Any) -> str:
+    """Return the redacted JSON as a string for TEXT column storage.
+
+    Every ``*_json`` column in the runtime schema is ``TEXT``; asyncpg would
+    reject a dict with ``DataError: expected str, got dict``. We pass the
+    serialized JSON directly — callers that need the object representation
+    can ``json.loads`` on read.
+    """
+    return redact_json_dumps(value)
 
 
 def _validated_path(value: str | None, *, allow_empty: bool = False) -> str | None:
@@ -161,7 +167,12 @@ class PostgresRuntimeStore:
         values_sql: list[str] = []
         params: list[Any] = [_now()]
         for item in updates:
-            values_sql.append("(?, ?, ?, ?, ?, ?, ?, ?)")
+            # Explicit casts keep Postgres from treating every VALUES column
+            # as TEXT — without them the WHERE target.task_id = source.task_id
+            # fails with "operator does not exist: bigint = text".
+            values_sql.append(
+                "(?::text, ?::bigint, ?::text, ?::integer, ?::text, ?::integer, ?::text, ?::text)"
+            )
             params.extend(
                 [
                     self._agent_scope,

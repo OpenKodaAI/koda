@@ -28,6 +28,9 @@ services:
       HOME: "/var/lib/koda/runtime/home"
       CLAUDE_HOME: "/var/lib/koda/runtime/home"
       CLAUDE_CONFIG_DIR: "/var/lib/koda/runtime/claude-config"
+      # Keep Playwright looking at the build-time install path regardless of
+      # the runtime HOME override. See Dockerfile for the full explanation.
+      PLAYWRIGHT_BROWSERS_PATH: "/var/lib/koda/playwright-browsers"
       CONTROL_PLANE_ENABLED: "true"
       CONTROL_PLANE_BIND: "0.0.0.0"
       CONTROL_PLANE_PORT: "${CONTROL_PLANE_PORT:-8090}"
@@ -76,6 +79,11 @@ services:
     networks:
       - frontend
       - backend
+    # Makes `host.docker.internal` resolvable on Linux. Required for the
+    # control plane to reach an Ollama daemon running on the host at
+    # http://host.docker.internal:11434.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:

@@ -853,10 +853,7 @@ def resolve_execution_policy(
     *,
     feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
-    explicit = normalize_execution_policy(_safe_object(agent_spec.get("execution_policy")))
-    if explicit:
-        return explicit
-    return compile_legacy_execution_policy(agent_spec, feature_flags=feature_flags)
+    return normalize_execution_policy(_safe_object(agent_spec.get("execution_policy")))
 
 
 def _group_catalog_actions(actions: list[dict[str, Any]]) -> dict[str, Any]:

@@ -1,7 +1,6 @@
 """Tests for structured data output feature."""
 
-import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from koda.services.tool_dispatcher import AgentToolResult, format_tool_results
 
@@ -76,56 +75,3 @@ class TestFormatToolResultsStructured:
             formatted = format_tool_results(results)
         # Should not crash — default=str handles it, so structured_data IS present
         assert "ok" in formatted
-
-
-class TestEnrichedHandlers:
-    def test_cron_list_has_structured_data(self):
-        from koda.services.tool_dispatcher import ToolContext, _handle_cron_list
-
-        ctx = ToolContext(
-            user_id=1,
-            chat_id=1,
-            work_dir="/tmp",
-            user_data={
-                "work_dir": "/tmp",
-                "model": "m",
-                "session_id": "s",
-                "total_cost": 0.0,
-                "query_count": 0,
-            },
-            agent=AsyncMock(),
-            agent_mode="autonomous",
-        )
-        fake_jobs = [(1, "*/5 * * * *", "echo hi", "test", True)]
-        with (
-            patch("koda.services.tool_dispatcher.list_cron_jobs", create=True),
-            patch("koda.services.cron_store.list_cron_jobs", return_value=fake_jobs),
-        ):
-            result = asyncio.run(_handle_cron_list({}, ctx))
-        assert result.success
-        assert result.data is not None
-        assert result.data[0]["id"] == 1
-        assert result.data[0]["expression"] == "*/5 * * * *"
-        assert result.data[0]["enabled"] is True
-
-    def test_cron_list_empty_no_data(self):
-        from koda.services.tool_dispatcher import ToolContext, _handle_cron_list
-
-        ctx = ToolContext(
-            user_id=1,
-            chat_id=1,
-            work_dir="/tmp",
-            user_data={
-                "work_dir": "/tmp",
-                "model": "m",
-                "session_id": "s",
-                "total_cost": 0.0,
-                "query_count": 0,
-            },
-            agent=AsyncMock(),
-            agent_mode="autonomous",
-        )
-        with patch("koda.services.cron_store.list_cron_jobs", return_value=[]):
-            result = asyncio.run(_handle_cron_list({}, ctx))
-        assert result.success
-        assert result.data is None

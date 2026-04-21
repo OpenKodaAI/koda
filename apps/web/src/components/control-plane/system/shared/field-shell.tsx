@@ -4,6 +4,7 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  useId,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -49,15 +50,23 @@ function localizeNode(node: ReactNode, tl: (value: string) => string): ReactNode
 export function FieldShell({
   label,
   description,
+  error,
   children,
 }: {
   label: string;
   description?: string;
+  error?: string | null;
   children: ReactNode;
 }) {
   const { tl } = useAppI18n();
+  const errorId = useId();
+  const hasError = Boolean(error);
   return (
-    <label className="flex flex-col gap-1.5">
+    <label
+      className="flex flex-col gap-1.5"
+      aria-invalid={hasError || undefined}
+      aria-describedby={hasError ? errorId : undefined}
+    >
       <span className="eyebrow">{tl(label)}</span>
       {description ? (
         <span className="max-w-[42rem] text-xs leading-relaxed text-[var(--text-quaternary)]">
@@ -65,6 +74,15 @@ export function FieldShell({
         </span>
       ) : null}
       {localizeNode(children, tl)}
+      {hasError ? (
+        <span
+          id={errorId}
+          role="alert"
+          className="text-xs text-[var(--tone-danger-text)]"
+        >
+          {tl(error as string)}
+        </span>
+      ) : null}
     </label>
   );
 }

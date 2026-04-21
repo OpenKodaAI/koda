@@ -91,7 +91,7 @@ def test_natural_language_general_model_change_uses_agent_local_model_setter() -
         message = maybe_apply_agent_local_settings_from_chat("use gpt-5.2 como modelo geral", user_data)
 
     mock_setter.assert_called_once_with("codex", "gpt-5.2")
-    assert "Modelo geral deste AGENT atualizado" in str(message)
+    assert "Agent's general model updated" in str(message)
 
 
 def test_natural_language_feature_model_change_uses_agent_local_feature_setter() -> None:
@@ -106,7 +106,7 @@ def test_natural_language_feature_model_change_uses_agent_local_feature_setter()
         message = maybe_apply_agent_local_settings_from_chat("para imagem use codex gpt-image-1.5", user_data)
 
     mock_setter.assert_called_once_with("image", "codex", "gpt-image-1.5")
-    assert "Modelo padrao deste AGENT para" in str(message)
+    assert "Agent default for" in str(message)
 
 
 def test_natural_language_voice_change_uses_agent_local_voice_setter() -> None:
@@ -125,7 +125,7 @@ def test_natural_language_voice_change_uses_agent_local_voice_setter() -> None:
         message = maybe_apply_agent_local_settings_from_chat("mude a voz para pm_alex", user_data)
 
     mock_setter.assert_called_once_with("pm_alex", voice_label="Alex", voice_language="pt-br")
-    assert "Voz deste AGENT atualizada" in str(message)
+    assert "Agent voice updated" in str(message)
 
 
 def test_natural_language_mode_change_is_agent_local_only() -> None:

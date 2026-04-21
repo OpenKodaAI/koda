@@ -18,7 +18,7 @@ import koda.config as config_module
 from koda.services.browser_manager import browser_manager
 from koda.services.runtime.controller import RuntimeController
 from koda.state.history_store import create_task
-from koda.state_primary import require_primary_state_backend
+from koda.state.primary import require_primary_state_backend
 
 
 def _is_within(path: Path, root: Path) -> bool:

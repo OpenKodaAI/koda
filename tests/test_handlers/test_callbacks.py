@@ -81,7 +81,7 @@ class TestCallbackLinkAnalysis:
         await callback_link_analysis(mock_callback_update, mock_context)
         mock_callback_update.callback_query.edit_message_text.assert_called_once()
         call_text = mock_callback_update.callback_query.edit_message_text.call_args[0][0]
-        assert "expirados" in call_text.lower()
+        assert "expired" in call_text.lower()
 
     @pytest.mark.asyncio
     async def test_callback_link_analysis_transcript_direct(self, mock_callback_update, mock_context):
@@ -117,7 +117,7 @@ class TestCallbackLinkAnalysis:
             # Should send message directly
             mock_context.bot.send_message.assert_called()
             sent_text = mock_context.bot.send_message.call_args[1]["text"]
-            assert "Transcrição" in sent_text
+            assert "Transcript" in sent_text
             assert "Hello world" in sent_text
 
     @pytest.mark.asyncio
@@ -152,7 +152,7 @@ class TestCallbackLinkAnalysis:
             mock_enqueue.assert_not_called()
             mock_context.bot.send_message.assert_called_once()
             sent_text = mock_context.bot.send_message.call_args[1]["text"]
-            assert "não foi possível" in sent_text.lower()
+            assert "could not extract" in sent_text.lower()
 
 
 class TestCallbackProvider:
@@ -446,6 +446,6 @@ class TestCallbackFeedback:
         mock_stats.assert_called_once()
         mock_utility.assert_called_once_with("AGENT_A", "useful")
         mock_callback_update.callback_query.answer.assert_any_call(
-            "Feedback registrado como aprovado. Abri um candidato de rotina positiva para revisão.",
+            "Feedback recorded as approved. Opened a positive-routine candidate for review.",
             show_alert=True,
         )

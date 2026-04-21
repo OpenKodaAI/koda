@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import require_primary_state_backend, run_coro_sync
+from koda.state.primary import require_primary_state_backend, run_coro_sync
 
 
 def _primary_backend(agent_id: str | None = None) -> Any:

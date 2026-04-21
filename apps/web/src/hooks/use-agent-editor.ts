@@ -322,8 +322,11 @@ function buildInitialState(
   compiledPromptPayload?: ControlPlaneCompiledPrompt | null,
   executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null,
 ): EditorState {
-  const rt = agent.runtime_endpoint as Record<string, unknown>;
-  const spec = agent.agent_spec as Record<string, unknown>;
+  // Backend may omit runtime_endpoint / agent_spec for archived agents or
+  // during transient error states. Default to empty objects so we don't
+  // crash with "Cannot read properties of null (reading 'health_port')".
+  const rt = (agent.runtime_endpoint ?? {}) as Record<string, unknown>;
+  const spec = (agent.agent_spec ?? {}) as Record<string, unknown>;
   const normalizedCompiledPromptPayload = normalizeCompiledPromptPayload(agent, compiledPromptPayload);
   const normalizedExecutionPolicyPayload = executionPolicyPayload ?? null;
   const effectiveExecutionPolicy =
@@ -337,16 +340,18 @@ function buildInitialState(
     storageNamespace: agent.storage_namespace,
     workspaceId: agent.organization?.workspace_id ?? "",
     squadId: agent.organization?.squad_id ?? "",
-    color: agent.appearance.color ?? "",
-    colorRgb: agent.appearance.color_rgb ?? "",
+    color: agent.appearance?.color ?? "",
+    colorRgb: agent.appearance?.color_rgb ?? "",
     healthPort: String(rt.health_port ?? ""),
     healthUrl: String(rt.health_url ?? ""),
     runtimeBaseUrl: String(rt.runtime_base_url ?? ""),
-    appearanceJson: prettyJson(agent.appearance),
-    runtimeEndpointJson: prettyJson(agent.runtime_endpoint),
-    metadataJson: prettyJson(agent.metadata),
-    // Documents
-    documents: { ...agent.documents },
+    appearanceJson: prettyJson(agent.appearance ?? {}),
+    runtimeEndpointJson: prettyJson(agent.runtime_endpoint ?? {}),
+    metadataJson: prettyJson(agent.metadata ?? {}),
+    // Documents — the backend may legitimately omit this for new agents.
+    // Spreading null throws; the empty-object fallback keeps the editor
+    // mountable for agents that haven't been fully initialized yet.
+    documents: { ...(agent.documents ?? {}) },
     // Agent spec
     missionProfileJson: prettyJson(spec.mission_profile ?? {}),
     interactionStyleJson: prettyJson(spec.interaction_style ?? {}),

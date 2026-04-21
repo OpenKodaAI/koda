@@ -56,6 +56,7 @@ const EMPTY_SECTION_ERRORS: Record<SettingsSectionId, SystemSettingsFieldError[]
   models: [],
   integrations: [],
   intelligence: [],
+  scheduler: [],
   variables: [],
 };
 
@@ -385,6 +386,7 @@ export function SystemSettingsProvider({
       models: false,
       integrations: false,
       intelligence: false,
+      scheduler: false,
       variables: false,
     };
     for (const [sectionId, keys] of Object.entries(SECTION_VALUE_KEYS)) {
@@ -1479,6 +1481,11 @@ export function SystemSettingsProvider({
                 api_key: connectionDraft?.api_key || "",
                 project_id: connectionDraft?.project_id || "",
                 base_url: connectionDraft?.base_url || "",
+                // Ask the backend to verify + flip the enabled flag in a
+                // single round-trip. Falls back to the explicit verify call
+                // below when the backend can't self-verify (legacy or
+                // providers that only support subscription login).
+                verify_after_save: true,
               }),
             },
           );
@@ -1806,6 +1813,17 @@ export function SystemSettingsProvider({
       candidateProvider && enabledProviders.includes(candidateProvider)
         ? candidateProvider
         : enabledProviders[0] || "";
+    // Drop stale functional_defaults that reference providers no longer enabled.
+    // This keeps the payload consistent: providers_enabled is the source of
+    // truth, and any selection pointing outside it would be rejected by the
+    // backend with "must_be_enabled".
+    const sanitizedFunctionalDefaults = Object.fromEntries(
+      Object.entries(draft.values.models.functional_defaults ?? {}).filter(
+        ([, selection]) =>
+          typeof selection?.provider_id === "string" &&
+          enabledProviders.includes(selection.provider_id.toLowerCase()),
+      ),
+    ) as typeof draft.values.models.functional_defaults;
     const payload = {
       account: draft.values.account,
       models: {
@@ -1817,9 +1835,11 @@ export function SystemSettingsProvider({
           draft.values.models.fallback_order,
           defaultProvider,
         ),
+        functional_defaults: sanitizedFunctionalDefaults,
       },
       resources: draft.values.resources,
       memory_and_knowledge: draft.values.memory_and_knowledge,
+      scheduler: draft.values.scheduler,
       variables: draft.values.variables,
     };
 

@@ -25,12 +25,12 @@ describe("system settings model helpers", () => {
       sanitizeVariableDraft({
         key: " jira api token ",
         type: "secret",
-        scope: "bot_grant",
+        scope: "agent_grant",
       }),
     ).toMatchObject({
       key: "JIRA_API_TOKEN",
       type: "secret",
-      scope: "bot_grant",
+      scope: "agent_grant",
     });
   });
 
@@ -50,7 +50,7 @@ describe("system settings model helpers", () => {
       {
         key: "TEAM_NAME",
         type: "text",
-        scope: "bot_grant",
+        scope: "agent_grant",
         description: "queue",
         value: "ops",
         preview: "ops",
@@ -61,7 +61,7 @@ describe("system settings model helpers", () => {
       {
         key: "TEAM_NAME",
         type: "text",
-        scope: "bot_grant",
+        scope: "agent_grant",
         description: "queue",
         value: "ops",
         preview: "ops",
@@ -95,6 +95,7 @@ describe("system settings model helpers", () => {
       "models",
       "integrations",
       "intelligence",
+      "scheduler",
       "variables",
     ]);
   });

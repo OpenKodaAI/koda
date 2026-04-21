@@ -151,7 +151,10 @@ def test_get_session_synthesizes_execution_backed_transcript(monkeypatch) -> Non
     detail = store.get_session("backend_developer", "session-gamma")
 
     assert detail is not None
-    assert detail["summary"]["bot_id"] == "backend_developer"
+    # dashboard_store now normalizes to uppercase to match cp_agent_definitions.id
+    # and the rest of the dashboard API. Both agent_id + bot_id are emitted.
+    assert detail["summary"]["bot_id"] == "BACKEND_DEVELOPER"
+    assert detail["summary"]["agent_id"] == "BACKEND_DEVELOPER"
     assert [message["role"] for message in detail["messages"]] == ["user"]
     assert detail["messages"][0]["text"] == "Bom dia"
     assert detail["messages"][0]["linked_execution"]["task_id"] == 7

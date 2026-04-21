@@ -36,7 +36,7 @@ def apply_runtime_env_from_control_plane(agent_id: str | None) -> None:
         except Exception:
             pass
         try:
-            import koda.state_primary as sp
+            import koda.state.primary as sp
 
             sp._BRIDGE_LOOP = None  # noqa: SLF001
             sp._BRIDGE_THREAD = None  # noqa: SLF001

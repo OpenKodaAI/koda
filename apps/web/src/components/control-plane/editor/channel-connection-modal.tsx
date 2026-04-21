@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { Check, X, Lock } from "lucide-react";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
@@ -22,16 +23,22 @@ function TagsInput({
   value,
   onChange,
   placeholder,
+  draftRef,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  draftRef?: MutableRefObject<string>;
 }) {
   const tags = useMemo(
     () => (value ? value.split(",").map((t) => t.trim()).filter(Boolean) : []),
     [value],
   );
   const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    if (draftRef) draftRef.current = draft;
+  }, [draft, draftRef]);
 
   const addTag = useCallback(
     (raw: string) => {
@@ -78,6 +85,12 @@ function TagsInput({
           }
           if (e.key === "Backspace" && !draft && tags.length > 0) {
             removeTag(tags.length - 1);
+          }
+        }}
+        onBlur={() => {
+          if (draft.trim()) {
+            addTag(draft);
+            setDraft("");
           }
         }}
         placeholder={tags.length === 0 ? placeholder : ""}
@@ -142,6 +155,7 @@ export function ChannelConnectionModal({
   const [loadedAllowedUsers, setLoadedAllowedUsers] = useState(false);
   const [editingUserIds, setEditingUserIds] = useState<string | null>(null);
   const [savingUserIds, setSavingUserIds] = useState(false);
+  const userIdsDraftRef = useRef<string>("");
   const statusUrl = `/api/channels/${encodeURIComponent(agentId)}/${channel.key}/status`;
 
   /* ---- Fetch agent info when connected but missing ---- */
@@ -418,6 +432,7 @@ export function ChannelConnectionModal({
                         value={editingUserIds}
                         onChange={setEditingUserIds}
                         placeholder={tl("Digite o ID e pressione Enter")}
+                        draftRef={userIdsDraftRef}
                       />
                       <p className="text-[11px] text-[var(--text-quaternary)]">
                         {tl("Deixe vazio para permitir todos.")}
@@ -436,7 +451,15 @@ export function ChannelConnectionModal({
                           onClick={async () => {
                             setSavingUserIds(true);
                             try {
-                              const value = editingUserIds.trim();
+                              const committed = editingUserIds
+                                .split(",")
+                                .map((t) => t.trim())
+                                .filter(Boolean);
+                              const pending = userIdsDraftRef.current.trim().replace(/,/g, "");
+                              if (pending && !committed.includes(pending)) {
+                                committed.push(pending);
+                              }
+                              const value = committed.join(",");
                               if (value) {
                                 await requestJson(
                                   `/api/control-plane/agents/${agentId}/secrets/ALLOWED_USER_IDS?scope=agent`,

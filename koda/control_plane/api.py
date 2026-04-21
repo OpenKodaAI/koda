@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import os
 import urllib.parse
@@ -83,7 +85,6 @@ _PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
     "/api/control-plane/auth/bootstrap/exchange",
     "/api/control-plane/auth/login",
     "/api/control-plane/auth/register-owner",
-    "/api/control-plane/auth/legacy/exchange",
     "/api/control-plane/auth/password/recover",
 )
 
@@ -350,11 +351,6 @@ async def auth_issue_bootstrap_code(request: web.Request) -> web.Response:
         ),
         status=201,
     )
-
-
-async def auth_legacy_exchange(request: web.Request) -> web.Response:
-    payload = await _json_payload(request)
-    return web.json_response(_auth_service().exchange_legacy_token(str(payload.get("token") or "")))
 
 
 async def auth_list_tokens(request: web.Request) -> web.Response:
@@ -966,6 +962,10 @@ async def get_general_system_settings(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_general_system_settings())
 
 
+async def get_persistence_diagnostics(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_persistence_diagnostics())
+
+
 async def put_general_system_settings(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     try:
@@ -1004,13 +1004,23 @@ async def get_provider_login_session(request: web.Request) -> web.Response:
 
 async def submit_provider_login_code(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _manager().submit_provider_login_code(
-            request.match_info["provider_id"],
-            request.match_info["session_id"],
-            payload,
+    provider_id = request.match_info["provider_id"]
+    session_id = request.match_info["session_id"]
+    manager = _manager()
+    # The submit call blocks on the CLI subprocess for up to 45 seconds; run
+    # it in the default thread pool so the event loop stays responsive to the
+    # frontend's 2.5s polling of the same login session.
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            functools.partial(manager.submit_provider_login_code, provider_id, session_id, payload),
         )
-    )
+    except KeyError:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "login_session_expired"}), content_type="application/json"
+        ) from None
+    return web.json_response(result)
 
 
 async def verify_provider_connection(request: web.Request) -> web.Response:
@@ -1605,7 +1615,22 @@ async def get_ollama_models(request: web.Request) -> web.Response:
     import asyncio
 
     manager = _manager()
-    payload = await asyncio.get_event_loop().run_in_executor(None, manager.get_ollama_model_catalog)
+    # Resolve connection inputs on the event loop (they touch the DB through
+    # `_merged_global_env`), then hand only the blocking HTTP probe off to a
+    # worker thread. Running the DB bits inside `run_in_executor` would escape
+    # the async loop that owns the asyncpg connection pool, raising
+    # `no running event loop` / `connection was closed in the middle of operation`.
+    auth_mode, base_url, api_key = manager._resolve_ollama_connection_inputs(
+        env=manager._merged_global_env(),
+    )
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager._fetch_ollama_model_catalog(
+            auth_mode=auth_mode,
+            base_url=base_url,
+            api_key=api_key,
+        ),
+    )
     return web.json_response(payload)
 
 
@@ -1947,7 +1972,6 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_post("/api/control-plane/auth/register-owner", auth_register_owner)
     app.router.add_post("/api/control-plane/auth/login", auth_login)
     app.router.add_post("/api/control-plane/auth/logout", auth_logout)
-    app.router.add_post("/api/control-plane/auth/legacy/exchange", auth_legacy_exchange)
     app.router.add_post("/api/control-plane/auth/password/recover", auth_password_recover)
     app.router.add_post("/api/control-plane/auth/password/change", auth_password_change)
     app.router.add_get("/api/control-plane/auth/recovery-codes", auth_recovery_codes_summary)
@@ -2094,6 +2118,7 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/system-settings", put_system_settings)
     app.router.add_get("/api/control-plane/system-settings/general", get_general_system_settings)
     app.router.add_put("/api/control-plane/system-settings/general", put_general_system_settings)
+    app.router.add_get("/api/control-plane/_diag/persistence", get_persistence_diagnostics)
     app.router.add_get("/api/control-plane/providers/{provider_id}/connection", get_provider_connection)
     app.router.add_put(
         "/api/control-plane/providers/{provider_id}/connection/api-key",

@@ -146,7 +146,7 @@ export type GeneralSystemSettingsValueSource =
 export type GeneralSystemSettingsVariable = {
   key: string;
   type: "text" | "secret";
-  scope: "system_only" | "bot_grant";
+  scope: "system_only" | "agent_grant";
   description: string;
   value: string;
   preview: string;
@@ -163,7 +163,7 @@ export type GeneralSystemSettingsCredentialField = {
   value?: string;
   preview?: string;
   value_present?: boolean;
-  usage_scope?: "system_only" | "bot_grant";
+  usage_scope?: "system_only" | "agent_grant";
   clear?: boolean;
 };
 
@@ -424,6 +424,22 @@ export type GeneralSystemSettings = {
       knowledge_policy: ControlPlaneKnowledgePolicy;
       autonomy_policy: ControlPlaneAutonomyPolicy;
     };
+    scheduler: {
+      scheduler_enabled: boolean;
+      scheduler_poll_interval_seconds?: number | null;
+      scheduler_lease_seconds?: number | null;
+      scheduler_run_max_attempts?: number | null;
+      scheduler_retry_base_delay?: number | null;
+      scheduler_retry_max_delay?: number | null;
+      scheduler_min_interval_seconds?: number | null;
+      runbook_governance_enabled: boolean;
+      runbook_governance_hour?: number | null;
+      runbook_revalidation_stale_days?: number | null;
+      runbook_revalidation_min_verified_runs?: number | null;
+      runbook_revalidation_min_success_rate?: number | null;
+      runbook_revalidation_correction_threshold?: number | null;
+      runbook_revalidation_rollback_threshold?: number | null;
+    };
     variables: GeneralSystemSettingsVariable[];
     provider_connections: Record<string, GeneralSystemSettingsProviderConnection>;
   };
@@ -566,6 +582,8 @@ export type ControlPlaneCoreProviders = {
   fallback_order?: string[];
   governance?: Record<string, unknown>;
   providers: Record<string, Record<string, unknown>>;
+  model_functions?: Array<{ id: string; title: string; description: string }>;
+  functional_model_catalog?: Record<string, Array<Record<string, unknown>>>;
 };
 
 export type ControlPlaneCorePolicies = Record<string, unknown>;
@@ -993,6 +1011,10 @@ export type ControlPlaneAuthStatus = {
   } | null;
 };
 
+// Stored-secret previews must never reach the browser. The backend already
+// emits "" for these fields (see manager.py serializers), and this set is the
+// last line of defence: any payload carrying a non-empty value under these
+// keys is forcibly zeroed before the response leaves the proxy.
 const PREVIEW_ONLY_KEYS = new Set([
   "preview",
   "api_key_preview",
@@ -1243,11 +1265,14 @@ export async function getControlPlaneSystemSettings() {
 }
 
 export async function getGeneralSystemSettings() {
+  // Always bypass the fetch cache: this payload is what the user just edited,
+  // so any staleness causes the UI to "revert" to the pre-save state even
+  // though the backend persisted correctly.
   return controlPlaneFetchJson<GeneralSystemSettings>(
     "/api/control-plane/system-settings/general",
     {},
     {
-      tier: "catalog",
+      tier: "live",
       tags: [CONTROL_PLANE_CACHE_TAGS.systemGeneral],
     },
   );

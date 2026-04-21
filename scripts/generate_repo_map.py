@@ -199,13 +199,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ],
             },
             {
-                "id": "compatibility-wrapper",
-                "summary": "Legacy file entrypoint that delegates directly to the package bootstrap.",
-                "paths": ["agent.py"],
-                "related_tests": [],
-                "related_docs": ["README.md", "docs/ai/architecture-overview.md"],
-            },
-            {
                 "id": "multi-agent-launcher",
                 "summary": "Process launcher for the configured multi-agent control-plane supervisor.",
                 "paths": ["launcher.py", "koda/control_plane/__main__.py"],
@@ -263,7 +256,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "koda/control_plane/__main__.py",
                     "koda/config.py",
                     "koda/state/history_store.py",
-                    "agent.py",
                     "launcher.py",
                     "pyproject.toml",
                 ],

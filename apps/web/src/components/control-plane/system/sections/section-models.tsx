@@ -7,11 +7,13 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  CheckCircle2,
   ChevronDown,
   Copy,
   ExternalLink,
   KeyRound,
   Link2,
+  RefreshCcw,
   Server,
   Unplug,
 } from "lucide-react";
@@ -36,6 +38,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { ProviderLoginSession } from "@/lib/control-plane";
 import { normalizeFallbackOrder } from "@/lib/system-settings-model";
+import { findFieldError } from "@/lib/system-settings-schema";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +100,7 @@ export function providerOrder(category: string) {
 export type ProviderOption = ReturnType<typeof useSystemSettings>["providerOptions"][number];
 
 export function providerDescription(providerId: string, category: string) {
-  if (providerId === "claude") return "Anthropic via API Key ou Claude Code CLI local.";
+  if (providerId === "claude") return "Anthropic via API Key, assinatura do Claude Code ou CLI local já autenticado.";
   if (providerId === "codex") return "OpenAI via API Key ou login oficial do Codex.";
   if (providerId === "gemini") return "Google via GEMINI_API_KEY ou login oficial do Gemini CLI.";
   if (providerId === "elevenlabs") return "Voz premium com API Key, idioma padrão e seleção de vozes.";
@@ -110,7 +113,7 @@ export function providerDescription(providerId: string, category: string) {
 
 export function providerLoginCopy(providerId: string) {
   if (providerId === "claude") {
-    return "Use o login oficial do Claude Code para conectar sua assinatura Anthropic.";
+    return "Abra o link gerado pelo Claude Code, autorize no navegador e cole o código aqui para conectar sua assinatura Anthropic.";
   }
   if (providerId === "codex") {
     return "Use o login oficial do Codex com sua conta OpenAI/ChatGPT. A cobrança da API continua separada da assinatura.";
@@ -126,7 +129,10 @@ export function providerLocalTitle(providerId: string) {
 
 export function providerLocalDescription(providerId: string) {
   if (providerId === "claude") {
-    return "A autenticação da Anthropic é gerenciada pelo Claude Code CLI instalado nesta máquina. Configure o CLI com `claude auth login` antes de conectar.";
+    return (
+      "Opcional: se você já autenticou o Claude Code em outra máquina e montou o CLAUDE_CONFIG_DIR no container, " +
+      "basta clicar em Verificar para detectar a sessão. Caso contrário use a opção de assinatura acima."
+    );
   }
   if (providerId === "ollama") {
     return "Use um endpoint local ou remoto compatível com a API do Ollama para listar e executar modelos.";
@@ -293,6 +299,25 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   const connection = providerConnections[provider.id];
   const connectionDraft = providerConnectionDrafts[provider.id];
   const activeMode = connectionDraft?.auth_mode || connection?.auth_mode || "api_key";
+  // Local flag so the persisted-key view can switch back to an editable
+  // SecretInput when the operator explicitly asks to replace the stored key.
+  const [replacingApiKey, setReplacingApiKey] = useState(false);
+  const markReplacingKey = () => setReplacingApiKey(true);
+  const unmarkReplacingKey = () => setReplacingApiKey(false);
+  // Auto-collapse back to the persisted view after a successful save: the
+  // `connectProviderApiKey` flow updates `connection.last_verified_at` (and
+  // resets `connectionDraft.api_key` to ""), so using that as the reset
+  // signal keeps the edit view open during typing but closes it as soon as
+  // the new key is persisted. The setState here is idempotent and runs in
+  // response to a prop change, so the cascading-renders lint is safely
+  // disabled for this intentional synchronization.
+  const lastVerifiedAt = connection?.last_verified_at ?? "";
+  useEffect(() => {
+    if (lastVerifiedAt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setReplacingApiKey(false);
+    }
+  }, [lastVerifiedAt]);
   const supportsAnyAuth = provider.connectionManaged;
   const supportsApiKey = provider.supportedAuthModes.includes("api_key");
   const supportsLocalConnection = provider.supportedAuthModes.includes("local");
@@ -460,6 +485,9 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     actionDisabled,
     handleActionClick,
     submitProviderLoginCode,
+    replacingApiKey,
+    markReplacingKey,
+    unmarkReplacingKey,
   };
 }
 
@@ -491,7 +519,10 @@ function ClaudeCodeEntry({
         setCode("");
         setStatus("success");
         setFeedback(tl("Código confirmado. Validando a conexão com a Anthropic..."));
-      } else if (result.status === "error") {
+      } else if (result.status === "error" || result.last_error) {
+        // Claude CLI reports invalid codes via ``last_error`` while keeping the
+        // session in ``awaiting_browser`` so the operator can retry in the same
+        // PTY. Surface that as a red error state so the rejection is obvious.
         setStatus("error");
         setFeedback(result.last_error || tl("Não foi possível validar o código enviado."));
       } else {
@@ -610,6 +641,9 @@ export function ProviderAuthPanel({
     ollamaModelCatalog,
     ollamaModelsLoading,
     submitProviderLoginCode,
+    replacingApiKey,
+    markReplacingKey,
+    unmarkReplacingKey,
   } = ui;
   const loginCode = loginSession?.user_code?.trim() || "";
   const codeCopied = Boolean(loginCode) && copiedCode === loginCode;
@@ -841,22 +875,62 @@ export function ProviderAuthPanel({
           {activeMode === "api_key" ? (
             <div className="grid gap-3 xl:grid-cols-2">
               <div className="space-y-2 px-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                  {tl("Chave da API")}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                    {tl("Chave da API")}
+                  </div>
+                  {connection?.api_key_present ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                      <CheckCircle2 className="h-3 w-3" strokeWidth={1.75} />
+                      {tl("Configurada")}
+                    </span>
+                  ) : null}
                 </div>
-                <SecretInput
-                  placeholder={
-                    connection?.api_key_present
-                      ? (connection.api_key_preview || tl("Chave configurada"))
-                      : provider.id === "gemini"
-                        ? "AIza..."
-                        : tl("Cole a chave da API")
-                  }
-                  value={connectionDraft?.api_key || ""}
-                  onChange={(event) =>
-                    setProviderConnectionDraft(provider.id, { api_key: event.target.value })
-                  }
-                />
+                {connection?.api_key_present &&
+                !connectionDraft?.api_key &&
+                !replacingApiKey ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      {tl(
+                        "A chave está armazenada e criptografada. Para trocar, clique em Substituir; o valor atual nunca é exibido.",
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={markReplacingKey}
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                    >
+                      <RefreshCcw className="h-3 w-3" strokeWidth={1.75} />
+                      {tl("Substituir chave")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <SecretInput
+                      placeholder={
+                        provider.id === "gemini"
+                          ? "AIza..."
+                          : tl("Cole a chave da API")
+                      }
+                      value={connectionDraft?.api_key || ""}
+                      onChange={(event) =>
+                        setProviderConnectionDraft(provider.id, { api_key: event.target.value })
+                      }
+                    />
+                    {connection?.api_key_present && replacingApiKey ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          unmarkReplacingKey();
+                          setProviderConnectionDraft(provider.id, { api_key: "" });
+                        }}
+                        className="text-[11px] text-[var(--text-tertiary)] underline-offset-2 transition-colors hover:text-[var(--text-primary)] hover:underline"
+                      >
+                        {tl("Cancelar substituição")}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               {provider.id === "gemini" ? (
@@ -888,6 +962,11 @@ export function ProviderAuthPanel({
                       setProviderConnectionDraft(provider.id, { base_url: event.target.value })
                     }
                   />
+                  <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">
+                    {tl(
+                      "Endpoint remoto da Ollama Cloud (padrão: https://ollama.com). Para uma instância local, use a aba Servidor local.",
+                    )}
+                  </p>
                 </div>
               ) : provider.id === "elevenlabs" ? (
                 <div className="grid gap-3 md:grid-cols-2">
@@ -992,12 +1071,17 @@ export function ProviderAuthPanel({
                   <input
                     className="field-shell text-[var(--text-primary)]"
                     type="text"
-                    placeholder="http://localhost:11434"
+                    placeholder="http://host.docker.internal:11434"
                     value={connectionDraft?.base_url || ""}
                     onChange={(event) =>
                       setProviderConnectionDraft(provider.id, { base_url: event.target.value })
                     }
                   />
+                  <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">
+                    {tl(
+                      "Ollama no desktop (host): http://host.docker.internal:11434. Em outro container da mesma rede: http://<serviço>:11434. Executando o Koda fora do Docker: http://localhost:11434.",
+                    )}
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -1289,8 +1373,9 @@ export function ProviderAccordionItem({
 
 export function SectionModels() {
   const { tl } = useAppI18n();
-  const { draft, setField, providerOptions, enabledProviders, moveFallback, providerConnections } =
+  const { draft, setField, providerOptions, enabledProviders, moveFallback, providerConnections, sectionErrors } =
     useSystemSettings();
+  const modelsErrors = sectionErrors.models;
 
   const generalProviders = useMemo(
     () => providerOptions.filter((provider) => provider.category === "general"),
@@ -1352,6 +1437,7 @@ export function SectionModels() {
           <FieldShell
             label="Provider padrão"
             description="Primeira escolha global entre os providers já verificados."
+            error={findFieldError(modelsErrors, "models.default_provider")?.message}
           >
             <Select
               value={
@@ -1485,7 +1571,11 @@ export function SectionModels() {
       {/* ---- Budgets ---- */}
       <SettingsFieldGroup title={tl("Budgets")}>
         <div className="grid gap-4 xl:grid-cols-2">
-          <FieldShell label="Budget por tarefa" description="Limite global por execução individual.">
+          <FieldShell
+            label="Budget por tarefa"
+            description="Limite global por execução individual."
+            error={findFieldError(modelsErrors, "models.max_budget_usd")?.message}
+          >
             <input
               className="field-shell text-[var(--text-primary)]"
               type="number"
@@ -1502,7 +1592,11 @@ export function SectionModels() {
             />
           </FieldShell>
 
-          <FieldShell label="Budget acumulado" description="Teto global para o uso consolidado.">
+          <FieldShell
+            label="Budget acumulado"
+            description="Teto global para o uso consolidado."
+            error={findFieldError(modelsErrors, "models.max_total_budget_usd")?.message}
+          >
             <input
               className="field-shell text-[var(--text-primary)]"
               type="number"
@@ -1543,6 +1637,16 @@ export function SectionModels() {
                 key={functionItem.id}
                 label={tl(functionItem.title)}
                 description={tl(functionItem.description)}
+                error={
+                  findFieldError(
+                    modelsErrors,
+                    `models.functional_defaults.${functionItem.id}.provider_id`,
+                  )?.message ??
+                  findFieldError(
+                    modelsErrors,
+                    `models.functional_defaults.${functionItem.id}`,
+                  )?.message
+                }
               >
                 <Select
                   value={selectedValue === "" ? SELECT_ALL_VALUE : selectedValue}

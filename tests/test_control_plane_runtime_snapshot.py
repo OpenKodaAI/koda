@@ -86,6 +86,53 @@ def test_legacy_agent_discovery_uses_env_only(monkeypatch):
     assert manager._discover_legacy_agent_ids({}) == []
 
 
+def test_runtime_snapshot_propagates_health_port_to_process_env(monkeypatch):
+    """The worker reads HEALTH_PORT from env; the supervisor polls the URL
+    from runtime.health_url. If the two disagree the supervisor's idle-check
+    never succeeds and graceful version-bump restarts don't fire.
+
+    Regression: _resolve_runtime_snapshot used runtime_endpoint.health_port
+    when composing the health_url but never wrote it back to ``env``, so the
+    spawned worker fell back to config.HEALTH_PORT default (8080) while the
+    supervisor polled 8223 (or whatever per-agent value the snapshot stored).
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+
+    monkeypatch.delenv("AGENT_ID", raising=False)
+
+    manager.get_published_snapshot = lambda agent_id, version=None: {  # type: ignore[attr-defined]
+        "env": {},
+        "agent": {"runtime_endpoint": {"health_port": 8223}},
+        "sections": {},
+        "skills": [],
+        "templates": [],
+        "secrets": {},
+    }
+    manager.publish_agent = lambda agent_id: {"version": 1}  # type: ignore[attr-defined]
+    manager._snapshot_version = lambda agent_id, snapshot: 1  # type: ignore[attr-defined]
+    manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_connection_env = lambda: {}  # type: ignore[attr-defined]
+    manager.get_agent_spec = lambda agent_id, snapshot=None: {"documents": {}}  # type: ignore[attr-defined]
+    manager._general_ui_meta = lambda sections=None: {}  # type: ignore[attr-defined]
+    manager._system_settings_sections = lambda: {}  # type: ignore[attr-defined]
+    manager._bool_from_env = lambda env, key, default=False: default  # type: ignore[attr-defined]
+    manager._scoped_env = lambda agent_id, env: dict(env)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_managed_voices_storage_path",
+        lambda: Path("/tmp/kokoro-managed.bin"),
+    )
+
+    snapshot = manager._resolve_runtime_snapshot("agent_h")
+
+    assert snapshot.health_url == "http://127.0.0.1:8223/health"
+    assert snapshot.process_env.get("HEALTH_PORT") == "8223", (
+        "HEALTH_PORT must be in process_env so the spawned worker binds the port the supervisor is polling."
+    )
+
+
 def test_runtime_prompt_preview_respects_agent_tool_policy():
     import koda.control_plane.manager as manager_mod
 

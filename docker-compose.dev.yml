@@ -14,6 +14,8 @@ services:
       PYTHONPATH: "/workspace"
       NODE_ENV: "development"
       WATCHFILES_FORCE_POLLING: "${WATCHFILES_FORCE_POLLING:-true}"
+      # Resolve Playwright browsers from the build-time install path.
+      PLAYWRIGHT_BROWSERS_PATH: "/var/lib/koda/playwright-browsers"
       CONTROL_PLANE_AUTH_MODE: "development"
       CONTROL_PLANE_POLL_INTERVAL_SECONDS: "${CONTROL_PLANE_POLL_INTERVAL_SECONDS:-1.0}"
       CONTROL_PLANE_STARTUP_GRACE_SECONDS: "${CONTROL_PLANE_STARTUP_GRACE_SECONDS:-0.5}"
@@ -21,6 +23,12 @@ services:
     volumes:
       - .:/workspace
       - tmp-images:/workspace/tmp_images
+    # Makes `host.docker.internal` resolvable on Linux. On macOS / Windows
+    # Docker Desktop this name already exists; on Linux it requires the
+    # gateway alias so the control plane can reach an Ollama daemon running
+    # on the host (default: http://host.docker.internal:11434).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   web:
     build:

@@ -80,23 +80,23 @@ class TestCallbackCoverage:
 
         update, query = _build_callback_update(mock_update, "settings:home")
         await callback_settings_home(update, mock_context)
-        assert "Ajustes deste AGENT" in query.edit_message_text.call_args.args[0]
+        assert "Agent settings" in query.edit_message_text.call_args.args[0]
 
         update, query = _build_callback_update(mock_update, "settings:provider")
         await callback_settings_provider(update, mock_context)
-        assert "Selecione o provider padrao" in query.edit_message_text.call_args.args[0]
+        assert "Select the default provider" in query.edit_message_text.call_args.args[0]
 
         update, query = _build_callback_update(mock_update, "settings:model")
         await callback_settings_model(update, mock_context)
-        assert "Selecione o modelo geral" in query.edit_message_text.call_args.args[0]
+        assert "Select the general model" in query.edit_message_text.call_args.args[0]
 
         update, query = _build_callback_update(mock_update, "settings:mode")
         await callback_settings_mode(update, mock_context)
-        assert "Selecione o modo deste AGENT" in query.edit_message_text.call_args.args[0]
+        assert "Select the mode for this agent" in query.edit_message_text.call_args.args[0]
 
         update, query = _build_callback_update(mock_update, "settings:voice")
         await callback_settings_voice(update, mock_context)
-        assert "Voz deste AGENT" in query.edit_message_text.call_args.args[0]
+        assert "Voice for this agent" in query.edit_message_text.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_settings_featuremodel_and_newsession_callbacks(self, mock_update, mock_context):
@@ -104,7 +104,7 @@ class TestCallbackCoverage:
         update, query = _build_callback_update(mock_update, "settings:featuremodel")
         with patch("koda.handlers.callbacks.get_agent_runtime_settings", return_value=settings):
             await callback_settings_featuremodel(update, mock_context)
-        assert "Selecione a funcionalidade" in query.edit_message_text.call_args.args[0]
+        assert "Select a feature" in query.edit_message_text.call_args.args[0]
 
         mock_context.user_data["session_id"] = "sess-123"
         mock_context.user_data["provider_sessions"] = {"codex": "sess-123"}
@@ -228,12 +228,12 @@ class TestCallbackCoverage:
         update, query = _build_callback_update(mock_update, "fmodelf:image")
         with patch("koda.handlers.callbacks.get_agent_runtime_settings", return_value=image_settings):
             await callback_feature_model_function(update, mock_context)
-        assert "Selecione o provider" in query.edit_message_text.call_args.args[0]
+        assert "Select the provider" in query.edit_message_text.call_args.args[0]
 
         update, query = _build_callback_update(mock_update, "fmodelp:image:codex")
         with patch("koda.handlers.callbacks.get_agent_runtime_settings", return_value=image_settings):
             await callback_feature_model_provider(update, mock_context)
-        assert "Selecione o modelo padrao" in query.edit_message_text.call_args.args[0]
+        assert "Select the default model" in query.edit_message_text.call_args.args[0]
         token = next(iter(mock_context.user_data["_feature_model_tokens"]))
 
         update, query = _build_callback_update(mock_update, f"fmodelm:{token}")
@@ -245,7 +245,7 @@ class TestCallbackCoverage:
         ) as mock_set:
             await callback_feature_model_model(update, mock_context)
         mock_set.assert_called_once_with("image", "codex", "gpt-image-1.5")
-        assert "Modelo padrao do AGENT atualizado" in query.edit_message_text.call_args.args[0]
+        assert "Agent default updated" in query.edit_message_text.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_callback_memory_forget_cancel_and_missing_store(self, mock_update, mock_context):

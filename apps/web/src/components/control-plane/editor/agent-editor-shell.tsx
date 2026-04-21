@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { ComponentType } from "react";
 import {
   ArrowLeft,
@@ -18,7 +18,6 @@ import {
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
 import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
@@ -310,28 +309,16 @@ function EditorHeader({
 
 function ActiveStepRenderer({
   activeStep,
-  direction,
 }: {
   activeStep: StepKey;
-  direction: number;
 }) {
   const ActiveComponent = STEP_COMPONENTS[activeStep];
   if (!ActiveComponent) return null;
 
   return (
-    <AnimatePresence mode="wait" custom={direction}>
-      <motion.div
-        key={activeStep}
-        custom={direction}
-        initial={{ x: direction > 0 ? 96 : -96, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: direction > 0 ? -96 : 96, opacity: 0 }}
-        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-        {...tourAnchor(`editor.step.${activeStep}`)}
-      >
-        <ActiveComponent />
-      </motion.div>
-    </AnimatePresence>
+    <div key={activeStep} {...tourAnchor(`editor.step.${activeStep}`)}>
+      <ActiveComponent />
+    </div>
   );
 }
 
@@ -343,13 +330,11 @@ function InnerShell() {
   const { activeTab, setActiveTab } = useTabNavigation([...STEP_KEYS], {
     redirects: LEGACY_STEP_REDIRECTS,
   });
-  const [prevStepIndex, setPrevStepIndex] = useState(0);
 
   const currentStepIndex = Math.max(
     0,
     STEP_KEYS.indexOf(activeTab as StepKey),
   );
-  const direction = currentStepIndex >= prevStepIndex ? 1 : -1;
   const activeStep = STEP_DEFINITIONS[currentStepIndex] ?? STEP_DEFINITIONS[0];
   const previousStep = currentStepIndex > 0 ? STEP_DEFINITIONS[currentStepIndex - 1] : null;
   const nextStep =
@@ -370,7 +355,6 @@ function InnerShell() {
   const hasUnsavedChanges = Object.values(state.dirty).some(Boolean);
 
   function handleStepChange(step: StepKey) {
-    setPrevStepIndex(currentStepIndex);
     setActiveTab(step);
   }
 
@@ -496,7 +480,7 @@ function InnerShell() {
 
           <div className="relative flex h-full min-h-0 flex-col overflow-hidden" {...tourAnchor("editor.active-step")}>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-8 lg:py-6">
-              <ActiveStepRenderer activeStep={activeStep.key} direction={direction} />
+              <ActiveStepRenderer activeStep={activeStep.key} />
             </div>
           </div>
         </div>

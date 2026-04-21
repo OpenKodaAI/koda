@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | "models"
   | "integrations"
   | "intelligence"
+  | "scheduler"
   | "variables";
 
 export type SystemSettingsFieldError = {
@@ -210,12 +211,92 @@ const variableSchema = z
     }
   });
 
+const schedulerSchema = z
+  .object({
+    scheduler_enabled: z.boolean().optional(),
+    scheduler_poll_interval_seconds: z.union([z.number(), z.string(), z.null()]).optional(),
+    scheduler_lease_seconds: z.union([z.number(), z.string(), z.null()]).optional(),
+    scheduler_run_max_attempts: z.union([z.number(), z.string(), z.null()]).optional(),
+    scheduler_retry_base_delay: z.union([z.number(), z.string(), z.null()]).optional(),
+    scheduler_retry_max_delay: z.union([z.number(), z.string(), z.null()]).optional(),
+    scheduler_min_interval_seconds: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_governance_enabled: z.boolean().optional(),
+    runbook_governance_hour: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_revalidation_stale_days: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_revalidation_min_verified_runs: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_revalidation_min_success_rate: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_revalidation_correction_threshold: z.union([z.number(), z.string(), z.null()]).optional(),
+    runbook_revalidation_rollback_threshold: z.union([z.number(), z.string(), z.null()]).optional(),
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    const positiveIntKeys: Array<keyof typeof value> = [
+      "scheduler_poll_interval_seconds",
+      "scheduler_lease_seconds",
+      "scheduler_run_max_attempts",
+      "scheduler_retry_base_delay",
+      "scheduler_retry_max_delay",
+      "scheduler_min_interval_seconds",
+      "runbook_revalidation_stale_days",
+      "runbook_revalidation_min_verified_runs",
+      "runbook_revalidation_correction_threshold",
+      "runbook_revalidation_rollback_threshold",
+    ];
+    for (const key of positiveIntKeys) {
+      const raw = value[key];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const parsed = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "invalid_type" });
+        continue;
+      }
+      if (parsed < 1) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "min_value" });
+      }
+    }
+    const hour = value.runbook_governance_hour;
+    if (hour !== undefined && hour !== null && hour !== "") {
+      const parsed = typeof hour === "number" ? hour : Number(hour);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["runbook_governance_hour"],
+          message: "invalid_type",
+        });
+      } else if (parsed < 0 || parsed > 23) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["runbook_governance_hour"],
+          message: "out_of_range",
+        });
+      }
+    }
+    const rate = value.runbook_revalidation_min_success_rate;
+    if (rate !== undefined && rate !== null && rate !== "") {
+      const parsed = typeof rate === "number" ? rate : Number(rate);
+      if (!Number.isFinite(parsed)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["runbook_revalidation_min_success_rate"],
+          message: "invalid_type",
+        });
+      } else if (parsed < 0 || parsed > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["runbook_revalidation_min_success_rate"],
+          message: "out_of_range",
+        });
+      }
+    }
+  });
+
 export const generalSystemSettingsPayloadSchema = z
   .object({
     account: accountSchema.optional(),
     models: modelsSchema.optional(),
     resources: z.record(z.string(), z.unknown()).optional(),
     memory_and_knowledge: memoryAndKnowledgeSchema.optional(),
+    scheduler: schedulerSchema.optional(),
     variables: z.array(variableSchema).optional(),
   })
   .passthrough();
@@ -235,6 +316,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   unknown_profile: "Perfil desconhecido.",
   required: "Campo obrigatório.",
   invalid_format: "Formato inválido.",
+  out_of_range: "Valor fora do intervalo permitido.",
 };
 
 export function humanizeCode(code: string, fallback?: string): string {
@@ -247,6 +329,7 @@ export function sectionForField(field: string): SettingsSectionId {
   if (field.startsWith("models.")) return "models";
   if (field.startsWith("resources.") || field.startsWith("integrations.")) return "integrations";
   if (field.startsWith("memory_and_knowledge.")) return "intelligence";
+  if (field.startsWith("scheduler.")) return "scheduler";
   if (field.startsWith("variables")) return "variables";
   return "general";
 }
@@ -276,10 +359,31 @@ export function groupErrorsBySection(
     models: [],
     integrations: [],
     intelligence: [],
+    scheduler: [],
     variables: [],
   };
   for (const err of errors) {
     initial[sectionForField(err.field)].push(err);
   }
   return initial;
+}
+
+/**
+ * Find the most specific error that matches a field path.
+ *
+ * Matching rules:
+ *  - Exact match on `err.field === fieldPath` wins.
+ *  - Otherwise, an error whose field starts with `fieldPath + "."` is returned
+ *    (e.g. `findFieldError(errors, "variables.0")` picks up `variables.0.key`).
+ *  - Returns `undefined` when no error applies to the path.
+ */
+export function findFieldError(
+  errors: SystemSettingsFieldError[] | undefined | null,
+  fieldPath: string,
+): SystemSettingsFieldError | undefined {
+  if (!errors || errors.length === 0) return undefined;
+  const exact = errors.find((err) => err.field === fieldPath);
+  if (exact) return exact;
+  const prefix = `${fieldPath}.`;
+  return errors.find((err) => err.field.startsWith(prefix));
 }

@@ -12,7 +12,7 @@ from typing import Any
 from koda.config import AGENT_ID, RUNBOOK_REVALIDATION_STALE_DAYS
 from koda.logging_config import get_logger
 from koda.state.memory_store import increment_memory_quality_counter
-from koda.state_primary import (
+from koda.state.primary import (
     get_primary_state_backend,
     postgres_primary_mode,
     primary_execute,

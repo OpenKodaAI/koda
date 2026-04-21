@@ -209,10 +209,6 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
     CoreToolDefinition("job_delete", "Scheduled job delete", "scheduler", "Archive a scheduled job."),
     CoreToolDefinition("job_run_now", "Scheduled job run now", "scheduler", "Queue an immediate manual run."),
     CoreToolDefinition("job_runs", "Scheduled job runs", "scheduler", "List recent scheduled runs.", read_only=True),
-    CoreToolDefinition("cron_list", "Legacy cron list", "scheduler", "List legacy cron jobs.", read_only=True),
-    CoreToolDefinition("cron_add", "Legacy cron add", "scheduler", "Create a legacy cron job."),
-    CoreToolDefinition("cron_delete", "Legacy cron delete", "scheduler", "Delete a legacy cron job."),
-    CoreToolDefinition("cron_toggle", "Legacy cron toggle", "scheduler", "Enable or disable a legacy cron job."),
     CoreToolDefinition("web_search", "Web search", "research", "Search the web.", read_only=True),
     CoreToolDefinition("fetch_url", "Fetch URL", "research", "Fetch one URL.", read_only=True),
     CoreToolDefinition("http_request", "HTTP request", "research", "Make an HTTP request."),
@@ -616,10 +612,16 @@ _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
         title="Anthropic",
         vendor="Anthropic",
         runtime_adapter="claude_runner",
-        description="Anthropic via API key or local Claude Code CLI.",
+        description=(
+            "Anthropic via API key, Claude subscription login (Koda spawns "
+            "``claude setup-token`` in a PTY and forwards the operator's "
+            "authorization code to the CLI's stdin), or local Claude Code CLI "
+            "when the operator has already authenticated the binary on a "
+            "mounted CLAUDE_CONFIG_DIR."
+        ),
         binary="claude",
-        supported_auth_modes=("api_key", "local"),
-        login_flow_kind=None,
+        supported_auth_modes=("api_key", "subscription_login", "local"),
+        login_flow_kind="browser",
         connection_managed=True,
     ),
     CoreProviderDefinition(
@@ -1308,17 +1310,13 @@ _SCHEDULER_ACTION_LEVELS: dict[str, str] = {
     "job_list": "read",
     "job_get": "read",
     "job_runs": "read",
-    "cron_list": "read",
     "job_create": "write",
     "job_validate": "write",
     "job_activate": "write",
     "job_pause": "write",
     "job_resume": "write",
     "job_run_now": "write",
-    "cron_add": "write",
-    "cron_toggle": "write",
     "job_delete": "destructive",
-    "cron_delete": "destructive",
 }
 _SCRIPT_LIBRARY_ACTION_LEVELS: dict[str, str] = {
     "search": "read",

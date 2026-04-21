@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import { SecretInput } from "@/components/ui/secret-controls";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { renderIntegrationLogo } from "@/components/control-plane/system/integrations/integration-logos";
 import { requestJson } from "@/lib/http-client";
@@ -297,7 +297,6 @@ function FieldRow({
   field,
   state,
   onChange,
-  preview,
   valuePresent,
   isSecret,
 }: FieldRowProps) {
@@ -324,7 +323,11 @@ function FieldRow({
       {help ? (
         <span className="text-[11px] text-[var(--text-quaternary)]">{help}</span>
       ) : null}
-      {valuePresent && preview ? <MaskedSecretPreview preview={preview} /> : null}
+      {valuePresent ? (
+        <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+          {tl("Configurada")}
+        </span>
+      ) : null}
       {isSwitch ? (
         <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
           <input

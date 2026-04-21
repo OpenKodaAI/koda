@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
+    PROMOTION_MODES,
     normalize_string_list,
     resolve_allowed_tool_ids,
     resolve_core_integration_catalog,
@@ -61,6 +62,7 @@ from koda.services.provider_auth import (
     MANAGED_PROVIDER_IDS,
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
+    PROVIDER_AUTH_TOKEN_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
     PROVIDER_PROJECT_ENV_KEYS,
     PROVIDER_TITLES,
@@ -424,6 +426,7 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "allowed_user_ids": ("ALLOWED_USER_IDS", "csv"),
         "knowledge_admin_user_ids": ("KNOWLEDGE_ADMIN_USER_IDS", "csv"),
         "rate_limit_per_minute": ("RATE_LIMIT_PER_MINUTE", "int"),
+        "time_format": ("TIME_FORMAT", "string"),
     },
     "providers": {
         "functional_defaults": ("MODEL_FUNCTION_DEFAULTS_JSON", "json"),
@@ -2501,9 +2504,9 @@ class ControlPlaneManager:
         )
         provider_api_key_env = PROVIDER_API_KEY_ENV_KEYS.get(cast(Any, provider_id))
         if provider_api_key_env:
-            api_key_present, api_key_preview = self._global_secret_preview_state(provider_api_key_env)
+            api_key_present, _api_key_preview = self._global_secret_preview_state(provider_api_key_env)
         else:
-            api_key_present, api_key_preview = False, ""
+            api_key_present = False
         payload = {
             "provider_id": provider_id,
             "title": _safe_json_object(catalog).get("title")
@@ -2525,7 +2528,12 @@ class ControlPlaneManager:
             "login_flow_kind": _safe_json_object(catalog).get("login_flow_kind"),
             "requires_project_id": bool(_safe_json_object(catalog).get("requires_project_id", False)),
             "api_key_present": api_key_present,
-            "api_key_preview": api_key_preview,
+            # The masked preview is intentionally stripped from the API contract:
+            # the browser only sees whether a key is configured, never its shape.
+            # We still compute the local flag `api_key_present` from the same
+            # source (`_global_secret_preview_state`) so the UI knows to hide
+            # the "Set a key" input and show "Connected" instead.
+            "api_key_preview": "",
             "base_url": self._resolve_ollama_base_url(auth_mode=auth_mode, env=env) if provider_id == "ollama" else "",
         }
         payload["connection_status"] = self._provider_connection_status(payload)
@@ -2824,8 +2832,6 @@ class ControlPlaneManager:
                 env.get("PROVIDER_FALLBACK_ORDER") or os.environ.get("PROVIDER_FALLBACK_ORDER")
             )
         ]
-        if not fallback_order:
-            fallback_order = enabled_ids.copy()
         return {
             "default_provider": default_provider,
             "enabled_providers": enabled_ids,
@@ -3286,7 +3292,14 @@ class ControlPlaneManager:
 
     def get_dashboard_execution(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
         normalized, _ = self._require_dashboard_agent(agent_id)
-        return cast(dict[str, Any] | None, self._dashboard_store().get_execution(normalized, task_id))
+        # Delegate to the control-plane dashboard_service, which uses the
+        # canonical uppercase agent_id convention. dashboard_store's
+        # _normalize_scope lowercases and misses rows written by the runtime
+        # (``tasks.agent_id = 'PIXIE_COPY'`` after the recent case-fix
+        # migration), returning 404 for existing executions.
+        from koda.control_plane.dashboard_service import get_dashboard_execution_detail
+
+        return get_dashboard_execution_detail(normalized, task_id)
 
     def list_dashboard_sessions(
         self,
@@ -4244,12 +4257,14 @@ class ControlPlaneManager:
             entry = dict(field)
             key = str(field["key"])
             if str(field.get("storage") or "env") == "secret":
-                value_present, preview = self._stored_global_secret_preview_state(key)
+                value_present, _preview = self._stored_global_secret_preview_state(key)
                 payload.append(
                     {
                         **entry,
                         "value": "",
-                        "preview": preview,
+                        # Preview intentionally stripped — UI only shows
+                        # "configured" / replace actions, never the value.
+                        "preview": "",
                         "value_present": value_present,
                         "usage_scope": "system_only",
                     }
@@ -4281,12 +4296,14 @@ class ControlPlaneManager:
             key = str(field["key"])
             storage = str(field.get("storage") or "env")
             if storage == "secret":
-                value_present, preview = self._agent_secret_preview_state(agent_id, key)
+                value_present, _preview = self._agent_secret_preview_state(agent_id, key)
                 payload.append(
                     {
                         **entry,
                         "value": "",
-                        "preview": preview,
+                        # Preview stripped — per-agent integrations follow
+                        # the same "no preview, replace-only" rule.
+                        "preview": "",
                         "value_present": value_present,
                         "usage_scope": "agent_only",
                     }
@@ -6195,14 +6212,19 @@ class ControlPlaneManager:
         normalized = provider_id.strip().lower()
         if normalized not in MANAGED_PROVIDER_IDS:
             raise ValueError(f"unsupported provider connection: {provider_id}")
-        if normalized in {"ollama", "claude"}:
+        # Ollama is a self-hosted endpoint — "login" is a base URL configuration.
+        if normalized == "ollama":
             title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
-            raise ValueError(f"{title} usa API key ou conexão local nesta interface.")
+            raise ValueError(f"{title} uses API key or local connection in this interface.")
         payload = payload or {}
         project_id = _trimmed_text(payload.get("project_id"))
         existing_row = self._provider_connection_row(normalized)
         if not project_id:
             project_id = _trimmed_text(existing_row["project_id"])
+
+        # Kill any lingering login subprocess for this provider so we never
+        # leak a PTY when the operator restarts the wizard.
+        self._terminate_provider_login_sessions(normalized)
 
         handle, state = start_login_process(
             cast(Any, normalized),
@@ -6235,6 +6257,10 @@ class ControlPlaneManager:
     def reauth_provider_connection(self, provider_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.start_provider_login(provider_id, payload)
 
+    _PROVIDER_LOGIN_CODE_MAX_LEN = 512
+    _PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS = 45.0
+    _PROVIDER_LOGIN_SUBMIT_VERIFY_INTERVAL_SECONDS = 2.0
+
     def submit_provider_login_code(
         self,
         provider_id: str,
@@ -6243,21 +6269,176 @@ class ControlPlaneManager:
     ) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
         code = _trimmed_text(_safe_json_object(payload).get("code"))
+        # Cap the payload defensively. Anthropic/OpenAI/Google authorization
+        # codes fit in under 200 chars; anything larger is either a paste
+        # mishap or a DoS attempt against the subprocess stdin buffer.
+        if code and len(code) > self._PROVIDER_LOGIN_CODE_MAX_LEN:
+            raise ValueError(f"authorization code is too long (max {self._PROVIDER_LOGIN_CODE_MAX_LEN} chars)")
 
-        # Write code to CLI subprocess (Codex, Gemini).
+        # Write code to CLI subprocess (Claude, Codex, Gemini).
         handle = self._provider_login_processes.get(session_id)
         if handle is None:
-            raise KeyError(session_id)
+            # Session is gone from memory — most likely the server restarted,
+            # the process died, or the session already reached a terminal
+            # state. Return the persisted session snapshot so the UI can show
+            # an actionable message ("session expired, start over") instead of
+            # a 500 that stalls the spinner.
+            log.warning(
+                "provider_login_submit_session_missing",
+                provider_id=normalized,
+                session_id=session_id,
+            )
+            try:
+                return self._sync_provider_login_session(normalized, session_id)
+            except KeyError:
+                raise KeyError(session_id) from None
+        log.info(
+            "provider_login_submit_started",
+            provider_id=normalized,
+            session_id=session_id,
+            code_length=len(code or ""),
+            code_has_hash_separator=("#" in (code or "")),
+        )
         if code:
             handle.write(code + "\n")
-            proc = getattr(handle, "process", None)
-            if proc is not None:
-                deadline = time.monotonic() + 6.0
-                while time.monotonic() < deadline:
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(0.3)
+            self._await_provider_login_completion(normalized, handle, session_id=session_id)
         return self._sync_provider_login_session(normalized, session_id)
+
+    def _await_provider_login_completion(
+        self,
+        provider_id: str,
+        handle: Any,
+        *,
+        session_id: str = "",
+    ) -> None:
+        """Block until the login subprocess either exits or the provider reports
+        the operator as authenticated, whichever comes first.
+
+        The naïve "wait 6s for exit" loop we inherited is too short for two
+        realistic paths: (1) the CLI keeps running in a retry loop when the
+        operator pastes the wrong code, and (2) even on success the CLI can
+        take 8-15s to exchange the code with the provider, persist the token
+        and exit cleanly. Polling ``*_subscription_login`` verification every
+        few seconds lets us return ``completed`` as soon as the provider
+        confirms the token landed on disk — we don't have to wait for the CLI
+        process to drain its TUI and exit.
+        """
+        proc = getattr(handle, "process", None)
+        if proc is None:
+            return
+        deadline = time.monotonic() + self._PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS
+        started_at = time.monotonic()
+        last_verify_at = 0.0
+        verify_attempts = 0
+        last_error = ""
+        base_env = self._merged_global_env()
+        work_dir = self._provider_auth_work_dir(provider_id)
+        connection_row = self._provider_connection_row(provider_id)
+        project_id = _trimmed_text(connection_row["project_id"])
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                log.info(
+                    "provider_login_submit_cli_exited",
+                    provider_id=provider_id,
+                    session_id=session_id,
+                    returncode=proc.returncode,
+                    elapsed_seconds=round(time.monotonic() - started_at, 2),
+                    verify_attempts=verify_attempts,
+                )
+                return
+            now = time.monotonic()
+            if now - last_verify_at >= self._PROVIDER_LOGIN_SUBMIT_VERIFY_INTERVAL_SECONDS:
+                last_verify_at = now
+                verify_attempts += 1
+                try:
+                    verification = verify_provider_subscription_login(
+                        cast(Any, provider_id),
+                        project_id=project_id,
+                        base_env=base_env,
+                        work_dir=work_dir,
+                    )
+                except Exception as exc:
+                    verification = None
+                    last_error = f"verify raised: {exc}"
+                if verification is not None:
+                    if verification.verified:
+                        log.info(
+                            "provider_login_submit_verified",
+                            provider_id=provider_id,
+                            session_id=session_id,
+                            elapsed_seconds=round(time.monotonic() - started_at, 2),
+                            verify_attempts=verify_attempts,
+                        )
+                        # Token is on disk; terminate the CLI so the PTY is
+                        # released and _sync_provider_login_session picks up
+                        # a completed session immediately.
+                        with contextlib.suppress(Exception):
+                            handle.terminate()
+                        return
+                    last_error = verification.last_error or ""
+            time.sleep(0.3)
+        output_tail = ""
+        with contextlib.suppress(Exception):
+            output_tail = str(handle.normalized_output() or "")[-500:]
+        log.warning(
+            "provider_login_submit_deadline_reached",
+            provider_id=provider_id,
+            session_id=session_id,
+            elapsed_seconds=round(time.monotonic() - started_at, 2),
+            verify_attempts=verify_attempts,
+            last_verify_error=last_error[:200],
+            cli_process_alive=proc.poll() is None,
+            cli_output_tail=output_tail,
+        )
+
+    def _terminate_provider_login_sessions(self, provider_id: str) -> None:
+        """Terminate any in-memory login subprocess owned by this provider.
+
+        Called before starting a fresh login to reclaim the PTY / pipe handles
+        when an operator restarts the wizard mid-flow.
+        """
+        normalized = provider_id.strip().lower()
+        stale_ids = [
+            session_id
+            for session_id, handle in self._provider_login_processes.items()
+            if getattr(handle, "provider_id", "") == normalized
+        ]
+        for session_id in stale_ids:
+            handle = self._provider_login_processes.pop(session_id, None)
+            if handle is None:
+                continue
+            with contextlib.suppress(Exception):
+                handle.terminate()
+
+    def _mark_provider_enabled(self, provider_id: str, *, enabled: bool) -> None:
+        """Flip ``cp_global_sections.providers.{id}_enabled`` without going through
+        the full ``put_general_system_settings`` flow.
+
+        Writes both the flat ``{id}_enabled`` flag (consumed by
+        ``_validate_general_payload``) AND the env-style ``{ID}_ENABLED`` key
+        under ``providers.env`` (consumed by ``_provider_catalog_from_env``
+        when the agent editor / model selectors build their provider lists).
+        Keeping both in sync after a successful verify makes a newly verified
+        provider show up immediately in every downstream view.
+        """
+        normalized = provider_id.strip().lower()
+        if not normalized:
+            return
+        sections = self._system_settings_sections()
+        providers_section = dict(_safe_json_object(sections.get("providers")))
+        flag_key = f"{normalized}_enabled"
+        env_key = f"{normalized.upper()}_ENABLED"
+        env_map = dict(_safe_json_object(providers_section.get("env")))
+        current_flag = providers_section.get(flag_key)
+        current_env = env_map.get(env_key)
+        desired_env = "true" if enabled else "false"
+        already_in_sync = isinstance(current_flag, bool) and current_flag == enabled and current_env == desired_env
+        if already_in_sync:
+            return
+        providers_section[flag_key] = bool(enabled)
+        env_map[env_key] = desired_env
+        providers_section["env"] = env_map
+        self._persist_global_sections({"providers": providers_section})
 
     def verify_provider_connection(self, provider_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
@@ -6302,6 +6483,8 @@ class ControlPlaneManager:
             last_verified_at=now_iso() if result.verified else "",
             last_error=result.last_error,
         )
+        if result.verified:
+            self._mark_provider_enabled(normalized, enabled=True)
         latest_row = fetch_one(
             """
             SELECT id FROM cp_provider_login_sessions
@@ -6342,6 +6525,24 @@ class ControlPlaneManager:
         }
 
     def disconnect_provider_connection(self, provider_id: str) -> dict[str, Any]:
+        """Full reset of a provider's connection state.
+
+        Wipes everything Koda persists about the provider so the next
+        connection attempt starts from zero:
+
+        1. Terminates any in-flight login subprocess.
+        2. Runs the CLI's native logout when available (``claude auth logout``,
+           ``codex logout``) so on-disk OAuth tokens are revoked.
+        3. Best-effort wipe of provider-owned credential files under the
+           runtime HOME (catches tokens left after logout failures).
+        4. Deletes ALL provider-scoped global secrets — API key, auth mode,
+           base URL, project id, verification flag, auth-token (not only the
+           API key as before).
+        5. Purges every ``cp_provider_login_sessions`` row for the provider.
+        6. Resets the ``cp_provider_connections`` row: cleared labels,
+           cleared ``project_id``, cleared ``last_error``, ``configured`` +
+           ``verified`` both false.
+        """
         normalized = provider_id.strip().lower()
         row = self._provider_connection_row(normalized)
         for session_id, handle in list(self._provider_login_processes.items()):
@@ -6360,22 +6561,32 @@ class ControlPlaneManager:
             )
             self._persist_provider_login_session(cancelled)
 
-        auth_mode = _trimmed_text(row["auth_mode"]) or "subscription_login"
-        logout_performed = False
-        logout_message = ""
-        if auth_mode == "api_key":
-            self.delete_global_secret_asset(PROVIDER_API_KEY_ENV_KEYS[cast(Any, normalized)], persist_sections=True)
-        else:
-            logout_performed, logout_message = run_provider_logout(
-                cast(Any, normalized),
-                base_env=self._merged_global_env(),
-                work_dir=self._provider_auth_work_dir(normalized),
+        logout_performed, logout_message = run_provider_logout(
+            cast(Any, normalized),
+            base_env=self._merged_global_env(),
+            work_dir=self._provider_auth_work_dir(normalized),
+        )
+        if not logout_performed and logout_message == "logout not supported":
+            logout_message = ""
+
+        self._wipe_provider_credential_files(normalized)
+        self._purge_provider_global_secrets(normalized)
+
+        with contextlib.suppress(Exception):
+            execute(
+                "DELETE FROM cp_provider_login_sessions WHERE provider_id = ?",
+                (normalized,),
             )
-            if not logout_performed and logout_message == "logout not supported":
-                logout_message = ""
 
         reset_auth_mode = (
-            "api_key" if normalized == "elevenlabs" else "local" if normalized == "ollama" else "subscription_login"
+            "api_key"
+            if normalized == "elevenlabs"
+            # Ollama is a self-hosted endpoint; Claude is authenticated out-of-band
+            # by the operator via ``claude auth login`` on the container shell.
+            # Both start in ``local`` mode after a reset.
+            else "local"
+            if normalized in {"ollama", "claude"}
+            else "subscription_login"
         )
 
         self._persist_provider_connection_row(
@@ -6385,10 +6596,14 @@ class ControlPlaneManager:
             verified=False,
             account_label="",
             plan_label="",
-            project_id=_trimmed_text(row["project_id"]),
+            # ``project_id`` was intentionally persisted before. For a clean
+            # reset we clear it too — operators explicitly asked for "wipe
+            # everything that was persisted".
+            project_id="",
             last_verified_at="",
             last_error="" if logout_performed or not logout_message else logout_message,
         )
+        del row  # old row snapshot is no longer authoritative after the wipe above
         return {
             "connection": self.get_provider_connection(normalized),
             "logout": {
@@ -6396,6 +6611,66 @@ class ControlPlaneManager:
                 "message": logout_message,
             },
         }
+
+    def _purge_provider_global_secrets(self, provider_id: str) -> None:
+        """Delete every provider-scoped entry from the global secrets store."""
+        provider_key = cast(Any, provider_id)
+        secret_env_keys = [
+            key
+            for key_map in (
+                PROVIDER_API_KEY_ENV_KEYS,
+                PROVIDER_AUTH_TOKEN_ENV_KEYS,
+                PROVIDER_AUTH_MODE_ENV_KEYS,
+                PROVIDER_VERIFIED_ENV_KEYS,
+                PROVIDER_BASE_URL_ENV_KEYS,
+                PROVIDER_PROJECT_ENV_KEYS,
+            )
+            if (key := key_map.get(provider_key))
+        ]
+        for env_key in secret_env_keys:
+            with contextlib.suppress(Exception):
+                self.delete_global_secret_asset(env_key, persist_sections=False)
+        if secret_env_keys:
+            self._persist_global_sections({})  # flush the provider-section drift
+
+    def _wipe_provider_credential_files(self, provider_id: str) -> None:
+        """Best-effort removal of CLI-managed credential files on disk.
+
+        Claude Code / Codex CLIs keep OAuth tokens under the runtime HOME.
+        ``*_auth logout`` is supposed to clear them, but failures or older
+        CLI versions leave the tokens behind. Wipe the known paths so the
+        next login starts from a clean slate.
+        """
+        import shutil
+        from pathlib import Path
+
+        home = os.environ.get("HOME") or ""
+        config_dirs: list[Path] = []
+        if provider_id == "claude":
+            claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
+            if claude_config:
+                config_dirs.append(Path(claude_config))
+            if home:
+                config_dirs.append(Path(home) / ".claude")
+        elif provider_id == "codex":
+            codex_home = os.environ.get("CODEX_HOME")
+            if codex_home:
+                config_dirs.append(Path(codex_home))
+            if home:
+                config_dirs.append(Path(home) / ".codex")
+        elif provider_id == "gemini":
+            if home:
+                config_dirs.append(Path(home) / ".gemini")
+
+        for directory in config_dirs:
+            with contextlib.suppress(Exception):
+                if directory.is_dir():
+                    for child in directory.iterdir():
+                        with contextlib.suppress(Exception):
+                            if child.is_dir():
+                                shutil.rmtree(child)
+                            else:
+                                child.unlink(missing_ok=True)
 
     def get_agent_spec(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)
@@ -6679,6 +6954,28 @@ class ControlPlaneManager:
                 "Until you configure Escopo, it only receives agent-local secrets and no shared variables."
             )
 
+        runtime_access_errors: list[str] = []
+        runtime_access_warnings: list[str] = []
+        try:
+            token_present = self.get_secret_asset(normalized, "AGENT_TOKEN", scope="agent") is not None
+        except Exception:
+            token_present = False
+        if not token_present:
+            runtime_access_errors.append(
+                "AGENT_TOKEN is not configured. The Telegram channel will fail to start until "
+                "a bot token is saved in Identidade → Canal Telegram."
+            )
+        allowed_raw = ""
+        try:
+            allowed_raw = self.get_decrypted_secret_value(normalized, "ALLOWED_USER_IDS") or ""
+        except Exception:
+            allowed_raw = ""
+        if not _normalize_user_id_values(allowed_raw):
+            runtime_access_warnings.append(
+                "ALLOWED_USER_IDS is empty. The agent will reply 'Access denied.' to every "
+                "Telegram user until you add at least one numeric user ID in Identidade → Canal Telegram."
+            )
+
         result = {
             **validation,
             "provider_errors": provider_errors,
@@ -6712,8 +7009,19 @@ class ControlPlaneManager:
                 )
         result["runtime_prompt_preview"] = runtime_prompt_preview
         result["prompt_preview"] = runtime_prompt_preview
-        result["warnings"] = [*validation["warnings"], *provenance_warnings, *resource_warnings]
-        result["errors"] = [*validation["errors"], *provider_errors, *resource_errors, *runtime_prompt_errors]
+        result["warnings"] = [
+            *validation["warnings"],
+            *provenance_warnings,
+            *resource_warnings,
+            *runtime_access_warnings,
+        ]
+        result["errors"] = [
+            *validation["errors"],
+            *provider_errors,
+            *resource_errors,
+            *runtime_prompt_errors,
+            *runtime_access_errors,
+        ]
         result["ok"] = not result["errors"]
         return result
 
@@ -6801,7 +7109,7 @@ class ControlPlaneManager:
         feature_flags = validation[0]
         policy = resolve_execution_policy(agent_spec, feature_flags=feature_flags)
         source = _trimmed_text(_safe_json_object(policy).get("source")) or (
-            "execution_policy" if _safe_json_object(agent_spec.get("execution_policy")) else "compiled_legacy"
+            "execution_policy" if _safe_json_object(agent_spec.get("execution_policy")) else "none"
         )
         return {
             "agent_id": normalized,
@@ -7385,6 +7693,63 @@ class ControlPlaneManager:
             "version": int(version_row["id"]) if version_row else self._persist_global_default_version(sections),
         }
 
+    def get_persistence_diagnostics(self) -> dict[str, Any]:
+        """Return the real state of the persistence stack.
+
+        Exposed via ``GET /api/control-plane/_diag/persistence`` so an operator
+        seeing "saves don't persist" can curl/inspect the truth: is the
+        Postgres backend available? How many rows are in cp_global_sections
+        and cp_provider_connections? When was the last write? Without this
+        endpoint the operator has to read source to figure out why writes
+        appear to succeed but revert to defaults.
+        """
+        from koda.state.primary import get_primary_state_backend, postgres_primary_mode
+
+        warnings: list[str] = []
+        backend_available = False
+        schema: str | None = None
+        try:
+            backend = get_primary_state_backend()
+            backend_available = backend is not None
+            if backend is not None:
+                schema = str(getattr(backend, "schema", "") or "") or None
+        except Exception as exc:  # noqa: BLE001 - surface diag failures to the caller
+            warnings.append(f"backend_resolution_failed: {exc!r}")
+
+        if postgres_primary_mode() and not backend_available:
+            warnings.append(
+                "STATE_BACKEND=postgres but KNOWLEDGE_V2_POSTGRES_DSN is empty or the shared "
+                "backend refused to initialize. Saves will fail loudly with primary_backend_unavailable."
+            )
+
+        row_counts: dict[str, int | None] = {}
+        last_updated_at: str | None = None
+        for table in ("cp_global_sections", "cp_provider_connections", "cp_secret_values", "cp_agent_definitions"):
+            try:
+                row = fetch_one(f"SELECT COUNT(*) AS count FROM {table}")
+                row_counts[table] = int(row["count"]) if row and row.get("count") is not None else 0
+            except Exception as exc:  # noqa: BLE001
+                row_counts[table] = None
+                warnings.append(f"{table}_count_failed: {exc!r}")
+
+        try:
+            latest = fetch_one("SELECT MAX(updated_at) AS updated_at FROM cp_global_sections")
+            if latest is not None:
+                raw = latest.get("updated_at")
+                last_updated_at = str(raw) if raw else None
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"last_updated_at_failed: {exc!r}")
+
+        return {
+            "state_backend": STATE_BACKEND,
+            "postgres_primary_mode": postgres_primary_mode(),
+            "primary_backend_available": backend_available,
+            "postgres_schema": schema,
+            "row_counts": row_counts,
+            "last_updated_at": last_updated_at,
+            "warnings": warnings,
+        }
+
     def _persist_global_sections(self, sections: dict[str, dict[str, Any]]) -> int:
         for section, value in sections.items():
             execute(
@@ -7395,6 +7760,20 @@ class ControlPlaneManager:
                 """,
                 (section, json_dump(_safe_json_object(value)), now_iso()),
             )
+        # Post-write verification — read back and confirm the sections we just
+        # wrote are visible. A silent failure in the DB layer (missing row,
+        # no-op backend) becomes a loud 500 here instead of a 200 OK that
+        # mysteriously reverts to defaults on reload.
+        written_keys = {str(section) for section in sections}
+        if written_keys:
+            actual = self._load_global_sections()
+            missing = sorted(key for key in written_keys if key not in actual)
+            if missing:
+                raise RuntimeError(
+                    "persist_global_sections_lost: "
+                    f"{missing} — write returned success but row is not visible on read. "
+                    "Check that STATE_BACKEND=postgres has a working KNOWLEDGE_V2_POSTGRES_DSN."
+                )
         return self._persist_global_default_version(sections)
 
     def _general_ui_meta(self, *, sections: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -7518,7 +7897,10 @@ class ControlPlaneManager:
                     "scope": str(secret.get("usage_scope") or "system_only"),
                     "description": _nonempty_text(secret.get("description")),
                     "value": "",
-                    "preview": str(secret.get("preview") or ""),
+                    # Never ship the masked preview — the UI shows only
+                    # "stored" / action buttons; to see the value the
+                    # operator must replace it.
+                    "preview": "",
                     "value_present": True,
                 }
             )
@@ -7895,6 +8277,7 @@ class ControlPlaneManager:
                 or "America/Sao_Paulo"
             ),
             "rate_limit_per_minute": general_section.get("rate_limit_per_minute"),
+            "time_format": _nonempty_text(general_section.get("time_format")) or "24h",
         }
         model_values = {
             "providers_enabled": enabled_providers,
@@ -8015,11 +8398,30 @@ class ControlPlaneManager:
             or _nonempty_text(providers_section.get("tts_default_voice"))
             or elevenlabs_prefill_from_env
         )
+        scheduler_values = {
+            "scheduler_enabled": bool(scheduler_section.get("scheduler_enabled", True)),
+            "scheduler_poll_interval_seconds": scheduler_section.get("scheduler_poll_interval_seconds"),
+            "scheduler_lease_seconds": scheduler_section.get("scheduler_lease_seconds"),
+            "scheduler_run_max_attempts": scheduler_section.get("scheduler_run_max_attempts"),
+            "scheduler_retry_base_delay": scheduler_section.get("scheduler_retry_base_delay"),
+            "scheduler_retry_max_delay": scheduler_section.get("scheduler_retry_max_delay"),
+            "scheduler_min_interval_seconds": scheduler_section.get("scheduler_min_interval_seconds"),
+            "runbook_governance_enabled": bool(scheduler_section.get("runbook_governance_enabled", False)),
+            "runbook_governance_hour": scheduler_section.get("runbook_governance_hour"),
+            "runbook_revalidation_stale_days": scheduler_section.get("runbook_revalidation_stale_days"),
+            "runbook_revalidation_min_verified_runs": scheduler_section.get("runbook_revalidation_min_verified_runs"),
+            "runbook_revalidation_min_success_rate": scheduler_section.get("runbook_revalidation_min_success_rate"),
+            "runbook_revalidation_correction_threshold": scheduler_section.get(
+                "runbook_revalidation_correction_threshold"
+            ),
+            "runbook_revalidation_rollback_threshold": scheduler_section.get("runbook_revalidation_rollback_threshold"),
+        }
         values = {
             "account": account_values,
             "models": model_values,
             "resources": resource_values,
             "memory_and_knowledge": memory_values,
+            "scheduler": scheduler_values,
             "variables": self._custom_global_variables_payload(legacy_settings, sections=sections),
             "provider_connections": provider_connections,
         }
@@ -8096,7 +8498,7 @@ class ControlPlaneManager:
                 "usage_profiles": [
                     {"id": profile_id, **profile} for profile_id, profile in _GENERAL_MODEL_USAGE_PROFILES.items()
                 ],
-                "memory_presets": [
+                "memory_profiles": [
                     {"id": profile_id, **profile} for profile_id, profile in _GENERAL_MEMORY_PROFILES.items()
                 ],
                 "knowledge_profiles": [
@@ -8223,10 +8625,20 @@ class ControlPlaneManager:
         account = _safe_json_object(payload.get("account"))
         models = _safe_json_object(payload.get("models"))
         memory_and_knowledge = _safe_json_object(payload.get("memory_and_knowledge"))
+        scheduler = _safe_json_object(payload.get("scheduler"))
         variables_raw = payload.get("variables")
 
         def _push(field: str, code: str, message: str) -> None:
             errors.append({"field": field, "code": code, "message": message})
+
+        if "time_format" in account and account.get("time_format") not in (None, ""):
+            requested_tf = _nonempty_text(account.get("time_format")).lower()
+            if requested_tf and requested_tf not in {"24h", "12h"}:
+                _push(
+                    "account.time_format",
+                    "invalid_enum",
+                    f"Formato de hora inválido: {requested_tf}. Use 24h ou 12h.",
+                )
 
         if "rate_limit_per_minute" in account and account.get("rate_limit_per_minute") not in (None, ""):
             raw = account.get("rate_limit_per_minute")
@@ -8343,6 +8755,62 @@ class ControlPlaneManager:
                     f"Política de proveniência inválida: {provenance}. Use strict ou standard.",
                 )
 
+        _SCHEDULER_POSITIVE_INT_FIELDS = (
+            "scheduler_poll_interval_seconds",
+            "scheduler_lease_seconds",
+            "scheduler_run_max_attempts",
+            "scheduler_retry_base_delay",
+            "scheduler_retry_max_delay",
+            "scheduler_min_interval_seconds",
+            "runbook_revalidation_stale_days",
+            "runbook_revalidation_min_verified_runs",
+            "runbook_revalidation_correction_threshold",
+            "runbook_revalidation_rollback_threshold",
+        )
+        for key in _SCHEDULER_POSITIVE_INT_FIELDS:
+            if key in scheduler and scheduler.get(key) not in (None, ""):
+                try:
+                    parsed = int(scheduler.get(key))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    _push(f"scheduler.{key}", "invalid_type", f"{key} deve ser um inteiro.")
+                    continue
+                if parsed < 1:
+                    _push(f"scheduler.{key}", "min_value", f"{key} deve ser ao menos 1.")
+        if "runbook_governance_hour" in scheduler and scheduler.get("runbook_governance_hour") not in (None, ""):
+            try:
+                hour = int(scheduler.get("runbook_governance_hour"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push(
+                    "scheduler.runbook_governance_hour",
+                    "invalid_type",
+                    "A hora da governança deve ser um inteiro.",
+                )
+            else:
+                if hour < 0 or hour > 23:
+                    _push(
+                        "scheduler.runbook_governance_hour",
+                        "out_of_range",
+                        "A hora da governança deve estar entre 0 e 23.",
+                    )
+        if "runbook_revalidation_min_success_rate" in scheduler and scheduler.get(
+            "runbook_revalidation_min_success_rate"
+        ) not in (None, ""):
+            try:
+                rate = float(scheduler.get("runbook_revalidation_min_success_rate"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push(
+                    "scheduler.runbook_revalidation_min_success_rate",
+                    "invalid_type",
+                    "A taxa mínima de sucesso deve ser numérica.",
+                )
+            else:
+                if rate < 0 or rate > 1:
+                    _push(
+                        "scheduler.runbook_revalidation_min_success_rate",
+                        "out_of_range",
+                        "A taxa mínima de sucesso deve estar entre 0 e 1.",
+                    )
+
         if variables_raw is not None:
             if not isinstance(variables_raw, list):
                 _push("variables", "invalid_type", "Variáveis devem ser uma lista.")
@@ -8415,6 +8883,38 @@ class ControlPlaneManager:
             current_general["rate_limit_per_minute"] = account.get("rate_limit_per_minute")
         if "scheduler_default_timezone" in account:
             current_scheduler["scheduler_default_timezone"] = _nonempty_text(account.get("scheduler_default_timezone"))
+        if "time_format" in account:
+            requested_time_format = _nonempty_text(account.get("time_format")).lower()
+            if requested_time_format in {"24h", "12h"}:
+                current_general["time_format"] = requested_time_format
+
+        scheduler_payload = _safe_json_object(payload.get("scheduler"))
+        for bool_key in ("scheduler_enabled", "runbook_governance_enabled"):
+            if bool_key in scheduler_payload:
+                current_scheduler[bool_key] = bool(scheduler_payload.get(bool_key))
+        for int_key in (
+            "scheduler_poll_interval_seconds",
+            "scheduler_lease_seconds",
+            "scheduler_run_max_attempts",
+            "scheduler_retry_base_delay",
+            "scheduler_retry_max_delay",
+            "scheduler_min_interval_seconds",
+            "runbook_governance_hour",
+            "runbook_revalidation_stale_days",
+            "runbook_revalidation_min_verified_runs",
+            "runbook_revalidation_correction_threshold",
+            "runbook_revalidation_rollback_threshold",
+        ):
+            if int_key in scheduler_payload and scheduler_payload.get(int_key) not in (None, ""):
+                with contextlib.suppress(TypeError, ValueError):
+                    current_scheduler[int_key] = int(scheduler_payload.get(int_key))  # type: ignore[arg-type]
+        if "runbook_revalidation_min_success_rate" in scheduler_payload and scheduler_payload.get(
+            "runbook_revalidation_min_success_rate"
+        ) not in (None, ""):
+            with contextlib.suppress(TypeError, ValueError):
+                current_scheduler["runbook_revalidation_min_success_rate"] = float(
+                    scheduler_payload.get("runbook_revalidation_min_success_rate")  # type: ignore[arg-type]
+                )
 
         provider_catalog = self.get_core_providers()
         enabled_providers = normalize_string_list(models.get("providers_enabled"))
@@ -8629,7 +9129,12 @@ class ControlPlaneManager:
         )
 
         provenance_policy = _nonempty_text(memory_and_knowledge.get("provenance_policy")).lower() or "strict"
-        current_knowledge["promotion_mode"] = "review_queue"
+        promotion_mode = _nonempty_text(memory_and_knowledge.get("promotion_mode")).lower()
+        stored_promotion = _nonempty_text(current_knowledge.get("promotion_mode")).lower()
+        resolved_promotion = promotion_mode or stored_promotion or "review_queue"
+        current_knowledge["promotion_mode"] = (
+            resolved_promotion if resolved_promotion in PROMOTION_MODES else "review_queue"
+        )
         current_knowledge["require_owner_provenance"] = True
         current_knowledge["require_freshness_provenance"] = provenance_policy == "strict"
         effective_knowledge_policy = normalize_knowledge_policy(
@@ -8819,7 +9324,8 @@ class ControlPlaneManager:
                 .get(normalized_secret_key, {})
                 .get("description")
             ),
-            "preview": str(row["preview"] or ""),
+            # Preview stripped — the browser never needs the masked shape.
+            "preview": "",
             "updated_at": str(row["updated_at"] or ""),
         }
 
@@ -9124,7 +9630,8 @@ class ControlPlaneManager:
                 "id": int(row["id"]),
                 "scope": "global" if str(row["scope_id"]) == "global" else "agent",
                 "secret_key": str(row["secret_key"]),
-                "preview": str(row["preview"] or ""),
+                # Preview stripped — see _current_global_secrets for rationale.
+                "preview": "",
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
@@ -9147,7 +9654,8 @@ class ControlPlaneManager:
             "id": int(row["id"]),
             "scope": normalized_scope,
             "secret_key": normalized_secret_key,
-            "preview": str(row["preview"] or ""),
+            # Preview stripped — browser sees only presence, never shape.
+            "preview": "",
             "updated_at": str(row["updated_at"] or ""),
         }
 
@@ -9299,6 +9807,15 @@ class ControlPlaneManager:
             "runtime_base_url": f"http://127.0.0.1:{health_port}",
         }
         runtime_endpoint.update(_safe_json_object(json_load(agent_row["runtime_endpoint_json"], {})))
+        # Post-update: re-read health_port in case runtime_endpoint_json overrode it, then
+        # propagate to process_env so the spawned worker binds the same port the supervisor
+        # expects to poll for liveness/idle checks. Without this the worker falls back to
+        # config.HEALTH_PORT default (8080) while the supervisor polls the per-agent value.
+        effective_health_port = int(runtime_endpoint.get("health_port") or health_port)
+        runtime_endpoint["health_port"] = effective_health_port
+        runtime_endpoint["health_url"] = f"http://127.0.0.1:{effective_health_port}/health"
+        runtime_endpoint["runtime_base_url"] = f"http://127.0.0.1:{effective_health_port}"
+        env["HEALTH_PORT"] = str(effective_health_port)
         appearance = _safe_json_object(json_load(agent_row["appearance_json"], {}))
         appearance.setdefault("label", str(agent_row["display_name"]))
         connection_refs = self._runtime_connection_refs(normalized)
@@ -9655,6 +10172,14 @@ class ControlPlaneManager:
 
         agent_config = _safe_json_object(snapshot.get("agent"))
         runtime_endpoint = _safe_json_object(agent_config.get("runtime_endpoint"))
+        # Propagate the per-agent health port into the spawned worker's env.
+        # Without this the child falls back to config.HEALTH_PORT default (8080)
+        # while the supervisor polls runtime_endpoint.health_url for liveness —
+        # the poll always misses, _is_agent_idle returns False, and graceful
+        # version-bump restarts never fire.
+        endpoint_health_port = runtime_endpoint.get("health_port")
+        if endpoint_health_port is not None:
+            env["HEALTH_PORT"] = str(endpoint_health_port)
         health_url = str(
             runtime_endpoint.get("health_url") or f"http://127.0.0.1:{env.get('HEALTH_PORT', '8080')}/health"
         )

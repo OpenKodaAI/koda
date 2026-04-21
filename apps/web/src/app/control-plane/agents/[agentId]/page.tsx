@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { notFound, redirect } from "next/navigation";
 import { AgentEditorShell } from "@/components/control-plane/editor/agent-editor-shell";
 import {
@@ -46,6 +44,7 @@ export default async function ControlPlaneAgentPage({
       coreIntegrations,
       workspaces,
       executionPolicyPayload,
+      compiledPromptPayload,
     ] = await Promise.all([
       getControlPlaneAgent(agentId),
       getControlPlaneSystemSettings(),
@@ -56,8 +55,8 @@ export default async function ControlPlaneAgentPage({
       getControlPlaneCoreIntegrations(),
       getControlPlaneWorkspaces(),
       getControlPlaneExecutionPolicy(agentId).catch(() => null),
+      getControlPlaneCompiledPrompt(agentId).catch(() => null),
     ]);
-    const compiledPromptPayload = await getControlPlaneCompiledPrompt(agentId).catch(() => null);
     payload = {
       agent,
       compiledPromptPayload,

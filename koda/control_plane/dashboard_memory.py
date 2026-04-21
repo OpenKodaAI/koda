@@ -9,7 +9,7 @@ from typing import Any, cast
 from koda.internal_rpc.memory_engine import build_memory_engine_client
 from koda.services.audit import AuditEvent, emit
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import require_primary_state_backend, run_coro_sync
+from koda.state.primary import require_primary_state_backend, run_coro_sync
 
 _ENGINE_REVIEW_ACTIONS = {
     "approve",

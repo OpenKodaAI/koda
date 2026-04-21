@@ -66,10 +66,6 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "job_delete",
             "job_run_now",
             "job_runs",
-            "cron_list",
-            "cron_add",
-            "cron_delete",
-            "cron_toggle",
             "web_search",
             "fetch_url",
             "http_request",
@@ -90,9 +86,6 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "browser_hover",
             "browser_press_key",
             "browser_cookies",
-            "sqlite_query",
-            "sqlite_schema",
-            "mongo_query",
             "browser_tab_open",
             "browser_tab_close",
             "browser_tab_switch",
@@ -103,12 +96,6 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "browser_upload",
             "browser_set_viewport",
             "browser_pdf",
-            "db_query",
-            "db_schema",
-            "db_explain",
-            "db_switch_env",
-            "mysql_query",
-            "mysql_schema",
             "script_search",
             "script_list",
             "script_save",
@@ -120,7 +107,6 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "snapshot_list",
             "snapshot_diff",
             "snapshot_delete",
-            "redis_query",
             "file_read",
             "file_write",
             "file_edit",
@@ -439,14 +425,6 @@ Initial validation auto-activates the job by default when it passes safely.
 - `job_delete` — Archive a job. Params: `{"job_id": 123}`
 - `job_run_now` — Queue an immediate manual run. Params: `{"job_id": 123}`
 - `job_runs` — Show recent runs. Params: `{"job_id": 123, "limit": 10}`
-
-### Legacy Cron Jobs
-Use these only when the user explicitly asks for cron compatibility or for a simple read-only shell command.
-- `cron_list` — List legacy cron jobs for the user. Params: `{}`
-- `cron_add` — Create a legacy read-only cron job.
-  Params: `{"expression": "cron_expr", "command": "shell_cmd", "description": "optional desc"}`
-- `cron_delete` — Delete a legacy cron job. Params: `{"job_id": 123}`
-- `cron_toggle` — Enable or disable a legacy cron job. Params: `{"job_id": 123, "enabled": true/false}`
 
 ### Web & HTTP
 - `web_search` — Search the web. Params: `{"query": "search terms"}`

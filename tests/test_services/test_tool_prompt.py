@@ -10,11 +10,11 @@ class TestBuildBotToolsPrompt:
         prompt = build_agent_tools_prompt()
         assert "<agent_tools>" in prompt
         assert "</agent_tools>" in prompt
-        assert "cron_list" in prompt
+        assert "job_list" in prompt
         assert "web_search" in prompt
         assert "fetch_url" in prompt
         assert "agent_get_status" in prompt
-        assert "cron_add" not in prompt
+        assert "job_create" not in prompt
         assert "agent_set_workdir" not in prompt
 
     def test_default_prompt_has_protocol(self):
@@ -136,16 +136,16 @@ class TestBuildBotToolsPrompt:
                 "version": 1,
                 "rules": [
                     {
-                        "id": "allow-cron-write",
+                        "id": "allow-job-write",
                         "decision": "require_approval",
-                        "selectors": {"tool_id": ["cron_add"]},
+                        "selectors": {"tool_id": ["job_create"]},
                     }
                 ],
             }
         )
 
         assert "## Enabled Tool Subset" in prompt
-        assert "`cron_add`" in prompt
+        assert "`job_create`" in prompt
 
     def test_prompt_does_not_offer_native_database_sections(self):
         prompt = build_agent_tools_prompt()

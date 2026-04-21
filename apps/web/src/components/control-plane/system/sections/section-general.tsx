@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { sourceBadgeLabel, sourceBadgeTone } from "@/lib/system-settings-model";
+import { findFieldError } from "@/lib/system-settings-schema";
 import type { GeneralSystemSettingsValueSource } from "@/lib/control-plane";
 
 function SourceBadge({ source }: { source: GeneralSystemSettingsValueSource }) {
@@ -48,10 +49,11 @@ function FieldWithBadge({
 }
 
 export function SectionGeneral() {
-  const { draft, setField } = useSystemSettings();
+  const { draft, setField, sectionErrors } = useSystemSettings();
   const { tl } = useAppI18n();
   const account = draft.values.account;
   const sourceBadges = draft.source_badges ?? {};
+  const errors = sectionErrors.general;
 
   function update(patch: Partial<typeof account>) {
     setField("account", { ...account, ...patch });
@@ -72,6 +74,7 @@ export function SectionGeneral() {
           <FieldShell
             label="Timezone"
             description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
+            error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
           >
             <input
               className="field-shell text-[var(--text-primary)]"
@@ -88,6 +91,7 @@ export function SectionGeneral() {
           <FieldShell
             label="Formato de hora"
             description="Define como os horários são exibidos na interface e nos relatórios."
+            error={findFieldError(errors, "account.time_format")?.message}
           >
             <Select
               value={(account as Record<string, unknown>).time_format as string ?? "24h"}
@@ -95,7 +99,7 @@ export function SectionGeneral() {
               disabled={isEnvSourced("account.time_format")}
             >
               <SelectTrigger
-               
+
                 title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
               >
                 <SelectValue />

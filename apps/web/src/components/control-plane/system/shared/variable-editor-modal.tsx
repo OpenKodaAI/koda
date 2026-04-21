@@ -5,7 +5,7 @@ import { Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { GeneralSystemSettingsVariable } from "@/lib/control-plane";
 import { FieldShell } from "./field-shell";
-import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import { SecretInput } from "@/components/ui/secret-controls";
 import {
   Select,
   SelectContent,
@@ -90,11 +90,11 @@ export function VariableEditorModal({
             </Select>
           </FieldShell>
 
-          <FieldShell label={tl("Escopo")} description={tl("Controle se o valor pode ser concedido explicitamente a bots.")}>
+          <FieldShell label={tl("Escopo")} description={tl("Controle se o valor pode ser concedido explicitamente a agentes.")}>
             <Select
               value={draft.scope}
               onValueChange={(v) =>
-                onChange({ ...draft, scope: v === "bot_grant" ? "bot_grant" : "system_only" })
+                onChange({ ...draft, scope: v === "agent_grant" ? "agent_grant" : "system_only" })
               }
             >
               <SelectTrigger>
@@ -102,7 +102,7 @@ export function VariableEditorModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="system_only">{tl("Somente sistema")}</SelectItem>
-                <SelectItem value="bot_grant">{tl("Disponível para bots mediante grant")}</SelectItem>
+                <SelectItem value="agent_grant">{tl("Disponível para agentes mediante grant")}</SelectItem>
               </SelectContent>
             </Select>
           </FieldShell>
@@ -121,13 +121,17 @@ export function VariableEditorModal({
               label={draft.type === "secret" ? tl("Valor do segredo") : tl("Valor")}
               description={
                 draft.type === "secret" && draft.value_present
-                  ? `${tl("Valor atual mascarado")}: ${draft.preview || tl("já configurado")}`
+                  ? tl(
+                      "Armazenado de forma criptografada. O valor atual nunca é exibido — digite uma nova chave para substituir.",
+                    )
                   : tl("O valor será salvo globalmente no control plane.")
               }
             >
               <div className="space-y-3">
                 {draft.type === "secret" && draft.value_present ? (
-                  <MaskedSecretPreview preview={draft.preview} />
+                  <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                    {tl("Armazenada")}
+                  </span>
                 ) : null}
                 {draft.type === "secret" ? (
                   <SecretInput

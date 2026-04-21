@@ -197,15 +197,9 @@ export function TabRecursos() {
       : []);
   const defaultModel =
     modelPolicy.default_models[effectiveDefaultProvider] || availableModels[0] || "";
-  const modelFunctions = Array.isArray((core.providers as Record<string, unknown>).model_functions)
-    ? ((core.providers as Record<string, unknown>).model_functions as Array<Record<string, unknown>>)
-    : [];
+  const modelFunctions = core.providers.model_functions ?? [];
   const functionalModelCatalog = useMemo(
-    () =>
-      (((core.providers as Record<string, unknown>).functional_model_catalog ?? {}) as Record<
-        string,
-        Array<Record<string, unknown>>
-      >),
+    () => core.providers.functional_model_catalog ?? {},
     [core.providers],
   );
   const generalModelLabelMap = useMemo(() => {

@@ -224,7 +224,7 @@ def _apply_general_model_change(text: str, user_data: dict[str, Any], settings: 
         return None
     updated = set_agent_general_model(provider_id, model_id)
     sync_user_data_with_runtime_settings(user_data, updated)
-    return f"Modelo geral deste AGENT atualizado para <code>{provider_id}</code> / <code>{model_id}</code>."
+    return f"Agent's general model updated to <code>{provider_id}</code> / <code>{model_id}</code>."
 
 
 def _apply_feature_model_change(text: str, user_data: dict[str, Any], settings: dict[str, Any]) -> str | None:
@@ -257,8 +257,7 @@ def _apply_feature_model_change(text: str, user_data: dict[str, Any], settings: 
     updated = set_agent_functional_default(function_id, provider_id, model_id)
     sync_user_data_with_runtime_settings(user_data, updated)
     return (
-        f"Modelo padrao deste AGENT para <code>{function_id}</code> atualizado para "
-        f"<code>{provider_id}</code> / <code>{model_id}</code>."
+        f"Agent default for <code>{function_id}</code> updated to <code>{provider_id}</code> / <code>{model_id}</code>."
     )
 
 
@@ -274,7 +273,7 @@ def _apply_voice_change(text: str, user_data: dict[str, Any]) -> str | None:
         voice_language = str((metadata or {}).get("language_id") or "")
     updated = set_agent_voice_default(voice_id, voice_label=voice_label, voice_language=voice_language)
     sync_user_data_with_runtime_settings(user_data, updated)
-    return f"Voz deste AGENT atualizada para <code>{voice_id}</code> ({voice_label})."
+    return f"Agent voice updated to <code>{voice_id}</code> ({voice_label})."
 
 
 def maybe_apply_agent_local_settings_from_chat(query_text: str, user_data: dict[str, Any]) -> str | None:

@@ -134,6 +134,68 @@ def test_accepts_functional_default_when_providers_unspecified() -> None:
     )
 
 
+def test_accepts_valid_scheduler_block() -> None:
+    payload = {
+        "scheduler": {
+            "scheduler_enabled": True,
+            "scheduler_poll_interval_seconds": 10,
+            "scheduler_lease_seconds": 60,
+            "scheduler_run_max_attempts": 3,
+            "runbook_governance_enabled": True,
+            "runbook_governance_hour": 4,
+            "runbook_revalidation_stale_days": 30,
+            "runbook_revalidation_min_verified_runs": 5,
+            "runbook_revalidation_min_success_rate": 0.85,
+            "runbook_revalidation_correction_threshold": 3,
+            "runbook_revalidation_rollback_threshold": 2,
+        }
+    }
+    _manager()._validate_general_payload(payload)
+
+
+def test_rejects_zero_scheduler_interval() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"scheduler": {"scheduler_poll_interval_seconds": 0}})
+    fields = {err["field"] for err in excinfo.value.errors}
+    assert "scheduler.scheduler_poll_interval_seconds" in fields
+
+
+def test_rejects_runbook_governance_hour_out_of_range() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"scheduler": {"runbook_governance_hour": 25}})
+    assert any(err["code"] == "out_of_range" for err in excinfo.value.errors)
+
+
+def test_rejects_runbook_governance_hour_below_zero() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"scheduler": {"runbook_governance_hour": -1}})
+    assert any(err["code"] == "out_of_range" for err in excinfo.value.errors)
+
+
+def test_rejects_min_success_rate_above_one() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"scheduler": {"runbook_revalidation_min_success_rate": 1.5}})
+    assert any(err["code"] == "out_of_range" for err in excinfo.value.errors)
+
+
+def test_rejects_non_numeric_min_success_rate() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"scheduler": {"runbook_revalidation_min_success_rate": "muito"}})
+    assert any(err["code"] == "invalid_type" for err in excinfo.value.errors)
+
+
+def test_accepts_known_time_formats() -> None:
+    _manager()._validate_general_payload({"account": {"time_format": "24h"}})
+    _manager()._validate_general_payload({"account": {"time_format": "12h"}})
+
+
+def test_rejects_unknown_time_format() -> None:
+    with pytest.raises(GeneralPayloadValidationError) as excinfo:
+        _manager()._validate_general_payload({"account": {"time_format": "36h"}})
+    fields = {err["field"] for err in excinfo.value.errors}
+    assert "account.time_format" in fields
+
+
 def test_accumulates_multiple_errors() -> None:
     with pytest.raises(GeneralPayloadValidationError) as excinfo:
         _manager()._validate_general_payload(

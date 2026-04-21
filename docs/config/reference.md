@@ -83,7 +83,6 @@ Global configuration and per-agent authorization are intentionally different lay
 - `/api/control-plane/auth/logout`
 - `/api/control-plane/auth/tokens*`
 - `/api/control-plane/auth/sessions*`
-- `/api/control-plane/web-auth`
 - `/api/control-plane/system-settings`
 - `/api/control-plane/system-settings/general`
 - `/api/control-plane/connections/catalog`

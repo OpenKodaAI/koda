@@ -154,20 +154,29 @@ class _ProviderLoginProcess:
         try:
             while True:
                 if self.process.poll() is not None:
-                    try:
+                    with suppress(OSError, BlockingIOError):
                         remainder = os.read(fd, 65536)
-                    except BlockingIOError:
-                        remainder = b""
-                    if remainder:
-                        self._append(remainder.decode("utf-8", "replace"))
+                        if remainder:
+                            self._append(remainder.decode("utf-8", "replace"))
                     break
-                ready, _, _ = select.select([fd], [], [], 0.2)
+                try:
+                    ready, _, _ = select.select([fd], [], [], 0.2)
+                except (OSError, ValueError):
+                    # fd was closed (EBADF) or became invalid — the subprocess
+                    # tore down its PTY slave. Nothing more to read.
+                    break
                 if not ready:
                     continue
                 try:
                     payload = os.read(fd, 65536)
                 except BlockingIOError:
                     continue
+                except OSError:
+                    # Typical EIO (errno 5) on Linux when the slave side closes
+                    # between the ``select`` return and the ``read`` call. Treat
+                    # it as a graceful end-of-stream rather than crashing the
+                    # reader thread.
+                    break
                 if not payload:
                     continue
                 self._append(payload.decode("utf-8", "replace"))
@@ -232,15 +241,46 @@ def provider_supports_api_key(provider_id: str) -> bool:
 
 
 def provider_supports_subscription_login(provider_id: str) -> bool:
-    return provider_id.strip().lower() in {"codex", "gemini"}
+    # Claude Code ships ``claude setup-token`` for headless environments: it
+    # prints the OAuth URL, accepts the authorization code on stdin and writes
+    # a long-lived token to CLAUDE_CONFIG_DIR. Koda spawns the CLI in a PTY,
+    # relays the URL to the UI and forwards the pasted code to stdin, so the
+    # browser step still happens against Anthropic directly — Koda only wraps
+    # the subprocess stdio, which the CLI is explicitly designed for.
+    return provider_id.strip().lower() in {"claude", "codex", "gemini"}
 
 
 def provider_supports_local_connection(provider_id: str) -> bool:
+    # Ollama runs as a self-hosted endpoint. Claude keeps a ``local`` fallback
+    # for operators who already authenticated the CLI on the host (mounted
+    # CLAUDE_CONFIG_DIR) and just want Koda to detect it.
     return provider_id.strip().lower() in {"ollama", "claude"}
 
 
 def provider_requires_project_id(provider_id: str) -> bool:
     return provider_id == "gemini"
+
+
+def _running_inside_container() -> bool:
+    """Best-effort detection of whether this process runs inside a container.
+
+    Looks at the signals Docker/Kubernetes leave on the filesystem:
+    `/.dockerenv` (Docker) or a cgroup entry mentioning docker/kubepods.
+    Used to switch the Ollama default from ``localhost`` (unreachable from
+    inside a container) to ``host.docker.internal`` (resolves to the host
+    on Docker Desktop and on Linux when the compose file adds the
+    ``host-gateway`` alias — see ``docker-compose.yml``).
+    """
+    import os
+
+    if os.path.exists("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", encoding="utf-8") as handle:
+            cgroup_content = handle.read()
+    except OSError:
+        return False
+    return any(token in cgroup_content for token in ("docker", "kubepods", "containerd"))
 
 
 def provider_default_base_url(provider_id: str, auth_mode: str = "api_key") -> str:
@@ -249,6 +289,10 @@ def provider_default_base_url(provider_id: str, auth_mode: str = "api_key") -> s
         return ""
     if auth_mode == "api_key":
         return "https://ollama.com"
+    # Inside a container, `localhost` is the container itself — Ollama lives
+    # on the host (or in a sibling container). Prefer the Docker host alias.
+    if _running_inside_container():
+        return "http://host.docker.internal:11434"
     return "http://localhost:11434"
 
 
@@ -345,7 +389,11 @@ def provider_login_command(
 ) -> tuple[str, ...]:
     command = resolve_provider_command(provider_id, base_env=base_env)
     if provider_id == "claude":
-        return (*command, "auth", "login", "--claudeai")
+        # ``setup-token`` is the headless-friendly variant of ``auth login``:
+        # it writes a long-lived OAuth token to CLAUDE_CONFIG_DIR and exits
+        # cleanly, which matches how Koda uses the CLI (one-shot spawns, no
+        # persistent interactive session).
+        return (*command, "setup-token")
     if provider_id == "codex":
         return (*command, "login", "--device-auth")
     if provider_id in {"elevenlabs", "ollama"}:
@@ -565,41 +613,41 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
             or bool(user_code)
         ):
             status = "awaiting_browser"
-            message = "Autorize no navegador para concluir o login da Anthropic."
+            message = "Authorize in the browser to complete the Anthropic login."
         if "oauth error:" in compact_lower or "invalid code" in compact_lower:
             status = "awaiting_browser"
-            last_error = "O Claude Code rejeitou o Authentication Code. Copie o código completo e tente novamente."
+            last_error = "Claude Code rejected the authentication code. Copy the complete code and try again."
             message = last_error
         elif "press enter to retry" in compact_lower:
             status = "awaiting_browser"
-            message = "O Claude Code pediu uma nova tentativa. Gere outro código no navegador e envie novamente."
+            message = "Claude Code requested another attempt. Generate a new code in the browser and submit it again."
     elif handle.provider_id == "codex":
         auth_url = _last_url(text)
         code_match = _CODE_RE.search(text)
         if code_match:
             user_code = code_match.group(0)
-        instructions = "Abra o link do Codex e informe o código temporário."
+        instructions = "Open the Codex link and enter the temporary code."
         if auth_url:
             status = "awaiting_browser"
-            message = "Autorização aguardando confirmação no ChatGPT."
+            message = "Authorization waiting for confirmation in ChatGPT."
     else:
         auth_url = _last_url(text)
-        instructions = "Abra o link da conta Google e finalize a autorização do Gemini CLI."
+        instructions = "Open the Google account link and complete Gemini CLI authorization."
         if auth_url:
             status = "awaiting_browser"
-            message = "Autorização aguardando confirmação na conta Google."
+            message = "Authorization waiting for confirmation in the Google account."
         elif "Waiting for authentication" in text:
             status = "pending"
-            message = "Preparando autorização do Gemini CLI."
+            message = "Preparing Gemini CLI authorization."
 
     if not running:
         if returncode == 0:
             if handle.provider_id in {"claude", "codex", "gemini"} and (auth_url or user_code):
                 status = "awaiting_browser"
-                message = message or "Autorize no navegador para concluir o login."
+                message = message or "Authorize in the browser to complete the login."
             else:
                 status = "completed"
-                message = message or "Fluxo oficial de login concluído."
+                message = message or "Official login flow completed."
         else:
             status = "error"
             last_error = _friendly_provider_error(
@@ -607,7 +655,7 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
                 text,
                 fallback=f"{handle.provider_id} login failed",
             )
-            message = "O fluxo de login terminou com erro."
+            message = "The login flow ended with an error."
 
     return ProviderLoginSessionState(
         session_id=session_id,
@@ -815,7 +863,7 @@ def _verify_claude_local_cli(
             provider_id="claude",
             auth_mode="local",
             verified=False,
-            last_error="Claude Code CLI não encontrado. Instale com: npm install -g @anthropic-ai/claude-code",
+            last_error="Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code",
             checked_via="local_cli",
         )
     env = build_provider_process_env(
@@ -846,7 +894,7 @@ def _verify_claude_local_cli(
             provider_id="claude",
             auth_mode="local",
             verified=False,
-            last_error="Claude Code CLI não autenticado. Execute 'claude auth login' no terminal primeiro.",
+            last_error="Claude Code CLI not authenticated. Run 'claude auth login' in your terminal first.",
             checked_via="local_cli",
         )
     except Exception as exc:
@@ -854,7 +902,7 @@ def _verify_claude_local_cli(
             provider_id="claude",
             auth_mode="local",
             verified=False,
-            last_error=f"Erro ao verificar Claude CLI: {exc}",
+            last_error=f"Error verifying Claude CLI: {exc}",
             checked_via="local_cli",
         )
 
@@ -873,7 +921,7 @@ def verify_provider_local_connection(
             provider_id=provider_id,
             auth_mode="local",
             verified=False,
-            last_error="Este provider não suporta conexão local direta.",
+            last_error="This provider does not support direct local connection.",
             checked_via="local_probe",
             details={},
         )
@@ -891,7 +939,7 @@ def verify_provider_local_connection(
             auth_mode="local",
             verified=bool(payload),
             account_label=resolved_base_url,
-            plan_label="Servidor Ollama",
+            plan_label="Ollama server",
             checked_via="local_probe",
             details={"base_url": resolved_base_url},
         )
@@ -907,14 +955,47 @@ def verify_provider_local_connection(
             details={"http_status": exc.code, "base_url": resolved_base_url},
         )
     except Exception as exc:
+        raw_error = str(exc)
+        # Surface actionable guidance when the most common Docker / local dev
+        # failure modes happen (connection refused, timeout, DNS failure).
+        # The raw errno stays in `details.raw_error` for operators who need it.
+        lowered = raw_error.lower()
+        reachability_markers = (
+            "connection refused",
+            "[errno 111]",
+            "[errno -2]",  # name or service not known
+            "[errno -3]",  # temporary failure in name resolution
+            "name or service not known",
+            "nodename nor servname",
+            "timed out",
+            "timeout",
+            "no route to host",
+        )
+        friendly_error = raw_error
+        if any(marker in lowered for marker in reachability_markers):
+            in_container = _running_inside_container()
+            hints = [
+                "Could not reach Ollama.",
+                f"URL attempted: {resolved_base_url}.",
+            ]
+            if in_container:
+                hints.append(
+                    "Koda is running in a container. Use http://host.docker.internal:11434 "
+                    "for Ollama on the host (Docker Desktop macOS/Windows; on Linux the compose "
+                    "already adds host-gateway), or http://<service-name>:11434 if Ollama runs "
+                    "in another container on the same network."
+                )
+            else:
+                hints.append("Confirm Ollama is running (ollama serve) and listening on http://localhost:11434.")
+            friendly_error = " ".join(hints)
         return ProviderVerificationResult(
             provider_id="ollama",
             auth_mode="local",
             verified=False,
-            last_error=str(exc),
+            last_error=friendly_error,
             checked_via="local_probe",
-            auth_expired=_looks_like_auth_expired(str(exc)),
-            details={"base_url": resolved_base_url},
+            auth_expired=_looks_like_auth_expired(raw_error),
+            details={"base_url": resolved_base_url, "raw_error": raw_error},
         )
 
 
@@ -930,7 +1011,7 @@ def verify_provider_subscription_login(
             provider_id=provider_id,
             auth_mode="subscription_login",
             verified=False,
-            last_error=f"{PROVIDER_TITLES[provider_id]} não suporta login por assinatura neste fluxo.",
+            last_error=f"{PROVIDER_TITLES[provider_id]} does not support subscription login in this flow.",
             checked_via="runtime",
             details={},
         )
@@ -967,8 +1048,8 @@ def verify_provider_subscription_login(
                         auth_mode="subscription_login",
                         verified=False,
                         last_error=(
-                            "Claude CLI ainda nao autenticado. "
-                            "Conclua a autorizacao no navegador e envie o Authentication Code se solicitado."
+                            "Claude CLI not authenticated yet. "
+                            "Complete authorization in the browser and submit the Authentication Code if requested."
                         ),
                         checked_via="auth_status",
                         auth_expired=False,
@@ -991,7 +1072,7 @@ def verify_provider_subscription_login(
                     last_error=_friendly_provider_error(
                         provider_id,
                         stderr_text or stdout_text,
-                        fallback="Claude CLI nao autenticado.",
+                        fallback="Claude CLI not authenticated.",
                     ),
                     checked_via="auth_status",
                     auth_expired=_looks_like_auth_expired(stderr_text or stdout_text),
@@ -1003,7 +1084,7 @@ def verify_provider_subscription_login(
                     provider_id=provider_id,
                     auth_mode="subscription_login",
                     verified=False,
-                    last_error="Claude CLI nao autenticado.",
+                    last_error="Claude CLI not authenticated.",
                     checked_via="auth_status",
                     auth_expired=_looks_like_auth_expired(stdout_text),
                     details={"stdout": stdout_text},
@@ -1036,7 +1117,7 @@ def verify_provider_subscription_login(
                     provider_id=provider_id,
                     auth_mode="subscription_login",
                     verified=False,
-                    last_error=_friendly_provider_error(provider_id, text, fallback="Codex CLI nao autenticado."),
+                    last_error=_friendly_provider_error(provider_id, text, fallback="Codex CLI not authenticated."),
                     checked_via="login_status",
                     auth_expired=_looks_like_auth_expired(text),
                     details={"stdout": text},
@@ -1046,7 +1127,7 @@ def verify_provider_subscription_login(
                     provider_id=provider_id,
                     auth_mode="subscription_login",
                     verified=False,
-                    last_error="O Codex esta autenticado via API key, nao via ChatGPT.",
+                    last_error="Codex is authenticated via API key, not via ChatGPT.",
                     checked_via="login_status",
                     auth_expired=False,
                     details={"stdout": text},
@@ -1086,7 +1167,7 @@ def verify_provider_subscription_login(
                 provider_id=provider_id,
                 auth_mode="subscription_login",
                 verified=False,
-                last_error="Gemini CLI ainda nao concluiu a autenticacao com Google.",
+                last_error="Gemini CLI has not yet completed authentication with Google.",
                 checked_via="headless_probe",
                 auth_expired=False,
                 details={"stdout": text},
@@ -1096,7 +1177,7 @@ def verify_provider_subscription_login(
                 provider_id=provider_id,
                 auth_mode="subscription_login",
                 verified=False,
-                last_error=_friendly_provider_error(provider_id, text, fallback="Gemini CLI nao autenticado."),
+                last_error=_friendly_provider_error(provider_id, text, fallback="Gemini CLI not authenticated."),
                 checked_via="headless_probe",
                 auth_expired=_looks_like_auth_expired(text),
                 details={"stdout": text},
@@ -1107,7 +1188,7 @@ def verify_provider_subscription_login(
                 provider_id=provider_id,
                 auth_mode="subscription_login",
                 verified=False,
-                last_error=str(payload.get("error") or "Gemini CLI nao autenticado."),
+                last_error=str(payload.get("error") or "Gemini CLI not authenticated."),
                 checked_via="headless_probe",
                 auth_expired=_looks_like_auth_expired(str(payload.get("error") or text)),
                 details={"stdout": text},
@@ -1336,8 +1417,10 @@ def start_claude_direct_oauth(session_id: str) -> ProviderLoginSessionState:
         status="awaiting_browser",
         command="direct_oauth",
         auth_url=auth_url,
-        message="Autorize no navegador para concluir o login da Anthropic.",
-        instructions=("Abra o link, autorize no navegador. Cole o código completo (incluindo o '#') no campo abaixo."),
+        message="Authorize in the browser to complete the Anthropic login.",
+        instructions=(
+            "Open the link and authorize in the browser. Paste the full code (including the '#') in the field below."
+        ),
         code_verifier=verifier,
     )
 
@@ -1360,7 +1443,7 @@ def exchange_claude_oauth_code(
             provider_id="claude",
             auth_mode="subscription_login",
             verified=False,
-            last_error="Código de autenticação vazio. Cole o código completo da página da Anthropic.",
+            last_error="Empty authentication code. Paste the full code from the Anthropic page.",
             checked_via="direct_oauth",
         )
 
@@ -1395,7 +1478,7 @@ def exchange_claude_oauth_code(
             provider_id="claude",
             auth_mode="subscription_login",
             verified=False,
-            last_error=f"Falha na troca do código OAuth: {exc.code} — {body[:200]}",
+            last_error=f"OAuth code exchange failed: {exc.code} — {body[:200]}",
             checked_via="direct_oauth",
             details={"http_status": exc.code, "body": body[:500]},
         )
@@ -1404,7 +1487,7 @@ def exchange_claude_oauth_code(
             provider_id="claude",
             auth_mode="subscription_login",
             verified=False,
-            last_error=f"Erro na troca OAuth: {exc}",
+            last_error=f"OAuth exchange error: {exc}",
             checked_via="direct_oauth",
         )
 
@@ -1414,7 +1497,7 @@ def exchange_claude_oauth_code(
             provider_id="claude",
             auth_mode="subscription_login",
             verified=False,
-            last_error="Anthropic não retornou access_token. Tente novamente.",
+            last_error="Anthropic did not return an access_token. Please try again.",
             checked_via="direct_oauth",
         )
 
@@ -1543,16 +1626,13 @@ def _friendly_provider_error(provider_id: ProviderId, text: str, *, fallback: st
     normalized = strip_ansi(text or "").strip()
     lower = normalized.lower()
     if provider_id == "codex" and "enable device code authorization" in lower:
-        return (
-            "Ative a autorizacao por codigo de dispositivo do Codex nas configuracoes de seguranca do ChatGPT "
-            "e tente novamente."
-        )
+        return "Enable Codex device-code authorization in ChatGPT security settings and try again."
     if provider_id == "claude" and "not found on path" in lower:
-        return "Claude Code CLI nao encontrado no PATH do servidor."
+        return "Claude Code CLI not found on the server PATH."
     if provider_id == "codex" and "not found on path" in lower:
-        return "Codex CLI nao encontrado no PATH do servidor."
+        return "Codex CLI not found on the server PATH."
     if provider_id == "gemini" and "not found on path" in lower:
-        return "Gemini CLI nao encontrado no PATH do servidor."
+        return "Gemini CLI not found on the server PATH."
     return _tail_line(normalized) or fallback or normalized
 
 

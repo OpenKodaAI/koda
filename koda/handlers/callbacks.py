@@ -104,12 +104,12 @@ def _feature_selection_label(user_data: dict[str, object], function_id: str) -> 
     payload = user_data.get("functional_defaults", {})
     selection = payload.get(function_id, {}) if isinstance(payload, dict) else {}
     if not isinstance(selection, dict):
-        return "herdado do global"
+        return "inherited from global"
     provider_id = str(selection.get("provider_id") or "").strip().lower()
     model_id = str(selection.get("model_id") or "").strip()
     if provider_id and model_id:
         return f"{provider_id} / {model_id}"
-    return "herdado do global"
+    return "inherited from global"
 
 
 def _remember_feature_model_tokens(
@@ -198,7 +198,7 @@ async def callback_model(update: Update, context: BotContext) -> None:
             f"Provider: <code>{escape_html(provider)}</code>\nModel set to: <code>{escape_html(model)}</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")]]
+                [[InlineKeyboardButton("Back to settings", callback_data="settings:home")]]
             ),
         )
 
@@ -223,7 +223,7 @@ async def callback_provider(update: Update, context: BotContext) -> None:
             f"Model: <code>{escape_html(context.user_data['model'])}</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")]]
+                [[InlineKeyboardButton("Back to settings", callback_data="settings:home")]]
             ),
         )
 
@@ -261,9 +261,9 @@ async def callback_settings_provider(update: Update, context: BotContext) -> Non
         ]
         for provider in _general_provider_options(context.user_data)
     ]
-    buttons.append([InlineKeyboardButton("Voltar", callback_data="settings:home")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="settings:home")])
     await query.edit_message_text(
-        "Selecione o provider padrao deste AGENT:",
+        "Select the default provider for this agent:",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -298,9 +298,9 @@ async def callback_settings_model(update: Update, context: BotContext) -> None:
             )
         ]
     )
-    buttons.append([InlineKeyboardButton("Voltar", callback_data="settings:home")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="settings:home")])
     await query.edit_message_text(
-        f"Selecione o modelo geral para <code>{escape_html(provider)}</code>:",
+        f"Select the general model for <code>{escape_html(provider)}</code>:",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -316,7 +316,7 @@ async def callback_settings_featuremodel(update: Update, context: BotContext) ->
     init_user_data(context.user_data, user_id=update.effective_user.id)
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
-        await query.edit_message_text("As configuracoes por funcionalidade deste AGENT nao estao disponiveis agora.")
+        await query.edit_message_text("Per-feature settings are not available for this agent right now.")
         return
     sync_user_data_with_runtime_settings(context.user_data, settings)
     option_map = _feature_option_map(context.user_data)
@@ -330,9 +330,9 @@ async def callback_settings_featuremodel(update: Update, context: BotContext) ->
         for function_id in MODEL_FUNCTION_IDS
         if option_map.get(function_id)
     ]
-    buttons.append([InlineKeyboardButton("Voltar", callback_data="settings:home")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="settings:home")])
     await query.edit_message_text(
-        "Selecione a funcionalidade para ajustar o modelo padrao deste AGENT:",
+        "Select a feature to adjust the agent's default model:",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -355,9 +355,9 @@ async def callback_settings_mode(update: Update, context: BotContext) -> None:
         ]
         for mode in AVAILABLE_AGENT_MODES
     ]
-    buttons.append([InlineKeyboardButton("Voltar", callback_data="settings:home")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="settings:home")])
     await query.edit_message_text(
-        f"Modo atual: <code>{escape_html(current_mode)}</code>\nSelecione o modo deste AGENT:",
+        f"Current mode: <code>{escape_html(current_mode)}</code>\nSelect the mode for this agent:",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -376,16 +376,16 @@ async def callback_settings_voice(update: Update, context: BotContext) -> None:
     language = str(context.user_data.get("tts_voice_language") or "n/a")
     await query.edit_message_text(
         (
-            "<b>Voz deste AGENT</b>\n\n"
-            f"Atual: <code>{escape_html(voice_id)}</code> ({escape_html(voice_label)})\n"
-            f"Idioma: <code>{escape_html(language)}</code>\n\n"
-            "Para trocar por chat, diga algo como:\n"
-            "• mude a voz para pm_alex\n"
-            "• mude a voz para Dora\n\n"
-            "Ou use /voice voices para listar e /voice search &lt;termo&gt; para buscar."
+            "<b>Voice for this agent</b>\n\n"
+            f"Current: <code>{escape_html(voice_id)}</code> ({escape_html(voice_label)})\n"
+            f"Language: <code>{escape_html(language)}</code>\n\n"
+            "To change via chat, say something like:\n"
+            "• change the voice to pm_alex\n"
+            "• change the voice to Dora\n\n"
+            "Or use /voice voices to list and /voice search &lt;term&gt; to search."
         ),
         parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Voltar", callback_data="settings:home")]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="settings:home")]]),
     )
 
 
@@ -404,11 +404,9 @@ async def callback_settings_newsession(update: Update, context: BotContext) -> N
         agent_id=config.AGENT_ID or "default",
     )
     await query.edit_message_text(
-        f"Sessao rotacionada para <code>{escape_html(new_session_id)}</code>.",
+        f"Session rotated to <code>{escape_html(new_session_id)}</code>.",
         parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")]]
-        ),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to settings", callback_data="settings:home")]]),
     )
 
 
@@ -488,11 +486,11 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
 
     created_candidate = False
     feedback_labels = {
-        "corrected": "Feedback registrado como correção. Abri um candidato de risco para revisão.",
-        "failed": "Feedback registrado como falha. Abri um candidato de risco para revisão.",
-        "risky": "Feedback registrado como risco alto. Abri um candidato de guardrail para revisão.",
-        "approved": "Feedback registrado como aprovado.",
-        "promote": "Feedback registrado como promoção.",
+        "corrected": "Feedback recorded as a correction. Opened a risk candidate for review.",
+        "failed": "Feedback recorded as a failure. Opened a risk candidate for review.",
+        "risky": "Feedback recorded as high risk. Opened a guardrail candidate for review.",
+        "approved": "Feedback recorded as approved.",
+        "promote": "Feedback recorded as a promotion.",
     }
 
     if feedback_type in {"corrected", "failed", "risky"}:
@@ -596,7 +594,7 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
         record_utility_event(agent_id, utility_outcome)
     if feedback_type == "approved" and not created_candidate:
         await query.answer(
-            "Feedback registrado como aprovado, mas faltam gates mínimos para promover em rotina reutilizável.",
+            "Feedback recorded as approved, but minimum gates are missing to promote into a reusable routine.",
             show_alert=True,
         )
         return
@@ -604,17 +602,17 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
         return
     if feedback_type == "approved" and created_candidate:
         await query.answer(
-            "Feedback registrado como aprovado. Abri um candidato de rotina positiva para revisão.",
+            "Feedback recorded as approved. Opened a positive-routine candidate for review.",
             show_alert=True,
         )
         return
     if feedback_type == "promote" and created_candidate:
         await query.answer(
-            "Feedback registrado como promoção. Abri um candidato de runbook para revisão.",
+            "Feedback recorded as a promotion. Opened a runbook candidate for review.",
             show_alert=True,
         )
         return
-    await query.answer(feedback_labels.get(feedback_type, "Feedback registrado."), show_alert=True)
+    await query.answer(feedback_labels.get(feedback_type, "Feedback recorded."), show_alert=True)
 
 
 async def callback_mode(update: Update, context: BotContext) -> None:
@@ -634,7 +632,7 @@ async def callback_mode(update: Update, context: BotContext) -> None:
             f"Agent mode set to: <code>{escape_html(mode)}</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")]]
+                [[InlineKeyboardButton("Back to settings", callback_data="settings:home")]]
             ),
         )
 
@@ -728,7 +726,7 @@ async def callback_feature_model_home(update: Update, context: BotContext) -> No
     init_user_data(context.user_data, user_id=update.effective_user.id)
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
-        await query.edit_message_text("As configuracoes por funcionalidade deste AGENT nao estao disponiveis agora.")
+        await query.edit_message_text("Per-feature settings are not available for this agent right now.")
         return
     sync_user_data_with_runtime_settings(context.user_data, settings)
     option_map = _feature_option_map(context.user_data)
@@ -742,9 +740,9 @@ async def callback_feature_model_home(update: Update, context: BotContext) -> No
         for function_id in MODEL_FUNCTION_IDS
         if option_map.get(function_id)
     ]
-    buttons.append([InlineKeyboardButton("Voltar aos ajustes", callback_data="settings:home")])
+    buttons.append([InlineKeyboardButton("Back to settings", callback_data="settings:home")])
     await query.edit_message_text(
-        "Selecione a funcionalidade para ajustar o modelo padrao deste AGENT:",
+        "Select a feature to adjust the agent's default model:",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -764,7 +762,7 @@ async def callback_feature_model_function(update: Update, context: BotContext) -
 
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
-        await query.edit_message_text("As configuracoes por funcionalidade deste AGENT nao estao disponiveis agora.")
+        await query.edit_message_text("Per-feature settings are not available for this agent right now.")
         return
     sync_user_data_with_runtime_settings(context.user_data, settings)
     options = _feature_option_map(context.user_data).get(function_id, [])
@@ -783,11 +781,11 @@ async def callback_feature_model_function(update: Update, context: BotContext) -
         [InlineKeyboardButton(title, callback_data=f"fmodelp:{function_id}:{provider_id}")]
         for provider_id, title in providers.items()
     ]
-    buttons.append([InlineKeyboardButton("Voltar", callback_data="fmodelhome")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="fmodelhome")])
     await query.edit_message_text(
         f"<b>{escape_html(_feature_function_label(function_id))}</b>\n"
-        f"Atual: <code>{escape_html(current)}</code>\n\n"
-        "Selecione o provider para esta funcionalidade:",
+        f"Current: <code>{escape_html(current)}</code>\n\n"
+        "Select the provider for this feature:",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -812,7 +810,7 @@ async def callback_feature_model_provider(update: Update, context: BotContext) -
 
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
-        await query.edit_message_text("As configuracoes por funcionalidade deste AGENT nao estao disponiveis agora.")
+        await query.edit_message_text("Per-feature settings are not available for this agent right now.")
         return
     sync_user_data_with_runtime_settings(context.user_data, settings)
     options = [
@@ -835,11 +833,11 @@ async def callback_feature_model_provider(update: Update, context: BotContext) -
         [InlineKeyboardButton(str(item.get("title") or item.get("model_id")), callback_data=f"fmodelm:{token}")]
         for token, item in tokens.items()
     ]
-    buttons.append([InlineKeyboardButton("Voltar", callback_data=f"fmodelf:{function_id}")])
+    buttons.append([InlineKeyboardButton("Back", callback_data=f"fmodelf:{function_id}")])
     await query.edit_message_text(
         f"<b>{escape_html(_feature_function_label(function_id))}</b>\n"
         f"Provider: <code>{escape_html(provider_title)}</code>\n\n"
-        "Selecione o modelo padrao para este AGENT:",
+        "Select the default model for this agent:",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -872,13 +870,13 @@ async def callback_feature_model_model(update: Update, context: BotContext) -> N
     sync_user_data_with_runtime_settings(context.user_data, updated)
     await query.edit_message_text(
         f"<b>{escape_html(_feature_function_label(function_id))}</b>\n"
-        f"Modelo padrao do AGENT atualizado para <code>{escape_html(title)}</code> "
+        f"Agent default updated to <code>{escape_html(title)}</code> "
         f"({escape_html(provider_id)} / <code>{escape_html(model_id)}</code>).",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("Ajustar outro modelo", callback_data=f"fmodelf:{function_id}")],
-                [InlineKeyboardButton("Voltar ao menu", callback_data="fmodelhome")],
+                [InlineKeyboardButton("Back to menu", callback_data="fmodelhome")],
             ]
         ),
     )
@@ -937,7 +935,7 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
     meta_dict = link_meta_store.get(hash_val)
     if not meta_dict:
         with contextlib.suppress(Exception):
-            await query.edit_message_text("⚠️ Metadados expirados. Envie o link novamente.")
+            await query.edit_message_text("⚠️ Metadata expired. Please send the link again.")
         return
 
     from koda.services.link_analyzer import (
@@ -951,12 +949,12 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
 
     # Action labels for status update
     action_labels = {
-        "summary": "📝 Resumo",
-        "main_idea": "💡 Ideia Principal",
-        "key_points": "🔑 Pontos-Chave",
-        "structure": "📋 Estrutura",
-        "full": "🔍 Análise Completa",
-        "transcript": "📜 Transcrição",
+        "summary": "📝 Summary",
+        "main_idea": "💡 Main Idea",
+        "key_points": "🔑 Key Points",
+        "structure": "📋 Structure",
+        "full": "🔍 Full Analysis",
+        "transcript": "📜 Transcript",
         "thumbnail": "🖼 Thumbnail",
     }
     label = action_labels.get(action, action)
@@ -965,7 +963,7 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
     original_text = update.effective_message.text or ""
     with contextlib.suppress(Exception):
         await query.edit_message_text(
-            escape_html(original_text) + f"\n\n<i>Selecionado: {label}</i>",
+            escape_html(original_text) + f"\n\n<i>Selected: {label}</i>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -989,10 +987,10 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
         if not transcript_text:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="⚠️ Não foi possível extrair a transcrição deste vídeo. Legendas podem não estar disponíveis.",
+                text="⚠️ Could not extract a transcript for this video. Captions may be unavailable.",
             )
             return
-        header = f"📜 <b>Transcrição: {escape_html(meta.title)}</b>\n\n" if meta.title else "📜 <b>Transcrição</b>\n\n"
+        header = f"📜 <b>Transcript: {escape_html(meta.title)}</b>\n\n" if meta.title else "📜 <b>Transcript</b>\n\n"
         full_text = header + escape_html(transcript_text)
         chunks = split_message(full_text)
         for chunk in chunks:

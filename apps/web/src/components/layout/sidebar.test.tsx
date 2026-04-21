@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/layout/sidebar";
 import { isSidebarItemActive, type SidebarNavItem } from "@/components/layout/sidebar-nav";
@@ -84,36 +84,6 @@ describe("Sidebar", () => {
 
     expect(isSidebarItemActive("/control-plane/system", agentsItem)).toBe(false);
     expect(isSidebarItemActive("/control-plane/system", generalSettingsItem)).toBe(true);
-  });
-
-  it("prefetches heavy routes on intent", () => {
-    vi.useFakeTimers();
-
-    render(
-      <I18nProvider initialLanguage="pt-BR">
-        <AppTourProvider
-          pathname="/control-plane/system"
-          mobileNavOpen={false}
-          onMobileNavOpenChange={() => {}}
-        >
-          <Sidebar mobileOpen={false} onMobileOpenChange={() => {}} collapsed={false} />
-        </AppTourProvider>
-      </I18nProvider>,
-    );
-
-    const agentsLink = screen.getByRole("link", { name: /Agentes/i });
-    fireEvent.mouseEnter(agentsLink);
-
-    vi.advanceTimersByTime(150);
-
-    expect(prefetchMock).toHaveBeenCalledWith("/control-plane");
-
-    const homeLink = screen.getByRole("link", { name: /Início/i });
-    fireEvent.click(homeLink);
-
-    expect(homeLink).not.toHaveAttribute("aria-busy");
-
-    vi.useRealTimers();
   });
 
   it("hides section labels when the sidebar is collapsed", () => {

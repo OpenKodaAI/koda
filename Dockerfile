@@ -86,7 +86,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY pyproject.toml ./
 COPY koda/ koda/
 COPY docs/openapi/ docs/openapi/
-COPY agent.py ./
 RUN pip install --no-cache-dir --no-deps .
 
 # Pre-download optional embedding assets only when the dependency is present in the image.
@@ -101,8 +100,17 @@ else:
     SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 PY
 
-# Install Playwright browsers (before switching to non-root user)
-RUN pip install --no-cache-dir playwright && playwright install --with-deps chromium
+# Install Playwright browsers to a shared path that survives the HOME
+# override set by docker-compose (HOME=/var/lib/koda/runtime/home). Without
+# PLAYWRIGHT_BROWSERS_PATH, Playwright installs to /root/.cache/ms-playwright
+# at build time but looks under $HOME/.cache/ms-playwright at runtime — the
+# browser binary is present but invisible to the runtime, and every browser
+# tool returns "Browser is not running. It may not be installed or failed
+# to start." despite a successful build.
+ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
+RUN mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" \
+    && pip install --no-cache-dir playwright \
+    && playwright install --with-deps chromium
 
 # Create required directories
 RUN mkdir -p tmp_images data /var/lib/koda/state /var/lib/koda/runtime /var/lib/koda/runtime/home /var/lib/koda/artifacts \

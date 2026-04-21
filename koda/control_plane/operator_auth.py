@@ -917,27 +917,6 @@ class OperatorAuthService:
         emit_security("security.operator_logout")
         return {"ok": True}
 
-    def exchange_legacy_token(self, token: str) -> dict[str, Any]:
-        provided = str(token or "").strip()
-        if not provided:
-            raise ValueError("Control plane token is required.")
-        if not any(compare_digest(provided, configured) for configured in CONTROL_PLANE_API_TOKENS):
-            emit_security("security.operator_legacy_exchange_failed", reason="invalid_break_glass_token")
-            raise ValueError("Invalid control plane token.")
-        owner = self._owner_row()
-        session_token, context = self._create_session(
-            user_id=str(owner["id"]) if owner is not None else None,
-            subject_type="break_glass",
-            label="legacy_web_auth",
-            metadata={"origin": "legacy_break_glass"},
-        )
-        emit_security("security.operator_legacy_exchange_succeeded")
-        return {
-            "ok": True,
-            "session_token": session_token,
-            "auth": self.auth_status(context),
-        }
-
     def _context_from_user_row(
         self,
         row: Any,
@@ -965,14 +944,14 @@ class OperatorAuthService:
         if any(compare_digest(provided, configured) for configured in CONTROL_PLANE_API_TOKENS):
             owner = self._owner_row()
             if owner is not None:
-                return self._context_from_user_row(owner, auth_kind="break_glass", subject_type="break_glass")
+                return self._context_from_user_row(owner, auth_kind="cli_bootstrap", subject_type="cli_bootstrap")
             return OperatorAuthContext(
-                auth_kind="break_glass",
-                subject_type="break_glass",
+                auth_kind="cli_bootstrap",
+                subject_type="cli_bootstrap",
                 user_id=None,
                 username=None,
                 email=None,
-                display_name="Break Glass",
+                display_name="CLI Bootstrap",
             )
         token_hash = _hash_secret(provided)
         session_row = fetch_one(

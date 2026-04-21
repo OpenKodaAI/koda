@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { parseAutonomyPolicy, serializeAutonomyPolicy } from "@/lib/policy-serializers";
+import { findFieldError } from "@/lib/system-settings-schema";
 
 function asOptions(
   catalog: Array<Record<string, unknown>> | null | undefined,
@@ -28,10 +29,11 @@ function asOptions(
 }
 
 export function SectionIntelligence() {
-  const { draft, setField } = useSystemSettings();
+  const { draft, setField, sectionErrors } = useSystemSettings();
   const { tl } = useAppI18n();
   const mk = draft.values.memory_and_knowledge;
   const catalogs = draft.catalogs ?? {};
+  const intelligenceErrors = sectionErrors.intelligence;
 
   function update(next: Partial<typeof mk>) {
     setField("memory_and_knowledge", { ...mk, ...next });
@@ -51,12 +53,15 @@ export function SectionIntelligence() {
   }
 
   // ── Catalog options ──────────────────────────────────────────────────────
+  // Fallbacks mirror the backend's `_GENERAL_{MEMORY,KNOWLEDGE}_PROFILES` IDs
+  // so the select always has a matching option for the persisted value, even
+  // if the backend didn't serve the catalogs (stale build).
   const memoryProfileOptions = useMemo(
     () =>
       asOptions(catalogs.memory_profiles, [
-        { value: "standard", label: "Standard" },
-        { value: "minimal", label: "Minimal" },
-        { value: "extended", label: "Extended" },
+        { value: "conservative", label: "Conservador" },
+        { value: "balanced", label: "Equilibrado" },
+        { value: "strong_learning", label: "Aprendizado forte" },
       ]),
     [catalogs.memory_profiles],
   );
@@ -64,8 +69,9 @@ export function SectionIntelligence() {
   const knowledgeProfileOptions = useMemo(
     () =>
       asOptions(catalogs.knowledge_profiles, [
-        { value: "standard", label: "Standard" },
-        { value: "strict", label: "Strict" },
+        { value: "curated_only", label: "Curado apenas" },
+        { value: "curated_workspace", label: "Curado + workspace" },
+        { value: "curated_workspace_patterns", label: "Curado + workspace + padrões" },
       ]),
     [catalogs.knowledge_profiles],
   );
@@ -77,17 +83,6 @@ export function SectionIntelligence() {
         { value: "strict", label: tl("Strict") },
       ]),
     [catalogs.provenance_policies, tl],
-  );
-
-  const promotionModeOptions = useMemo(
-    () =>
-      asOptions(catalogs.approval_modes, [
-        { value: "read_only", label: tl("Read only") },
-        { value: "guarded", label: tl("Guarded") },
-        { value: "supervised", label: tl("Supervised") },
-        { value: "escalation_required", label: tl("Escalation required") },
-      ]),
-    [catalogs.approval_modes, tl],
   );
 
   const autonomyTierOptions = useMemo(
@@ -118,6 +113,10 @@ export function SectionIntelligence() {
         <FieldShell
           label={tl("Memory profile")}
           description={tl("Preset baseline for retention, recall and maintenance.")}
+          error={
+            findFieldError(intelligenceErrors, "memory_and_knowledge.memory_policy.profile")
+              ?.message
+          }
         >
           <Select
             value={mk.memory_profile}
@@ -163,6 +162,10 @@ export function SectionIntelligence() {
         <FieldShell
           label={tl("Knowledge profile")}
           description={tl("Preset baseline for layers, recall and freshness.")}
+          error={
+            findFieldError(intelligenceErrors, "memory_and_knowledge.knowledge_policy.profile")
+              ?.message
+          }
         >
           <Select
             value={mk.knowledge_profile}
@@ -184,6 +187,12 @@ export function SectionIntelligence() {
         <FieldShell
           label={tl("Provenance policy")}
           description={tl("Governance baseline for owner and freshness requirements.")}
+          error={
+            findFieldError(
+              intelligenceErrors,
+              "memory_and_knowledge.knowledge_policy.provenance_policy",
+            )?.message
+          }
         >
           <Select
             value={mk.provenance_policy}
@@ -202,26 +211,6 @@ export function SectionIntelligence() {
           </Select>
         </FieldShell>
 
-        <FieldShell
-          label={tl("Promotion mode")}
-          description={tl("Controls how knowledge items are approved and promoted.")}
-        >
-          <Select
-            value={mk.promotion_mode}
-            onValueChange={(v) => update({ promotion_mode: v })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {promotionModeOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {tl(opt.label)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FieldShell>
       </SettingsFieldGroup>
 
       {/* ── Autonomy ─────────────────────────────────────────────────────── */}
@@ -229,6 +218,12 @@ export function SectionIntelligence() {
         <FieldShell
           label={tl("Autonomy tier")}
           description={tl("Default operational autonomy tier for bot executions.")}
+          error={
+            findFieldError(
+              intelligenceErrors,
+              "memory_and_knowledge.autonomy_policy.default_autonomy_tier",
+            )?.message
+          }
         >
           <Select
             value={autonomyPolicy.default_autonomy_tier}

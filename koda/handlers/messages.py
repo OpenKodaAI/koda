@@ -153,7 +153,7 @@ async def _handle_audio_common(update: Update, context: ContextTypes.DEFAULT_TYP
     Path(audio_path).unlink(missing_ok=True)
 
     if not transcription:
-        await update.message.reply_text("Não foi possível transcrever o áudio. Tente novamente ou envie como texto.")
+        await update.message.reply_text("Could not transcribe the audio. Please try again or send it as text.")
         return
 
     query_text = build_audio_prompt(transcription, caption)

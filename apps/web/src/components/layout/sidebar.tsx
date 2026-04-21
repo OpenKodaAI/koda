@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { Plus } from "lucide-react";
 import {
   buildSidebarFooterSections,
@@ -16,6 +16,20 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { usePrefetchRouteData } from "@/hooks/use-prefetch-route-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { cn } from "@/lib/utils";
+
+type IdleWindow = typeof window & {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
+};
+
+function scheduleIdle(fn: () => void) {
+  if (typeof window === "undefined") return;
+  const win = window as IdleWindow;
+  if (typeof win.requestIdleCallback === "function") {
+    win.requestIdleCallback(fn, { timeout: 2000 });
+  } else {
+    setTimeout(fn, 300);
+  }
+}
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -38,20 +52,18 @@ function SidebarNavLink({
   pathname,
   collapsed,
   onNavigate,
-  onIntentPrefetch,
 }: {
   item: SidebarNavItem;
   pathname: string;
   collapsed: boolean;
   onNavigate: (href: string) => void;
-  onIntentPrefetch: (item: SidebarNavItem) => void;
 }) {
   const isActive = isSidebarItemActive(pathname, item);
 
   return (
     <Link
       href={item.href}
-      prefetch={item.prefetchStrategy === "viewport"}
+      prefetch
       scroll={false}
       {...tourAnchor(`shell.sidebar.nav.${item.href === "/" ? "home" : item.href.slice(1).replace(/\//g, ".")}`)}
       onClick={(event) => {
@@ -60,8 +72,6 @@ function SidebarNavLink({
         }
         onNavigate(item.href);
       }}
-      onMouseEnter={() => onIntentPrefetch(item)}
-      onFocus={() => onIntentPrefetch(item)}
       className={cn(
         "app-sidebar__link group",
         isActive && "is-active",
@@ -89,13 +99,11 @@ function SidebarNavList({
   pathname,
   collapsed,
   onNavigate,
-  onIntentPrefetch,
 }: {
   items: SidebarNavItem[];
   pathname: string;
   collapsed: boolean;
   onNavigate: (href: string) => void;
-  onIntentPrefetch: (item: SidebarNavItem) => void;
 }) {
   return (
     <div
@@ -111,7 +119,6 @@ function SidebarNavList({
           pathname={pathname}
           collapsed={collapsed}
           onNavigate={onNavigate}
-          onIntentPrefetch={onIntentPrefetch}
         />
       ))}
     </div>
@@ -126,35 +133,18 @@ export function Sidebar({
   const { t } = useAppI18n();
   const { currentStep, status } = useAppTour();
   const pathname = usePathname();
-  const router = useRouter();
   const prefetchRouteData = usePrefetchRouteData();
   const primaryItems = buildSidebarPrimarySections(t).flatMap((section) => section.items);
   const footerItems = buildSidebarFooterSections(t).flatMap((section) => section.items);
 
-  const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleIntentPrefetch = useCallback(
-    (item: SidebarNavItem) => {
-      if (item.prefetchStrategy !== "intent") {
-        return;
-      }
-
-      if (intentTimerRef.current) {
-        clearTimeout(intentTimerRef.current);
-      }
-
-      intentTimerRef.current = setTimeout(() => {
-        router.prefetch(item.href);
-        prefetchRouteData(item.href);
-      }, 150);
-    },
-    [prefetchRouteData, router],
-  );
-
   useEffect(() => {
-    return () => {
-      if (intentTimerRef.current) clearTimeout(intentTimerRef.current);
-    };
+    scheduleIdle(() => {
+      for (const item of [...primaryItems, ...footerItems]) {
+        prefetchRouteData(item.href);
+      }
+    });
+    // primaryItems/footerItems are derived from a stable translator; prefetch runs once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -265,7 +255,6 @@ export function Sidebar({
               pathname={pathname}
               collapsed={collapsed}
               onNavigate={() => onMobileOpenChange(false)}
-              onIntentPrefetch={handleIntentPrefetch}
             />
           </nav>
 
@@ -276,7 +265,6 @@ export function Sidebar({
                 pathname={pathname}
                 collapsed={collapsed}
                 onNavigate={() => onMobileOpenChange(false)}
-                onIntentPrefetch={handleIntentPrefetch}
               />
             </nav>
           </div>

@@ -18,7 +18,7 @@ from koda.memory.napkin import (
 from koda.memory.store import MemoryStore
 from koda.memory.types import DEFAULT_TTL_DAYS, MemoryType
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     require_primary_state_backend,

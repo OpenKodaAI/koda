@@ -2,7 +2,6 @@
 
 import asyncio
 import re
-import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -161,26 +160,18 @@ async def _insert_audit_primary(event: AuditEvent) -> None:
 
 
 def _run_coro_sync(coro: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+    """Delegate to the canonical ``koda.state.primary.run_coro_sync``.
 
-    result: dict[str, Any] = {}
-    error: dict[str, BaseException] = {}
+    The primary-state helper clears the shared asyncpg pool cache around
+    each transient ``asyncio.run`` boundary. Audit inserts reuse the same
+    backend, so keeping them on the same bridge avoids the pool pathology
+    where one insert's transient loop leaves a dangling pool that the next
+    insert tries to acquire from (``InterfaceError: another operation in
+    progress``).
+    """
+    from koda.state.primary import run_coro_sync as _primary_run_coro_sync
 
-    def _runner() -> None:
-        try:
-            result["value"] = asyncio.run(coro)
-        except BaseException as exc:  # pragma: no cover - defensive thread bridge
-            error["exc"] = exc
-
-    thread = threading.Thread(target=_runner, daemon=True)
-    thread.start()
-    thread.join()
-    if "exc" in error:
-        raise error["exc"]
-    return result.get("value")
+    return _primary_run_coro_sync(coro)
 
 
 def _insert_audit(event: AuditEvent) -> None:
