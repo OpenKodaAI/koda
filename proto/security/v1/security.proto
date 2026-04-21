@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package koda.security.v1;
+
+import "common/v1/metadata.proto";
+
+message ValidateShellCommandRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string command = 2;
+}
+
+message ValidateShellCommandResponse {
+  string command = 1;
+}
+
+message SanitizeEnvironmentRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  map<string, string> base_env = 2;
+  repeated string allowed_provider_keys = 3;
+  map<string, string> env_overrides = 4;
+}
+
+message SanitizeEnvironmentResponse {
+  map<string, string> env = 1;
+}
+
+message ValidateRuntimePathRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string value = 2;
+  bool allow_empty = 3;
+}
+
+message ValidateRuntimePathResponse {
+  string value = 1;
+}
+
+message ValidateObjectKeyRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string object_key = 3;
+}
+
+message ValidateObjectKeyResponse {
+  string object_key = 1;
+}
+
+message RedactValueRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string value_json = 2;
+  string key_hint = 3;
+}
+
+message RedactValueResponse {
+  string value_json = 1;
+}
+
+message ValidateFilePolicyRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string path = 2;
+  bool require_file = 3;
+}
+
+message ValidateFilePolicyResponse {
+  string canonical_path = 1;
+}
+
+service SecurityGuardService {
+  rpc ValidateShellCommand(ValidateShellCommandRequest) returns (ValidateShellCommandResponse);
+  rpc SanitizeEnvironment(SanitizeEnvironmentRequest) returns (SanitizeEnvironmentResponse);
+  rpc ValidateRuntimePath(ValidateRuntimePathRequest) returns (ValidateRuntimePathResponse);
+  rpc ValidateObjectKey(ValidateObjectKeyRequest) returns (ValidateObjectKeyResponse);
+  rpc RedactValue(RedactValueRequest) returns (RedactValueResponse);
+  rpc ValidateFilePolicy(ValidateFilePolicyRequest) returns (ValidateFilePolicyResponse);
+  rpc Health(koda.common.v1.HealthRequest) returns (koda.common.v1.HealthResponse);
+}

@@ -1,0 +1,14 @@
+name: example-hello
+version: "1.0.0"
+description: Example plugin demonstrating the Koda plugin system
+author: koda-team
+tools:
+  - id: hello_world
+    title: Hello World
+    category: example
+    description: A simple greeting tool
+    handler: handlers.hello_world
+    read_only: true
+prompt_section: |
+  ### Example Plugin
+  - `hello_world` --- Say hello. Params: `{}` or `{"name": "Alice"}`

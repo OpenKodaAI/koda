@@ -1,0 +1,24 @@
+[package]
+name = "koda-artifact-engine"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-credential-types = "1"
+aws-sdk-s3 = "1"
+koda-observability = { path = "../koda-observability" }
+koda-proto = { path = "../koda-proto" }
+koda-security-core = { path = "../koda-security-core" }
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+
+[dev-dependencies]
+axum = "0.7"
+tempfile = "3"

@@ -1,0 +1,22 @@
+FROM rust:1.86-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY proto/ proto/
+COPY rust/ rust/
+WORKDIR /build/rust
+RUN cargo build --release -p koda-security-service
+
+FROM debian:bookworm-slim
+
+RUN useradd -m -s /bin/bash svcuser
+
+COPY --from=builder /build/rust/target/release/koda-security-service /usr/local/bin/koda-security-service
+
+USER svcuser
+
+EXPOSE 50065
+
+CMD ["koda-security-service"]

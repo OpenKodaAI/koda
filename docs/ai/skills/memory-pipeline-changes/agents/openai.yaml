@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memory Pipeline Changes"
+  short_description: "Modify memory extraction, recall, and upkeep safely"
+  default_prompt: "Use $memory-pipeline-changes when changing the memory pipeline."
