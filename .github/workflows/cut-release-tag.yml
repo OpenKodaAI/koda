@@ -1,0 +1,337 @@
+name: cut-release-tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or commit to inspect; defaults to main"
+        required: false
+        default: "main"
+
+concurrency:
+  group: cut-release-tag-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  NPM_PACKAGE_NAME: "@openkodaai/koda"
+
+permissions:
+  actions: write
+  contents: write
+  id-token: write
+
+jobs:
+  cut-release-tag:
+    name: cut-release-tag
+    if: github.repository_owner == 'OpenKodaAI'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve target commit
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for required main workflows
+        if: github.event_name == 'push'
+        id: gate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const required = ["pr-quality", "security"];
+            const sha = process.env.TARGET_SHA;
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const deadline = Date.now() + 45 * 60 * 1000;
+
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                branch: "main",
+                event: "push",
+                per_page: 100,
+              });
+
+              const matches = data.workflow_runs.filter(
+                (run) => run.head_sha === sha && required.includes(run.name),
+              );
+
+              core.info(
+                JSON.stringify(
+                  matches.map((run) => ({
+                    name: run.name,
+                    status: run.status,
+                    conclusion: run.conclusion,
+                    url: run.html_url,
+                  })),
+                  null,
+                  2,
+                ),
+              );
+
+              const allPresent = required.every((name) => matches.some((run) => run.name === name));
+              const allCompleted =
+                allPresent &&
+                required.every((name) => matches.find((run) => run.name === name).status === "completed");
+
+              if (allCompleted) {
+                const failed = required.filter(
+                  (name) => matches.find((run) => run.name === name).conclusion !== "success",
+                );
+                core.setOutput("should_release", failed.length === 0 ? "true" : "false");
+                core.setOutput("failed_workflows", failed.join(","));
+                return;
+              }
+
+              await sleep(30000);
+            }
+
+            core.setFailed(`Timed out waiting for pr-quality and security to finish for ${sha}.`);
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+
+      - name: Skip tag cut when required workflows failed
+        if: github.event_name == 'push' && steps.gate.outputs.should_release != 'true'
+        shell: bash
+        env:
+          FAILED_WORKFLOWS: ${{ steps.gate.outputs.failed_workflows }}
+        run: |
+          echo "Skipping release tag cut because these workflows did not succeed: ${FAILED_WORKFLOWS:-unknown}."
+
+      - name: Resolve release version
+        if: github.event_name == 'workflow_dispatch' || steps.gate.outputs.should_release == 'true'
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+
+          root = Path(".")
+          versions = {
+              "pyproject": tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
+              "cli_package": json.loads((root / "packages" / "cli" / "package.json").read_text(encoding="utf-8"))["version"],
+              "release_manifest": json.loads((root / "packages" / "cli" / "release" / "manifest.json").read_text(encoding="utf-8"))["version"],
+              "python_init": re.search(r'__version__ = "([^"]+)"', (root / "koda" / "__init__.py").read_text(encoding="utf-8")).group(1),
+          }
+
+          unique = sorted(set(versions.values()))
+          if len(unique) != 1:
+              raise SystemExit(f"Version mismatch: {versions}")
+
+          print(unique[0])
+          PY
+          )"
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check whether tag already exists
+        if: steps.version.outcome == 'success'
+        id: existing
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "tag_sha=$(git rev-list -n 1 "${TAG}")" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "tag_sha=" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Check whether GitHub release is complete for the existing tag
+        if: steps.existing.outputs.exists == 'true'
+        id: release_state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft,assets > release-state.json 2>/dev/null; then
+            {
+              echo "release_exists=false"
+              echo "release_ready=false"
+              echo "release_draft=false"
+              echo "missing_assets="
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "release_exists=true" >> "${GITHUB_OUTPUT}"
+          python3 - <<'PY' >> "${GITHUB_OUTPUT}"
+          from __future__ import annotations
+
+          import json
+          import os
+
+          version = os.environ["VERSION"]
+          payload = json.loads(open("release-state.json", encoding="utf-8").read())
+          expected_assets = {
+              f"koda-{version}.tar.gz",
+              f"openkodaai-koda-{version}.tgz",
+              "SHA256SUMS.txt",
+              "release-artifacts.json",
+              "manifest.json",
+              "sbom.spdx.json",
+          }
+          assets = {asset["name"] for asset in payload.get("assets", [])}
+          missing_assets = sorted(expected_assets - assets)
+          is_draft = bool(payload.get("isDraft"))
+          ready = (not is_draft) and not missing_assets
+          print(f"release_draft={'true' if is_draft else 'false'}")
+          print(f"release_ready={'true' if ready else 'false'}")
+          print(f"missing_assets={','.join(missing_assets)}")
+          PY
+
+      - name: Check whether npm publication is complete for the existing tag
+        if: steps.existing.outputs.exists == 'true'
+        id: npm_state
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          expected_dist_tag="latest"
+          if [[ "${VERSION}" == *-* ]]; then
+            expected_dist_tag="next"
+          fi
+
+          version_published="false"
+          if npm view "${NPM_PACKAGE_NAME}@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            version_published="true"
+          fi
+
+          dist_tags_json="$(npm view "${NPM_PACKAGE_NAME}" dist-tags --json --registry=https://registry.npmjs.org 2>/dev/null || echo '{}')"
+          EXPECTED_DIST_TAG="${expected_dist_tag}" VERSION_PUBLISHED="${version_published}" DIST_TAGS_JSON="${dist_tags_json}" python3 - <<'PY' >> "${GITHUB_OUTPUT}"
+          from __future__ import annotations
+
+          import json
+          import os
+
+          version = os.environ["VERSION"]
+          expected_dist_tag = os.environ["EXPECTED_DIST_TAG"]
+          version_published = os.environ["VERSION_PUBLISHED"] == "true"
+          dist_tags = json.loads(os.environ["DIST_TAGS_JSON"] or "{}")
+          current_dist_tag_version = str(dist_tags.get(expected_dist_tag, ""))
+          ready = version_published and current_dist_tag_version == version
+          print(f"npm_ready={'true' if ready else 'false'}")
+          print(f"version_published={'true' if version_published else 'false'}")
+          print(f"expected_dist_tag={expected_dist_tag}")
+          print(f"current_dist_tag_version={current_dist_tag_version}")
+          PY
+
+      - name: Stop when the version tag already exists on an older commit and publication is complete
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_SHA: ${{ steps.existing.outputs.tag_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          echo "Tag ${TAG} already exists at ${TAG_SHA}; publication is complete, so the newer commit ${TARGET_SHA} will not reuse or retarget that version."
+
+      - name: Fail when the version tag already exists on an older commit but publication is incomplete
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_SHA: ${{ steps.existing.outputs.tag_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RELEASE_DRAFT: ${{ steps.release_state.outputs.release_draft }}
+          MISSING_ASSETS: ${{ steps.release_state.outputs.missing_assets }}
+          VERSION_PUBLISHED: ${{ steps.npm_state.outputs.version_published }}
+          EXPECTED_DIST_TAG: ${{ steps.npm_state.outputs.expected_dist_tag }}
+          CURRENT_DIST_TAG_VERSION: ${{ steps.npm_state.outputs.current_dist_tag_version }}
+        run: |
+          echo "Tag ${TAG} already exists at ${TAG_SHA}, but its publication is incomplete." >&2
+          echo "release_draft=${RELEASE_DRAFT:-false}" >&2
+          echo "missing_assets=${MISSING_ASSETS:-none}" >&2
+          echo "version_published=${VERSION_PUBLISHED:-false}" >&2
+          echo "expected_dist_tag=${EXPECTED_DIST_TAG:-unknown}" >&2
+          echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}" >&2
+          echo "The validated commit is ${TARGET_SHA}. Do not retarget ${TAG}; ship a new patch version from this commit instead." >&2
+          exit 1
+
+      - name: Skip dispatch when the release and npm publication are complete for the current tag
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "Tag ${TAG} already exists and its GitHub release, assets, and npm dist-tag are complete; nothing to do."
+
+      - name: Recover publish when the tag exists but publication is incomplete
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_DRAFT: ${{ steps.release_state.outputs.release_draft }}
+          MISSING_ASSETS: ${{ steps.release_state.outputs.missing_assets }}
+          EXPECTED_DIST_TAG: ${{ steps.npm_state.outputs.expected_dist_tag }}
+          CURRENT_DIST_TAG_VERSION: ${{ steps.npm_state.outputs.current_dist_tag_version }}
+          VERSION_PUBLISHED: ${{ steps.npm_state.outputs.version_published }}
+        run: |
+          echo "Tag ${TAG} already exists on the validated commit, but publication is incomplete; dispatching release.yml for recovery."
+          echo "release_draft=${RELEASE_DRAFT:-false}"
+          echo "missing_assets=${MISSING_ASSETS:-none}"
+          echo "version_published=${VERSION_PUBLISHED:-false}"
+          echo "expected_dist_tag=${EXPECTED_DIST_TAG:-unknown}"
+          echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}"
+
+      - name: Create and push release tag
+        if: steps.version.outcome == 'success' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" "${TARGET_SHA}" -m "Release ${TAG}"
+          git push origin "refs/tags/${TAG}"
+
+      - name: Dispatch release workflow for the tag
+        if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))
+        uses: actions/github-script@v8
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "release.yml",
+              ref: "main",
+              inputs: {
+                mode: "publish",
+                release_ref: process.env.TAG,
+              },
+            });

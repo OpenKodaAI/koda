@@ -1,0 +1,169 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "koda"
+version = "1.0.6"
+description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[job-queue]>=22.0,<23.0",
+    "python-dotenv>=1.0.0,<2.0",
+    "structlog>=24.0,<25.0",
+    "tenacity>=8.2,<9.0",
+    "aiohttp>=3.13.4,<4.0",
+    "aiolimiter>=1.1,<2.0",
+    "playwright>=1.40,<2.0",
+    "croniter>=2.0,<3.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "boto3>=1.35,<2.0",
+    "atlassian-python-api>=3.41,<4.0",
+    "asyncpg>=0.30.0,<1.0",
+    "asyncssh>=2.14.0,<3.0",
+    "argon2-cffi>=23.1,<24.0",
+    "kokoro-onnx>=0.5.0,<1.0",
+    "openpyxl>=3.1,<4.0",
+    "pillow>=12.1.1,<13.0",
+    "pypdf>=6.10.2,<7.0.0",
+    "soundfile>=0.12,<1.0",
+    "python-docx>=1.1,<2.0",
+    "PyYAML>=6.0,<7.0",
+    "rapidocr-onnxruntime>=1.4.4,<2.0",
+    "requests>=2.33.0,<3.0",
+    "prometheus_client>=0.20,<1.0",
+    "pybreaker>=1.0,<2.0",
+    "cryptography>=46.0.7,<47.0",
+    "grpcio>=1.74,<2.0",
+    # lxml is pulled in transitively; pin a floor here so Snyk/pip-audit stop
+    # flagging CVE-2026-41066 on older wheels.
+    "lxml>=6.1.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+    "pytest-cov>=4.0,<5.0",
+    "ruff>=0.3,<1.0",
+    "mypy>=1.8,<2.0",
+    "types-PyYAML>=6.0.12,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.7,<3.0",
+    "bandit>=1.7,<2.0",
+    "watchfiles>=1.1,<2.0",
+]
+whatsapp = ["pywa>=1.0,<2.0"]
+discord = ["discord.py>=2.3,<3.0"]
+slack = ["slack-bolt[async]>=1.18,<2.0"]
+teams = ["botbuilder-core>=4.14,<5.0", "botbuilder-integration-aiohttp>=4.14,<5.0"]
+line = ["line-bot-sdk>=3.0,<4.0"]
+channels-all = [
+    "pywa>=1.0,<2.0",
+    "discord.py>=2.3,<3.0",
+    "slack-bolt[async]>=1.18,<2.0",
+    "botbuilder-core>=4.14,<5.0",
+    "botbuilder-integration-aiohttp>=4.14,<5.0",
+    "line-bot-sdk>=3.0,<4.0",
+]
+
+[project.scripts]
+koda = "koda.control_plane.__main__:main"
+koda-control-plane = "koda.control_plane.__main__:main"
+koda-runtime-worker = "koda.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["koda*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = []
+markers = [
+    "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
+]
+
+[tool.coverage.report]
+# Repo-wide coverage is still climbing while large runtime/control-plane modules are
+# being brought under test. Keep this gate aligned with the measured baseline so
+# the suite fails on regressions instead of on a stale target.
+fail_under = 53.5
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["runtime_*", "control_plane_runtime", "logs", "koda/internal_rpc/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["SIM108"]  # ternary operator suggestions reduce readability for complex expressions
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.handlers.atlassian",
+    "koda.handlers.automation",
+    "koda.handlers.browser",
+    "koda.handlers.devops",
+    "koda.handlers.fileops",
+    "koda.handlers.google_workspace",
+    "koda.handlers.messages",
+    "koda.handlers.packages",
+    "koda.services.atlassian_client",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.internal_rpc.generated.*",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "telegram.*",
+    "boto3.*",
+    "botocore.*",
+    "atlassian.*",
+    "playwright.*",
+    "psycopg2.*",
+    "psycopg.*",
+    "aiohttp.*",
+    "grpc.*",
+    "grpc_aio.*",
+    "google.*",
+    "asyncssh.*",
+    "qdrant_client.*",
+    "chromadb.*",
+    "langgraph.*",
+    "langchain_core.*",
+    "elevenlabs.*",
+    "openai.*",
+    "anthropic.*",
+    "prost.*",
+    "tonic.*",
+    "dotenv.*",
+    "yaml.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+    "pytest-cov>=4.0,<5.0",
+    "ruff>=0.3,<1.0",
+    "mypy>=1.8,<2.0",
+    "types-PyYAML>=6.0.12,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.7,<3.0",
+    "bandit>=1.7,<2.0",
+    "watchfiles>=1.1,<2.0",
+]

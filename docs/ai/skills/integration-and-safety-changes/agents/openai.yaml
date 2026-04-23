@@ -1,0 +1,4 @@
+interface:
+  display_name: "Integration and Safety Changes"
+  short_description: "Add integrations while preserving runtime guardrails"
+  default_prompt: "Use $integration-and-safety-changes when adding or extending external integrations."

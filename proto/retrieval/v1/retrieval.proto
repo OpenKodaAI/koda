@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+package koda.retrieval.v1;
+
+import "common/v1/metadata.proto";
+import "google/protobuf/struct.proto";
+
+message RetrievalHit {
+  string id = 1;
+  string title = 2;
+  string content = 3;
+  string layer = 4;
+  string scope = 5;
+  string source_label = 6;
+  string source_path = 7;
+  string updated_at = 8;
+  string owner = 9;
+  repeated string tags = 10;
+  string criticality = 11;
+  string freshness = 12;
+  double similarity = 13;
+  int32 lexical_rank = 14;
+  int32 dense_rank = 15;
+  int32 graph_rank = 16;
+  double lexical_score = 17;
+  double dense_score = 18;
+  string project_key = 19;
+  string environment = 20;
+  string team = 21;
+  string source_type = 22;
+  bool operable = 23;
+  int32 graph_hops = 24;
+  double graph_score = 25;
+  repeated string graph_relation_types = 26;
+  repeated string evidence_modalities = 27;
+  repeated string reasons = 28;
+}
+
+message RetrievalTraceHit {
+  string hit_id = 1;
+  string title = 2;
+  string layer = 3;
+  string source_label = 4;
+  double similarity = 5;
+  string freshness = 6;
+  bool selected = 7;
+  int32 rank_before = 8;
+  int32 rank_after = 9;
+  int32 lexical_rank = 10;
+  int32 dense_rank = 11;
+  int32 graph_rank = 12;
+  double lexical_score = 13;
+  double dense_score = 14;
+  int32 graph_hops = 15;
+  double graph_score = 16;
+  repeated string graph_relation_types = 17;
+  repeated string reasons = 18;
+  string exclusion_reason = 19;
+  repeated string evidence_modalities = 20;
+  repeated string supporting_evidence_keys = 21;
+}
+
+message AuthoritativeEvidence {
+  string source_label = 1;
+  string layer = 2;
+  string title = 3;
+  string excerpt = 4;
+  string updated_at = 5;
+  string freshness = 6;
+  double score = 7;
+  bool operable = 8;
+  string rationale = 9;
+  repeated string evidence_modalities = 10;
+}
+
+message SupportingEvidence {
+  string ref_key = 1;
+  string label = 2;
+  string modality = 3;
+  string excerpt = 4;
+  double score = 5;
+  double confidence = 6;
+  string trust_level = 7;
+  string source_kind = 8;
+  google.protobuf.Struct provenance = 9;
+}
+
+message CanonicalEntity {
+  string entity_key = 1;
+  string entity_type = 2;
+  string label = 3;
+  repeated string aliases = 4;
+  double confidence = 5;
+  google.protobuf.Struct metadata = 6;
+}
+
+message CanonicalRelation {
+  string relation_key = 1;
+  string relation_type = 2;
+  string source_entity_key = 3;
+  string target_entity_key = 4;
+  double weight = 5;
+  google.protobuf.Struct metadata = 6;
+}
+
+message AnswerPlan {
+  string user_intent = 1;
+  string recommended_action_mode = 2;
+  repeated string authoritative_sources = 3;
+  repeated string supporting_sources = 4;
+  repeated string required_verifications = 5;
+  repeated string open_conflicts = 6;
+  string uncertainty_level = 7;
+}
+
+message JudgeResult {
+  string status = 1;
+  repeated string reasons = 2;
+  repeated string warnings = 3;
+  double citation_coverage = 4;
+  double citation_span_precision = 5;
+  double contradiction_escape_rate = 6;
+  double policy_compliance = 7;
+  bool uncertainty_marked = 8;
+  bool requires_review = 9;
+  string safe_response = 10;
+  map<string, double> metrics = 11;
+}
+
+message RetrieveEnvelope {
+  string normalized_query = 1;
+  string task_kind = 2;
+  string project_key = 3;
+  string environment = 4;
+  string team = 5;
+  string workspace_dir = 6;
+  string workspace_fingerprint = 7;
+  bool requires_write = 8;
+  string strategy = 9;
+  repeated string allowed_source_labels = 10;
+  repeated string allowed_workspace_roots = 11;
+  google.protobuf.Struct metadata = 12;
+}
+
+message RetrieveRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string query = 3;
+  uint32 limit = 4;
+  RetrieveEnvelope envelope = 5;
+}
+
+message RetrieveResponse {
+  string trace_id = 1;
+  string normalized_query = 2;
+  string query_intent = 3;
+  string route = 4;
+  string strategy = 5;
+  repeated RetrievalHit selected_hits = 6;
+  repeated RetrievalHit candidate_hits = 7;
+  repeated RetrievalTraceHit trace_hits = 8;
+  repeated AuthoritativeEvidence authoritative_evidence = 9;
+  repeated SupportingEvidence supporting_evidence = 10;
+  repeated CanonicalEntity linked_entities = 11;
+  repeated CanonicalRelation graph_relations = 12;
+  repeated string subqueries = 13;
+  repeated string open_conflicts = 14;
+  repeated string uncertainty_notes = 15;
+  string uncertainty_level = 16;
+  string recommended_action_mode = 17;
+  repeated string required_verifications = 18;
+  int32 graph_hops = 19;
+  double grounding_score = 20;
+  AnswerPlan answer_plan = 21;
+  JudgeResult judge_result = 22;
+  string effective_engine = 23;
+  bool fallback_used = 24;
+  string explanation = 25;
+}
+
+message GraphEntity {
+  string entity_key = 1;
+  string entity_type = 2;
+  string label = 3;
+  string source_kind = 4;
+  google.protobuf.Struct metadata = 5;
+  string updated_at = 6;
+  double graph_score = 7;
+  uint32 graph_hops = 8;
+  repeated string relation_types = 9;
+}
+
+message GraphRelation {
+  string relation_key = 1;
+  string relation_type = 2;
+  string source_entity_key = 3;
+  string target_entity_key = 4;
+  double weight = 5;
+  google.protobuf.Struct metadata = 6;
+  string updated_at = 7;
+}
+
+message ListGraphRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string entity_type = 3;
+  uint32 limit = 4;
+}
+
+message ListGraphResponse {
+  repeated GraphEntity entities = 1;
+  repeated GraphRelation relations = 2;
+}
+
+service RetrievalEngineService {
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+  rpc ListGraph(ListGraphRequest) returns (ListGraphResponse);
+  rpc Health(koda.common.v1.HealthRequest) returns (koda.common.v1.HealthResponse);
+}

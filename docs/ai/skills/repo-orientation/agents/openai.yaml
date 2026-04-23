@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Orientation"
+  short_description: "Map the codebase, flows, and safe edit points"
+  default_prompt: "Use $repo-orientation to map this repository before making changes."

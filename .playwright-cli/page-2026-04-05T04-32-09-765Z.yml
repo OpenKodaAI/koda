@@ -1,0 +1,93 @@
+- generic [active] [ref=e1]:
+  - link "Ir para o conteúdo principal" [ref=e2] [cursor=pointer]:
+    - /url: "#conteudo-principal"
+  - generic [ref=e3]:
+    - complementary "Main navigation" [ref=e4]:
+      - generic [ref=e5]:
+        - link "Koda" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Koda" [ref=e9]
+          - generic [ref=e11]: Koda
+        - navigation [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]: Koda
+            - generic [ref=e15]:
+              - link "Home" [ref=e16] [cursor=pointer]:
+                - /url: /
+                - img [ref=e17]
+                - generic [ref=e19]: Home
+              - link "Runtime" [ref=e20] [cursor=pointer]:
+                - /url: /runtime
+                - img [ref=e21]
+                - generic [ref=e26]: Runtime
+              - link "Agents" [ref=e27] [cursor=pointer]:
+                - /url: /control-plane
+                - img [ref=e28]
+                - generic [ref=e31]: Agents
+          - generic [ref=e32]:
+            - generic [ref=e33]: Operations
+            - generic [ref=e34]:
+              - link "Executions" [ref=e35] [cursor=pointer]:
+                - /url: /executions
+                - img [ref=e36]
+                - generic [ref=e40]: Executions
+              - link "Sessions" [ref=e41] [cursor=pointer]:
+                - /url: /sessions
+                - img [ref=e42]
+                - generic [ref=e45]: Sessions
+              - link "Schedules" [ref=e46] [cursor=pointer]:
+                - /url: /schedules
+                - img [ref=e47]
+                - generic [ref=e50]: Schedules
+              - link "Dead letter queue" [ref=e51] [cursor=pointer]:
+                - /url: /dlq
+                - img [ref=e52]
+                - generic [ref=e54]: Dead letter queue
+          - generic [ref=e55]:
+            - generic [ref=e56]: Analysis
+            - generic [ref=e57]:
+              - link "Memory" [ref=e58] [cursor=pointer]:
+                - /url: /memory
+                - img [ref=e59]
+                - generic [ref=e64]: Memory
+              - link "Costs" [ref=e65] [cursor=pointer]:
+                - /url: /costs
+                - img [ref=e66]
+                - generic [ref=e69]: Costs
+        - navigation [ref=e71]:
+          - generic [ref=e72]:
+            - generic [ref=e73]: System
+            - link "General settings" [ref=e75] [cursor=pointer]:
+              - /url: /control-plane/system
+              - img [ref=e76]
+              - generic [ref=e79]: General settings
+    - main [ref=e80]:
+      - generic [ref=e83]:
+        - complementary [ref=e85]:
+          - generic [ref=e88]:
+            - generic [ref=e89]:
+              - img [ref=e90]
+              - textbox [ref=e93]:
+                - /placeholder: Search by name or message
+            - button "New chat" [ref=e94] [cursor=pointer]:
+              - img [ref=e95]
+        - generic [ref=e109]:
+          - button "Bot conversations" [ref=e111] [cursor=pointer]:
+            - img [ref=e112]
+          - generic [ref=e115]:
+            - img [ref=e117]
+            - paragraph [ref=e119]: Select a specific bot
+            - paragraph [ref=e120]: Choose a specific bot in the composer to start a new chat.
+          - generic [ref=e125]:
+            - button "Select bot" [ref=e128] [cursor=pointer]:
+              - generic [ref=e129]:
+                - img [ref=e131]
+                - generic [ref=e134]: Select a bot to chat
+              - img [ref=e135]
+            - generic [ref=e137]:
+              - textbox "Select a specific bot here to start a chat." [disabled] [ref=e138]
+              - button "Send" [disabled] [ref=e139]:
+                - img [ref=e140]
+            - generic [ref=e142]:
+              - paragraph [ref=e143]: Choose a specific bot in the composer to start a new chat.
+              - paragraph [ref=e144]: Enter to send • Shift + Enter for a line break

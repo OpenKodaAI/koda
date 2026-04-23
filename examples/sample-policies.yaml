@@ -1,0 +1,37 @@
+version: 1
+# Sample approval policies for Koda
+# Copy to your preferred location and set APPROVAL_POLICIES_PATH
+
+policies:
+  - name: auto-approve-reads
+    priority: 100
+    match:
+      access_level: read
+    action: auto_approve
+
+  - name: auto-approve-safe-shell
+    priority: 90
+    match:
+      tool: shell_execute
+      params:
+        command: "^(ls|cat|grep|find|echo|pwd|which|date)\\b"
+    action: auto_approve
+
+  - name: auto-approve-git-features
+    priority: 80
+    match:
+      tool: "git_*"
+    action: auto_approve
+
+  - name: block-destructive
+    priority: 10
+    match:
+      access_level: destructive
+    action: deny
+    reason: "Destructive operations require manual override"
+
+  - name: default-write-approval
+    priority: 0
+    match:
+      access_level: [write, admin]
+    action: require_approval

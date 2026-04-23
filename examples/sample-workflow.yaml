@@ -1,0 +1,15 @@
+# Sample workflow: analyze git status and save to file
+# Use with workflow_create tool
+
+name: git-status-report
+description: Check git status and save to a report file
+steps:
+  - id: status
+    tool: git_status
+    params: {}
+  - id: save
+    tool: file_write
+    params:
+      path: "status-report.txt"
+      content: "{{ steps.status.output }}"
+    condition: "{{ steps.status.success }}"
