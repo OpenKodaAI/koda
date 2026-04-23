@@ -25,3 +25,4 @@ prometheus_client>=0.20
 pybreaker>=1.0
 cryptography>=46.0.7
 grpcio>=1.74
+lxml>=6.1.0 # not directly required, pinned by Snyk to avoid a vulnerability
