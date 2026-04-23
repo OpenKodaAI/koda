@@ -1,5 +1,5 @@
 <div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%;">
-  <img src="docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
+  <img src="docs/assets/brand/koda_hero.jpeg" alt="Koda" style="border-radius: 0.5rem;" width="450px" />
 </div>
 
 <p align="center">
