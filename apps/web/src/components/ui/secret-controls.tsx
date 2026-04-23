@@ -79,30 +79,6 @@ export function SecretInput({
   );
 }
 
-export function MaskedSecretPreview({
-  preview,
-  fallbackLabel = "Segredo configurado",
-  className,
-}: {
-  preview?: string;
-  fallbackLabel?: string;
-  className?: string;
-}) {
-  const { tl } = useAppI18n();
-  const [visible, setVisible] = useState(true);
-  const maskedValue = preview?.trim() || tl(fallbackLabel);
-
-  return (
-    <div className={cn("flex items-start gap-2", className)}>
-      <div className="min-w-0 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 font-mono text-xs break-all text-[var(--text-secondary)]">
-        {visible ? maskedValue : "••••••••••"}
-      </div>
-      <SecretVisibilityButton
-        revealed={visible}
-        onToggle={() => setVisible((current) => !current)}
-        masked
-        className="mt-0.5"
-      />
-    </div>
-  );
-}
+// MaskedSecretPreview was intentionally removed. Stored secrets must never be
+// displayed to the user — even in masked form. Callers should render a
+// "Configurada/Armazenada" badge plus a replace action instead.

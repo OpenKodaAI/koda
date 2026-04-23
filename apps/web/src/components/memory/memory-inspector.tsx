@@ -1,7 +1,11 @@
 "use client";
 
+import { Focus } from "lucide-react";
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { DetailBlock, DetailDatum, DetailGrid } from "@/components/ui/detail-group";
+import { Drawer } from "@/components/ui/drawer";
+import { StatusDot } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getMemoryTypeLabel, getMemoryTypeMeta } from "@/lib/memory-constants";
 import type {
@@ -11,24 +15,99 @@ import type {
   MemorySemanticStatus,
 } from "@/lib/types";
 import { cn, formatDateTime, formatRelativeTime, truncateText } from "@/lib/utils";
-import { SyntaxHighlight } from "../shared/syntax-highlight";
 
-type MemoryNode = MemoryGraphNode | MemoryLearningNode;
+export type MemoryInspectorNode = MemoryGraphNode | MemoryLearningNode;
 
-interface MemoryInspectorProps {
-  node: MemoryNode | null;
-  relatedNodes: MemoryNode[];
+export interface MemoryInspectorProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  node: MemoryInspectorNode | null;
+  relatedNodes: MemoryInspectorNode[];
   relatedEdges: MemoryGraphEdge[];
   semanticStatus: MemorySemanticStatus;
-  className?: string;
-  onClose?: () => void;
+  onFocusNode?: (nodeId: string) => void;
+  onRecenter?: () => void;
 }
 
-function isMemoryNode(node: MemoryNode): node is MemoryGraphNode {
+function isMemoryNode(node: MemoryInspectorNode): node is MemoryGraphNode {
   return node.kind === "memory";
 }
 
-function Section({
+function TypeBadge({ color, label }: { color: string; label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-[color:var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.12em]"
+      style={{ color }}
+    >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  );
+}
+
+function NeighborRow({
+  node,
+  relation,
+  onSelect,
+}: {
+  node: MemoryInspectorNode;
+  relation: MemoryGraphEdge | undefined;
+  onSelect?: () => void;
+}) {
+  const { t } = useAppI18n();
+  const meta = getMemoryTypeMeta(
+    isMemoryNode(node) ? node.memory_type : node.dominant_type,
+  );
+  const subtitle = isMemoryNode(node)
+    ? `${getMemoryTypeLabel(node.memory_type, t)} · ${Math.round(node.importance * 100)}%`
+    : `${t("memory.inspector.syntheticLearning", { defaultValue: "Aprendizado" })} · ${node.member_count}`;
+  const relationLabel = relation
+    ? relation.type === "semantic"
+      ? t("memory.inspector.semantic", { defaultValue: "Semântico" })
+      : relation.type === "session"
+        ? t("common.session", { defaultValue: "Sessão" })
+        : relation.type === "source"
+          ? t("memory.inspector.source", { defaultValue: "Origem" })
+          : t("memory.inspector.learning", { defaultValue: "Aprendizado" })
+    : null;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "flex w-full items-center justify-between gap-3 border-t border-[color:var(--divider-hair)] py-2.5 pl-0.5 pr-1 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "first:border-t-0",
+        "hover:bg-[color:var(--hover-tint)]",
+        !onSelect && "cursor-default hover:bg-transparent",
+      )}
+      disabled={!onSelect}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span
+          aria-hidden
+          className="h-1.5 w-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: meta.color }}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.8125rem] text-[color:var(--text-primary)]">
+            {truncateText(node.label || node.title, 54)}
+          </span>
+          <span className="block truncate font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+            {subtitle}
+          </span>
+        </span>
+      </span>
+      {relationLabel ? (
+        <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+          {relationLabel}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function DrawerSection({
   title,
   children,
 }: {
@@ -36,344 +115,220 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="border-t border-[var(--border-subtle)] pt-5 first:border-t-0 first:pt-0">
-      <div className="mb-3">
-        <p className="eyebrow">{title}</p>
-      </div>
+    <section className="px-5 py-4">
+      <h4 className="mb-2.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
+        {title}
+      </h4>
       {children}
     </section>
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="grid gap-1.5 py-3 first:pt-0 last:pb-0 sm:grid-cols-[112px_minmax(0,1fr)] sm:gap-3 sm:items-start">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-        {label}
-      </span>
-      <span
-        className={cn(
-          "text-sm leading-6 text-[var(--text-secondary)] [overflow-wrap:anywhere]",
-          mono && "font-mono text-[12px]"
-        )}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-        {label}
-      </p>
-      <p className="mt-2 text-[0.98rem] font-semibold leading-6 tracking-[-0.03em] text-[var(--text-primary)] [overflow-wrap:anywhere]">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function EmptyState({
-  className,
-  onClose,
-}: {
-  className?: string;
-  onClose?: () => void;
-}) {
-  const { t } = useAppI18n();
-  return (
-      <div
-        className={cn(
-          "glass-card h-full border-[var(--border-strong)] bg-[var(--surface-elevated-soft)] p-5 shadow-[0_18px_30px_rgba(0,0,0,0.16)] sm:p-6",
-          className
-        )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-[1.4rem] font-semibold leading-[1.08] tracking-[-0.055em] text-[var(--text-primary)] sm:text-[1.5rem]">
-            {t("memory.inspector.selectPoint")}
-          </h2>
-        </div>
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="button-shell button-shell--secondary button-shell--icon h-10 w-10 shrink-0 text-[var(--text-secondary)]"
-            aria-label={t("memory.inspector.close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 export function MemoryInspector({
+  open,
+  onOpenChange,
   node,
   relatedNodes,
   relatedEdges,
   semanticStatus,
-  className,
-  onClose,
+  onFocusNode,
+  onRecenter,
 }: MemoryInspectorProps) {
   const { t } = useAppI18n();
+  const handleClose = () => onOpenChange(false);
+
   if (!node) {
-    return <EmptyState className={className} onClose={onClose} />;
-  }
-
-  if (isMemoryNode(node)) {
-    const meta = getMemoryTypeMeta(node.memory_type);
-
     return (
-      <div
-        className={cn(
-          "glass-card h-full overflow-auto border-[var(--border-strong)] bg-[var(--surface-elevated-soft)] p-5 shadow-[0_18px_30px_rgba(0,0,0,0.16)] sm:p-6",
-          className
-        )}
+      <Drawer
+        open={open}
+        onOpenChange={onOpenChange}
+        width="min(380px, 92vw)"
+        title={t("memory.inspector.selectPoint", { defaultValue: "Selecione uma memória" })}
+        description={t("memory.inspector.selectPointHint", {
+          defaultValue: "Clique em um ponto do grafo para ver seus detalhes aqui.",
+        })}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 text-[11px] font-semibold uppercase tracking-[0.12em]"
-                style={{ color: meta.color }}
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                {getMemoryTypeLabel(node.memory_type, t)}
-              </span>
-              <span className="inline-flex min-h-8 items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-                {node.is_active ? t("memory.inspector.active") : t("memory.inspector.inactive")}
-              </span>
-            </div>
-            <h2 className="mt-4 text-[1.35rem] font-semibold leading-[1.08] tracking-[-0.055em] text-[var(--text-primary)] sm:text-[1.55rem] [overflow-wrap:anywhere]">
-              {node.title}
-            </h2>
-            <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)] [overflow-wrap:anywhere]">
-              {node.content}
-            </p>
-          </div>
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="button-shell button-shell--secondary button-shell--icon h-10 w-10 shrink-0 text-[var(--text-secondary)]"
-              aria-label={t("memory.inspector.close")}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          ) : null}
+        <div className="px-5 py-6 text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
+          {t("memory.inspector.empty", {
+            defaultValue: "Nenhum nó selecionado. Explore o mapa para começar.",
+          })}
         </div>
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <Metric label={t("memory.inspector.importance")} value={`${Math.round(node.importance * 100)}%`} />
-          <Metric label={t("memory.inspector.accesses")} value={`${node.access_count}`} />
-          <Metric
-            label={t("memory.inspector.lastUsed")}
-            value={node.last_accessed ? formatRelativeTime(node.last_accessed) : t("memory.inspector.notAccessedYet")}
-          />
-          <Metric
-            label={t("memory.inspector.createdAt")}
-            value={node.created_at ? formatDateTime(node.created_at) : t("memory.inspector.noDate")}
-          />
-        </div>
-
-        <div className="mt-6 space-y-5">
-          <Section title={t("memory.inspector.origin")}>
-            <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4">
-              <InfoRow
-                label={t("common.session")}
-                value={node.session_id ? truncateText(node.session_id, 42) : t("memory.inspector.noLinkedSession")}
-                mono
-              />
-              <InfoRow
-                label={t("common.query")}
-                value={node.source_query_text || node.source_query_preview || t("memory.inspector.unavailable")}
-              />
-            </div>
-          </Section>
-
-          <Section title={t("memory.inspector.relatedConnections")}>
-            {relatedNodes.length > 0 ? (
-              <div className="space-y-2.5">
-                {relatedNodes.slice(0, 6).map((related) => {
-                  const relation = relatedEdges.find(
-                    (edge) =>
-                      (edge.source === node.id && edge.target === related.id) ||
-                      (edge.target === node.id && edge.source === related.id)
-                  );
-
-                  return (
-                    <div
-                      key={related.id}
-                      className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold leading-6 text-[var(--text-primary)] [overflow-wrap:anywhere]">
-                            {related.title}
-                          </p>
-                          <p className="mt-1 text-xs leading-6 text-[var(--text-tertiary)]">
-                            {related.kind === "memory"
-                              ? getMemoryTypeLabel(related.memory_type, t)
-                              : t("memory.inspector.syntheticLearning")}
-                          </p>
-                        </div>
-                        {relation ? (
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                            {relation.type === "semantic"
-                              ? t("memory.inspector.semantic")
-                              : relation.type === "session"
-                                ? t("common.session")
-                                : relation.type === "source"
-                                  ? t("memory.inspector.source")
-                                  : t("memory.inspector.learning")}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm leading-7 text-[var(--text-tertiary)]">
-                {t("memory.inspector.noVisibleConnections")}
-              </p>
-            )}
-          </Section>
-
-          {Object.keys(node.metadata).length > 0 ? (
-            <Section title={t("memory.inspector.metadata")}>
-              <SyntaxHighlight lang="json" className="p-4 text-[12px]">
-                {JSON.stringify(node.metadata, null, 2)}
-              </SyntaxHighlight>
-            </Section>
-          ) : null}
-        </div>
-      </div>
+      </Drawer>
     );
   }
 
-  const dominantMeta = getMemoryTypeMeta(node.dominant_type);
+  const isMemory = isMemoryNode(node);
+  const meta = getMemoryTypeMeta(isMemory ? node.memory_type : node.dominant_type);
+  const typeLabel = isMemory
+    ? getMemoryTypeLabel(node.memory_type, t)
+    : t("memory.inspector.learningBadge", { defaultValue: "Aprendizado" });
+
+  const statusTone = isMemory
+    ? node.is_active
+      ? "success"
+      : "danger"
+    : "info";
+  const statusLabel = isMemory
+    ? node.is_active
+      ? t("memory.inspector.active", { defaultValue: "Ativa" })
+      : t("memory.inspector.inactive", { defaultValue: "Inativa" })
+    : semanticStatus === "available"
+      ? t("memory.health.semanticAvailable", { defaultValue: "Semântico ativo" })
+      : t("memory.health.semanticFallback", { defaultValue: "Fallback contextual" });
+
+  const headerMeta = (
+    <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+      <StatusDot tone={statusTone as "success" | "danger" | "info"} />
+      <span>{statusLabel}</span>
+    </div>
+  );
 
   return (
-      <div
-        className={cn(
-          "glass-card h-full overflow-auto border-[var(--border-strong)] bg-[var(--surface-elevated-soft)] p-5 shadow-[0_18px_30px_rgba(0,0,0,0.16)] sm:p-6",
-          className
-        )}
-      >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex min-h-8 items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 text-[11px] font-semibold uppercase tracking-[0.12em]"
-              style={{ color: dominantMeta.color }}
-            >
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: dominantMeta.color }}
-              />
-              {t("memory.inspector.learningBadge")}
-            </span>
-            <span className="inline-flex min-h-8 items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              {t("memory.inspector.memoriesCount", { count: node.member_count })}
-            </span>
-          </div>
-          <h2 className="mt-4 text-[1.35rem] font-semibold leading-[1.08] tracking-[-0.055em] text-[var(--text-primary)] sm:text-[1.55rem] [overflow-wrap:anywhere]">
-            {node.title}
-          </h2>
-          <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)] [overflow-wrap:anywhere]">
-            {node.summary}
-          </p>
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      width="min(380px, 92vw)"
+      title={
+        <div className="flex items-center gap-2">
+          <TypeBadge color={meta.color} label={typeLabel} />
+          <span className="min-w-0 truncate text-[0.9375rem] font-medium text-[color:var(--text-primary)]">
+            {truncateText(node.title || node.label, 38)}
+          </span>
         </div>
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="button-shell button-shell--secondary button-shell--icon h-10 w-10 shrink-0 text-[var(--text-secondary)]"
-            aria-label={t("memory.inspector.close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
+      }
+      description={headerMeta}
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="ghost" size="sm" onClick={handleClose}>
+            {t("common.close", { defaultValue: "Fechar" })}
+          </Button>
+          {onRecenter ? (
+            <Button variant="secondary" size="sm" onClick={onRecenter}>
+              <Focus className="icon-xs" strokeWidth={1.75} />
+              {t("memory.inspector.recenter", { defaultValue: "Centralizar" })}
+            </Button>
+          ) : null}
+        </div>
+      }
+    >
+      <DrawerSection title={t("memory.inspector.content", { defaultValue: "Conteúdo" })}>
+        <p className="text-[0.8125rem] leading-6 text-[color:var(--text-primary)]">
+          {isMemory ? node.content : node.summary}
+        </p>
+      </DrawerSection>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        <Metric label={t("memory.inspector.dominantType")} value={getMemoryTypeLabel(node.dominant_type, t)} />
-        <Metric label={t("memory.inspector.intensity")} value={`${Math.round(node.importance * 100)}%`} />
-        <Metric
-          label={t("memory.inspector.semanticStrength")}
-          value={
-            node.semantic_strength != null
-              ? `${Math.round(node.semantic_strength * 100)}%`
-              : semanticStatus === "available"
-                ? t("memory.inspector.noStrongAffinity")
-                : t("memory.inspector.contextualFallback")
-          }
-        />
-        <Metric label={t("memory.inspector.sessions")} value={`${node.session_ids.length}`} />
-      </div>
+      <div className="border-t border-[color:var(--divider-hair)]" />
 
-      <div className="mt-6 space-y-5">
-        <Section title={t("memory.inspector.relatedMemories")}>
-          {relatedNodes.length > 0 ? (
-            <div className="space-y-2.5">
-              {relatedNodes.slice(0, 8).map((related) => {
-                const relatedMemory = related.kind === "memory" ? related : null;
-                const relatedMeta = relatedMemory
-                  ? getMemoryTypeMeta(relatedMemory.memory_type)
-                  : dominantMeta;
+      <DrawerSection title={t("memory.inspector.details", { defaultValue: "Detalhes" })}>
+        {isMemory ? (
+          <DetailGrid columns={2}>
+            <DetailDatum
+              label={t("memory.inspector.importance", { defaultValue: "Importância" })}
+              value={`${Math.round(node.importance * 100)}%`}
+            />
+            <DetailDatum
+              label={t("memory.inspector.accesses", { defaultValue: "Acessos" })}
+              value={`${node.access_count}`}
+            />
+            <DetailDatum
+              label={t("memory.inspector.lastUsed", { defaultValue: "Último uso" })}
+              value={
+                node.last_accessed
+                  ? formatRelativeTime(node.last_accessed)
+                  : t("memory.inspector.notAccessedYet", { defaultValue: "—" })
+              }
+            />
+            <DetailDatum
+              label={t("memory.inspector.createdAt", { defaultValue: "Criada" })}
+              value={
+                node.created_at
+                  ? formatDateTime(node.created_at)
+                  : t("memory.inspector.noDate", { defaultValue: "—" })
+              }
+            />
+            <DetailDatum
+              label={t("memory.inspector.expiresAt", { defaultValue: "Expira" })}
+              value={
+                node.expires_at
+                  ? formatRelativeTime(node.expires_at)
+                  : t("memory.inspector.never", { defaultValue: "Sem prazo" })
+              }
+            />
+            <DetailDatum
+              label={t("common.session", { defaultValue: "Sessão" })}
+              value={node.session_id ? truncateText(node.session_id, 18) : "—"}
+            />
+          </DetailGrid>
+        ) : (
+          <DetailGrid columns={2}>
+            <DetailDatum
+              label={t("memory.inspector.dominantType", { defaultValue: "Tipo dominante" })}
+              value={typeLabel}
+            />
+            <DetailDatum
+              label={t("memory.inspector.intensity", { defaultValue: "Intensidade" })}
+              value={`${Math.round(node.importance * 100)}%`}
+            />
+            <DetailDatum
+              label={t("memory.inspector.semanticStrength", { defaultValue: "Força semântica" })}
+              value={
+                node.semantic_strength != null
+                  ? `${Math.round(node.semantic_strength * 100)}%`
+                  : t("memory.inspector.contextualFallback", { defaultValue: "Contextual" })
+              }
+            />
+            <DetailDatum
+              label={t("memory.inspector.members", { defaultValue: "Membros" })}
+              value={`${node.member_count}`}
+            />
+            <DetailDatum
+              label={t("memory.inspector.sessions", { defaultValue: "Sessões" })}
+              value={`${node.session_ids.length}`}
+            />
+          </DetailGrid>
+        )}
+      </DrawerSection>
 
-                return (
-                  <div
-                    key={related.id}
-                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: relatedMeta.color }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold leading-6 text-[var(--text-primary)] [overflow-wrap:anywhere]">
-                          {related.title}
-                        </p>
-                        <p className="mt-1 text-xs leading-6 text-[var(--text-tertiary)]">
-                          {related.kind === "memory"
-                            ? `${getMemoryTypeLabel(relatedMemory!.memory_type, t)} • ${Math.round(related.importance * 100)}%`
-                            : truncateText(related.title, 60)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            ) : (
-              <p className="text-sm leading-7 text-[var(--text-tertiary)]">
-                {t("memory.inspector.noRelatedMemories")}
-              </p>
-            )}
-        </Section>
-      </div>
-    </div>
+      {isMemory && node.source_query_text ? (
+        <>
+          <div className="border-t border-[color:var(--divider-hair)]" />
+          <DrawerSection title={t("memory.inspector.origin", { defaultValue: "Origem" })}>
+            <DetailBlock monospace>{node.source_query_text}</DetailBlock>
+          </DrawerSection>
+        </>
+      ) : null}
+
+      <div className="border-t border-[color:var(--divider-hair)]" />
+
+      <DrawerSection
+        title={t("memory.inspector.relatedConnections", { defaultValue: "Conexões" })}
+      >
+        {relatedNodes.length === 0 ? (
+          <p className="text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
+            {t("memory.inspector.noVisibleConnections", {
+              defaultValue: "Nenhuma conexão visível nos filtros atuais.",
+            })}
+          </p>
+        ) : (
+          <div className="-mx-1 flex flex-col">
+            {relatedNodes.slice(0, 8).map((related) => {
+              const relation = relatedEdges.find(
+                (edge) =>
+                  (edge.source === node.id && edge.target === related.id) ||
+                  (edge.target === node.id && edge.source === related.id),
+              );
+              return (
+                <NeighborRow
+                  key={related.id}
+                  node={related}
+                  relation={relation}
+                  onSelect={onFocusNode ? () => onFocusNode(related.id) : undefined}
+                />
+              );
+            })}
+          </div>
+        )}
+      </DrawerSection>
+    </Drawer>
   );
 }

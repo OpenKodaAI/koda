@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, ShieldAlert } from "lucide-react";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { getBotLabel } from "@/lib/bot-constants";
+import { getAgentLabel } from "@/lib/agent-constants";
 import {
   buildRuntimeRoomRows,
   getRuntimeRowSummary,
@@ -73,13 +73,13 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
         ) : (
           rows.map((row) => (
             <Link
-              key={`${row.botId}-${row.taskId}`}
-              href={`/runtime/${row.botId}/tasks/${row.taskId}`}
+              key={`${row.agentId}-${row.taskId}`}
+              href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
               className="group flex items-center justify-between gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3 transition-colors hover:bg-[var(--surface-hover)]"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="chip">{getBotLabel(row.botId)}</span>
+                  <span className="chip">{getAgentLabel(row.agentId)}</span>
                   <span
                     className="inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.03em]"
                     style={getSemanticStyle(getRuntimeTone(row.phase))}
@@ -87,7 +87,7 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
                     {getRuntimeLabel(row.phase)}
                   </span>
                   <span className="chip font-mono">#{row.taskId}</span>
-                  {connected[row.botId] ? <span className="chip">{t("runtime.controlCard.live")}</span> : null}
+                  {connected[row.agentId] ? <span className="chip">{t("runtime.controlCard.live")}</span> : null}
                 </div>
                 <p className="mt-2 text-sm text-[var(--text-primary)]">
                   {truncateText(getRuntimeRowSummary(row), 104)}

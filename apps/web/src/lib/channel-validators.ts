@@ -159,7 +159,7 @@ async function checkDiscord(
   if (!token) return { ok: false, error: "DISCORD_BOT_TOKEN is required" };
 
   const res = await fetch("https://discord.com/api/v10/users/@me", {
-    headers: { Authorization: `Bot ${token}` },
+    headers: { Authorization: `Agent ${token}` },
   });
   const data = (await res.json()) as {
     username?: string;
@@ -168,7 +168,7 @@ async function checkDiscord(
   };
 
   if (!res.ok) {
-    return { ok: false, error: data.message ?? "Invalid Discord bot token" };
+    return { ok: false, error: data.message ?? "Invalid Discord agent token" };
   }
 
   return {
@@ -195,7 +195,7 @@ async function checkSlack(
     team?: string;
   };
 
-  if (!data.ok) return { ok: false, error: data.error ?? "Invalid Slack bot token" };
+  if (!data.ok) return { ok: false, error: data.error ?? "Invalid Slack agent token" };
 
   return {
     ok: true,
@@ -242,7 +242,7 @@ async function checkTeams(
     };
   }
 
-  return { ok: true, display_name: "Teams Bot", display_id: appId };
+  return { ok: true, display_name: "Teams Agent", display_id: appId };
 }
 
 async function checkLine(

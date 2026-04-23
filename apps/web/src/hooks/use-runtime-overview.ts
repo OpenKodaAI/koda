@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useRuntimeQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { resolveBotSelection } from "@/lib/bot-selection";
+import { resolveAgentSelection } from "@/lib/agent-selection";
 import { parseResponseError, readJsonResponse } from "@/lib/http-client";
 import type { RuntimeEvent, RuntimeOverview } from "@/lib/runtime-types";
 
@@ -15,17 +15,17 @@ interface UseRuntimeOverviewResult {
   refreshing: boolean;
   connected: Record<string, boolean>;
   error: string | null;
-  refreshBot: (botId: string) => Promise<void>;
+  refreshAgent: (agentId: string) => Promise<void>;
   lastUpdated: number | null;
 }
 
 export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOverviewResult {
   const { language } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
   );
   const [connected, setConnected] = useState<Record<string, boolean>>({});
@@ -38,17 +38,17 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
     connectedRef.current = connected;
   }, [connected]);
 
-  const visibleBotKey = useMemo(() => visibleBotIds.join(","), [visibleBotIds]);
-  const visibleBotIdsRef = useRef(visibleBotIds);
+  const visibleAgentKey = useMemo(() => visibleBotIds.join(","), [visibleBotIds]);
+  const visibleAgentIdsRef = useRef(visibleBotIds);
   useEffect(() => {
-    visibleBotIdsRef.current = visibleBotIds;
+    visibleAgentIdsRef.current = visibleBotIds;
   }, [visibleBotIds]);
 
-  const fetchBotOverview = useCallback(
-    async (botId: string, signal?: AbortSignal) => {
+  const fetchAgentOverview = useCallback(
+    async (agentId: string, signal?: AbortSignal) => {
       const params = new URLSearchParams({ lang: language });
       const response = await fetch(
-        `/api/runtime/bots/${botId}/overview?${params.toString()}`,
+        `/api/runtime/agents/${agentId}/overview?${params.toString()}`,
         { cache: "no-store", signal },
       );
 
@@ -56,7 +56,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
         throw new Error(
           await parseResponseError(
             response,
-            `Erro ao carregar runtime do bot ${botId}`,
+            `Erro ao carregar runtime do agent ${agentId}`,
           ),
         );
       }
@@ -67,15 +67,15 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   );
 
   const fetchBatchOverview = useCallback(
-    async (botIds: string[], signal?: AbortSignal) => {
-      if (botIds.length === 0) return {};
+    async (agentIds: string[], signal?: AbortSignal) => {
+      if (agentIds.length === 0) return {};
 
       const params = new URLSearchParams({
         lang: language,
-        bots: botIds.join(","),
+        agents: agentIds.join(","),
       });
       const response = await fetch(
-        `/api/runtime/bots/overview?${params.toString()}`,
+        `/api/runtime/agents/overview?${params.toString()}`,
         { cache: "no-store", signal },
       );
 
@@ -94,8 +94,8 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   );
 
   const overviewQueryKey = useMemo(
-    () => ["runtime", "overview-batch", visibleBotKey, language] as const,
-    [visibleBotKey, language],
+    () => ["runtime", "overview-batch", visibleAgentKey, language] as const,
+    [visibleAgentKey, language],
   );
   const overviewQueryKeyRef = useRef(overviewQueryKey);
   useEffect(() => {
@@ -107,10 +107,10 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
     enabled: visibleBotIds.length > 0,
     refetchInterval: () => {
       const currentConnected = connectedRef.current;
-      const currentBotIds = visibleBotIdsRef.current;
-      const streamBots = currentBotIds.filter((id) => currentConnected[id]);
+      const currentBotIds = visibleAgentIdsRef.current;
+      const streamAgents = currentBotIds.filter((id) => currentConnected[id]);
       const allConnected =
-        streamBots.length > 0 && streamBots.length === currentBotIds.length;
+        streamAgents.length > 0 && streamAgents.length === currentBotIds.length;
       // Safety net: keep a slow 60s poll even when all SSE streams are connected
       return allConnected ? 60_000 : 20_000;
     },
@@ -125,7 +125,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   const streamBotIds = useMemo(
     () =>
       visibleBotIds.filter(
-        (botId) => overviews[botId]?.availability.runtime === "available",
+        (agentId) => overviews[agentId]?.availability.runtime === "available",
       ),
     [overviews, visibleBotIds],
   );
@@ -139,7 +139,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
 
     if (visibleBotIds.length === 0) return;
     void queryClient.invalidateQueries({ queryKey: overviewQueryKey });
-  }, [language, queryClient, overviewQueryKey, visibleBotIds.length, visibleBotKey]);
+  }, [language, queryClient, overviewQueryKey, visibleBotIds.length, visibleAgentKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -163,23 +163,23 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
       }, 1_000);
     };
 
-    const connectBot = (botId: string) => {
+    const connectAgent = (agentId: string) => {
       if (disposed) return;
       const es = new EventSource(
-        `/api/runtime/bots/${botId}/stream?after_seq=${lastSeqRef.current[botId] ?? 0}`,
+        `/api/runtime/agents/${agentId}/stream?after_seq=${lastSeqRef.current[agentId] ?? 0}`,
       );
       sources.push(es);
 
       es.onopen = () => {
-        setConnected((current) => ({ ...current, [botId]: true }));
+        setConnected((current) => ({ ...current, [agentId]: true }));
       };
 
       es.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data) as RuntimeEvent;
           if (typeof payload.seq === "number") {
-            lastSeqRef.current[botId] = Math.max(
-              lastSeqRef.current[botId] ?? 0,
+            lastSeqRef.current[agentId] = Math.max(
+              lastSeqRef.current[agentId] ?? 0,
               payload.seq,
             );
           }
@@ -193,17 +193,17 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
       };
 
       es.onerror = () => {
-        setConnected((current) => ({ ...current, [botId]: false }));
+        setConnected((current) => ({ ...current, [agentId]: false }));
         es.close();
         if (!disposed) {
           reconnectTimers.push(
-            window.setTimeout(() => connectBot(botId), 3000),
+            window.setTimeout(() => connectAgent(agentId), 3000),
           );
         }
       };
     };
 
-    activeStreamBotIds.forEach((botId) => connectBot(botId));
+    activeStreamBotIds.forEach((agentId) => connectAgent(agentId));
 
     return () => {
       disposed = true;
@@ -220,17 +220,17 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
     overviews,
     loading:
       overviewQuery.isLoading ||
-      visibleBotIds.some((botId) => !overviews[botId]),
+      visibleBotIds.some((agentId) => !overviews[agentId]),
     refreshing: overviewQuery.isFetching && !overviewQuery.isLoading,
     connected,
     error: overviewQuery.error?.message ?? null,
-    refreshBot: async (botId) => {
-      const payload = await fetchBotOverview(botId);
+    refreshAgent: async (agentId) => {
+      const payload = await fetchAgentOverview(agentId);
       queryClient.setQueryData(
         overviewQueryKey,
         (current: Record<string, RuntimeOverview> | undefined) => ({
           ...(current ?? {}),
-          [botId]: payload,
+          [agentId]: payload,
         }),
       );
     },

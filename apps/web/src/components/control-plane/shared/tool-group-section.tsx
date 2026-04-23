@@ -5,6 +5,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { COLLAPSE_TRANSITION } from "./motion-constants";
 import { ToolPolicySegment, type ToolPolicy } from "./tool-policy-segment";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
@@ -58,8 +65,7 @@ export function ToolGroupSection({
   const { tl } = useAppI18n();
   const [expanded, setExpanded] = useState(defaultExpanded);
 
-  function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value as GroupPolicy;
+  function handleSelectChange(val: GroupPolicy) {
     if (val !== "custom") {
       onGroupPolicyChange(val);
     }
@@ -99,23 +105,30 @@ export function ToolGroupSection({
         </button>
 
         {/* Right side: policy select */}
-        <select
+        <Select
           value={groupPolicy}
-          onChange={handleSelectChange}
-          onClick={(e) => e.stopPropagation()}
-          className="field-shell w-auto max-w-[180px] shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)]"
-          title={tl("Politica do grupo")}
+          onValueChange={(v) => handleSelectChange(v as GroupPolicy)}
         >
-          {GROUP_POLICY_OPTIONS.map(({ value, labelKey }) => (
-            <option
-              key={value}
-              value={value}
-              disabled={value === "custom" && groupPolicy !== "custom"}
-            >
-              {tl(labelKey)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            sizeVariant="sm"
+            onClick={(e) => e.stopPropagation()}
+            className="w-auto max-w-[180px] shrink-0 text-[var(--text-secondary)]"
+            title={tl("Politica do grupo")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {GROUP_POLICY_OPTIONS.map(({ value, labelKey }) => (
+              <SelectItem
+                key={value}
+                value={value}
+                disabled={value === "custom" && groupPolicy !== "custom"}
+              >
+                {tl(labelKey)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Collapsible body */}

@@ -150,7 +150,7 @@ export function AuditTable({
                           </p>
                           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
                             <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1">
-                              {entry.bot_id ?? t("common.noBot")}
+                              {entry.bot_id ?? t("common.noAgent")}
                             </span>
                             <span>{t("audit.table.task", { value: entry.task_id != null ? `#${entry.task_id}` : "—" })}</span>
                             {entry.trace_id && (
@@ -225,7 +225,7 @@ export function AuditTable({
                     {truncateText(getDetailsPreview(entry, t), 100)}
                   </p>
                   <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                    <span>{entry.bot_id ?? t("common.noBot")}</span>
+                    <span>{entry.bot_id ?? t("common.noAgent")}</span>
                     <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
                     <span>{formatRelativeTime(entry.timestamp)}</span>
                   </div>
@@ -233,7 +233,7 @@ export function AuditTable({
                 <ArrowUpRight className="mt-0.5 h-4 w-4 text-[var(--text-quaternary)]" />
               </div>
               <div className="mt-4 grid grid-cols-3 gap-3">
-                <MobileAuditStat label={t("common.bot")} value={entry.bot_id ?? "—"} />
+                <MobileAuditStat label={t("common.agent")} value={entry.bot_id ?? "—"} />
                 <MobileAuditStat label={t("common.cost")} value={formatCost(entry.cost_usd)} mono />
                 <MobileAuditStat label={t("common.duration")} value={formatDuration(entry.duration_ms)} mono />
               </div>

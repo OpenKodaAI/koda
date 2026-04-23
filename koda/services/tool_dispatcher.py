@@ -1,7 +1,6 @@
 """Agent tool dispatcher: parses <agent_cmd> tags, executes tools, and formats results."""
 
 import asyncio
-import importlib
 import json
 import re
 import time as _time
@@ -37,17 +36,10 @@ from koda.config import (
     GWS_ENABLED,
     INTER_AGENT_ENABLED,
     JIRA_ENABLED,
-    MONGO_ENABLED,
-    MYSQL_ENABLED,
     PLUGIN_SYSTEM_ENABLED,
-    POSTGRES_ENABLED,
-    POSTGRES_MAX_ROWS_CAP,
-    POSTGRES_WRITE_ENABLED,
-    REDIS_ENABLED,
     SHELL_ENABLED,
     SHELL_TIMEOUT,
     SNAPSHOT_ENABLED,
-    SQLITE_ENABLED,
     STRUCTURED_DATA_OUTPUT_ENABLED,
     WEBHOOK_ENABLED,
     WORKFLOW_ENABLED,
@@ -87,30 +79,10 @@ def _coerce_int(value: object) -> int:
 
 _AGENT_CMD_RE = re.compile(r'<agent_cmd\s+tool="([^"]+)">(.*?)</agent_cmd>', re.DOTALL)
 _ACTION_PLAN_RE = re.compile(r"<action_plan>.*?</action_plan>", re.DOTALL | re.IGNORECASE)
-_REMOVED_NATIVE_DB_TOOLS = frozenset(
-    {
-        "sqlite_query",
-        "sqlite_schema",
-        "mongo_query",
-        "db_query",
-        "db_schema",
-        "db_explain",
-        "db_switch_env",
-        "db_execute",
-        "db_execute_plan",
-        "db_transaction",
-        "mysql_query",
-        "mysql_schema",
-        "redis_query",
-    }
-)
 
 # Tools that modify state (require approval in supervised mode)
 _WRITE_TOOLS = frozenset(
     {
-        "cron_add",
-        "cron_delete",
-        "cron_toggle",
         "job_create",
         "job_update",
         "job_validate",
@@ -172,7 +144,6 @@ _WRITE_TOOLS = frozenset(
 # Tools that are always read-only
 _READ_TOOLS = frozenset(
     {
-        "cron_list",
         "job_list",
         "job_get",
         "job_runs",
@@ -363,21 +334,13 @@ def _infer_tool_category(tool: str) -> str:
         return "mcp"
     if tool.startswith("file_"):
         return "fileops"
-    if tool.startswith("mysql_"):
-        return "mysql"
-    if tool.startswith("mongo_"):
-        return "db"
-    if tool.startswith("sqlite_"):
-        return "db"
-    if tool.startswith("redis_"):
-        return "db"
     if tool.startswith("db_"):
         return "db"
     if tool in {"gws", "jira", "confluence"}:
         return "cli"
     if tool.startswith("browser_"):
         return "browser"
-    if tool.startswith("cron_") or tool.startswith("job_"):
+    if tool.startswith("job_"):
         return "ops"
     if tool.startswith("shell_"):
         return "shell"
@@ -551,15 +514,6 @@ async def execute_tool(
         runtime = get_runtime_controller()
     except Exception:
         runtime = None
-    if call.tool in _REMOVED_NATIVE_DB_TOOLS:
-        return AgentToolResult(
-            tool=call.tool,
-            success=False,
-            output=("Native database tools were removed from Koda. Configure and use a database MCP server instead."),
-            metadata={"category": _infer_tool_category(call.tool), "mcp_only": True},
-            started_at=started_at,
-            completed_at=datetime.now(UTC).isoformat(),
-        )
 
     async def _publish_runtime_event(event_type: str, *, severity: str = "info", payload: dict | None = None) -> None:
         if ctx.task_id is None or runtime is None:
@@ -910,187 +864,6 @@ def _is_write_tool(tool: str, params: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
-
-
-async def _handle_cron_list(params: dict, ctx: ToolContext) -> AgentToolResult:
-    from koda.services.cron_store import list_cron_jobs
-
-    jobs = list_cron_jobs(ctx.user_id)
-    if not jobs:
-        return AgentToolResult(tool="cron_list", success=True, output="No cron jobs found.")
-
-    lines = []
-    for job_id, expr, cmd, desc, enabled in jobs:
-        status = "enabled" if enabled else "disabled"
-        line = f"#{job_id}: {expr} → {cmd}"
-        if desc:
-            line += f" ({desc})"
-        line += f" [{status}]"
-        lines.append(line)
-    data = [
-        {"id": job_id, "expression": expr, "command": cmd, "description": desc, "enabled": enabled}
-        for job_id, expr, cmd, desc, enabled in jobs
-    ]
-    return AgentToolResult(tool="cron_list", success=True, output="\n".join(lines), data=data, data_format="json")
-
-
-async def _handle_cron_add(params: dict, ctx: ToolContext) -> AgentToolResult:
-    expression = params.get("expression", "")
-    command = params.get("command", "")
-    description = params.get("description", "")
-
-    if not expression or not command:
-        return AgentToolResult(
-            tool="cron_add",
-            success=False,
-            output="Missing required params: 'expression' and 'command'.",
-        )
-
-    # Validate cron expression
-    try:
-        croniter = importlib.import_module("croniter").croniter
-
-        if not croniter.is_valid(expression):
-            return AgentToolResult(
-                tool="cron_add",
-                success=False,
-                output=f"Invalid cron expression: {expression}",
-            )
-    except ImportError:
-        return AgentToolResult(
-            tool="cron_add",
-            success=False,
-            output="croniter not installed — cannot validate cron expression.",
-        )
-
-    # Security: block dangerous commands
-    if BLOCKED_SHELL_PATTERN.search(command):
-        _audit_blocked("cron_add", "dangerous_shell_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="cron_add",
-            success=False,
-            output="Blocked: command contains a dangerous pattern.",
-        )
-    if GIT_META_CHARS.search(command):
-        _audit_blocked("cron_add", "shell_meta_characters", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="cron_add",
-            success=False,
-            output="Blocked: command contains shell meta-characters.",
-        )
-
-    work_dir_validation = validate_work_dir(str(params.get("work_dir") or ctx.work_dir))
-    if not work_dir_validation.ok:
-        _audit_blocked("cron_add", "invalid_work_dir", user_id=ctx.user_id)
-        return AgentToolResult(tool="cron_add", success=False, output=work_dir_validation.reason or "Blocked.")
-
-    try:
-        from koda.services.cron_store import create_cron_job
-
-        auto_activate_after_validation = _coerce_bool(
-            params.get("auto_activate_after_validation"),
-            default=True,
-        )
-        job_id = create_cron_job(
-            ctx.user_id,
-            ctx.chat_id,
-            expression,
-            command,
-            description,
-            work_dir_validation.path,
-            auto_activate_after_validation=auto_activate_after_validation,
-        )
-        return AgentToolResult(
-            tool="cron_add",
-            success=True,
-            output=(
-                f'Legacy cron job #{job_id} created in validation mode: "{expression}" → {command}. '
-                + (
-                    "A safe dry-run is running now and the job will activate automatically if it passes."
-                    if auto_activate_after_validation
-                    else f"Run /jobs activate {job_id} after the dry-run passes."
-                )
-            ),
-        )
-    except ValueError as e:
-        return AgentToolResult(tool="cron_add", success=False, output=str(e))
-
-
-async def _handle_cron_delete(params: dict, ctx: ToolContext) -> AgentToolResult:
-    job_id = params.get("job_id")
-    if job_id is None:
-        return AgentToolResult(
-            tool="cron_delete",
-            success=False,
-            output="Missing required param: 'job_id'.",
-        )
-
-    from koda.services.cron_store import cancel_cron_task, delete_cron_job
-
-    try:
-        job_id = int(job_id)
-    except (TypeError, ValueError):
-        return AgentToolResult(tool="cron_delete", success=False, output="'job_id' must be an integer.")
-    if delete_cron_job(ctx.user_id, job_id):
-        cancel_cron_task(job_id)
-        return AgentToolResult(
-            tool="cron_delete",
-            success=True,
-            output=f"Cron job #{job_id} deleted.",
-        )
-    return AgentToolResult(
-        tool="cron_delete",
-        success=False,
-        output=f"Cron job #{job_id} not found or not owned by you.",
-    )
-
-
-async def _handle_cron_toggle(params: dict, ctx: ToolContext) -> AgentToolResult:
-    job_id = params.get("job_id")
-    enabled = params.get("enabled")
-    if job_id is None or enabled is None:
-        return AgentToolResult(
-            tool="cron_toggle",
-            success=False,
-            output="Missing required params: 'job_id' and 'enabled'.",
-        )
-
-    from koda.services.cron_store import (
-        cancel_cron_task,
-        get_cron_job,
-        schedule_cron_task,
-        toggle_cron_job,
-    )
-
-    try:
-        job_id = int(job_id)
-    except (TypeError, ValueError):
-        return AgentToolResult(tool="cron_toggle", success=False, output="'job_id' must be an integer.")
-    if isinstance(enabled, str):
-        enabled = enabled.lower() in ("true", "1", "yes")
-    else:
-        enabled = bool(enabled)
-
-    if not toggle_cron_job(ctx.user_id, job_id, enabled):
-        return AgentToolResult(
-            tool="cron_toggle",
-            success=False,
-            output=f"Cron job #{job_id} not found or not owned by you.",
-        )
-
-    if enabled:
-        job = get_cron_job(job_id)
-        if job:
-            schedule_cron_task(job_id, ctx.agent, ctx.chat_id, job[3], job[4], job[7] or ctx.work_dir)
-    else:
-        cancel_cron_task(job_id)
-
-    state = "enabled" if enabled else "disabled"
-    return AgentToolResult(
-        tool="cron_toggle",
-        success=True,
-        output=f"Cron job #{job_id} {state}.",
-    )
 
 
 async def _handle_job_list(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2164,338 +1937,6 @@ async def _handle_browser_pdf(params: dict, ctx: ToolContext) -> AgentToolResult
 
 
 # ---------------------------------------------------------------------------
-# SQLite handlers
-# ---------------------------------------------------------------------------
-
-
-async def _handle_sqlite_query(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not SQLITE_ENABLED:
-        return AgentToolResult(
-            tool="sqlite_query", success=False, output="SQLite not enabled. Set SQLITE_ENABLED=true."
-        )
-    sql = params.get("sql", "")
-    db_path = params.get("db_path", "")
-    if not sql or not db_path:
-        return AgentToolResult(
-            tool="sqlite_query", success=False, output="Missing required params: 'sql' and 'db_path'."
-        )
-    max_rows = params.get("max_rows", 100)
-    try:
-        max_rows = int(max_rows)
-    except (TypeError, ValueError):
-        return AgentToolResult(tool="sqlite_query", success=False, output="'max_rows' must be an integer.")
-    if max_rows < 1:
-        return AgentToolResult(tool="sqlite_query", success=False, output="'max_rows' must be at least 1.")
-
-    from koda.services.sqlite_manager import get_sqlite_manager
-
-    mgr = get_sqlite_manager()
-    if not mgr.is_available:
-        return AgentToolResult(
-            tool="sqlite_query", success=False, output="SQLite not available (aiosqlite not installed)."
-        )
-    result = await mgr.query(sql, db_path, max_rows=max_rows)
-    return AgentToolResult(
-        tool="sqlite_query",
-        success=not result.startswith("Error"),
-        output=result,
-        metadata={"category": "sqlite", "sql": sql, "db_path": db_path},
-    )
-
-
-async def _handle_sqlite_schema(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not SQLITE_ENABLED:
-        return AgentToolResult(
-            tool="sqlite_schema", success=False, output="SQLite not enabled. Set SQLITE_ENABLED=true."
-        )
-    db_path = params.get("db_path", "")
-    if not db_path:
-        return AgentToolResult(tool="sqlite_schema", success=False, output="Missing required param: 'db_path'.")
-
-    from koda.services.sqlite_manager import get_sqlite_manager
-
-    mgr = get_sqlite_manager()
-    if not mgr.is_available:
-        return AgentToolResult(
-            tool="sqlite_schema", success=False, output="SQLite not available (aiosqlite not installed)."
-        )
-    result = await mgr.get_schema(db_path, table=params.get("table"))
-    return AgentToolResult(
-        tool="sqlite_schema",
-        success=not result.startswith("Error"),
-        output=result,
-        metadata={"category": "sqlite", "db_path": db_path, "table": params.get("table")},
-    )
-
-
-# ---------------------------------------------------------------------------
-# MongoDB handlers
-# ---------------------------------------------------------------------------
-
-
-async def _handle_mongo_query(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not MONGO_ENABLED:
-        return AgentToolResult(
-            tool="mongo_query",
-            success=False,
-            output="MongoDB not enabled. Set MONGO_ENABLED=true.",
-        )
-    database = params.get("database", "")
-    collection = params.get("collection", "")
-    if not database or not collection:
-        return AgentToolResult(
-            tool="mongo_query",
-            success=False,
-            output="Missing required params: 'database' and 'collection'.",
-        )
-    filter_doc = params.get("filter", {})
-    limit = int(params.get("limit", 100))
-    env = params.get("env")
-    from koda.services.mongo_manager import get_mongo_manager
-
-    mgr = get_mongo_manager()
-    if not mgr.is_available:
-        return AgentToolResult(
-            tool="mongo_query",
-            success=False,
-            output="MongoDB not available (motor not installed).",
-        )
-    result = await mgr.query(database, collection, filter_doc, limit, env)
-    return AgentToolResult(
-        tool="mongo_query",
-        success=not result.startswith("Error"),
-        output=result,
-        metadata={"category": "db", "database": database, "collection": collection, "env": env},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Database handlers
-# ---------------------------------------------------------------------------
-
-
-def _check_db_available(tool_name: str, env: str | None = None) -> AgentToolResult | None:
-    """Return error result if PostgreSQL is not available, else None."""
-    if not POSTGRES_ENABLED:
-        return AgentToolResult(
-            tool=tool_name, success=False, output="PostgreSQL is disabled. Set POSTGRES_ENABLED=true."
-        )
-
-    from koda.services.resilience import check_breaker, postgres_breaker
-
-    err = check_breaker(postgres_breaker)
-    if err:
-        return AgentToolResult(tool=tool_name, success=False, output=err)
-
-    from koda.services.db_manager import db_manager
-
-    if not db_manager.is_available:
-        return AgentToolResult(tool=tool_name, success=False, output="PostgreSQL is not connected.")
-    if env and not db_manager.is_env_available(env):
-        return AgentToolResult(
-            tool=tool_name,
-            success=False,
-            output=f"Database env '{env}' is not available. Available: {', '.join(db_manager.available_envs)}",
-        )
-    return None
-
-
-async def _handle_db_query(params: dict, ctx: ToolContext) -> AgentToolResult:
-    env = str(params.get("env") or ctx.user_data.get("postgres_env") or "").strip().lower() or None
-    err = _check_db_available("db_query", env)
-    if err:
-        return err
-    sql = params.get("sql", "")
-    if not sql:
-        return AgentToolResult(tool="db_query", success=False, output="Missing required param: 'sql'.")
-
-    max_rows = params.get("max_rows")
-    if max_rows is not None:
-        try:
-            max_rows = int(max_rows)
-        except (TypeError, ValueError):
-            return AgentToolResult(
-                tool="db_query",
-                success=False,
-                output="'max_rows' must be an integer.",
-            )
-        if max_rows < 1:
-            return AgentToolResult(
-                tool="db_query",
-                success=False,
-                output="'max_rows' must be at least 1.",
-            )
-        if max_rows > POSTGRES_MAX_ROWS_CAP:
-            return AgentToolResult(
-                tool="db_query",
-                success=False,
-                output=f"'max_rows' cannot exceed {POSTGRES_MAX_ROWS_CAP}.",
-            )
-    timeout = params.get("timeout")
-    if timeout is not None:
-        try:
-            timeout = int(timeout)
-        except (TypeError, ValueError):
-            return AgentToolResult(tool="db_query", success=False, output="'timeout' must be an integer.")
-        if timeout < 1:
-            return AgentToolResult(tool="db_query", success=False, output="'timeout' must be at least 1.")
-
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.query(sql, timeout=timeout, max_rows=max_rows, env=env)
-    success = not result.startswith("Error")
-    return AgentToolResult(
-        tool="db_query",
-        success=success,
-        output=result,
-        metadata={
-            "category": "db",
-            "sql": sql,
-            "env": env,
-            "max_rows": max_rows,
-            "timeout": timeout,
-        },
-    )
-
-
-async def _handle_db_schema(params: dict, ctx: ToolContext) -> AgentToolResult:
-    env = str(params.get("env") or ctx.user_data.get("postgres_env") or "").strip().lower() or None
-    err = _check_db_available("db_schema", env)
-    if err:
-        return err
-    table = params.get("table")
-    timeout = params.get("timeout")
-    if timeout is not None:
-        try:
-            timeout = int(timeout)
-        except (TypeError, ValueError):
-            return AgentToolResult(tool="db_schema", success=False, output="'timeout' must be an integer.")
-        if timeout < 1:
-            return AgentToolResult(tool="db_schema", success=False, output="'timeout' must be at least 1.")
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.get_schema(table, env=env, timeout=timeout)
-    success = not result.startswith("Error")
-    return AgentToolResult(
-        tool="db_schema",
-        success=success,
-        output=result,
-        metadata={
-            "category": "db",
-            "table": table,
-            "env": env,
-            "timeout": timeout,
-        },
-    )
-
-
-async def _handle_db_explain(params: dict, ctx: ToolContext) -> AgentToolResult:
-    env = str(params.get("env") or ctx.user_data.get("postgres_env") or "").strip().lower() or None
-    err = _check_db_available("db_explain", env)
-    if err:
-        return err
-    sql = params.get("sql", "")
-    if not sql:
-        return AgentToolResult(tool="db_explain", success=False, output="Missing required param: 'sql'.")
-    analyze = params.get("analyze", False)
-    if isinstance(analyze, str):
-        analyze = analyze.lower() in ("true", "1", "yes")
-    timeout = params.get("timeout")
-    if timeout is not None:
-        try:
-            timeout = int(timeout)
-        except (TypeError, ValueError):
-            return AgentToolResult(tool="db_explain", success=False, output="'timeout' must be an integer.")
-        if timeout < 1:
-            return AgentToolResult(tool="db_explain", success=False, output="'timeout' must be at least 1.")
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.explain(sql, analyze=analyze, env=env, timeout=timeout)
-    success = not result.startswith("Error")
-    return AgentToolResult(
-        tool="db_explain",
-        success=success,
-        output=result,
-        metadata={
-            "category": "db",
-            "sql": sql,
-            "env": env,
-            "analyze": analyze,
-            "timeout": timeout,
-        },
-    )
-
-
-async def _handle_db_switch_env(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = _check_db_available("db_switch_env")
-    if err:
-        return err
-    env = str(params.get("env") or "").lower()
-    from koda.services.db_manager import db_manager
-
-    if env not in db_manager.available_envs:
-        return AgentToolResult(
-            tool="db_switch_env",
-            success=False,
-            output=f"Unknown env '{env}'. Available: {', '.join(db_manager.available_envs)}",
-        )
-    ctx.user_data["postgres_env"] = env
-    return AgentToolResult(tool="db_switch_env", success=True, output=f"Switched to {env}.")
-
-
-# ---------------------------------------------------------------------------
-# MySQL handlers
-# ---------------------------------------------------------------------------
-
-
-async def _handle_mysql_query(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not MYSQL_ENABLED:
-        return AgentToolResult(
-            tool="mysql_query", success=False, output="MySQL is not enabled. Set MYSQL_ENABLED=true."
-        )
-    sql = params.get("sql", "")
-    if not sql:
-        return AgentToolResult(tool="mysql_query", success=False, output="Missing required param: 'sql'.")
-    env = params.get("env")
-    max_rows = int(params.get("max_rows", 100))
-    from koda.services.mysql_manager import get_mysql_manager
-
-    manager = get_mysql_manager()
-    if not manager.is_available:
-        return AgentToolResult(
-            tool="mysql_query", success=False, output="MySQL is not available (aiomysql not installed)."
-        )
-    result = await manager.query(sql, env=env, max_rows=max_rows)
-    success = not result.startswith("Error")
-    return AgentToolResult(
-        tool="mysql_query",
-        success=success,
-        output=result,
-        metadata={"category": "mysql", "sql": sql, "env": env, "max_rows": max_rows},
-    )
-
-
-async def _handle_mysql_schema(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not MYSQL_ENABLED:
-        return AgentToolResult(tool="mysql_schema", success=False, output="MySQL is not enabled.")
-    table = params.get("table")
-    env = params.get("env")
-    from koda.services.mysql_manager import get_mysql_manager
-
-    manager = get_mysql_manager()
-    if not manager.is_available:
-        return AgentToolResult(tool="mysql_schema", success=False, output="MySQL is not available.")
-    result = await manager.get_schema(table=table, env=env)
-    success = not result.startswith("Error")
-    return AgentToolResult(
-        tool="mysql_schema",
-        success=success,
-        output=result,
-        metadata={"category": "mysql", "table": table, "env": env},
-    )
-
-
-# ---------------------------------------------------------------------------
 # Script Library handlers
 # ---------------------------------------------------------------------------
 
@@ -2801,25 +2242,6 @@ async def _handle_snapshot_delete(params: dict, ctx: ToolContext) -> AgentToolRe
     if err:
         return AgentToolResult(tool="snapshot_delete", success=False, output=err)
     return AgentToolResult(tool="snapshot_delete", success=True, output=f"Snapshot '{name}' deleted.")
-
-
-async def _handle_redis_query(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not REDIS_ENABLED:
-        return AgentToolResult(tool="redis_query", success=False, output="Redis not enabled. Set REDIS_ENABLED=true.")
-    command = params.get("command", "")
-    if not command:
-        return AgentToolResult(tool="redis_query", success=False, output="Missing required param: 'command'.")
-    args = params.get("args", [])
-    env = params.get("env")
-    from koda.services.redis_manager import get_redis_manager
-
-    mgr = get_redis_manager()
-    if not mgr.is_available:
-        return AgentToolResult(
-            tool="redis_query", success=False, output="Redis not available (redis package not installed)."
-        )
-    result = await mgr.execute(command, args, env)
-    return AgentToolResult(tool="redis_query", success=not result.startswith("Error"), output=result)
 
 
 async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -4010,73 +3432,6 @@ async def _handle_event_wait(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 # ---------------------------------------------------------------------------
-# Database write handlers
-# ---------------------------------------------------------------------------
-
-
-async def _handle_db_execute(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not POSTGRES_WRITE_ENABLED:
-        return AgentToolResult(
-            tool="db_execute",
-            success=False,
-            output="Database write not enabled. Set POSTGRES_WRITE_ENABLED=true.",
-        )
-    if not POSTGRES_ENABLED:
-        return AgentToolResult(tool="db_execute", success=False, output="Database not enabled.")
-    sql = params.get("sql", "")
-    if not sql:
-        return AgentToolResult(tool="db_execute", success=False, output="Missing 'sql'.")
-    env = params.get("env") or ctx.user_data.get("postgres_env")
-    sql_params = params.get("params")
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.execute_write(sql, params=sql_params, env=env)
-    if result.get("error"):
-        return AgentToolResult(tool="db_execute", success=False, output=result["error"])
-    output = f"Executed on {result['env']}:\n{result['command']}\nAffected rows: {result['affected_rows']}"
-    return AgentToolResult(tool="db_execute", success=True, output=output, data=result, data_format="json")
-
-
-async def _handle_db_execute_plan(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not POSTGRES_WRITE_ENABLED:
-        return AgentToolResult(tool="db_execute_plan", success=False, output="Database write not enabled.")
-    if not POSTGRES_ENABLED:
-        return AgentToolResult(tool="db_execute_plan", success=False, output="Database not enabled.")
-    sql = params.get("sql", "")
-    if not sql:
-        return AgentToolResult(tool="db_execute_plan", success=False, output="Missing 'sql'.")
-    env = params.get("env") or ctx.user_data.get("postgres_env")
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.explain_write(sql, env=env)
-    if result.get("error"):
-        return AgentToolResult(tool="db_execute_plan", success=False, output=result["error"])
-    return AgentToolResult(tool="db_execute_plan", success=True, output=f"EXPLAIN:\n{result['plan']}")
-
-
-async def _handle_db_transaction(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not POSTGRES_WRITE_ENABLED:
-        return AgentToolResult(tool="db_transaction", success=False, output="Database write not enabled.")
-    if not POSTGRES_ENABLED:
-        return AgentToolResult(tool="db_transaction", success=False, output="Database not enabled.")
-    statements = params.get("statements", [])
-    if not statements or not isinstance(statements, list):
-        return AgentToolResult(tool="db_transaction", success=False, output="Missing 'statements' (list).")
-    env = params.get("env") or ctx.user_data.get("postgres_env")
-    from koda.services.db_manager import db_manager
-
-    result = await db_manager.execute_transaction(statements, env=env)
-    if result.get("error"):
-        return AgentToolResult(tool="db_transaction", success=False, output=result["error"])
-    lines = [f"Transaction on {result['env']}: {len(result['results'])} statements"]
-    for r in result["results"]:
-        lines.append(f"  {r['command']} ({r['affected_rows']} rows)")
-    return AgentToolResult(
-        tool="db_transaction", success=True, output="\n".join(lines), data=result, data_format="json"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Browser network interception handlers
 # ---------------------------------------------------------------------------
 
@@ -4193,10 +3548,6 @@ async def _handle_browser_session_list(params: dict, ctx: ToolContext) -> AgentT
 _ToolHandler = Callable[[dict, ToolContext], Awaitable[AgentToolResult]]
 
 _TOOL_HANDLERS: dict[str, _ToolHandler] = {
-    "cron_list": _handle_cron_list,
-    "cron_add": _handle_cron_add,
-    "cron_delete": _handle_cron_delete,
-    "cron_toggle": _handle_cron_toggle,
     "job_list": _handle_job_list,
     "job_get": _handle_job_get,
     "job_create": _handle_job_create,
@@ -4241,15 +3592,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "browser_upload": _handle_browser_upload,
     "browser_set_viewport": _handle_browser_set_viewport,
     "browser_pdf": _handle_browser_pdf,
-    "sqlite_query": _handle_sqlite_query,
-    "sqlite_schema": _handle_sqlite_schema,
-    "mongo_query": _handle_mongo_query,
-    "db_query": _handle_db_query,
-    "db_schema": _handle_db_schema,
-    "db_explain": _handle_db_explain,
-    "db_switch_env": _handle_db_switch_env,
-    "mysql_query": _handle_mysql_query,
-    "mysql_schema": _handle_mysql_schema,
     "script_save": _handle_script_save,
     "script_search": _handle_script_search,
     "script_list": _handle_script_list,
@@ -4261,7 +3603,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "snapshot_list": _handle_snapshot_list,
     "snapshot_diff": _handle_snapshot_diff,
     "snapshot_delete": _handle_snapshot_delete,
-    "redis_query": _handle_redis_query,
     "request_skill": _handle_request_skill,
     "file_read": _handle_file_read,
     "file_write": _handle_file_write,
@@ -4304,9 +3645,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "webhook_unregister": _handle_webhook_unregister,
     "webhook_list": _handle_webhook_list,
     "event_wait": _handle_event_wait,
-    "db_execute": _handle_db_execute,
-    "db_execute_plan": _handle_db_execute_plan,
-    "db_transaction": _handle_db_transaction,
     "browser_network_capture_start": _handle_browser_network_capture_start,
     "browser_network_capture_stop": _handle_browser_network_capture_stop,
     "browser_network_requests": _handle_browser_network_requests,

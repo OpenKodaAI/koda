@@ -9,7 +9,13 @@ import { translateLiteral } from "@/lib/i18n";
 
 // --- Section-based navigation ---
 
-export type SettingsSectionId = "general" | "models" | "integrations" | "intelligence" | "variables";
+export type SettingsSectionId =
+  | "general"
+  | "models"
+  | "integrations"
+  | "intelligence"
+  | "scheduler"
+  | "variables";
 
 export const DEFAULT_SETTINGS_SECTION_ID: SettingsSectionId = "general";
 
@@ -44,6 +50,12 @@ export const SETTINGS_SECTIONS: Array<{
     icon: "Brain",
   },
   {
+    id: "scheduler",
+    labelKey: "settings.sections.scheduler.label",
+    descriptionKey: "settings.sections.scheduler.description",
+    icon: "Clock",
+  },
+  {
     id: "variables",
     labelKey: "settings.sections.variables.label",
     descriptionKey: "settings.sections.variables.description",
@@ -61,6 +73,7 @@ export const SECTION_VALUE_KEYS: Record<
   models: ["models", "provider_connections"],
   integrations: ["resources"],
   intelligence: ["memory_and_knowledge"],
+  scheduler: ["scheduler"],
   variables: ["variables"],
 };
 
@@ -71,6 +84,7 @@ export const STEP_TO_SECTION: Record<string, SettingsSectionId> = {
   integrations: "integrations",
   mcp: "integrations",
   memory: "intelligence",
+  scheduler: "scheduler",
   variables: "variables",
   review: "general",
 };
@@ -137,7 +151,10 @@ export function sanitizeVariableDraft(
       .replace(/[^A-Z0-9_]/g, "_")
       .replace(/^_+|_+$/g, ""),
     type: variable.type === "secret" ? "secret" : "text",
-    scope: variable.scope === "bot_grant" ? "bot_grant" : "system_only",
+    scope:
+      variable.scope === "agent_grant" || (variable.scope as string) === "bot_grant"
+        ? "agent_grant"
+        : "system_only",
     description: String(variable.description ?? "").trim(),
     value: String(variable.value ?? ""),
     preview: String(variable.preview ?? ""),

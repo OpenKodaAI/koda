@@ -146,9 +146,9 @@ def test_effective_allowed_tool_ids_include_secure_default_plus_execution_policy
             "version": 1,
             "rules": [
                 {
-                    "id": "allow-cron-add",
+                    "id": "allow-job-create",
                     "decision": "require_approval",
-                    "selectors": {"tool_id": ["cron_add"]},
+                    "selectors": {"tool_id": ["job_create"]},
                 }
             ],
         }
@@ -156,7 +156,7 @@ def test_effective_allowed_tool_ids_include_secure_default_plus_execution_policy
 
     assert "web_search" in allowed_tool_ids
     assert "agent_get_status" in allowed_tool_ids
-    assert "cron_add" in allowed_tool_ids
+    assert "job_create" in allowed_tool_ids
     assert "agent_set_workdir" not in allowed_tool_ids
 
 

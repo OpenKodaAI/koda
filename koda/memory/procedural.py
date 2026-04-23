@@ -80,17 +80,17 @@ def build_execution_memories(
 
     if outcome == "success":
         content = (
-            f"Procedimento validado para {task_kind}: em tarefas como '{preview}', "
-            f"comece reunindo evidências e fontes ({source_summary}), execute apenas depois de um mini-plano, "
-            f"use ferramentas como {tool_list}, e finalize verificando com {validation_summary}."
+            f"Validated procedure for {task_kind}: on tasks like '{preview}', "
+            f"start by gathering evidence and sources ({source_summary}), only act after a mini-plan, "
+            f"use tools like {tool_list}, and finalize by verifying with {validation_summary}."
         )
         importance = 0.82
     else:
         error_summary = (error_message or "unknown error")[:160]
         content = (
-            f"Cautela para {task_kind}: uma execução de '{preview}' falhou. "
-            f"Evite agir sem plano e sem fontes atualizadas; o risco observado foi '{error_summary}'. "
-            f"Ferramentas tentadas: {tool_list}. Validação detectada: {validation_summary}."
+            f"Caution for {task_kind}: a run of '{preview}' failed. "
+            f"Do not act without a plan and up-to-date sources; the observed risk was '{error_summary}'. "
+            f"Tools attempted: {tool_list}. Validation detected: {validation_summary}."
         )
         importance = 0.74
 
@@ -260,9 +260,9 @@ async def build_procedural_context(
     if not successes and not cautions:
         return ""
 
-    sections = ["## Memória Procedural"]
+    sections = ["## Procedural Memory"]
     if successes:
-        sections.append("### Procedimentos Validados\n" + "\n".join(successes))
+        sections.append("### Validated Procedures\n" + "\n".join(successes))
     if cautions:
-        sections.append("### Cautelas\n" + "\n".join(cautions))
+        sections.append("### Cautions\n" + "\n".join(cautions))
     return "\n\n".join(sections)

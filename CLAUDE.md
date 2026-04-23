@@ -12,11 +12,13 @@ Follow this order before making non-trivial changes:
 4. [`docs/ai/architecture-overview.md`](docs/ai/architecture-overview.md)
 5. [`docs/ai/runtime-flows.md`](docs/ai/runtime-flows.md)
 6. [`docs/ai/configuration-and-prompts.md`](docs/ai/configuration-and-prompts.md)
-7. the closest subtree guide:
+7. [`docs/ai/integrations/README.md`](docs/ai/integrations/README.md) — per-integration reference generated from `koda/agent_contract.py` + `koda/integrations/mcp_catalog.py` via [`scripts/generate_integration_docs.py`](scripts/generate_integration_docs.py). Source of truth for connection profiles, runtime constraints, and MCP tool inventories.
+8. the closest subtree guide:
    - [`koda/CLAUDE.md`](koda/CLAUDE.md)
    - [`koda/services/CLAUDE.md`](koda/services/CLAUDE.md)
    - [`koda/memory/CLAUDE.md`](koda/memory/CLAUDE.md)
    - [`tests/CLAUDE.md`](tests/CLAUDE.md)
+   - [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md) — **UI design system & principles** (mandatory for any `apps/web/` change)
 
 If another tool expects `AGENTS.md`, the guidance is mirrored there. The provider-neutral content still lives in [`docs/ai`](docs/ai), [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml), and each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md).
 
@@ -33,6 +35,7 @@ Public product and contributor documentation lives in [`docs/README.md`](docs/RE
 - [`AGENTS.md`](AGENTS.md) and the matching subtree `AGENTS.md` files mirror this guidance for `AGENTS.md`-aware tooling.
 - The canonical machine-readable repo index lives at [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml) and must match [`scripts/generate_repo_map.py`](scripts/generate_repo_map.py).
 - Per-agent runtime prompt behavior is derived from control-plane documents and the compiled runtime prompt contract, not repository prompt files.
+- Setup / login / recovery contract is documented in [`docs/security/authentication.md`](docs/security/authentication.md). Changes to [`koda/control_plane/operator_auth.py`](koda/control_plane/operator_auth.py), [`koda/control_plane/password_policy.py`](koda/control_plane/password_policy.py), [`koda/control_plane/bootstrap_file.py`](koda/control_plane/bootstrap_file.py), or the web auth routes must update that document and the matching tests in the same change.
 
 ## Safe Editing Rules
 

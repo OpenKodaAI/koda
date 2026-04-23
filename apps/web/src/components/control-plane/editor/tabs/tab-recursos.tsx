@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Check, Cpu, Server, Volume2 } from "lucide-react";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   FormCurrencyInput,
@@ -39,7 +39,9 @@ function prettifyModelId(modelId: string) {
     .replace(/\b(\d+(?:\.\d+)?)\b/g, "$1")
     .replace(/\b\w/g, (match) => match.toUpperCase())
     .replace(/\bGpt\b/g, "GPT")
-    .replace(/\bOss\b/g, "OSS");
+    .replace(/\bOss\b/g, "OSS")
+    .replace(/\bQwen\b/g, "Qwen")
+    .replace(/\bLlama\b/g, "Llama");
 }
 
 const PROVIDER_LOGOS: Record<string, string> = {
@@ -140,7 +142,7 @@ function ProviderLogo({
 }
 
 export function TabRecursos() {
-  const { state, core, developerMode, updateAgentSpecField, updateDocument } = useBotEditor();
+  const { state, core, developerMode, updateAgentSpecField, updateDocument } = useAgentEditor();
   const { tl } = useAppI18n();
 
   const modelPolicy = useMemo(
@@ -195,15 +197,9 @@ export function TabRecursos() {
       : []);
   const defaultModel =
     modelPolicy.default_models[effectiveDefaultProvider] || availableModels[0] || "";
-  const modelFunctions = Array.isArray((core.providers as Record<string, unknown>).model_functions)
-    ? ((core.providers as Record<string, unknown>).model_functions as Array<Record<string, unknown>>)
-    : [];
+  const modelFunctions = core.providers.model_functions ?? [];
   const functionalModelCatalog = useMemo(
-    () =>
-      (((core.providers as Record<string, unknown>).functional_model_catalog ?? {}) as Record<
-        string,
-        Array<Record<string, unknown>>
-      >),
+    () => core.providers.functional_model_catalog ?? {},
     [core.providers],
   );
   const generalModelLabelMap = useMemo(() => {
@@ -352,6 +348,8 @@ export function TabRecursos() {
         description={`${currentProviderLabel} · ${currentModelLabel}`}
         icon={Cpu}
         dirty={state.dirty.agentSpec}
+        variant="flat"
+        defaultOpen
       >
         <div className="flex flex-wrap gap-2">
           <span className="chip text-xs">{currentProviderLabel}</span>
@@ -525,6 +523,7 @@ export function TabRecursos() {
         title={tl("Voz")}
         description={voiceModeLabel}
         icon={Volume2}
+        variant="flat"
       >
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
           <FormSelect

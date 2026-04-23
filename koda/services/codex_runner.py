@@ -434,7 +434,7 @@ async def _get_codex_auth_status() -> tuple[bool, str, str]:
                     result = (
                         False,
                         "login_status",
-                        "Codex está autenticado via API key, mas o modo ativo exige login do ChatGPT.",
+                        "Codex is authenticated via API key, but the active mode requires ChatGPT login.",
                     )
                 else:
                     result = (False, "login_status", message or "Codex CLI is not logged in.")

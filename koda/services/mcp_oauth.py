@@ -6,7 +6,6 @@ import asyncio
 import base64
 import contextlib
 import hashlib
-import ipaddress
 import json
 import os
 import secrets
@@ -107,27 +106,9 @@ def _validate_frontend_callback_uri(frontend_callback_uri: str) -> str:
     parsed = urllib.parse.urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("frontend_callback_uri must be an absolute http(s) URL")
-    allowed_bases = [
-        str(os.environ.get(name) or "").strip().rstrip("/")
-        for name in ("MCP_OAUTH_CALLBACK_BASE_URL", "WEB_PUBLIC_BASE_URL")
-    ]
-    allowed_bases = [base for base in allowed_bases if base]
-    if allowed_bases:
-        if not any(
-            value == base or value.startswith(f"{base}/") or value.startswith(f"{base}?") for base in allowed_bases
-        ):
-            raise ValueError("frontend_callback_uri is not allowed")
-        return value
-
-    hostname = (parsed.hostname or "").strip().lower()
-    if hostname == "localhost":
-        return value
-    try:
-        if ipaddress.ip_address(hostname).is_loopback:
-            return value
-    except ValueError:
-        pass
-    raise ValueError("frontend_callback_uri is not allowed without an explicit callback base")
+    allowed_base = str(os.environ.get("MCP_OAUTH_CALLBACK_BASE_URL") or "").strip()
+    if allowed_base and not value.startswith(allowed_base.rstrip("/")):
+        raise ValueError("frontend_callback_uri is not allowed")
     return value
 
 

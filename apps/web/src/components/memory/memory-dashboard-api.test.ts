@@ -16,7 +16,7 @@ describe("memory dashboard api", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fetches memory map from canonical control-plane endpoint and injects bot scope", async () => {
+  it("fetches memory map from canonical control-plane endpoint and injects agent scope", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(
         JSON.stringify({

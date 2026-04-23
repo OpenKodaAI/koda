@@ -28,7 +28,10 @@ class _SilentRuntimeMessage:
 
     def __init__(self, text: str = "") -> None:
         self.text = text
-        self.message_id = int(hashlib.blake2s(text.encode(), digest_size=4).hexdigest(), 16) or 1
+        # Non-cryptographic digest — just need a stable integer message_id
+        # derived from the text body. ``usedforsecurity=False`` makes that
+        # explicit and silences bandit's B324 warning.
+        self.message_id = int(hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()[:8], 16) or 1
 
     async def edit_text(self, text: str, *_args: object, **_kwargs: object) -> _SilentRuntimeMessage:
         self.text = text
@@ -102,7 +105,7 @@ def _attach_token_from_request(request: web.Request) -> str:
     header_token = str(headers.get("X-Koda-Attach-Token", "")).strip()
     if header_token:
         return header_token
-    return request.query.get("token", "").strip()
+    return str(request.query.get("token", "")).strip()
 
 
 async def _json_payload(request: web.Request) -> dict[str, object]:
@@ -117,11 +120,13 @@ async def _json_payload(request: web.Request) -> dict[str, object]:
 
 def _dashboard_actor_id(*, namespace: str, session_id: str) -> int:
     seed = f"{AGENT_ID}:{namespace}:{session_id}".encode()
-    return 1_000_000_000 + int(hashlib.blake2s(seed, digest_size=8).hexdigest()[:12], 16) % 900_000_000
+    # Non-cryptographic digest — this id is only used to namespace dashboard
+    # actors; no authentication, no access decisions.
+    return 1_000_000_000 + int(hashlib.sha1(seed, usedforsecurity=False).hexdigest()[:12], 16) % 900_000_000
 
 
 def _include_sensitive(request: web.Request) -> bool:
-    return request.query.get("include_sensitive", "false").strip().lower() == "true"
+    return str(request.query.get("include_sensitive", "false")).strip().lower() == "true"
 
 
 def _authorize_sensitive_runtime_access(request: web.Request, *, agent_scope: str) -> web.Response | None:
@@ -692,16 +697,30 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
         return auth
     task_id = request.query.get("task_id")
     env_id = request.query.get("env_id")
+    session_id = (request.query.get("session_id") or "").strip() or None
     after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
     controller = get_runtime_controller()
+
+    task_ids_refresh = None
+    if session_id and not task_id:
+
+        def task_ids_refresh() -> set[int]:
+            return set(controller.store.list_task_ids_for_session(session_id))
+
     response = web.StreamResponse(
         status=200,
         reason="OK",
-        headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
     await response.prepare(request)
     async for event in controller.events.iter_events(
         task_id=int(task_id) if task_id else None,
+        task_ids_refresh=task_ids_refresh,
         env_id=int(env_id) if env_id else None,
         after_seq=after_seq,
     ):
@@ -715,14 +734,23 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPForbidden(text=json.dumps({"error": "invalid runtime token"}))
     task_id = request.query.get("task_id")
     env_id = request.query.get("env_id")
+    session_id = (request.query.get("session_id") or "").strip() or None
     after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
     controller = get_runtime_controller()
+
+    task_ids_refresh = None
+    if session_id and not task_id:
+
+        def task_ids_refresh() -> set[int]:
+            return set(controller.store.list_task_ids_for_session(session_id))
+
     RUNTIME_WS_CLIENTS_ACTIVE.inc()
     try:
         async for event in controller.events.iter_events(
             task_id=int(task_id) if task_id else None,
+            task_ids_refresh=task_ids_refresh,
             env_id=int(env_id) if env_id else None,
             after_seq=after_seq,
         ):
@@ -970,6 +998,63 @@ async def _runtime_resume(request: web.Request) -> web.Response:
     return web.json_response({"ok": ok})
 
 
+def _latest_active_task_id_for_session(session_id: str) -> int | None:
+    controller = get_runtime_controller()
+    task_ids = controller.store.list_task_ids_for_session(session_id)
+    if not task_ids:
+        return None
+    active_states = {"queued", "running", "retrying", "paused"}
+    for task_id in reversed(task_ids):
+        task = controller.store.get_task_runtime(task_id)
+        if task is None:
+            continue
+        if str(task.get("status") or "") in active_states:
+            return int(task_id)
+    return int(task_ids[-1])
+
+
+async def _runtime_session_cancel(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    session_id = request.match_info["session_id"]
+    task_id = _latest_active_task_id_for_session(session_id)
+    if task_id is None:
+        return web.json_response({"error": "session has no active task"}, status=404)
+    allowed, phase = _is_mutation_allowed(task_id)
+    if not allowed:
+        return web.json_response({"error": f"mutations blocked during {phase}"}, status=409)
+    result = await get_runtime_controller().cancel_task(task_id=task_id, actor="runtime_api")
+    if result is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    return web.json_response({"session_id": session_id, "task_id": task_id, "result": result})
+
+
+async def _runtime_session_pause(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    session_id = request.match_info["session_id"]
+    task_id = _latest_active_task_id_for_session(session_id)
+    if task_id is None:
+        return web.json_response({"error": "session has no active task"}, status=404)
+    reason = request.query.get("reason", "paused from dashboard")
+    ok = await get_runtime_controller().pause_environment(task_id=task_id, reason=reason)
+    return web.json_response({"ok": ok, "session_id": session_id, "task_id": task_id})
+
+
+async def _runtime_session_resume(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    session_id = request.match_info["session_id"]
+    task_id = _latest_active_task_id_for_session(session_id)
+    if task_id is None:
+        return web.json_response({"error": "session has no active task"}, status=404)
+    ok = await get_runtime_controller().resume_environment(task_id=task_id)
+    return web.json_response({"ok": ok, "session_id": session_id, "task_id": task_id})
+
+
 async def _runtime_save(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1140,6 +1225,9 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_post("/api/runtime/sessions/messages", _runtime_send_session_message)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/pause", _runtime_pause)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/resume", _runtime_resume)
+    app.router.add_post("/api/runtime/sessions/{session_id}/cancel", _runtime_session_cancel)
+    app.router.add_post("/api/runtime/sessions/{session_id}/pause", _runtime_session_pause)
+    app.router.add_post("/api/runtime/sessions/{session_id}/resume", _runtime_session_resume)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/save", _runtime_save)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/attach/terminal", _runtime_attach_terminal)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/attach/browser", _runtime_attach_browser)

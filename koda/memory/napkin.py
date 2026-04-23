@@ -18,7 +18,7 @@ from koda.memory.types import (
     MemoryType,
 )
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_one,

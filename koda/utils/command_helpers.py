@@ -69,7 +69,7 @@ def require_user(update: Update) -> User:
 
 def require_user_id(update: Update) -> int:
     """Return the effective Telegram user id."""
-    return require_user(update).id
+    return int(require_user(update).id)
 
 
 def require_message(update: Update) -> Message:

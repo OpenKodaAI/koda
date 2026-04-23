@@ -11,7 +11,9 @@ export function PageToolbar({
   children: ReactNode;
   className?: string;
 }) {
-  return <section className={cn("app-toolbar-card", className)}>{children}</section>;
+  return (
+    <section className={cn("flex flex-wrap items-center gap-3", className)}>{children}</section>
+  );
 }
 
 export function PageToolbarRow({
@@ -21,7 +23,7 @@ export function PageToolbarRow({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("app-toolbar-row", className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap items-center gap-3", className)}>{children}</div>;
 }
 
 export function PageToolbarMeta({
@@ -31,7 +33,7 @@ export function PageToolbarMeta({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("app-filter-row", className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
 }
 
 export function SectionActionBar({
@@ -41,7 +43,7 @@ export function SectionActionBar({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("flex flex-wrap items-center gap-2.5", className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
 }
 
 export function PageSection({
@@ -61,7 +63,11 @@ export function PageDataTableShell({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("max-w-full overflow-x-auto overflow-y-hidden overscroll-x-contain", className)}>{children}</div>;
+  return (
+    <div className={cn("max-w-full overflow-x-auto overflow-y-hidden overscroll-x-contain", className)}>
+      {children}
+    </div>
+  );
 }
 
 export function PageSectionHeader({
@@ -70,13 +76,15 @@ export function PageSectionHeader({
   description,
   meta,
   actions,
+  compact = false,
   className,
 }: {
   eyebrow?: string;
-  title: string;
-  description?: string;
+  title: ReactNode;
+  description?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
+  compact?: boolean;
   className?: string;
 }) {
   return (
@@ -84,13 +92,29 @@ export function PageSectionHeader({
       className={cn(
         "app-section__header",
         (meta || actions) && "lg:flex-row lg:items-end lg:justify-between",
+        compact && "gap-1",
         className,
       )}
     >
       <div className="min-w-0">
         {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
-        <h2 className={cn("app-section__title", eyebrow && "mt-2")}>{title}</h2>
-        {description ? <p className="app-section__description">{description}</p> : null}
+        <h2
+          className={cn(
+            compact ? "m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]" : "app-section__title",
+            eyebrow && !compact && "mt-2",
+          )}
+        >
+          {title}
+        </h2>
+        {description ? (
+          <p
+            className={cn(
+              compact ? "m-0 mt-0.5 text-[0.8125rem] text-[var(--text-tertiary)]" : "app-section__description",
+            )}
+          >
+            {description}
+          </p>
+        ) : null}
       </div>
 
       {meta || actions ? (
@@ -126,16 +150,39 @@ export function PageMetricStrip({
 export function PageMetricStripItem({
   label,
   value,
+  hint,
+  delta,
+  tone = "neutral",
   className,
 }: {
   label: ReactNode;
   value: ReactNode;
+  hint?: ReactNode;
+  delta?: ReactNode;
+  tone?: "neutral" | "accent" | "warning" | "danger" | "success";
   className?: string;
 }) {
+  const toneClass =
+    tone === "accent"
+      ? "text-[var(--accent)]"
+      : tone === "warning"
+        ? "text-[var(--tone-warning-dot)]"
+        : tone === "danger"
+          ? "text-[var(--tone-danger-dot)]"
+          : tone === "success"
+            ? "text-[var(--tone-success-dot)]"
+            : "";
+
   return (
     <div className={cn("metric-strip__item", className)}>
       <span className="metric-label">{label}</span>
-      <span className="metric-value">{value}</span>
+      <span className={cn("metric-value", toneClass)}>{value}</span>
+      {hint ? (
+        <span className="text-[0.75rem] leading-[1.45] text-[var(--text-tertiary)]">{hint}</span>
+      ) : null}
+      {delta ? (
+        <span className="text-[0.75rem] text-[var(--text-tertiary)]">{delta}</span>
+      ) : null}
     </div>
   );
 }
@@ -222,11 +269,13 @@ export function PageSearchField({
   value,
   onChange,
   placeholder,
+  ariaLabel,
   className,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  ariaLabel?: string;
   className?: string;
 }) {
   return (
@@ -235,6 +284,7 @@ export function PageSearchField({
       <input
         type="text"
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -249,7 +299,7 @@ export function PageFilterChips({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("app-filter-row w-full", className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap items-center gap-2 w-full", className)}>{children}</div>;
 }
 
 export function PageQueryState({

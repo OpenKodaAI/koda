@@ -32,6 +32,12 @@ import type {
 } from "@/lib/control-plane";
 import { requestJson } from "@/lib/http-client";
 import {
+  groupErrorsBySection,
+  sectionForField,
+  validatePayloadClientSide,
+  type SystemSettingsFieldError,
+} from "@/lib/system-settings-schema";
+import {
   DEFAULT_SETTINGS_SECTION_ID,
   SECTION_VALUE_KEYS,
   STEP_TO_SECTION,
@@ -44,6 +50,15 @@ import {
   upsertVariable,
 } from "@/lib/system-settings-model";
 import isEqual from "fast-deep-equal";
+
+const EMPTY_SECTION_ERRORS: Record<SettingsSectionId, SystemSettingsFieldError[]> = {
+  general: [],
+  models: [],
+  integrations: [],
+  intelligence: [],
+  scheduler: [],
+  variables: [],
+};
 
 type ProviderConnectionDraft = {
   auth_mode: "api_key" | "subscription_login" | "local";
@@ -87,6 +102,8 @@ type SystemSettingsContextValue = {
   sectionDirty: Record<SettingsSectionId, boolean>;
   isDirty: (sectionId: SettingsSectionId) => boolean;
   discardSection: (sectionId: SettingsSectionId) => void;
+  sectionErrors: Record<SettingsSectionId, SystemSettingsFieldError[]>;
+  clearSectionErrors: (sectionId?: SettingsSectionId) => void;
   saving: boolean;
   saveStatus: "idle" | "pending" | "success" | "error";
   activeSection: SettingsSectionId;
@@ -352,6 +369,16 @@ export function SystemSettingsProvider({
   const [baseline, setBaseline] = useState<GeneralSystemSettings>(() =>
     cloneGeneralSystemSettings(settings),
   );
+  const [sectionErrors, setSectionErrors] = useState<
+    Record<SettingsSectionId, SystemSettingsFieldError[]>
+  >(() => ({ ...EMPTY_SECTION_ERRORS }));
+  const clearSectionErrors = useCallback((sectionId?: SettingsSectionId) => {
+    if (sectionId) {
+      setSectionErrors((prev) => ({ ...prev, [sectionId]: [] }));
+    } else {
+      setSectionErrors({ ...EMPTY_SECTION_ERRORS });
+    }
+  }, []);
 
   const sectionDirty = useMemo(() => {
     const result: Record<SettingsSectionId, boolean> = {
@@ -359,6 +386,7 @@ export function SystemSettingsProvider({
       models: false,
       integrations: false,
       intelligence: false,
+      scheduler: false,
       variables: false,
     };
     for (const [sectionId, keys] of Object.entries(SECTION_VALUE_KEYS)) {
@@ -1097,6 +1125,7 @@ export function SystemSettingsProvider({
         }
         return { ...prev, values: nextValues };
       });
+      setSectionErrors((prev) => ({ ...prev, [sectionId]: [] }));
     },
     [baseline],
   );
@@ -1452,6 +1481,11 @@ export function SystemSettingsProvider({
                 api_key: connectionDraft?.api_key || "",
                 project_id: connectionDraft?.project_id || "",
                 base_url: connectionDraft?.base_url || "",
+                // Ask the backend to verify + flip the enabled flag in a
+                // single round-trip. Falls back to the explicit verify call
+                // below when the backend can't self-verify (legacy or
+                // providers that only support subscription login).
+                verify_after_save: true,
               }),
             },
           );
@@ -1773,35 +1807,78 @@ export function SystemSettingsProvider({
   );
 
   const handleSave = useCallback(async () => {
+    const generalDefault = draft.values.models.functional_defaults?.general;
+    const candidateProvider = generalDefault?.provider_id || draft.values.models.default_provider;
+    const defaultProvider =
+      candidateProvider && enabledProviders.includes(candidateProvider)
+        ? candidateProvider
+        : enabledProviders[0] || "";
+    // Drop stale functional_defaults that reference providers no longer enabled.
+    // This keeps the payload consistent: providers_enabled is the source of
+    // truth, and any selection pointing outside it would be rejected by the
+    // backend with "must_be_enabled".
+    const sanitizedFunctionalDefaults = Object.fromEntries(
+      Object.entries(draft.values.models.functional_defaults ?? {}).filter(
+        ([, selection]) =>
+          typeof selection?.provider_id === "string" &&
+          enabledProviders.includes(selection.provider_id.toLowerCase()),
+      ),
+    ) as typeof draft.values.models.functional_defaults;
+    const payload = {
+      account: draft.values.account,
+      models: {
+        ...draft.values.models,
+        providers_enabled: enabledProviders,
+        default_provider: defaultProvider,
+        fallback_order: normalizeFallbackOrder(
+          enabledProviders,
+          draft.values.models.fallback_order,
+          defaultProvider,
+        ),
+        functional_defaults: sanitizedFunctionalDefaults,
+      },
+      resources: draft.values.resources,
+      memory_and_knowledge: draft.values.memory_and_knowledge,
+      scheduler: draft.values.scheduler,
+      variables: draft.values.variables,
+    };
+
+    const clientErrors = validatePayloadClientSide(payload);
+    if (clientErrors.length > 0) {
+      setSectionErrors(groupErrorsBySection(clientErrors));
+      const firstBadSection = sectionForField(clientErrors[0].field);
+      setStoredSection(firstBadSection);
+      showToast(clientErrors[0].message, "error", { title: tl("Corrija os erros antes de salvar.") });
+      return;
+    }
+
+    clearSectionErrors();
+
     await runAction(
       "save-general-settings",
       async () => {
-        const generalDefault = draft.values.models.functional_defaults?.general;
-        const candidateProvider = generalDefault?.provider_id || draft.values.models.default_provider;
-        const defaultProvider =
-          enabledProviders.includes(candidateProvider)
-            ? candidateProvider
-            : enabledProviders[0] || candidateProvider;
-        const payload = {
-          account: draft.values.account,
-          models: {
-            ...draft.values.models,
-            providers_enabled: enabledProviders,
-            default_provider: defaultProvider,
-            fallback_order: normalizeFallbackOrder(
-              enabledProviders,
-              draft.values.models.fallback_order,
-              defaultProvider,
-            ),
-          },
-          resources: draft.values.resources,
-          memory_and_knowledge: draft.values.memory_and_knowledge,
-          variables: draft.values.variables,
-        };
-        const refreshed = await requestJson<GeneralSystemSettings>("/api/control-plane/system-settings/general", {
+        const response = await fetch("/api/control-plane/system-settings/general", {
           method: "PUT",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (response.status === 400) {
+          const body = (await response.json().catch(() => null)) as
+            | { errors?: SystemSettingsFieldError[] }
+            | null;
+          const serverErrors = Array.isArray(body?.errors) ? body!.errors : [];
+          if (serverErrors.length > 0) {
+            setSectionErrors(groupErrorsBySection(serverErrors));
+            const firstBadSection = sectionForField(serverErrors[0].field);
+            setStoredSection(firstBadSection);
+            throw new Error(serverErrors[0].message);
+          }
+          throw new Error(tl("Nao foi possivel salvar as configuracoes gerais."));
+        }
+        if (!response.ok) {
+          throw new Error(tl("Nao foi possivel salvar as configuracoes gerais."));
+        }
+        const refreshed = (await response.json()) as GeneralSystemSettings;
         const freshState = cloneGeneralSystemSettings(refreshed);
         setBaseline(freshState);
         setDraft(cloneGeneralSystemSettings(refreshed));
@@ -1813,6 +1890,7 @@ export function SystemSettingsProvider({
         elevenlabsVoiceCacheRef.current = {};
         kokoroVoiceCacheRef.current = {};
         ollamaModelCacheRef.current = {};
+        clearSectionErrors();
         return refreshed;
       },
       {
@@ -1820,7 +1898,7 @@ export function SystemSettingsProvider({
         errorMessage: tl("Nao foi possivel salvar as configuracoes gerais."),
       },
     );
-  }, [draft, enabledProviders, runAction, tl]);
+  }, [draft, enabledProviders, runAction, tl, clearSectionErrors, setStoredSection, showToast]);
 
   const handleDiscard = useCallback(() => {
     setDraft(cloneGeneralSystemSettings(baseline));
@@ -1872,6 +1950,8 @@ export function SystemSettingsProvider({
     sectionDirty,
     isDirty,
     discardSection,
+    sectionErrors,
+    clearSectionErrors,
     saving,
     saveStatus,
     activeSection,
@@ -1930,6 +2010,8 @@ export function SystemSettingsProvider({
     sectionDirty,
     isDirty,
     discardSection,
+    sectionErrors,
+    clearSectionErrors,
     saving,
     saveStatus,
     activeSection,

@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SkipToContentLink } from "@/components/layout/skip-to-content-link";
 import { AppShell } from "@/components/layout/app-shell";
-import { BotCatalogProvider } from "@/components/providers/bot-catalog-provider";
+import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { buildThemeBootstrapScript, normalizeThemePreference } from "@/components/providers/theme";
 import { QueryProvider } from "@/components/providers/query-provider";
-import { getCachedBotDisplays } from "@/lib/bot-catalog-cache";
+import { getCachedAgentDisplays } from "@/lib/agent-catalog-cache";
 import { DEFAULT_LANGUAGE } from "@/lib/i18n";
 import { THEME_PREFERENCE_STORAGE_KEY } from "@/lib/storage-codecs";
 import "@xterm/xterm/css/xterm.css";
@@ -47,13 +47,18 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const initialBots = await getCachedBotDisplays();
+  const initialAgents = await getCachedAgentDisplays();
   const initialLanguage = DEFAULT_LANGUAGE;
   const cookieStore = await cookies();
   const themePreferenceCookie = cookieStore.get(THEME_PREFERENCE_STORAGE_KEY)?.value;
   const initialThemePreference = normalizeThemePreference(themePreferenceCookie);
   const initialTheme =
     initialThemePreference === "system" ? undefined : initialThemePreference;
+  const headerStore = await headers();
+  // The middleware sets `x-koda-pathname` on every forwarded request, so the
+  // layout can branch on the route deterministically during SSR even though
+  // `usePathname()` is client-only.
+  const serverPathname = headerStore.get("x-koda-pathname") || "";
 
   return (
     <html
@@ -81,9 +86,9 @@ export default async function RootLayout({
           <ThemeProvider initialThemePreference={initialThemePreference}>
             <I18nProvider initialLanguage={initialLanguage}>
               <SkipToContentLink />
-              <BotCatalogProvider initialBots={initialBots}>
-                <AppShell>{children}</AppShell>
-              </BotCatalogProvider>
+              <AgentCatalogProvider initialAgents={initialAgents}>
+                <AppShell serverPathname={serverPathname}>{children}</AppShell>
+              </AgentCatalogProvider>
             </I18nProvider>
           </ThemeProvider>
         </QueryProvider>

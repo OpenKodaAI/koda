@@ -119,7 +119,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
         "oauth_mode": "none",
         "oauth_metadata_url": "",
         "tool_discovery_mode": "runtime",
-        "vendor_notes": "Integração community/manual; nao prometer suporte oficial.",
+        "vendor_notes": "Community/manual integration; do not promise official support.",
         "default_policy": "always_ask",
         "metadata": {
             "tagline": "Diagramas e whiteboarding colaborativo",
@@ -185,7 +185,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
         "oauth_mode": "none",
         "oauth_metadata_url": "",
         "tool_discovery_mode": "runtime",
-        "vendor_notes": "Integração community/manual; depende do fluxo local do provider.",
+        "vendor_notes": "Community/manual integration; depends on the provider's local flow.",
         "default_policy": "always_ask",
         "metadata": {
             "tagline": "Meeting notes e transcricoes",
@@ -430,7 +430,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "server_key": "todoist",
         "display_name": "Todoist",
-        "description": "Integração community/manual com API token do Todoist.",
+        "description": "Community/manual integration with a Todoist API token.",
         "transport_type": "stdio",
         "transport_kind": "local",
         "command": ("npx", "-y", "todoist-mcp-server"),
@@ -446,7 +446,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
         "oauth_mode": "none",
         "oauth_metadata_url": "",
         "tool_discovery_mode": "runtime",
-        "vendor_notes": "Integração manual/terceira.",
+        "vendor_notes": "Manual/third-party integration.",
         "default_policy": "always_ask",
         "metadata": {
             "tagline": "Tarefas e produtividade pessoal",
@@ -460,7 +460,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "server_key": "obsidian",
         "display_name": "Obsidian",
-        "description": "Integração community/manual para vaults locais do Obsidian.",
+        "description": "Community/manual integration for local Obsidian vaults.",
         "transport_type": "stdio",
         "transport_kind": "local",
         "command": ("npx", "-y", "@mauricio.wolff/mcp-obsidian", "/path/to/vault"),
@@ -476,7 +476,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
         "oauth_mode": "none",
         "oauth_metadata_url": "",
         "tool_discovery_mode": "runtime",
-        "vendor_notes": "Integração local; requer configuracao manual do vault.",
+        "vendor_notes": "Local integration; requires manual vault configuration.",
         "default_policy": "always_ask",
         "metadata": {
             "tagline": "Vault local e conhecimento pessoal",
@@ -600,7 +600,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "server_key": "twilio",
         "display_name": "Twilio",
-        "description": "Integração community/manual com Account SID e Auth Token.",
+        "description": "Community/manual integration with Account SID and Auth Token.",
         "transport_type": "stdio",
         "transport_kind": "local",
         "command": ("npx", "-y", "@twilio-alpha/mcp"),
@@ -649,7 +649,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
         "oauth_mode": "none",
         "oauth_metadata_url": "",
         "tool_discovery_mode": "runtime",
-        "vendor_notes": "Integração community/manual.",
+        "vendor_notes": "Community/manual integration.",
         "default_policy": "always_ask",
         "metadata": {
             "tagline": "Banco relacional por connection string",

@@ -57,7 +57,7 @@ function HomeShell() {
   return (
     <>
       <div {...tourRoute("overview", "default")}>
-        <div {...tourAnchor("overview.bot-switcher")}>Bot switcher</div>
+        <div {...tourAnchor("overview.agent-switcher")}>Agent switcher</div>
         <div {...tourAnchor("overview.stats")}>Overview stats</div>
         <div {...tourAnchor("overview.runtime-control")}>Runtime control</div>
         <div {...tourAnchor("overview.live-plan")}>Live plan</div>
@@ -81,8 +81,8 @@ function ControlPlaneShell() {
   return (
     <>
       <section {...tourRoute("control-plane.catalog", "empty")}>
-        <button type="button" {...tourAnchor("catalog.create-bot")}>
-          Create bot
+        <button type="button" {...tourAnchor("catalog.create-agent")}>
+          Create agent
         </button>
         <div {...tourAnchor("catalog.board")}>Catalog board</div>
         <div {...tourAnchor("catalog.empty")}>Empty catalog</div>
@@ -228,7 +228,7 @@ describe("TourHost", () => {
     });
   });
 
-  it("skips the optional editor chapter and navigates to runtime when no bot editor route exists", async () => {
+  it("skips the optional editor chapter and navigates to runtime when no agent editor route exists", async () => {
     const user = userEvent.setup();
     renderTour({ pathname: "/control-plane", shell: <ControlPlaneShell /> });
 

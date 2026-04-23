@@ -14,9 +14,9 @@ const RuntimeOverviewScreen = dynamic(
 export default async function RuntimePage({
   searchParams,
 }: {
-  searchParams: Promise<{ bot?: string | string[] }>;
+  searchParams: Promise<{ agent?: string | string[] }>;
 }) {
-  const { bot } = await searchParams;
-  const initialBotIds = Array.isArray(bot) ? bot : bot ? [bot] : undefined;
+  const { agent } = await searchParams;
+  const initialBotIds = Array.isArray(agent) ? agent : agent ? [agent] : undefined;
   return <RuntimeOverviewScreen initialBotIds={initialBotIds} />;
 }

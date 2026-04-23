@@ -62,7 +62,7 @@ def get_previous_fernet() -> Fernet | None:
 
 def encrypt_secret(value: str) -> str:
     """Encrypt a secret value. Always uses the current master key."""
-    return get_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+    return str(get_fernet().encrypt(value.encode("utf-8")).decode("utf-8"))
 
 
 def decrypt_secret(value: str) -> str:
@@ -74,12 +74,12 @@ def decrypt_secret(value: str) -> str:
     """
     data = value.encode("utf-8")
     try:
-        return get_fernet().decrypt(data).decode("utf-8")
+        return str(get_fernet().decrypt(data).decode("utf-8"))
     except InvalidToken:
         previous = get_previous_fernet()
         if previous is None:
             raise
-        return previous.decrypt(data).decode("utf-8")
+        return str(previous.decrypt(data).decode("utf-8"))
 
 
 def rotate_master_key(encrypted_values: list[str]) -> list[str]:

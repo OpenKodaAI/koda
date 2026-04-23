@@ -14,7 +14,6 @@ from typing import Any
 
 from koda.config import AGENT_ID, STATE_BACKEND
 from koda.logging_config import get_logger
-from koda.memory.config import MEMORY_EMBEDDING_MODEL
 from koda.services.cache_config import (
     CACHE_ENABLED,
     CACHE_FUZZY_SUGGEST_THRESHOLD,
@@ -34,17 +33,19 @@ from koda.state.cache_store import (
     cache_record_hit,
     cache_upsert,
 )
-from koda.utils.embeddings import (
-    embed_batch,
-    embed_batch_with_model,
-    embed_text,
-    embed_text_with_model,
-    load_sentence_transformer,
-)
 
 log = get_logger(__name__)
 _MAX_MANAGERS = 50
 _MANAGERS: OrderedDict[str, CacheManager] = OrderedDict()
+
+
+def _build_sentence_transformer() -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    from koda.memory.config import MEMORY_EMBEDDING_MODEL
+
+    return SentenceTransformer(MEMORY_EMBEDDING_MODEL)
+
 
 _CONVERSATIONAL_PREFIXES = re.compile(
     r"^(por favor|pode|preciso que|quero que|gostaria que|please|can you|could you|i need you to|i want you to)\s+",
@@ -63,7 +64,7 @@ _PROVIDER_ERROR_INDICATORS = re.compile(
         r"failed to authenticate|authentication(?:_error)?|invalid authentication credentials|"
         r"api error:\s*401|not logged in|login required|"
         r"claude authentication failed|codex authentication failed|"
-        r"<b>autenticação</b>|o provedor está sem credenciais válidas|"
+        r"<b>authentication</b>|the provider is missing valid credentials|"
         r"unexpected argument|unrecognized option|unknown option|"
         r"usage:\s+(?:claude|codex)\b"
     ),
@@ -186,23 +187,22 @@ class CacheManager:
         async with self._model_lock:
             if self._model is None:
                 loop = asyncio.get_running_loop()
-                self._model = await loop.run_in_executor(
-                    None,
-                    lambda: load_sentence_transformer(MEMORY_EMBEDDING_MODEL),
-                )
+                self._model = await loop.run_in_executor(None, _build_sentence_transformer)
         return self._model
 
     def _embed_sync(self, text: str) -> list[float]:
-        if self._model is not None:
-            return embed_text_with_model(text, self._model)
-        return embed_text(text, model_name=MEMORY_EMBEDDING_MODEL)
+        if self._model is None:
+            self._model = _build_sentence_transformer()
+        result: list[float] = self._model.encode(text, normalize_embeddings=True).tolist()
+        return result
 
     def _embed_sync_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if self._model is not None:
-            return embed_batch_with_model(texts, self._model)
-        return embed_batch(texts, model_name=MEMORY_EMBEDDING_MODEL)
+        if self._model is None:
+            self._model = _build_sentence_transformer()
+        result = self._model.encode(texts, normalize_embeddings=True)
+        return [list(vector) for vector in result.tolist()]
 
     async def lookup(
         self,

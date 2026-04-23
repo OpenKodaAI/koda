@@ -9,16 +9,9 @@ export function useAppI18n() {
   const { i18n } = useTranslation();
   const { language, setLanguage, options } = useI18nProvider();
   const translate = useMemo(
-    () =>
-      typeof i18n?.t === "function"
-        ? (key: string, options?: Record<string, unknown>) =>
-            i18n.t(
-              key,
-              options === undefined ? { lng: language } : { ...options, lng: language },
-            ) as string
-        : (key: string, options?: Record<string, unknown>) =>
-            translateForLanguage(language, key, options),
-    [i18n, language],
+    () => (key: string, options?: Record<string, unknown>) =>
+      translateForLanguage(language, key, options),
+    [language],
   );
   const t = useMemo(
     () => (key: string, options?: Record<string, unknown>) => translate(key, options),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -78,19 +78,39 @@ class RuntimeEventBroker:
         self,
         *,
         task_id: int | None = None,
+        task_ids: set[int] | None = None,
+        task_ids_refresh: Callable[[], set[int]] | None = None,
+        task_ids_refresh_interval_s: float = 5.0,
         env_id: int | None = None,
         after_seq: int = 0,
     ) -> AsyncIterator[dict[str, Any]]:
+        current_task_ids: set[int] | None = task_ids
+        loop = asyncio.get_running_loop()
+        if task_ids_refresh is not None:
+            current_task_ids = task_ids_refresh()
+        last_refresh = loop.time()
         for event in cast(
             list[dict[str, Any]],
-            self.store.list_events(task_id=task_id, env_id=env_id, after_seq=after_seq),
+            self.store.list_events(
+                task_id=task_id,
+                task_ids=list(current_task_ids) if current_task_ids is not None else None,
+                env_id=env_id,
+                after_seq=after_seq,
+            ),
         ):
             yield event
         queue = self.subscribe()
         try:
             while True:
                 event = await queue.get()
+                if task_ids_refresh is not None:
+                    now = loop.time()
+                    if now - last_refresh >= task_ids_refresh_interval_s:
+                        current_task_ids = task_ids_refresh()
+                        last_refresh = now
                 if task_id is not None and event.get("task_id") != task_id:
+                    continue
+                if current_task_ids is not None and event.get("task_id") not in current_task_ids:
                     continue
                 if env_id is not None and event.get("env_id") != env_id:
                     continue

@@ -5,27 +5,65 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Sentinel value for "no selection" / "all" items. Radix Select rejects
+ * `SelectItem value=""`, so use this constant for any option that maps to
+ * `null | undefined | ""` in the underlying state.
+ *
+ *   <Select
+ *     value={x ?? SELECT_ALL_VALUE}
+ *     onValueChange={(v) => setX(v === SELECT_ALL_VALUE ? null : v)}
+ *   >
+ *     ...
+ *     <SelectItem value={SELECT_ALL_VALUE}>Todos</SelectItem>
+ *   </Select>
+ */
+export const SELECT_ALL_VALUE = "__all__";
+
+export type SelectTriggerSize = "sm" | "md" | "lg";
+
+const triggerSizeClasses: Record<SelectTriggerSize, string> = {
+  sm: "h-8 px-2.5 text-[0.75rem]",
+  md: "h-9 px-3 text-[0.8125rem]",
+  lg: "h-11 px-4 text-[0.875rem]",
+};
+
 const Select = SelectPrimitive.Root;
 
 const SelectGroup = SelectPrimitive.Group;
 
 const SelectValue = SelectPrimitive.Value;
 
+interface SelectTriggerProps extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> {
+  sizeVariant?: SelectTriggerSize;
+  invalid?: boolean;
+}
+
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
+  SelectTriggerProps
+>(({ className, children, sizeVariant = "md", invalid, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
+    data-slot="select-trigger"
+    aria-invalid={invalid || undefined}
     className={cn(
-      "field-shell flex min-h-[48px] w-full items-center justify-between gap-3 rounded-[1rem] px-4 py-3 text-sm ring-offset-background focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-      className
+      "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-primary)]",
+      "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+      "hover:border-[var(--border-strong)]",
+      "focus:outline-none focus-visible:border-[var(--accent)]",
+      "data-[state=open]:border-[var(--accent)]",
+      "data-[placeholder]:text-[var(--text-quaternary)]",
+      "disabled:cursor-not-allowed disabled:opacity-60",
+      invalid && "border-[var(--tone-danger-border)] focus-visible:border-[var(--tone-danger-border)]",
+      triggerSizeClasses[sizeVariant],
+      className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-quaternary)]" />
+      <ChevronDown className="icon-sm shrink-0 text-[var(--text-tertiary)]" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -37,10 +75,10 @@ const SelectScrollUpButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollUpButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1", className)}
+    className={cn("flex cursor-default items-center justify-center py-1 text-[var(--text-tertiary)]", className)}
     {...props}
   >
-    <ChevronUp className="h-4 w-4" />
+    <ChevronUp className="icon-sm" />
   </SelectPrimitive.ScrollUpButton>
 ));
 SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName;
@@ -51,10 +89,10 @@ const SelectScrollDownButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollDownButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1", className)}
+    className={cn("flex cursor-default items-center justify-center py-1 text-[var(--text-tertiary)]", className)}
     {...props}
   >
-    <ChevronDown className="h-4 w-4" />
+    <ChevronDown className="icon-sm" />
   </SelectPrimitive.ScrollDownButton>
 ));
 SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName;
@@ -62,25 +100,28 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+>(({ className, children, position = "popper", sideOffset = 6, ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
-      className={cn(
-        "app-floating-panel relative z-50 max-h-[22rem] min-w-[14rem] overflow-hidden rounded-[1rem] text-[var(--text-primary)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        position === "popper" &&
-          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
-        className
-      )}
+      data-slot="select-content"
+      sideOffset={sideOffset}
       position={position}
+      className={cn(
+        "relative z-50 min-w-[10rem] overflow-hidden rounded-[var(--radius-panel)] border border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-floating-bg)] text-[var(--text-primary)] shadow-[var(--overlay-floating-shadow)]",
+        "backdrop-blur-[22px] backdrop-saturate-[140%]",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
+        className,
+      )}
       {...props}
     >
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport
         className={cn(
-          "max-h-[20rem] p-1.5",
+          "max-h-[20rem] p-1",
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
         )}
       >
         {children}
@@ -97,7 +138,11 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn("px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-quaternary)]", className)}
+    data-slot="select-label"
+    className={cn(
+      "px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+      className,
+    )}
     {...props}
   />
 ));
@@ -109,19 +154,24 @@ const SelectItem = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
+    data-slot="select-item"
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-[0.8rem] py-2.5 pl-9 pr-3 text-sm text-[var(--text-secondary)] outline-none transition-colors focus:bg-[var(--surface-hover)] focus:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className
+      "relative flex w-full cursor-default select-none items-center gap-2 rounded-[var(--radius-panel-sm)] py-1.5 pl-7 pr-2 text-[0.8125rem] text-[var(--text-secondary)] outline-none",
+      "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+      "focus:bg-[var(--hover-tint)] focus:text-[var(--text-primary)]",
+      "data-[state=checked]:bg-[var(--panel-strong)] data-[state=checked]:text-[var(--text-primary)]",
+      "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className,
     )}
     {...props}
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
-        <Check className="h-4 w-4" />
+        <Check className="icon-sm text-[var(--accent)]" />
       </SelectPrimitive.ItemIndicator>
     </span>
 
-    {children}
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;
@@ -130,7 +180,11 @@ const SelectSeparator = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Separator>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-muted", className)} {...props} />
+  <SelectPrimitive.Separator
+    ref={ref}
+    className={cn("my-1 h-px bg-[var(--divider-hair)]", className)}
+    {...props}
+  />
 ));
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
 

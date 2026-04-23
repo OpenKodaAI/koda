@@ -155,54 +155,6 @@ def build_skills_awareness_prompt() -> str:
     )
 
 
-def select_relevant_skills(query: str, *, max_skills: int = 4) -> list[dict[str, str | float]]:
-    """Return scored curated skills for a query without formatting them into a prompt."""
-    normalized_query = _normalize_skill_match_text(query)
-    if not normalized_query or not _SKILL_TEMPLATES:
-        return []
-
-    query_tokens = {token for token in _WORD_RE.findall(normalized_query) if len(token) >= 3}
-    scored: list[tuple[float, str, str]] = []
-    for name, content in sorted(_SKILL_TEMPLATES.items()):
-        when_to_use = _WHEN_TO_USE_RE.search(content)
-        description = when_to_use.group(1).strip() if when_to_use else ""
-        haystack = _normalize_skill_match_text(" ".join([name.replace("-", " "), description]))
-        haystack_tokens = {token for token in _WORD_RE.findall(haystack) if len(token) >= 3}
-        if not haystack_tokens:
-            continue
-        overlap = len(query_tokens & haystack_tokens)
-        name_match = name in normalized_query or name.replace("-", " ") in normalized_query
-        if not overlap and not name_match:
-            continue
-        score = float(overlap) + (2.0 if name_match else 0.0)
-        summary = description.split(". ")[0].strip() if description else ""
-        if summary and not summary.endswith("."):
-            summary += "."
-        scored.append((score, name, summary))
-
-    return [
-        {"score": score, "name": name, "summary": summary or "Specialized methodology available for this kind of task."}
-        for score, name, summary in sorted(scored, key=lambda item: (-item[0], item[1]))[: max(1, max_skills)]
-    ]
-
-
-def build_relevant_skills_awareness_prompt(query: str, *, max_skills: int = 4) -> str:
-    """Build a compact skills hint only when the query clearly matches curated skills."""
-    relevant_skills = select_relevant_skills(query, max_skills=max_skills)
-    if not relevant_skills:
-        return ""
-
-    lines = []
-    for skill in relevant_skills:
-        lines.append(f"- **{skill['name']}**: {skill['summary']}")
-    return (
-        "<expert_skills>\n"
-        "Relevant curated expert skills are available for this request.\n"
-        "Apply them when they materially improve quality or specificity.\n\n"
-        "Relevant skills:\n" + "\n".join(lines) + "\n</expert_skills>"
-    )
-
-
 _SKILLS_AWARENESS_PROMPT: str = build_skills_awareness_prompt()
 
 

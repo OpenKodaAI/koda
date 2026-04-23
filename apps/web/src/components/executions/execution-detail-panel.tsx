@@ -5,7 +5,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { translate } from "@/lib/i18n";
 import type { ExecutionDetail, ExecutionSummary } from "@/lib/types";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
-import { getBotColor } from "@/lib/bot-constants";
+import { getAgentColor } from "@/lib/agent-constants";
 import { getSemanticStyle } from "@/lib/theme-semantic";
 import { StatusPill } from "../tasks/status-pill";
 import {
@@ -41,7 +41,7 @@ export function ExecutionDetailPanel({
     return null;
   }
 
-  const botColor = getBotColor(data.bot_id);
+  const agentColor = getAgentColor(data.bot_id);
   const traceMeta = EXECUTION_TRACE_SOURCE_META[data.trace_source];
 
   return (
@@ -65,7 +65,7 @@ export function ExecutionDetailPanel({
 
         <div
           className="border-b border-[var(--border-subtle)] px-6 py-5 pr-14 sm:pr-16"
-          style={{ boxShadow: `inset 0 1px 0 ${botColor}12` }}
+          style={{ boxShadow: `inset 0 1px 0 ${agentColor}12` }}
         >
           <div className="space-y-4">
             <div className="flex items-start justify-between gap-3">

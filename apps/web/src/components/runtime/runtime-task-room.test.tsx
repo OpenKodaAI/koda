@@ -52,7 +52,7 @@ describe("RuntimeTaskRoom", () => {
     const { useRuntimeTask } = await import("@/hooks/use-runtime-task");
     vi.mocked(useRuntimeTask).mockReturnValue({
       bundle: {
-        botId: "ATLAS",
+        agentId: "ATLAS",
         fetchedAt: "2026-03-19T00:00:00.000Z",
         availability: {
           health: "available",
@@ -136,7 +136,7 @@ describe("RuntimeTaskRoom", () => {
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <RuntimeTaskRoom botId="ATLAS" taskId={42} />
+        <RuntimeTaskRoom agentId="ATLAS" taskId={42} />
       </I18nProvider>,
     );
 

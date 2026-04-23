@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import { queryKeys } from "@/lib/query/keys";
 
 describe("queryKeys", () => {
-  it("normalizes bot ids for executions filters", () => {
+  it("normalizes agent ids for executions filters", () => {
     expect(
       queryKeys.dashboard.executions({
-        botIds: ["KODA", "ATLAS"],
+        agentIds: ["KODA", "ATLAS"],
         status: "running",
       }),
     ).toEqual([
       "dashboard",
       "executions",
       {
-        botIds: ["ATLAS", "KODA"],
+        agentIds: ["ATLAS", "KODA"],
         status: "running",
       },
     ]);

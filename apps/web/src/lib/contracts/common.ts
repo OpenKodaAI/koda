@@ -8,12 +8,12 @@ import {
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9:_-]+$/;
 
-export const botIdSchema = z
+export const agentIdSchema = z
   .string()
   .trim()
   .min(1)
   .max(120)
-  .regex(IDENTIFIER_PATTERN, "Invalid bot id.");
+  .regex(IDENTIFIER_PATTERN, "Invalid agent id.");
 
 export const sessionIdSchema = z.string().trim().min(1).max(240);
 
@@ -54,6 +54,6 @@ function toArray(value: string | string[] | undefined) {
   return value ? [value] : [];
 }
 
-export function parseBotIdList(value: string | string[] | undefined) {
-  return z.array(botIdSchema).catch([]).parse(toArray(value));
+export function parseAgentIdList(value: string | string[] | undefined) {
+  return z.array(agentIdSchema).catch([]).parse(toArray(value));
 }

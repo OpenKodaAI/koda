@@ -313,6 +313,12 @@ class KnowledgeV2PostgresBackend:
 
     async def _ensure_pool(self) -> None:
         if self._pool is not None:
+            # Keep the existing pool. If it belongs to a different event loop,
+            # ``_connection()`` / ``_probe_connection()`` will skip it via
+            # ``_pool_loop_matches_current()`` and fall back to a direct
+            # connection for this loop. Closing the cross-loop pool from the
+            # current loop triggers ``InterfaceError: pool is closing`` for
+            # any in-flight acquire on the original loop.
             return
         asyncpg = await self._load_asyncpg()
         create_pool = getattr(asyncpg, "create_pool", None)
@@ -326,7 +332,7 @@ class KnowledgeV2PostgresBackend:
 
     @asynccontextmanager
     async def _probe_connection(self) -> AsyncIterator[tuple[Any, str]]:
-        if self._pool is not None:
+        if self._pool is not None and self._pool_loop_matches_current():
             async with self._pool.acquire() as conn:
                 yield conn, "pool"
             return
@@ -337,15 +343,38 @@ class KnowledgeV2PostgresBackend:
         finally:
             await conn.close()
 
+    def _pool_loop_matches_current(self) -> bool:
+        """Return True when the cached pool is usable from the current loop.
+
+        asyncpg pools bind to one event loop at creation. Accessing a pool
+        from a different loop raises ``Future attached to a different loop``.
+        Test fakes typically omit the ``_loop`` attribute — we treat a
+        missing attribute as "usable" so unit tests needn't mirror asyncpg
+        internals.
+        """
+        if self._pool is None:
+            return False
+        existing_loop = getattr(self._pool, "_loop", None)
+        if existing_loop is None:
+            return True
+        try:
+            return existing_loop is asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+
     @asynccontextmanager
     async def _connection(self) -> AsyncIterator[Any]:
         if not self.bootstrapped and not await self.start():
             raise RuntimeError("knowledge_v2_postgres_backend_unavailable")
         await self._ensure_pool()
-        if self._pool is not None:
+        if self._pool is not None and self._pool_loop_matches_current():
             async with self._pool.acquire() as conn:
                 yield conn
             return
+        # No pool for the current loop — fall back to a throwaway direct
+        # connection rather than poisoning the cached pool. This happens
+        # when a caller on a second event loop in the same process needs
+        # DB access (worker main loop while bridge loop owns the pool).
         asyncpg = await self._load_asyncpg()
         conn = await asyncpg.connect(self._dsn)
         try:
@@ -1138,7 +1167,6 @@ class KnowledgeV2PostgresBackend:
                             id TEXT PRIMARY KEY,
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
-                            color TEXT NOT NULL DEFAULT '',
                             spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
                             documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
@@ -1149,13 +1177,15 @@ class KnowledgeV2PostgresBackend:
                             workspace_id TEXT NOT NULL,
                             name TEXT NOT NULL,
                             description TEXT NOT NULL DEFAULT '',
-                            color TEXT NOT NULL DEFAULT '',
                             spec_json TEXT NOT NULL DEFAULT '{{}}'  ,
                             documents_json TEXT NOT NULL DEFAULT '{{}}',
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL,
                             UNIQUE (workspace_id, name)
                         )""",
+                    # Drop the legacy color column if it exists from older deployments.
+                    f"""ALTER TABLE "{schema}"."cp_workspaces" DROP COLUMN IF EXISTS color""",
+                    f"""ALTER TABLE "{schema}"."cp_workspace_squads" DROP COLUMN IF EXISTS color""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_agent_sections" (
                             agent_id TEXT NOT NULL,
                             section TEXT NOT NULL,
@@ -1985,6 +2015,171 @@ class KnowledgeV2PostgresBackend:
                     END
                     $$;
                     """,
+                ),
+            ),
+            _Migration(
+                "018_operator_recovery_codes",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_operator_recovery_codes" (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            code_hash TEXT NOT NULL,
+                            code_hint TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            consumed_at TEXT NOT NULL DEFAULT '',
+                            consumed_reason TEXT NOT NULL DEFAULT '',
+                            generation TEXT NOT NULL DEFAULT ''
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_operator_recovery_codes_user
+                           ON "{schema}"."cp_operator_recovery_codes" (user_id, consumed_at)""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_cp_operator_recovery_codes_hash
+                           ON "{schema}"."cp_operator_recovery_codes" (code_hash)""",
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS recovery_generation TEXT NOT NULL DEFAULT ''""",
+                ),
+            ),
+            _Migration(
+                "019a_runtime_queue_items_payload_columns",
+                (
+                    f"""ALTER TABLE "{schema}"."runtime_queue_items"
+                           ADD COLUMN IF NOT EXISTS payload_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."runtime_queue_items"
+                           ADD COLUMN IF NOT EXISTS recovery_count INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."runtime_queue_items"
+                           ADD COLUMN IF NOT EXISTS last_recovered_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."runtime_queue_items"
+                           ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT 'user'""",
+                    f"""ALTER TABLE "{schema}"."runtime_queue_items"
+                           ADD COLUMN IF NOT EXISTS last_error TEXT""",
+                ),
+            ),
+            _Migration(
+                "019_knowledge_governance_tables",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."knowledge_candidates" (
+                            id BIGSERIAL PRIMARY KEY,
+                            candidate_key TEXT NOT NULL UNIQUE,
+                            merge_key TEXT,
+                            agent_id TEXT,
+                            task_id BIGINT,
+                            task_kind TEXT NOT NULL DEFAULT '',
+                            candidate_type TEXT NOT NULL DEFAULT '',
+                            summary TEXT NOT NULL DEFAULT '',
+                            evidence_json TEXT NOT NULL DEFAULT '[]',
+                            source_refs_json TEXT NOT NULL DEFAULT '[]',
+                            proposed_runbook_json TEXT NOT NULL DEFAULT '{{}}',
+                            confidence_score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                            review_status TEXT NOT NULL DEFAULT 'learning',
+                            reviewer TEXT NOT NULL DEFAULT '',
+                            reviewed_at TEXT,
+                            diff_summary TEXT NOT NULL DEFAULT '',
+                            review_note TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            project_key TEXT NOT NULL DEFAULT '',
+                            environment TEXT NOT NULL DEFAULT '',
+                            team TEXT NOT NULL DEFAULT '',
+                            support_count INTEGER NOT NULL DEFAULT 0,
+                            success_count INTEGER NOT NULL DEFAULT 0,
+                            failure_count INTEGER NOT NULL DEFAULT 0,
+                            verification_count INTEGER NOT NULL DEFAULT 0,
+                            promoted_runbook_id BIGINT,
+                            last_human_feedback_at TEXT,
+                            last_promoted_version TEXT
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_review
+                           ON "{schema}"."knowledge_candidates"
+                           (review_status, agent_id, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_merge
+                           ON "{schema}"."knowledge_candidates"
+                           (merge_key)
+                           WHERE merge_key IS NOT NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."approved_runbooks" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT,
+                            runbook_key TEXT NOT NULL,
+                            version TEXT NOT NULL DEFAULT '',
+                            title TEXT NOT NULL DEFAULT '',
+                            task_kind TEXT NOT NULL DEFAULT '',
+                            summary TEXT NOT NULL DEFAULT '',
+                            prerequisites_json TEXT NOT NULL DEFAULT '[]',
+                            steps_json TEXT NOT NULL DEFAULT '[]',
+                            verification_json TEXT NOT NULL DEFAULT '[]',
+                            rollback TEXT NOT NULL DEFAULT '',
+                            source_refs_json TEXT NOT NULL DEFAULT '[]',
+                            project_key TEXT NOT NULL DEFAULT '',
+                            environment TEXT NOT NULL DEFAULT '',
+                            team TEXT NOT NULL DEFAULT '',
+                            owner TEXT NOT NULL DEFAULT '',
+                            approved_by TEXT NOT NULL DEFAULT '',
+                            approved_at TEXT NOT NULL,
+                            last_validated_by TEXT NOT NULL DEFAULT '',
+                            last_validated_at TEXT,
+                            status TEXT NOT NULL DEFAULT 'approved',
+                            lifecycle_status TEXT NOT NULL DEFAULT 'approved',
+                            valid_from TEXT,
+                            valid_until TEXT,
+                            rollout_scope_json TEXT NOT NULL DEFAULT '{{}}',
+                            policy_overrides_json TEXT NOT NULL DEFAULT '{{}}',
+                            supersedes_runbook_id BIGINT,
+                            source_candidate_id BIGINT
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_approved_runbooks_lookup
+                           ON "{schema}"."approved_runbooks"
+                           (agent_id, status, lifecycle_status, task_kind, approved_at DESC)""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_approved_runbooks_key
+                           ON "{schema}"."approved_runbooks"
+                           (agent_id, runbook_key, version)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."approved_guardrails" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT,
+                            task_kind TEXT NOT NULL DEFAULT '',
+                            title TEXT NOT NULL DEFAULT '',
+                            severity TEXT NOT NULL DEFAULT '',
+                            reason TEXT NOT NULL DEFAULT '',
+                            source_label TEXT NOT NULL DEFAULT '',
+                            source_path TEXT NOT NULL DEFAULT '',
+                            project_key TEXT NOT NULL DEFAULT '',
+                            environment TEXT NOT NULL DEFAULT '',
+                            team TEXT NOT NULL DEFAULT '',
+                            owner TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'active',
+                            source_candidate_id BIGINT,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_approved_guardrails_lookup
+                           ON "{schema}"."approved_guardrails"
+                           (agent_id, status, task_kind, updated_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."knowledge_source_registry" (
+                            id BIGSERIAL PRIMARY KEY,
+                            source_key TEXT NOT NULL UNIQUE,
+                            agent_id TEXT,
+                            project_key TEXT NOT NULL DEFAULT '',
+                            source_type TEXT NOT NULL DEFAULT '',
+                            layer TEXT NOT NULL DEFAULT '',
+                            source_label TEXT NOT NULL DEFAULT '',
+                            source_path TEXT NOT NULL DEFAULT '',
+                            owner TEXT NOT NULL DEFAULT '',
+                            freshness_days INTEGER NOT NULL DEFAULT 0,
+                            content_hash TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT '',
+                            is_canonical BOOLEAN NOT NULL DEFAULT FALSE,
+                            updated_at TEXT NOT NULL,
+                            last_synced_at TEXT,
+                            stale_after TEXT,
+                            invalid_after TEXT,
+                            sla_hours INTEGER NOT NULL DEFAULT 0,
+                            sync_mode TEXT NOT NULL DEFAULT '',
+                            last_success_at TEXT,
+                            last_error TEXT NOT NULL DEFAULT '',
+                            workspace_fingerprint TEXT NOT NULL DEFAULT ''
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_knowledge_source_registry_lookup
+                           ON "{schema}"."knowledge_source_registry"
+                           (agent_id, status, is_canonical, updated_at DESC)""",
                 ),
             ),
         )

@@ -56,7 +56,7 @@ function installMatchMedia(matches = false) {
 }
 
 describe("WorkspaceTopbar", () => {
-  it("renders the theme switcher immediately before the language switcher", () => {
+  it("renders the language switcher immediately before the theme toggle", () => {
     installLocalStorage();
     installMatchMedia(false);
 
@@ -74,9 +74,9 @@ describe("WorkspaceTopbar", () => {
       </ThemeProvider>,
     );
 
-    const themeButton = screen.getByRole("button", { name: /Theme/i });
     const languageButton = screen.getByRole("button", { name: /Language/i });
+    const themeButton = screen.getByRole("button", { name: /Theme/i });
 
-    expect(themeButton.compareDocumentPosition(languageButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(languageButton.compareDocumentPosition(themeButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

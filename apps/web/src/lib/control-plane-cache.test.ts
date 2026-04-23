@@ -20,12 +20,12 @@ describe("control-plane cache helpers", () => {
 
   it("builds detail fetch config with shorter revalidation", () => {
     expect(
-      getControlPlaneFetchConfig("detail", [CONTROL_PLANE_CACHE_TAGS.bot("ATLAS")]),
+      getControlPlaneFetchConfig("detail", [CONTROL_PLANE_CACHE_TAGS.agent("ATLAS")]),
     ).toEqual({
       cache: "force-cache",
       next: {
         revalidate: 5,
-        tags: [CONTROL_PLANE_CACHE_TAGS.bot("ATLAS")],
+        tags: [CONTROL_PLANE_CACHE_TAGS.agent("ATLAS")],
       },
     });
   });
@@ -40,23 +40,10 @@ describe("control-plane cache helpers", () => {
     ).toEqual({
       tags: [
         CONTROL_PLANE_CACHE_TAGS.catalog,
-        CONTROL_PLANE_CACHE_TAGS.botCatalog,
-        CONTROL_PLANE_CACHE_TAGS.bot("ATLAS"),
+        CONTROL_PLANE_CACHE_TAGS.agentCatalog,
+        CONTROL_PLANE_CACHE_TAGS.agent("ATLAS"),
       ],
-      paths: ["/control-plane", "/control-plane/agents/ATLAS", "/control-plane/bots/ATLAS"],
-    });
-  });
-
-  it("keeps legacy bot mutations compatible during migration", () => {
-    expect(
-      getControlPlaneMutationInvalidation(["bots", "ATLAS", "publish"]),
-    ).toEqual({
-      tags: [
-        CONTROL_PLANE_CACHE_TAGS.catalog,
-        CONTROL_PLANE_CACHE_TAGS.botCatalog,
-        CONTROL_PLANE_CACHE_TAGS.bot("ATLAS"),
-      ],
-      paths: ["/control-plane", "/control-plane/agents/ATLAS", "/control-plane/bots/ATLAS"],
+      paths: ["/control-plane", "/control-plane/agents/ATLAS"],
     });
   });
 

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
@@ -19,16 +18,29 @@ import {
   SquareSlash,
   Trash2,
   Waypoints,
-  X,
 } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { RuntimeBrowserPanel } from "@/components/runtime/runtime-browser-panel";
 import { RuntimeFilesPanel } from "@/components/runtime/runtime-files-panel";
 import { RuntimeTerminalPanel } from "@/components/runtime/runtime-terminal-panel";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { Drawer } from "@/components/ui/drawer";
+import {
+  DetailBlock as SharedDetailBlock,
+  DetailDatum as SharedDetailDatum,
+  DetailGrid as SharedDetailGrid,
+} from "@/components/ui/detail-group";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { SoftTabs } from "@/components/ui/soft-tabs";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useRuntimeTask } from "@/hooks/use-runtime-task";
 import { translate } from "@/lib/i18n";
-import { getSemanticStyle, getSemanticTextStyle } from "@/lib/theme-semantic";
+import type { SemanticTone } from "@/lib/theme-semantic";
 import type { RuntimeEvent } from "@/lib/runtime-types";
 import {
   formatBytes,
@@ -44,14 +56,28 @@ type RoomTab = "activity" | "terminal" | "browser" | "files";
 type DetailTab = "details" | "logs" | "diagnostics";
 
 interface RuntimeTaskRoomProps {
-  botId: string;
+  agentId: string;
   taskId: number;
 }
 
-export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
+function toneToDot(tone: SemanticTone): StatusDotTone {
+  if (
+    tone === "success" ||
+    tone === "info" ||
+    tone === "warning" ||
+    tone === "danger" ||
+    tone === "retry" ||
+    tone === "neutral"
+  ) {
+    return tone;
+  }
+  return "neutral";
+}
+
+export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
   const { t, tl } = useAppI18n();
   const { bundle, loading, error, connected, mutate, fetchResource, refresh } =
-    useRuntimeTask(botId, taskId);
+    useRuntimeTask(agentId, taskId);
   const [activeTab, setActiveTab] = useState<RoomTab>("terminal");
   const [detailTab, setDetailTab] = useState<DetailTab>("details");
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -66,21 +92,27 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
     : String(bundle?.environment?.current_phase || "").includes("paused");
   const isPinned = Boolean(bundle?.environment?.is_pinned);
 
-  const tabs = [
+  const roomTabs = [
     { id: "terminal", label: t("runtime.room.tabs.terminal") },
     { id: "browser", label: t("runtime.room.tabs.browser") },
     { id: "files", label: t("runtime.room.tabs.files") },
     { id: "activity", label: t("runtime.room.tabs.activity") },
   ] satisfies Array<{ id: RoomTab; label: string }>;
 
+  const detailTabs = [
+    { id: "details", label: t("runtime.room.detailTabs.details") },
+    { id: "logs", label: "Logs" },
+    { id: "diagnostics", label: t("runtime.room.detailTabs.diagnostics") },
+  ] satisfies Array<{ id: DetailTab; label: string }>;
+
   const heroTitle = truncateText(
-      bundle?.task?.query_text ||
+    bundle?.task?.query_text ||
       bundle?.events.at(-1)?.type ||
       t("runtime.room.executionLive"),
-    116
+    160,
   );
   const currentPhase = getRuntimeLabel(
-    bundle?.task?.current_phase || bundle?.environment?.current_phase || bundle?.task?.status
+    bundle?.task?.current_phase || bundle?.environment?.current_phase || bundle?.task?.status,
   );
   const currentStatus = String(bundle?.task?.status || bundle?.environment?.status || "queued");
   const heartbeatAt =
@@ -89,6 +121,11 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
     bundle?.environment?.updated_at ||
     bundle?.task?.started_at ||
     null;
+
+  const phaseTone = toneToDot(
+    getRuntimeTone(bundle?.environment?.current_phase || bundle?.task?.current_phase),
+  );
+  const isLivePhase = phaseTone === "info" || phaseTone === "warning";
 
   const essentialStats = useMemo(
     () => [
@@ -107,7 +144,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
       {
         label: t("runtime.room.stats.memory"),
         value: formatBytes(
-          latestResource?.rss_kb != null ? latestResource.rss_kb * 1024 : null
+          latestResource?.rss_kb != null ? latestResource.rss_kb * 1024 : null,
         ),
       },
       {
@@ -115,14 +152,8 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
         value: heartbeatAt ? formatRelativeTime(heartbeatAt) : t("runtime.room.stats.noHeartbeat"),
       },
     ],
-    [bundle?.environment?.status, bundle?.task?.status, currentPhase, latestResource, heartbeatAt, t]
+    [bundle?.environment?.status, bundle?.task?.status, currentPhase, latestResource, heartbeatAt, t],
   );
-
-  const detailTabs = [
-    { id: "details", label: t("runtime.room.detailTabs.details") },
-    { id: "logs", label: "Logs" },
-    { id: "diagnostics", label: t("runtime.room.detailTabs.diagnostics") },
-  ] satisfies Array<{ id: DetailTab; label: string }>;
 
   const runAction = async (
     action: string,
@@ -130,7 +161,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
     options?: {
       confirmMessage?: string;
       searchParams?: URLSearchParams;
-    }
+    },
   ) => {
     if (options?.confirmMessage && !window.confirm(options.confirmMessage)) {
       return;
@@ -145,7 +176,7 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
       setActionFeedback(t("runtime.room.completed", { label }));
     } catch (actionError) {
       setActionFeedback(
-        actionError instanceof Error ? actionError.message : `${t("common.failed")} ${label}`
+        actionError instanceof Error ? actionError.message : `${t("common.failed")} ${label}`,
       );
     } finally {
       setBusyAction(null);
@@ -154,31 +185,32 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
 
   if (loading && !bundle) {
     return (
-      <div className="runtime-shell runtime-shell--wide space-y-5">
-        <div className="runtime-hero">
-          <div className="space-y-3">
-            <div className="h-5 w-24 rounded-lg bg-[rgba(255,255,255,0.06)]" />
-            <div className="h-14 w-72 rounded-lg bg-[rgba(255,255,255,0.05)]" />
-          </div>
-          <div className="h-10 w-52 rounded-lg bg-[rgba(255,255,255,0.05)]" />
+      <div className="runtime-shell space-y-6">
+        <div className="space-y-3">
+          <div className="skeleton h-4 w-24 rounded" />
+          <div className="skeleton h-10 w-80 rounded" />
         </div>
-        <div className="runtime-stage min-h-[620px] animate-pulse" />
+        <div className="skeleton min-h-[520px] w-full rounded-[var(--radius-panel)]" />
       </div>
     );
   }
 
   if (!bundle || error) {
     return (
-      <div className="runtime-shell runtime-shell--wide">
-        <div className="runtime-empty runtime-empty--danger min-h-[320px]">
-          <AlertTriangle className="h-6 w-6" />
-          <p className="text-base font-semibold text-[var(--text-primary)]">
+      <div className="runtime-shell">
+        <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-[var(--radius-panel)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] p-8 text-center">
+          <AlertTriangle className="h-6 w-6 text-[var(--tone-danger-dot)]" />
+          <p className="m-0 text-base font-medium text-[var(--text-primary)]">
             {t("runtime.room.openErrorTitle")}
           </p>
-          <p className="max-w-xl text-center text-sm leading-6 text-[var(--text-tertiary)]">
+          <p className="m-0 max-w-xl text-[0.8125rem] leading-6 text-[var(--text-tertiary)]">
             {error || t("runtime.room.openErrorDescription")}
           </p>
-          <Link href="/runtime" className="runtime-ghost-button">
+          <Link
+            href="/runtime"
+            className="mt-2 inline-flex h-8 items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
             {t("common.back")}
           </Link>
         </div>
@@ -187,32 +219,47 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
   }
 
   return (
-    <div className="runtime-shell runtime-shell--wide runtime-task-room" data-testid="runtime-task-room">
-      <header className="runtime-hero">
-        <div className="runtime-hero__main">
-          <div className="runtime-hero__title-row">
-            <Link href={`/runtime?bot=${botId}`} className="runtime-back-link">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <span className="runtime-inline-id runtime-inline-id--lg">Task #{taskId}</span>
-            <span
-              className="runtime-inline-tone"
-              style={getSemanticStyle(
-                getRuntimeTone(bundle.environment?.current_phase || bundle.task?.current_phase)
-              )}
+    <div className="runtime-shell space-y-6" data-testid="runtime-task-room">
+      {/* Hero */}
+      <header className="flex flex-col gap-5">
+        <div className="min-w-0 space-y-3">
+          <div className="flex items-center gap-2.5">
+            <Link
+              href={`/runtime?agent=${agentId}`}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+              aria-label={t("common.back")}
             >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </Link>
+            <span className="font-mono text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              Task #{taskId}
+            </span>
+            <span className="text-[var(--text-quaternary)]">·</span>
+            <StatusDot tone={phaseTone} pulse={isLivePhase} />
+            <span className="text-[0.8125rem] text-[var(--text-secondary)]">
               {currentPhase}
             </span>
-            <span className={cn("runtime-inline-dot", connected && "runtime-inline-dot--live")} />
+            {connected ? (
+              <>
+                <span className="text-[var(--text-quaternary)]">·</span>
+                <StatusDot tone="success" pulse />
+                <span className="text-[0.75rem] text-[var(--text-tertiary)]">
+                  {t("runtime.overview.live")}
+                </span>
+              </>
+            ) : null}
           </div>
-          <h1 className="runtime-hero__title">{heroTitle}</h1>
+          <h1 className="m-0 text-[1.75rem] font-medium leading-[1.2] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance]">
+            {heroTitle}
+          </h1>
         </div>
-        <div className="runtime-hero__actions">
+
+        <div className="flex flex-wrap items-center gap-2">
           <ActionButton
             onClick={() =>
               void runAction(
                 isPaused ? "resume" : "pause",
-                isPaused ? t("runtime.room.resume") : t("runtime.room.pause")
+                isPaused ? t("runtime.room.resume") : t("runtime.room.pause"),
               )
             }
             busy={busyAction === "pause" || busyAction === "resume"}
@@ -237,88 +284,81 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
             tone="danger"
           />
 
-          <div className="relative">
-            <button
-              type="button"
-              className={cn("runtime-ghost-button", actionsOpen && "is-active")}
-              onClick={() => setActionsOpen((current) => !current)}
-              aria-expanded={actionsOpen}
-              aria-haspopup="menu"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-              {t("runtime.room.more")}
-            </button>
+          <span className="mx-1 h-5 w-px bg-[var(--divider-hair)]" aria-hidden="true" />
 
-            <AnimatePresence>
-              {actionsOpen ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  className="app-floating-surface runtime-actions-menu"
-                  role="menu"
-                >
-                  <MenuAction
-                    icon={RefreshCcw}
-                    label={t("runtime.room.refresh")}
-                    onClick={() => {
-                      void refresh();
-                      setActionsOpen(false);
-                    }}
-                  />
-                  <MenuAction
-                    icon={RotateCcw}
-                    label={t("runtime.room.retry")}
-                    busy={busyAction === "retry"}
-                    onClick={() => void runAction("retry", t("runtime.room.retry"))}
-                  />
-                  <MenuAction
-                    icon={RefreshCcw}
-                    label={t("runtime.room.recover")}
-                    busy={busyAction === "recover"}
-                    onClick={() => void runAction("recover", t("runtime.room.recover"))}
-                  />
-                  <MenuAction
-                    icon={Pin}
-                    label={isPinned ? t("runtime.room.unpin") : t("runtime.room.pin")}
-                    busy={busyAction === "pin" || busyAction === "unpin"}
-                    onClick={() =>
-                      void runAction(
-                        isPinned ? "unpin" : "pin",
-                        isPinned ? t("runtime.room.unpin") : t("runtime.room.pin")
-                      )
-                    }
-                  />
-                  <MenuAction
-                    icon={Trash2}
-                    label={t("runtime.room.requestCleanup")}
-                    busy={busyAction === "cleanup"}
-                    onClick={() =>
-                      void runAction("cleanup", t("runtime.room.requestCleanup"), {
-                        confirmMessage: t("runtime.room.requestCleanupConfirm"),
-                      })
-                    }
-                    tone="warning"
-                  />
-                  <MenuAction
-                    icon={Trash2}
-                    label={t("runtime.room.forceCleanup")}
-                    busy={busyAction === "cleanup/force"}
-                    onClick={() =>
-                      void runAction("cleanup/force", t("runtime.room.forceCleanup"), {
-                        confirmMessage: t("runtime.room.forceCleanupConfirm"),
-                      })
-                    }
-                    tone="danger"
-                  />
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </div>
+          <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-secondary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] data-[state=open]:border-[var(--border-strong)] data-[state=open]:bg-[var(--hover-tint)]"
+                aria-label={t("runtime.room.more")}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+                <span>{t("runtime.room.more")}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-52">
+              <MenuAction
+                icon={RefreshCcw}
+                label={t("runtime.room.refresh")}
+                onClick={() => {
+                  void refresh();
+                  setActionsOpen(false);
+                }}
+              />
+              <MenuAction
+                icon={RotateCcw}
+                label={t("runtime.room.retry")}
+                busy={busyAction === "retry"}
+                onClick={() => void runAction("retry", t("runtime.room.retry"))}
+              />
+              <MenuAction
+                icon={RefreshCcw}
+                label={t("runtime.room.recover")}
+                busy={busyAction === "recover"}
+                onClick={() => void runAction("recover", t("runtime.room.recover"))}
+              />
+              <MenuAction
+                icon={Pin}
+                label={isPinned ? t("runtime.room.unpin") : t("runtime.room.pin")}
+                busy={busyAction === "pin" || busyAction === "unpin"}
+                onClick={() =>
+                  void runAction(
+                    isPinned ? "unpin" : "pin",
+                    isPinned ? t("runtime.room.unpin") : t("runtime.room.pin"),
+                  )
+                }
+              />
+              <MenuAction
+                icon={Trash2}
+                label={t("runtime.room.requestCleanup")}
+                busy={busyAction === "cleanup"}
+                onClick={() =>
+                  void runAction("cleanup", t("runtime.room.requestCleanup"), {
+                    confirmMessage: t("runtime.room.requestCleanupConfirm"),
+                  })
+                }
+                tone="warning"
+              />
+              <MenuAction
+                icon={Trash2}
+                label={t("runtime.room.forceCleanup")}
+                busy={busyAction === "cleanup/force"}
+                onClick={() =>
+                  void runAction("cleanup/force", t("runtime.room.forceCleanup"), {
+                    confirmMessage: t("runtime.room.forceCleanupConfirm"),
+                  })
+                }
+                tone="danger"
+              />
+            </PopoverContent>
+          </Popover>
+
+          <span className="mx-1 h-5 w-px bg-[var(--divider-hair)]" aria-hidden="true" />
 
           <button
             type="button"
-            className="runtime-ghost-button"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] text-[var(--text-secondary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
             onClick={() => {
               setDetailTab("details");
               setDetailsOpen(true);
@@ -326,434 +366,399 @@ export function RuntimeTaskRoom({ botId, taskId }: RuntimeTaskRoomProps) {
           >
             {t("runtime.room.details")}
           </button>
-          <Link href="/executions" className="runtime-ghost-button">
+          <Link
+            href="/executions"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3 text-[0.8125rem] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+          >
             {t("runtime.room.history")}
           </Link>
         </div>
       </header>
 
       {actionFeedback ? (
-        <div className="runtime-inline-alert">
-          <Activity className="h-4 w-4 shrink-0" />
-          <span>{actionFeedback}</span>
-        </div>
+        <InlineAlert tone="info" icon={Activity}>
+          {actionFeedback}
+        </InlineAlert>
       ) : null}
 
-      <section className="runtime-stage" aria-label={t("runtime.room.trackingLabel")}>
-        <div className="runtime-stage__header">
-          <div className="runtime-tabs" role="tablist" aria-label={t("runtime.room.switchSurface")}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={cn("runtime-tab", activeTab === tab.id && "is-active")}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <span className={cn("runtime-inline-dot", connected && "runtime-inline-dot--live")} />
+      {/* Stage */}
+      <section
+        className="flex flex-col gap-4 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] p-4"
+        aria-label={t("runtime.room.trackingLabel")}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <SoftTabs
+            items={roomTabs}
+            value={activeTab}
+            onChange={(id) => setActiveTab(id as RoomTab)}
+            ariaLabel={t("runtime.room.switchSurface")}
+          />
+          {connected ? (
+            <span className="inline-flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <StatusDot tone="success" pulse />
+              {t("runtime.overview.live")}
+            </span>
+          ) : null}
         </div>
 
-        <div className="runtime-stage__body">
-          <AnimatePresence mode="wait">
-            {activeTab === "terminal" ? (
-              <motion.div
-                key="terminal"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-              >
-                <RuntimeTerminalPanel
-                  taskId={taskId}
-                  terminals={bundle.terminals}
-                  mutate={mutate}
-                  fetchResource={fetchResource}
-                />
-              </motion.div>
-            ) : null}
+        <div className="min-h-[420px]">
+          {activeTab === "terminal" ? (
+            <RuntimeTerminalPanel
+              taskId={taskId}
+              terminals={bundle.terminals}
+              mutate={mutate}
+              fetchResource={fetchResource}
+            />
+          ) : null}
 
-            {activeTab === "browser" ? (
-              <motion.div
-                key="browser"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-              >
-                <RuntimeBrowserPanel
-                  botId={botId}
-                  taskId={taskId}
-                  browser={bundle.browser}
-                  mutate={mutate}
-                  fetchResource={fetchResource}
-                />
-              </motion.div>
-            ) : null}
+          {activeTab === "browser" ? (
+            <RuntimeBrowserPanel
+              agentId={agentId}
+              taskId={taskId}
+              browser={bundle.browser}
+              mutate={mutate}
+              fetchResource={fetchResource}
+            />
+          ) : null}
 
-            {activeTab === "files" ? (
-              <motion.div
-                key="files"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-              >
-                <RuntimeFilesPanel
-                  taskId={taskId}
-                  workspaceTree={bundle.workspaceTree}
-                  mutate={mutate}
-                  fetchResource={fetchResource}
-                />
-              </motion.div>
-            ) : null}
+          {activeTab === "files" ? (
+            <RuntimeFilesPanel
+              taskId={taskId}
+              workspaceTree={bundle.workspaceTree}
+              mutate={mutate}
+              fetchResource={fetchResource}
+            />
+          ) : null}
 
-            {activeTab === "activity" ? (
-              <motion.div
-                key="activity"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                className="space-y-4"
-              >
-                {bundle.warnings.length > 0 ? (
+          {activeTab === "activity" ? (
+            <div className="space-y-3">
+              {bundle.warnings.length > 0 ? (
+                <div className="space-y-2">
+                  {bundle.warnings.slice(-3).reverse().map((warning) => (
+                    <InlineAlert key={warning.id} tone="warning">
+                      <p className="m-0 font-medium text-[var(--text-primary)]">
+                        {warning.message || warning.warning_type}
+                      </p>
+                      <p className="m-0 mt-0.5 text-[0.6875rem] text-[var(--text-quaternary)]">
+                        {warning.created_at
+                          ? formatDateTime(warning.created_at)
+                          : t("runtime.room.eventRecordedNow")}
+                      </p>
+                    </InlineAlert>
+                  ))}
+                </div>
+              ) : null}
+
+              {bundle.events.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                  <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                  <p className="m-0">{t("runtime.room.noMovementYet")}</p>
+                </div>
+              ) : (
+                <div className="rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-3">
+                  {bundle.events
+                    .slice()
+                    .reverse()
+                    .slice(0, 14)
+                    .map((event) => (
+                      <RuntimeEventFeedRow key={event.seq} event={event} />
+                    ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        <ProgressBar
+          percent={
+            typeof bundle.environment?.progress_percent === "number"
+              ? bundle.environment.progress_percent
+              : null
+          }
+        />
+
+        <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[color:var(--divider-hair)] pt-3">
+          {essentialStats.map((item, index) => (
+            <span
+              key={item.label}
+              className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]"
+            >
+              {index > 0 ? (
+                <span className="text-[var(--text-quaternary)]" aria-hidden="true">
+                  ·
+                </span>
+              ) : null}
+              <span>{item.label}</span>
+              <span className="text-[var(--text-secondary)]">{item.value}</span>
+            </span>
+          ))}
+        </footer>
+      </section>
+
+      {/* Detail Drawer */}
+      <Drawer
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        title={t("runtime.room.details")}
+        closeLabel={t("runtime.room.closeDetailsPanel")}
+        width="min(560px, 92vw)"
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <SoftTabs
+            items={detailTabs}
+            value={detailTab}
+            onChange={(id) => setDetailTab(id as DetailTab)}
+            ariaLabel={t("runtime.room.detailTabsAria")}
+            className="self-start"
+          />
+
+          {detailTab === "details" ? (
+            <div className="space-y-5">
+              <SharedDetailGrid>
+                <SharedDetailDatum label={t("common.agent")} value={agentId} />
+                <SharedDetailDatum label={t("common.task")} value={`#${taskId}`} />
+                <SharedDetailDatum
+                  label={t("common.status")}
+                  value={
+                    <span className="inline-flex items-center gap-1.5">
+                      <StatusDot tone={toneToDot(getRuntimeTone(currentStatus))} />
+                      {getRuntimeLabel(currentStatus)}
+                    </span>
+                  }
+                />
+                <SharedDetailDatum label={t("common.phase")} value={currentPhase} />
+                <SharedDetailDatum
+                  label={t("runtime.room.branch")}
+                  value={
+                    <span className="font-mono text-[0.75rem]">
+                      {bundle.environment?.branch_name || "—"}
+                    </span>
+                  }
+                />
+                <SharedDetailDatum
+                  label={t("runtime.room.retention")}
+                  value={
+                    bundle.environment?.retention_expires_at
+                      ? formatDateTime(bundle.environment.retention_expires_at)
+                      : "—"
+                  }
+                />
+              </SharedDetailGrid>
+
+              <SharedDetailBlock title={t("runtime.room.workspace")} monospace>
+                {bundle.environment?.workspace_path || "—"}
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.runtimeDir")} monospace>
+                {bundle.environment?.runtime_dir || "—"}
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.gitStatus")} monospace>
+                <SyntaxHighlight lang="diff">
+                  {bundle.workspaceStatus.text || t("runtime.room.noStatus")}
+                </SyntaxHighlight>
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.diff")} monospace>
+                <SyntaxHighlight lang="diff">
+                  {bundle.workspaceDiff.text || t("runtime.room.noDiff")}
+                </SyntaxHighlight>
+              </SharedDetailBlock>
+            </div>
+          ) : null}
+
+          {detailTab === "logs" ? (
+            <div className="space-y-5">
+              {bundle.warnings.length > 0 ? (
+                <SharedDetailBlock title={t("runtime.room.warnings")}>
                   <div className="space-y-2">
-                    {bundle.warnings.slice(-3).reverse().map((warning) => (
-                      <div key={warning.id} className="runtime-inline-alert">
-                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                    {bundle.warnings.slice().reverse().map((warning) => (
+                      <div
+                        key={warning.id}
+                        className="rounded-[var(--radius-panel-sm)] bg-[var(--panel)] p-2.5"
+                      >
+                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                          {warning.message || warning.warning_type}
+                        </p>
+                        <p className="m-0 mt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+                          {warning.created_at
+                            ? formatDateTime(warning.created_at)
+                            : t("runtime.room.eventRecordedNow")}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </SharedDetailBlock>
+              ) : null}
+
+              <SharedDetailBlock title={t("runtime.room.events")}>
+                {bundle.events.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                    <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                    <p className="m-0">{t("runtime.room.noEvents")}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {bundle.events
+                      .slice()
+                      .reverse()
+                      .map((event) => (
+                        <RuntimeEventLogRow key={event.seq} event={event} />
+                      ))}
+                  </div>
+                )}
+              </SharedDetailBlock>
+            </div>
+          ) : null}
+
+          {detailTab === "diagnostics" ? (
+            <div className="space-y-5">
+              <SharedDetailGrid columns={3}>
+                <SharedDetailDatum
+                  label={t("runtime.room.stats.cpu")}
+                  value={formatPercent(latestResource?.cpu_percent)}
+                />
+                <SharedDetailDatum
+                  label={tl("RSS")}
+                  value={formatBytes(
+                    latestResource?.rss_kb != null
+                      ? latestResource.rss_kb * 1024
+                      : null,
+                  )}
+                />
+                <SharedDetailDatum
+                  label={t("runtime.room.processes")}
+                  value={String(latestResource?.process_count ?? "—")}
+                />
+                <SharedDetailDatum
+                  label={t("runtime.room.disk")}
+                  value={formatBytes(latestResource?.workspace_disk_bytes)}
+                />
+                <SharedDetailDatum
+                  label={t("runtime.room.loops")}
+                  value={String(bundle.loopCycles.length)}
+                />
+                <SharedDetailDatum
+                  label={t("runtime.room.guardrails")}
+                  value={String(bundle.guardrails.length)}
+                />
+              </SharedDetailGrid>
+
+              <SharedDetailBlock title={t("runtime.room.services")}>
+                {bundle.services.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                    <Globe className="h-4 w-4 text-[var(--text-quaternary)]" />
+                    <p className="m-0">{t("runtime.room.noActiveServices")}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bundle.services.map((service) => (
+                      <div
+                        key={service.id}
+                        className="flex items-start justify-between gap-3"
+                      >
                         <div className="min-w-0">
-                          <p className="text-sm text-[var(--text-primary)]">
-                            {warning.message || warning.warning_type}
+                          <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                            {service.label || service.service_kind}
                           </p>
-                          <p className="text-xs text-[var(--text-quaternary)]">
-                                  {warning.created_at
-                              ? formatDateTime(warning.created_at)
-                              : t("runtime.room.eventRecordedNow")}
+                          <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                            {service.url ||
+                              `${service.protocol}://${service.host}:${service.port}`}
+                          </p>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-secondary)]">
+                          <StatusDot tone={toneToDot(getRuntimeTone(service.status))} />
+                          {getRuntimeLabel(service.status)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.checkpointsAndArtifacts")}>
+                <div className="space-y-2">
+                  {latestCheckpoint ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                          {t("runtime.room.latestCheckpoint")}
+                        </p>
+                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                          {latestCheckpoint.checkpoint_dir}
+                        </p>
+                      </div>
+                      <span className="text-[0.6875rem] text-[var(--text-quaternary)]">
+                        {formatRelativeTime(latestCheckpoint.created_at)}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {bundle.artifacts.slice(-5).map((artifact) => (
+                    <div
+                      key={artifact.id}
+                      className="flex items-start justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                          {artifact.label || artifact.artifact_kind}
+                        </p>
+                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                          {artifact.path}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.sessions")}>
+                <SharedDetailGrid columns={3}>
+                  <SharedDetailDatum
+                    label={t("runtime.room.attach")}
+                    value={String(bundle.sessions.attach_sessions.length)}
+                  />
+                  <SharedDetailDatum
+                    label={t("runtime.room.tabs.browser")}
+                    value={String(bundle.sessions.browser_sessions.length)}
+                  />
+                  <SharedDetailDatum
+                    label={t("runtime.room.terminals")}
+                    value={String(bundle.sessions.terminals.length)}
+                  />
+                </SharedDetailGrid>
+              </SharedDetailBlock>
+
+              <SharedDetailBlock title={t("runtime.room.recentGuardrails")}>
+                {bundle.guardrails.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                    <Waypoints className="h-4 w-4 text-[var(--text-quaternary)]" />
+                    <p className="m-0">{t("runtime.room.noRecentGuardrails")}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bundle.guardrails.slice(-5).reverse().map((guardrail) => (
+                      <div
+                        key={guardrail.id}
+                        className="flex items-start justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                            {guardrail.guardrail_type}
+                          </p>
+                          <p className="m-0 mt-0.5 text-[0.6875rem] text-[var(--text-quaternary)]">
+                            {formatRelativeTime(guardrail.created_at)}
                           </p>
                         </div>
                       </div>
                     ))}
                   </div>
-                ) : null}
-
-                {bundle.events.length === 0 ? (
-                  <div className="runtime-empty">
-                    <Activity className="h-5 w-5" />
-                    <p>{t("runtime.room.noMovementYet")}</p>
-                  </div>
-                ) : (
-                  <div className="runtime-activity-feed">
-                    {bundle.events
-                      .slice()
-                      .reverse()
-                      .slice(0, 14)
-                      .map((event) => (
-                        <RuntimeEventFeedRow key={event.seq} event={event} />
-                      ))}
-                  </div>
                 )}
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+              </SharedDetailBlock>
+            </div>
+          ) : null}
         </div>
-
-        <div className="progress-bar">
-          <div className={cn(
-            "progress-bar__fill",
-            !bundle.environment?.progress_percent && "progress-bar__fill--indeterminate"
-          )}
-            style={bundle.environment?.progress_percent ? { width: `${bundle.environment.progress_percent}%` } : undefined}
-          />
-        </div>
-
-        <div className="runtime-stage__footer">
-          <div className="runtime-stat-strip">
-            {essentialStats.map((item) => (
-              <div key={item.label} className="runtime-stat-strip__item">
-                <span className="runtime-stat-strip__label">{item.label}</span>
-                <span className="runtime-stat-strip__value">{item.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <AnimatePresence>
-        {detailsOpen ? (
-          <>
-            <motion.button
-              type="button"
-              aria-label={t("runtime.room.closeDetails")}
-              className="runtime-detail-sheet__scrim"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.14, ease: "easeOut" }}
-              onClick={() => setDetailsOpen(false)}
-            />
-            <motion.aside
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.16, ease: "easeOut" }}
-              className="runtime-detail-sheet"
-            >
-              <div className="runtime-detail-sheet__header">
-                <p className="runtime-panel__title">{t("runtime.room.details")}</p>
-                <button
-                  type="button"
-                  className="runtime-ghost-button runtime-ghost-button--icon"
-                  onClick={() => setDetailsOpen(false)}
-                  aria-label={t("runtime.room.closeDetailsPanel")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="runtime-detail-tabs" role="tablist" aria-label={t("runtime.room.detailTabsAria")}>
-                {detailTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={detailTab === tab.id}
-                    onClick={() => setDetailTab(tab.id)}
-                    className={cn("runtime-detail-tab", detailTab === tab.id && "is-active")}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="runtime-detail-sheet__body">
-                {detailTab === "details" ? (
-                  <div className="space-y-5">
-                    <DetailGrid>
-                      <DetailDatum label={t("common.bot")}>{botId}</DetailDatum>
-                      <DetailDatum label={t("common.task")}>#{taskId}</DetailDatum>
-                      <DetailDatum label={t("common.status")}>
-                        <span
-                          className="runtime-inline-tone"
-                          style={getSemanticStyle(getRuntimeTone(currentStatus))}
-                        >
-                          {getRuntimeLabel(currentStatus)}
-                        </span>
-                      </DetailDatum>
-                      <DetailDatum label={t("common.phase")}>{currentPhase}</DetailDatum>
-                      <DetailDatum label={t("runtime.room.branch")}>
-                        <span className="font-mono text-[12px]">
-                          {bundle.environment?.branch_name || "—"}
-                        </span>
-                      </DetailDatum>
-                      <DetailDatum label={t("runtime.room.retention")}>
-                        {bundle.environment?.retention_expires_at
-                          ? formatDateTime(bundle.environment.retention_expires_at)
-                          : "—"}
-                      </DetailDatum>
-                    </DetailGrid>
-
-                    <DetailBlock title={t("runtime.room.workspace")}>
-                      <p className="runtime-code-inline">
-                        {bundle.environment?.workspace_path || "—"}
-                      </p>
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.runtimeDir")}>
-                      <p className="runtime-code-inline">
-                        {bundle.environment?.runtime_dir || "—"}
-                      </p>
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.gitStatus")}>
-                      <SyntaxHighlight lang="diff" className="runtime-code-block">
-                        {bundle.workspaceStatus.text || t("runtime.room.noStatus")}
-                      </SyntaxHighlight>
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.diff")}>
-                      <SyntaxHighlight lang="diff" className="runtime-code-block">
-                        {bundle.workspaceDiff.text || t("runtime.room.noDiff")}
-                      </SyntaxHighlight>
-                    </DetailBlock>
-                  </div>
-                ) : null}
-
-                {detailTab === "logs" ? (
-                  <div className="space-y-5">
-                    {bundle.warnings.length > 0 ? (
-                      <DetailBlock title={t("runtime.room.warnings")}>
-                        <div className="space-y-2">
-                          {bundle.warnings.slice().reverse().map((warning) => (
-                            <div key={warning.id} className="runtime-log-row">
-                              <div>
-                                <p className="text-sm text-[var(--text-primary)]">
-                                  {warning.message || warning.warning_type}
-                                </p>
-                                <p className="text-xs text-[var(--text-quaternary)]">
-                                  {warning.created_at
-                                    ? formatDateTime(warning.created_at)
-                                    : t("runtime.room.eventRecordedNow")}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </DetailBlock>
-                    ) : null}
-
-                    <DetailBlock title={t("runtime.room.events")}>
-                      <div className="space-y-2">
-                        {bundle.events.length === 0 ? (
-                          <div className="runtime-empty">
-                            <Activity className="h-5 w-5" />
-                            <p>{t("runtime.room.noEvents")}</p>
-                          </div>
-                        ) : (
-                          bundle.events
-                            .slice()
-                            .reverse()
-                            .map((event) => <RuntimeEventLogRow key={event.seq} event={event} />)
-                        )}
-                      </div>
-                    </DetailBlock>
-                  </div>
-                ) : null}
-
-                {detailTab === "diagnostics" ? (
-                  <div className="space-y-5">
-                    <DetailGrid>
-                      <DetailDatum label={t("runtime.room.stats.cpu")}>
-                        {formatPercent(latestResource?.cpu_percent)}
-                      </DetailDatum>
-                      <DetailDatum label={tl("RSS")}>
-                        {formatBytes(
-                          latestResource?.rss_kb != null
-                            ? latestResource.rss_kb * 1024
-                            : null
-                        )}
-                      </DetailDatum>
-                      <DetailDatum label={t("runtime.room.processes")}>
-                        {String(latestResource?.process_count ?? "—")}
-                      </DetailDatum>
-                      <DetailDatum label={t("runtime.room.disk")}>
-                        {formatBytes(latestResource?.workspace_disk_bytes)}
-                      </DetailDatum>
-                      <DetailDatum label={t("runtime.room.loops")}>
-                        {String(bundle.loopCycles.length)}
-                      </DetailDatum>
-                      <DetailDatum label={t("runtime.room.guardrails")}>
-                        {String(bundle.guardrails.length)}
-                      </DetailDatum>
-                    </DetailGrid>
-
-                    <DetailBlock title={t("runtime.room.services")}>
-                      {bundle.services.length === 0 ? (
-                        <div className="runtime-empty">
-                          <Globe className="h-5 w-5" />
-                          <p>{t("runtime.room.noActiveServices")}</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {bundle.services.map((service) => (
-                            <div key={service.id} className="runtime-log-row">
-                              <div>
-                                <p className="text-sm text-[var(--text-primary)]">
-                                  {service.label || service.service_kind}
-                                </p>
-                                <p className="runtime-code-inline">
-                                  {service.url ||
-                                    `${service.protocol}://${service.host}:${service.port}`}
-                                </p>
-                              </div>
-                              <span
-                                className="text-xs font-semibold"
-                                style={getSemanticTextStyle(getRuntimeTone(service.status))}
-                              >
-                                {getRuntimeLabel(service.status)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.checkpointsAndArtifacts")}>
-                      <div className="space-y-2">
-                        {latestCheckpoint ? (
-                          <div className="runtime-log-row">
-                            <div>
-                              <p className="text-sm text-[var(--text-primary)]">
-                                {t("runtime.room.latestCheckpoint")}
-                              </p>
-                              <p className="runtime-code-inline">
-                                {latestCheckpoint.checkpoint_dir}
-                              </p>
-                            </div>
-                            <span className="text-xs text-[var(--text-quaternary)]">
-                              {formatRelativeTime(latestCheckpoint.created_at)}
-                            </span>
-                          </div>
-                        ) : null}
-
-                        {bundle.artifacts.slice(-5).map((artifact) => (
-                          <div key={artifact.id} className="runtime-log-row">
-                            <div>
-                              <p className="text-sm text-[var(--text-primary)]">
-                                {artifact.label || artifact.artifact_kind}
-                              </p>
-                              <p className="runtime-code-inline">{artifact.path}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.sessions")}>
-                      <DetailGrid>
-                        <DetailDatum label={t("runtime.room.attach")}>
-                          {String(bundle.sessions.attach_sessions.length)}
-                        </DetailDatum>
-                        <DetailDatum label={t("runtime.room.tabs.browser")}>
-                          {String(bundle.sessions.browser_sessions.length)}
-                        </DetailDatum>
-                        <DetailDatum label={t("runtime.room.terminals")}>
-                          {String(bundle.sessions.terminals.length)}
-                        </DetailDatum>
-                      </DetailGrid>
-                    </DetailBlock>
-
-                    <DetailBlock title={t("runtime.room.recentGuardrails")}>
-                      {bundle.guardrails.length === 0 ? (
-                        <div className="runtime-empty">
-                          <Waypoints className="h-5 w-5" />
-                          <p>{t("runtime.room.noRecentGuardrails")}</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {bundle.guardrails.slice(-5).reverse().map((guardrail) => (
-                            <div key={guardrail.id} className="runtime-log-row">
-                              <div>
-                                <p className="text-sm text-[var(--text-primary)]">
-                                  {guardrail.guardrail_type}
-                                </p>
-                                <p className="text-xs text-[var(--text-quaternary)]">
-                                  {formatRelativeTime(guardrail.created_at)}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </DetailBlock>
-                  </div>
-                ) : null}
-              </div>
-            </motion.aside>
-          </>
-        ) : null}
-      </AnimatePresence>
+      </Drawer>
     </div>
   );
 }
@@ -780,10 +785,6 @@ function ActionButton({
       variant={tone === "danger" ? "danger" : "secondary"}
       size="sm"
       icon={Icon as never}
-      className={cn(
-        "runtime-action-button",
-        tone === "danger" && "runtime-action-button--danger"
-      )}
     >
       {label}
     </AsyncActionButton>
@@ -803,13 +804,19 @@ function MenuAction({
   busy?: boolean;
   tone?: "neutral" | "warning" | "danger";
 }) {
+  const toneClass =
+    tone === "danger"
+      ? "text-[var(--tone-danger-dot)] hover:bg-[var(--tone-danger-bg)]"
+      : tone === "warning"
+        ? "text-[var(--tone-warning-dot)] hover:bg-[var(--tone-warning-bg)]"
+        : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]";
+
   return (
     <AsyncActionButton
       type="button"
       className={cn(
-        "runtime-menu-action",
-        tone === "warning" && "runtime-menu-action--warning",
-        tone === "danger" && "runtime-menu-action--danger"
+        "w-full justify-start gap-2 rounded-[var(--radius-panel-sm)] border-0 bg-transparent px-2 py-1.5 text-left text-[0.8125rem] font-normal",
+        toneClass,
       )}
       onClick={onClick}
       loading={busy}
@@ -824,120 +831,86 @@ function MenuAction({
   );
 }
 
-function DetailBlock({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+function ProgressBar({ percent }: { percent: number | null }) {
+  const isIndeterminate = percent == null;
   return (
-    <section className="runtime-detail-block">
-      <div className="runtime-detail-block__header">
-        <p className="runtime-panel__title">{title}</p>
-      </div>
-      <div className="runtime-detail-block__body">{children}</div>
-    </section>
-  );
-}
-
-function DetailGrid({ children }: { children: ReactNode }) {
-  return <div className="runtime-detail-grid">{children}</div>;
-}
-
-function DetailDatum({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="runtime-detail-datum">
-      <p className="runtime-detail-datum__label">{label}</p>
-      <div className="runtime-detail-datum__value">{children}</div>
+    <div
+      role="progressbar"
+      aria-valuenow={isIndeterminate ? undefined : percent ?? 0}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="relative h-[2px] w-full overflow-hidden rounded-full bg-[var(--panel-soft)]"
+    >
+      <div
+        className={cn(
+          "h-full bg-[var(--accent)] transition-[width] duration-300 ease-out",
+          isIndeterminate && "w-1/3 animate-[roster-shimmer_1.8s_cubic-bezier(0.4,0,0.2,1)_infinite]",
+        )}
+        style={isIndeterminate ? undefined : { width: `${Math.min(100, Math.max(0, percent))}%` }}
+      />
     </div>
   );
 }
 
 function RuntimeEventFeedRow({ event }: { event: RuntimeEvent }) {
   const { t } = useAppI18n();
+  const toneDot = toneToDot(getRuntimeSeverityTone(event.severity));
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, x: -4 }}
-      animate={{ opacity: 1, x: 0 }}
-      className="runtime-feed-row"
-    >
-      <span
-        className="runtime-feed-row__dot"
-        style={{
-          backgroundColor: `var(--tone-${getRuntimeSeverityTone(event.severity)}-dot)`,
-        }}
-      />
-
-      <div className="min-w-0 flex-1">
-        <div className="runtime-feed-row__top">
-          <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-            {getRuntimeLabel(event.type || t("runtime.room.eventFallback"))}
-          </p>
-          <span className="text-xs text-[var(--text-quaternary)]">
-            {event.ts ? formatRelativeTime(event.ts) : t("runtime.room.eventRecordedNow")}
-          </span>
-        </div>
-        <p className="text-sm leading-6 text-[var(--text-secondary)]">
+    <article className="grid w-full grid-cols-[auto_1fr_auto] items-start gap-3 border-b border-[color:var(--divider-hair)] py-2 last:border-b-0">
+      <StatusDot tone={toneDot} className="mt-[6px]" />
+      <div className="min-w-0">
+        <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+          {getRuntimeLabel(event.type || t("runtime.room.eventFallback"))}
+        </p>
+        <p className="m-0 mt-0.5 text-[0.75rem] leading-[1.5] text-[var(--text-secondary)]">
           {getEventPreview(event)}
         </p>
       </div>
-    </motion.div>
+      <span className="whitespace-nowrap text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+        {event.ts ? formatRelativeTime(event.ts) : t("runtime.room.eventRecordedNow")}
+      </span>
+    </article>
   );
 }
 
 function RuntimeEventLogRow({ event }: { event: RuntimeEvent }) {
   const { t } = useAppI18n();
+  const toneDot = toneToDot(getRuntimeSeverityTone(event.severity));
   return (
-    <div className="runtime-log-row">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className="runtime-inline-tone"
-            style={getSemanticStyle(getRuntimeSeverityTone(event.severity))}
-          >
-            {getRuntimeLabel(event.severity || "info")}
+    <article className="flex flex-col gap-1.5 border-b border-[color:var(--divider-hair)] py-2.5 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusDot tone={toneDot} />
+        <span className="text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
+          {getRuntimeLabel(event.severity || "info")}
+        </span>
+        <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          seq {event.seq}
+        </span>
+        {event.phase ? (
+          <span className="text-[0.6875rem] text-[var(--text-quaternary)]">
+            · {getRuntimeLabel(event.phase)}
           </span>
-          <span className="runtime-inline-id">seq {event.seq}</span>
-          {event.phase ? (
-            <span className="text-xs text-[var(--text-quaternary)]">
-              {getRuntimeLabel(event.phase)}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-2 text-sm font-medium text-[var(--text-primary)]">
-          {getRuntimeLabel(event.type || t("runtime.room.eventFallback"))}
-        </p>
-        <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
-          {getEventPreview(event)}
-        </p>
-        {event.payload && Object.keys(event.payload).length > 0 ? (
-          <SyntaxHighlight lang="json" className="runtime-code-block mt-3">
-            {JSON.stringify(event.payload, null, 2)}
-          </SyntaxHighlight>
         ) : null}
-      </div>
-
-      <div className="shrink-0 text-right">
-        <p className="text-xs text-[var(--text-secondary)]">
+        <span className="ml-auto text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
           {event.ts ? formatRelativeTime(event.ts) : t("runtime.room.eventRecordedNow")}
-        </p>
-        <p className="text-xs text-[var(--text-quaternary)]">
-          {event.ts ? formatDateTime(event.ts) : "—"}
-        </p>
+        </span>
       </div>
-    </div>
+      <p className="m-0 text-[0.8125rem] font-medium text-[var(--text-primary)]">
+        {getRuntimeLabel(event.type || t("runtime.room.eventFallback"))}
+      </p>
+      <p className="m-0 text-[0.75rem] leading-[1.5] text-[var(--text-secondary)]">
+        {getEventPreview(event)}
+      </p>
+      {event.payload && Object.keys(event.payload).length > 0 ? (
+        <SyntaxHighlight lang="json" className="mt-1 text-[0.6875rem]">
+          {JSON.stringify(event.payload, null, 2)}
+        </SyntaxHighlight>
+      ) : null}
+    </article>
   );
 }
 
-function getEventPreview(event: RuntimeEvent) {
+function getEventPreview(event: RuntimeEvent): ReactNode {
   const payload = event.payload ?? {};
 
   const directMessage = [

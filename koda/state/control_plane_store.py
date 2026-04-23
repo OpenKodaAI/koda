@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from koda.config import STATE_BACKEND
-from koda.state_primary import (
+from koda.state.primary import (
     get_primary_state_backend,
     primary_execute,
     primary_fetch_all,
@@ -75,17 +75,24 @@ def execute(query: str, params: tuple[Any, ...] = ()) -> int:
     if normalized[:6].upper() == "INSERT" and "RETURNING " not in normalized.upper():
         try:
             inserted = run_coro_sync(primary_fetch_val(f"{normalized} RETURNING id", params))
-            if inserted in (None, ""):
-                return 0
-            try:
-                return int(inserted)
-            except (TypeError, ValueError):
-                # Many control-plane tables use text primary keys such as "boot_*" or "usr_*".
-                # A non-empty RETURNING payload means the insert already succeeded and must not
-                # fall through to a second INSERT attempt.
-                return 1
         except Exception:
+            # RETURNING id isn't supported here (no `id` column, or some other
+            # driver error). Fall back to a bare INSERT *only in that case* —
+            # never after the RETURNING path already committed the row, which
+            # would produce a duplicate-key on retry.
             return int(run_coro_sync(primary_execute(normalized, params)) or 0)
+        # Callers historically expect an integer rowcount. Numeric primary
+        # keys return as ints (legacy callers relied on this); TEXT primary
+        # keys (e.g. "boot_<hex>", "usr_<hex>") return strings. In the TEXT
+        # case we still want to report "one row affected" (==1) rather than 0,
+        # since the INSERT did succeed — a 0 return would make idempotent
+        # UPSERT paths re-fire the INSERT and produce a duplicate-key error.
+        if inserted is None:
+            return 0
+        try:
+            return int(inserted)
+        except (TypeError, ValueError):
+            return 1
     return int(run_coro_sync(primary_execute(normalized, params)) or 0)
 
 

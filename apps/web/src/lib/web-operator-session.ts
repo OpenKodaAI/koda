@@ -5,6 +5,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
 import {
+  OWNER_EXISTS_HINT_COOKIE,
+  OWNER_EXISTS_HINT_MAX_AGE_SECONDS,
+  PENDING_RECOVERY_COOKIE,
+  PENDING_RECOVERY_MAX_AGE_SECONDS,
   WEB_OPERATOR_SESSION_COOKIE,
   WEB_OPERATOR_SESSION_MAX_AGE_SECONDS,
 } from "@/lib/web-operator-session-constants";
@@ -118,4 +122,32 @@ export function clearWebOperatorSessionCookie(response: NextResponse): void {
     path: "/",
     secure: SECURE_COOKIES,
   });
+}
+
+export function setOwnerExistsHintCookie(response: NextResponse, hasOwner: boolean): void {
+  response.cookies.set({
+    name: OWNER_EXISTS_HINT_COOKIE,
+    value: hasOwner ? "1" : "",
+    httpOnly: false,
+    sameSite: "lax",
+    maxAge: hasOwner ? OWNER_EXISTS_HINT_MAX_AGE_SECONDS : 0,
+    path: "/",
+    secure: SECURE_COOKIES,
+  });
+}
+
+export function setPendingRecoveryCookie(response: NextResponse, pending: boolean): void {
+  response.cookies.set({
+    name: PENDING_RECOVERY_COOKIE,
+    value: pending ? "1" : "",
+    httpOnly: true,
+    sameSite: "strict",
+    maxAge: pending ? PENDING_RECOVERY_MAX_AGE_SECONDS : 0,
+    path: "/",
+    secure: SECURE_COOKIES,
+  });
+}
+
+export function clearPendingRecoveryCookie(response: NextResponse): void {
+  setPendingRecoveryCookie(response, false);
 }

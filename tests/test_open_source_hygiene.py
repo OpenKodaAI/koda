@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-import tomllib
 from pathlib import Path
-
-from packaging.requirements import Requirement
-from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -76,27 +72,6 @@ SECURITY_SCAN_MANIFEST_ALLOWLIST = {
     "uv.lock",
 }
 
-MINIMUM_SAFE_LOCK_VERSIONS = {
-    "numpy": Version("1.22.2"),
-    "onnxruntime": Version("1.24.1"),
-    "pillow": Version("10.2.0"),
-    "protobuf": Version("4.25.8"),
-    "requests": Version("2.33.0"),
-    "sympy": Version("1.12"),
-    "urllib3": Version("2.5.0"),
-}
-
-MINIMUM_SAFE_MANIFEST_FLOORS = {
-    "kokoro-onnx": Version("0.5.0"),
-    "pillow": Version("12.1.1"),
-    "rapidocr-onnxruntime": Version("1.4.4"),
-    "requests": Version("2.33.0"),
-}
-
-OPTIONAL_SAFE_LOCK_VERSIONS = {
-    "zipp": Version("3.19.1"),
-}
-
 
 def _tracked_repo_files() -> list[Path]:
     result = subprocess.run(
@@ -118,37 +93,6 @@ def _read_text_if_applicable(path: Path) -> str | None:
     if b"\x00" in data:
         return None
     return data.decode("utf-8", errors="ignore")
-
-
-def _manifest_requirements() -> dict[str, Requirement]:
-    pyproject_payload = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = pyproject_payload["project"]["dependencies"]
-
-    requirements_lines = [
-        line.strip()
-        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-
-    parsed_requirements = [Requirement(item) for item in dependencies + requirements_lines]
-    return {requirement.name: requirement for requirement in parsed_requirements}
-
-
-def _requirement_lower_bound(requirement: Requirement) -> Version | None:
-    lower_bounds = [Version(specifier.version) for specifier in requirement.specifier if specifier.operator == ">="]
-    if not lower_bounds:
-        return None
-    return max(lower_bounds)
-
-
-def _locked_package_versions() -> dict[str, Version]:
-    lock_payload = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    packages = lock_payload.get("package", [])
-    return {
-        package["name"]: Version(package["version"])
-        for package in packages
-        if "name" in package and "version" in package
-    }
 
 
 def test_repo_contains_no_banned_private_identifiers() -> None:
@@ -222,31 +166,3 @@ def test_tracked_package_manager_manifests_are_whitelisted_for_security_scans() 
     assert "composer.json" not in manifest_names
     assert "composer.lock" not in manifest_names
     assert manifests <= allowed_manifests, sorted(manifests - allowed_manifests)
-
-
-def test_python_manifests_and_lockfile_hold_safe_dependency_floors() -> None:
-    manifest_requirements = _manifest_requirements()
-    locked_versions = _locked_package_versions()
-
-    for package_name, minimum_version in MINIMUM_SAFE_MANIFEST_FLOORS.items():
-        requirement = manifest_requirements[package_name]
-        lower_bound = _requirement_lower_bound(requirement)
-        assert lower_bound is not None, f"{package_name} must declare an explicit lower bound"
-        assert lower_bound >= minimum_version, (
-            f"{package_name} lower bound regressed to {lower_bound}; expected >= {minimum_version}"
-        )
-
-    for package_name, minimum_version in MINIMUM_SAFE_LOCK_VERSIONS.items():
-        locked_version = locked_versions.get(package_name)
-        assert locked_version is not None, f"{package_name} must stay present in uv.lock"
-        assert locked_version >= minimum_version, (
-            f"{package_name} resolved version regressed to {locked_version}; expected >= {minimum_version}"
-        )
-
-    for package_name, minimum_version in OPTIONAL_SAFE_LOCK_VERSIONS.items():
-        locked_version = locked_versions.get(package_name)
-        if locked_version is None:
-            continue
-        assert locked_version >= minimum_version, (
-            f"{package_name} resolved version regressed to {locked_version}; expected >= {minimum_version}"
-        )

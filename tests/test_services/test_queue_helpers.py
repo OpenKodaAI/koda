@@ -440,13 +440,13 @@ class TestVoicePromptInjection:
         prompt = _build_system_prompt(user_instr, audio_response=True, tts_enabled=True)
         user_pos = prompt.index("## User Instructions")
         # Use the section header which only appears in the appended VOICE_ACTIVE_PROMPT
-        voice_pos = prompt.index("## 🎙️ VOICE MODE ATIVO")
+        voice_pos = prompt.index("## 🎙️ VOICE MODE ACTIVE")
         assert voice_pos > user_pos
 
     def test_voice_prompt_constant_has_required_sections(self):
-        assert "VOICE MODE ATIVO" in VOICE_ACTIVE_PROMPT
+        assert "VOICE MODE ACTIVE" in VOICE_ACTIVE_PROMPT
         assert "<voice_rules>" in VOICE_ACTIVE_PROMPT
-        assert "Prosa corrida" in VOICE_ACTIVE_PROMPT
+        assert "Flowing, continuous prose" in VOICE_ACTIVE_PROMPT
         assert "TTS" in VOICE_ACTIVE_PROMPT
         assert "URLs" in VOICE_ACTIVE_PROMPT
         assert "<voice_example>" in VOICE_ACTIVE_PROMPT
@@ -1170,8 +1170,8 @@ class TestQueueOrdering:
             assert task_id == 2
             update.message.reply_text.assert_awaited_once()
             feedback = update.message.reply_text.await_args.args[0]
-            assert "coloquei na fila" in feedback.lower()
-            assert "tarefa atual" in feedback.lower()
+            assert "queued it" in feedback.lower()
+            assert "current task" in feedback.lower()
             assert "#2" in feedback
         finally:
             _user_tasks.pop(user_id, None)

@@ -11,8 +11,39 @@ function getHeader(
 }
 
 function getRequestOrigin(
-  request: Request | { url?: string; nextUrl?: URL },
+  request:
+    | Request
+    | {
+        url?: string;
+        nextUrl?: URL;
+        headers?: Headers | { get(name: string): string | null | undefined };
+      },
 ): string | null {
+  // Prefer the Host header: it reflects the hostname the client actually
+  // contacted. When the server is bound to 0.0.0.0 but the browser reached it
+  // as 127.0.0.1 or localhost, `request.nextUrl.origin` reports the bind
+  // address and no browser Origin will ever match it.
+  const hostHeader = getHeader(request, "host");
+  if (hostHeader) {
+    const forwardedProto = getHeader(request, "x-forwarded-proto");
+    let proto = forwardedProto ? forwardedProto.split(",")[0].trim() : "";
+    if (!proto) {
+      if ("nextUrl" in request && request.nextUrl instanceof URL) {
+        proto = request.nextUrl.protocol.replace(":", "");
+      } else if ("url" in request && typeof request.url === "string") {
+        try {
+          proto = new URL(request.url).protocol.replace(":", "");
+        } catch {
+          proto = "";
+        }
+      }
+    }
+    if (!proto) {
+      proto = "http";
+    }
+    return `${proto}://${hostHeader}`;
+  }
+
   if ("nextUrl" in request && request.nextUrl instanceof URL) {
     return request.nextUrl.origin;
   }

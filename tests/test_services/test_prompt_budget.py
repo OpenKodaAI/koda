@@ -6,7 +6,6 @@ from koda.services.prompt_budget import (
     preview_compiled_prompt,
     preview_modeled_runtime_prompt,
 )
-from koda.services.templates import build_relevant_skills_awareness_prompt
 
 
 def test_prompt_budget_keeps_hard_floor_and_drops_low_priority_segments():
@@ -73,12 +72,6 @@ def test_preview_compiled_prompt_reports_segment_order():
         "scheduled_dry_run_rules",
     ]
     assert preview["runtime_alignment"]["represents_full_runtime_prompt"] is False
-
-
-def test_relevant_skills_awareness_prompt_only_includes_matching_skills():
-    result = build_relevant_skills_awareness_prompt("Preciso de architecture review com foco em security.")
-    assert "architecture" in result.lower()
-    assert "security" in result.lower()
 
 
 def test_prompt_budget_applies_category_caps():

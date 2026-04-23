@@ -1,0 +1,24 @@
+FROM rust:1.92-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY proto/ proto/
+COPY rust/ rust/
+WORKDIR /build/rust
+RUN cargo build --release -p koda-artifact-engine
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash svcuser
+
+COPY --from=builder /build/rust/target/release/koda-artifact-engine /usr/local/bin/koda-artifact-engine
+
+USER svcuser
+
+EXPOSE 50064
+
+CMD ["koda-artifact-engine"]

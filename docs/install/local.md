@@ -10,14 +10,8 @@
 ## Quickstart
 
 ```bash
-npm install -g @openkodaai/koda
+npm install -g koda
 koda install
-```
-
-Or without a global install:
-
-```bash
-npx @openkodaai/koda@latest install
 ```
 
 If you are working from the repository itself, the source wrapper installs the same npm CLI and
@@ -29,9 +23,6 @@ cd ./koda
 ./scripts/install.sh
 ```
 
-The wrapper only automates dependency installation on apt-based Linux hosts with `sudo`. On macOS
-or other environments, install Docker and Node.js yourself and use the npm CLI path directly.
-
 The installer will:
 
 1. verify Docker and the Koda npm CLI prerequisites
@@ -40,9 +31,6 @@ The installer will:
 4. start the quickstart stack with the release compose file
 5. run the doctor checks
 6. print the dashboard setup URL plus a short-lived setup code
-
-The scoped npm package already contains the product-only release bundle, so this path does not clone the
-source repository or depend on a second download step.
 
 ## What Starts
 
@@ -69,64 +57,72 @@ Persistent volumes are managed by Docker Compose and are intended to survive con
 
 ## First Boot
 
-When the installer finishes, open the dashboard setup URL it prints:
+When the installer finishes, open the dashboard:
 
-- `http://127.0.0.1:3000/control-plane/setup`
-- `http://127.0.0.1:3000`
+- `http://127.0.0.1:3000/setup`
 
-At that point the infrastructure is already ready for use:
+The flow is deliberately minimal — two screens, no provider or GitHub or Telegram required
+up-front. Everything else is configured from the dashboard after first login.
 
-- the dashboard UI is reachable
-- Postgres is available
-- object storage is available
-- bootstrap secrets exist
-- the control plane is reachable
-- health checks are in place
+### 1. Create the owner account (`/setup`)
 
-Use the dashboard control plane to complete product configuration:
+Fill in:
 
-1. open `/control-plane/setup`
-2. paste the setup code printed by `koda install`
-3. create the local owner account
-4. sign in with that owner account
-5. configure the initial access policy and default provider
-6. optionally connect the first Telegram agent
-7. continue ongoing configuration in `/control-plane`
+- email
+- password (minimum 12 characters, 3 of 4 classes: upper / lower / digit / symbol)
+- confirm password
 
-If the setup code expires before you finish, reissue one from the terminal:
+The `username` is derived from the email local-part and can be renamed later.
 
-```bash
-koda auth issue-code
-```
+By default, `ALLOW_LOOPBACK_BOOTSTRAP=true` in development, which means no setup code is
+required when the request originates from `127.0.0.1` with no proxy hop. If loopback trust is
+disabled, the page shows an additional **setup code** field; read the value from
+`${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (the file is created on first boot with mode
+`0600` and is echoed to the control-plane log once). The file is deleted automatically after
+the owner is registered.
 
-After provider and integration setup, each bot still needs its own grants. In practice the operator flow is:
+### 2. Save your recovery codes
 
-- configure the provider or integration in the control plane
-- run `verify` and inspect the resulting `connection_status` / `checked_via`
-- open the bot editor and grant only the required tools and `resource_access_policy.integration_grants`
+After registration, the dashboard shows **ten** one-time recovery codes. Copy, download, or
+print them — they are never shown again. Tick the confirmation checkbox and continue to the
+dashboard.
 
-The quickstart now provisions `WEB_OPERATOR_SESSION_SECRET` automatically so operator sessions
-survive web restarts instead of depending on ephemeral in-memory state.
-Daily operator access should start from the printed setup code, local owner account, and HTTP-only
-browser session. `CONTROL_PLANE_API_TOKEN` remains recovery-only.
+Recovery codes let you reset the password without SMTP:
 
-The quickstart path does not require per-agent env configuration, provider credentials in `.env`, or manual Telegram runtime wiring before first boot.
+- visit `/forgot-password`
+- enter your email + any unused recovery code + a new password
+- all existing sessions are revoked, and **every remaining recovery code is invalidated** (you
+  must regenerate a new batch from Settings › Security)
+
+### 3. Optional configuration in the dashboard
+
+A `SetupChecklistCard` on the dashboard home points to three opt-in steps:
+
+- connect an AI provider
+- create your first agent
+- connect Telegram (or any other channel)
+
+Each item opens a Drawer with its dedicated wizard. None of them block normal operation, and
+the card dismisses itself once all three are complete.
+
+`CONTROL_PLANE_API_TOKEN` stays blank by default and is only used as a break-glass CLI
+credential. It is no longer part of the default setup flow.
+
+The quickstart path does not require per-agent env configuration, provider credentials in
+`.env`, or manual Telegram runtime wiring before first boot.
 
 ## Doctor
 
 Run the built-in diagnostic command at any time:
 
 ```bash
-koda doctor
+python3 scripts/doctor.py \
+  --env-file .env \
+  --base-url http://127.0.0.1:8090 \
+  --dashboard-url http://127.0.0.1:3000
 ```
 
-Or, without a global install:
-
-```bash
-npx @openkodaai/koda@latest doctor
-```
-
-The packaged doctor validates bootstrap configuration, storage connectivity, secrets, dashboard reachability, and control-plane reachability for the installed product directory.
+The doctor validates bootstrap configuration, storage connectivity, secrets, dashboard reachability, and control-plane reachability.
 
 ## Manual Startup
 
@@ -138,12 +134,10 @@ docker compose up -d --build
 python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
 ```
 
-The Python doctor path above is only for source-based/manual repository bootstraps.
-
 ## Troubleshooting
 
 - If the dashboard is not reachable, verify that `docker compose ps` shows `web` healthy.
-- If `http://127.0.0.1:3000/control-plane/setup` is not reachable, verify that `docker compose ps` shows `web` healthy.
+- If `http://127.0.0.1:3000/control-plane` is not reachable, verify that `docker compose ps` shows `web` healthy.
 - If `http://127.0.0.1:8090/health` is not reachable, verify that `docker compose ps` shows `app` healthy.
 - If object storage checks fail, verify that `seaweedfs` and `seaweedfs-init` both completed successfully.
 - If bootstrap still fails, rerun the doctor command and inspect the reported failing check name.

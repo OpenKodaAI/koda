@@ -1,6 +1,5 @@
 "use client";
 
-import { BookCheck, Layers3 } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { MemoryClusterReviewItem, MemoryReviewItem } from "@/lib/types";
 import { MemoryCurationRow } from "./memory-curation-row";
@@ -8,12 +7,11 @@ import { MemoryCurationRow } from "./memory-curation-row";
 type Item = MemoryReviewItem | MemoryClusterReviewItem;
 
 export function MemoryCurationList({
-  kind,
   items,
   selectedId,
   selectedBotId,
   checkedKeys,
-  showBot,
+  showAgent,
   title,
   subtitle,
   loading = false,
@@ -26,7 +24,7 @@ export function MemoryCurationList({
   selectedId: string | null;
   selectedBotId: string | null;
   checkedKeys: Set<string>;
-  showBot: boolean;
+  showAgent: boolean;
   title: string;
   subtitle: string;
   loading?: boolean;
@@ -57,16 +55,8 @@ export function MemoryCurationList({
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex min-h-[24rem] flex-col items-center justify-center px-6 text-center">
-            {kind === "memory" ? (
-              <BookCheck className="h-9 w-9 text-[var(--text-tertiary)]" />
-            ) : (
-              <Layers3 className="h-9 w-9 text-[var(--text-tertiary)]" />
-            )}
-            <p className="mt-4 text-sm font-medium text-[var(--text-primary)]">{emptyLabel}</p>
-            <p className="mt-2 max-w-xs text-sm leading-6 text-[var(--text-secondary)]">
-              {t("memory.curation.adjustFilters")}
-            </p>
+          <div className="flex min-h-[24rem] items-center justify-center px-6">
+            <p className="text-[12px] text-[var(--text-tertiary)]">{emptyLabel}</p>
           </div>
         ) : (
           <div className="divide-y divide-[var(--border-subtle)]">
@@ -83,7 +73,7 @@ export function MemoryCurationList({
                   item={item}
                   selected={selectedId === itemId && selectedBotId === item.bot_id}
                   checked={checkedKeys.has(key)}
-                  showBot={showBot}
+                  showAgent={showAgent}
                   onSelect={() => onSelect(item)}
                   onCheckChange={(checked) => onCheckChange(item, checked)}
                 />

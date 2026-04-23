@@ -9,31 +9,31 @@ import { useAsyncAction } from "@/hooks/use-async-action";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { requestJson } from "@/lib/http-client";
 import { parseHealthPort, prettyJson } from "@/lib/control-plane-editor";
-import type { ControlPlaneBotSummary } from "@/lib/control-plane";
+import type { ControlPlaneAgentSummary } from "@/lib/control-plane";
 
 function slug(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-function formatBotCatalogCount(
+function formatAgentCatalogCount(
   tl: (value: string, options?: Record<string, unknown>) => string,
   count: number,
 ) {
   return tl(
-    count === 1 ? "{{count}} bot no catálogo" : "{{count}} bots no catálogo",
+    count === 1 ? "{{count}} agent no catálogo" : "{{count}} agents no catálogo",
     { count },
   );
 }
 
 export function ControlPlaneHome({
-  bots,
+  agents,
   globalDefaults,
   coreTools,
   coreProviders,
   corePolicies,
   coreCapabilities,
 }: {
-  bots: ControlPlaneBotSummary[];
+  agents: ControlPlaneAgentSummary[];
   globalDefaults: {
     sections: Record<string, Record<string, unknown>>;
     version: number;
@@ -48,7 +48,7 @@ export function ControlPlaneHome({
 }) {
   const router = useRouter();
   const { tl } = useAppI18n();
-  const [botId, setBotId] = useState("");
+  const [agentId, setBotId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [color, setColor] = useState("#6E97D9");
   const [colorRgb, setColorRgb] = useState("110, 151, 217");
@@ -57,10 +57,10 @@ export function ControlPlaneHome({
   const [message, setMessage] = useState<string | null>(null);
   const { runAction, isPending, getStatus } = useAsyncAction();
 
-  const nextStorageNamespace = useMemo(() => slug(botId), [botId]);
+  const nextStorageNamespace = useMemo(() => slug(agentId), [agentId]);
 
-  async function handleCreateBot() {
-    const normalizedId = botId.trim().toUpperCase();
+  async function handleCreateAgent() {
+    const normalizedId = agentId.trim().toUpperCase();
     if (!normalizedId) return;
 
     setMessage(null);
@@ -85,8 +85,8 @@ export function ControlPlaneHome({
           },
         }),
       });
-      setMessage(tl("Bot {{id}} criado com sucesso.", { id: payload.id }));
-      router.push(`/control-plane/bots/${payload.id}`);
+      setMessage(tl("Agent {{id}} criado com sucesso.", { id: payload.id }));
+      router.push(`/control-plane/agents/${payload.id}`);
       router.refresh();
     }, {
       successMessage: tl("Bot criado com sucesso."),
@@ -112,16 +112,16 @@ export function ControlPlaneHome({
     });
   }
 
-  async function handleBotAction(botIdValue: string, action: "publish" | "activate" | "pause") {
+  async function handleAgentAction(agentIdValue: string, action: "publish" | "activate" | "pause") {
     setMessage(null);
-    await runAction(`${action}:${botIdValue}`, async () => {
-      await requestJson(`/api/control-plane/agents/${botIdValue}/${action}`, {
+    await runAction(`${action}:${agentIdValue}`, async () => {
+      await requestJson(`/api/control-plane/agents/${agentIdValue}/${action}`, {
         method: "POST",
       });
-      setMessage(tl("Ação {{action}} aplicada em {{botId}}.", { action, botId: botIdValue }));
+      setMessage(tl("Ação {{action}} aplicada em {{agentId}}.", { action, agentId: agentIdValue }));
       router.refresh();
     }, {
-      successMessage: tl("Ação {{action}} aplicada em {{botId}}.", { action, botId: botIdValue }),
+      successMessage: tl("Ação {{action}} aplicada em {{agentId}}.", { action, agentId: agentIdValue }),
       errorMessage: tl("Falha ao executar {{action}}.", { action }),
       onError: async (error) => setMessage(error.message),
     });
@@ -152,84 +152,84 @@ export function ControlPlaneHome({
             <div>
               <p className="eyebrow">{tl("Bots")}</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
-                {formatBotCatalogCount(tl, bots.length)}
+                {formatAgentCatalogCount(tl, agents.length)}
               </h2>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              {bots.map((bot) => (
+              {agents.map((agent) => (
                 <article
-                  key={bot.id}
+                  key={agent.id}
                   className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-2">
                       <Link
-                        href={`/control-plane/bots/${bot.id}`}
+                        href={`/control-plane/agents/${agent.id}`}
                         className="inline-flex items-center gap-2 transition-opacity hover:opacity-90"
                       >
                         <span
                           className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: bot.appearance?.color || "#7A8799" }}
+                          style={{ backgroundColor: agent.appearance?.color || "#7A8799" }}
                         />
                         <h3 className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {bot.display_name}
+                          {agent.display_name}
                         </h3>
                       </Link>
                       <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-                        {bot.id}
+                        {agent.id}
                       </p>
                     </div>
                     <span className="chip">
-                      {bot.status === "active"
+                      {agent.status === "active"
                         ? tl("Ativo")
-                        : bot.status === "paused"
+                        : agent.status === "paused"
                           ? tl("Pausado")
-                          : bot.status}
+                          : agent.status}
                     </span>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)]">
-                    <span>{tl("Applied")} v{bot.applied_version ?? "—"}</span>
-                    <span>{tl("Desired")} v{bot.desired_version ?? "—"}</span>
-                    <span>{bot.storage_namespace}</span>
-                    <span>{String(bot.runtime_endpoint?.health_port ?? "—")}</span>
+                    <span>{tl("Applied")} v{agent.applied_version ?? "—"}</span>
+                    <span>{tl("Desired")} v{agent.desired_version ?? "—"}</span>
+                    <span>{agent.storage_namespace}</span>
+                    <span>{String(agent.runtime_endpoint?.health_port ?? "—")}</span>
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Link
-                      href={`/control-plane/bots/${bot.id}`}
+                      href={`/control-plane/agents/${agent.id}`}
                       className="button-shell button-shell--primary button-shell--sm"
                     >
                       {tl("Abrir editor")}
                     </Link>
                     <AsyncActionButton
                       type="button"
-                      onClick={() => void handleBotAction(bot.id, "publish")}
+                      onClick={() => void handleAgentAction(agent.id, "publish")}
                       variant="secondary"
                       size="sm"
-                      loading={isPending(`publish:${bot.id}`)}
-                      status={getStatus(`publish:${bot.id}`)}
+                      loading={isPending(`publish:${agent.id}`)}
+                      status={getStatus(`publish:${agent.id}`)}
                       loadingLabel={tl("Publicando")}
                     >
                       {tl("Publicar")}
                     </AsyncActionButton>
                     <AsyncActionButton
                       type="button"
-                      onClick={() => void handleBotAction(bot.id, bot.status === "active" ? "pause" : "activate")}
+                      onClick={() => void handleAgentAction(agent.id, agent.status === "active" ? "pause" : "activate")}
                       variant="secondary"
                       size="sm"
                       loading={
-                        isPending(`activate:${bot.id}`) || isPending(`pause:${bot.id}`)
+                        isPending(`activate:${agent.id}`) || isPending(`pause:${agent.id}`)
                       }
                       status={
-                        getStatus(`activate:${bot.id}`) !== "idle"
-                          ? getStatus(`activate:${bot.id}`)
-                          : getStatus(`pause:${bot.id}`)
+                        getStatus(`activate:${agent.id}`) !== "idle"
+                          ? getStatus(`activate:${agent.id}`)
+                          : getStatus(`pause:${agent.id}`)
                       }
-                      loadingLabel={bot.status === "active" ? tl("Pausando") : tl("Ativando")}
+                      loadingLabel={agent.status === "active" ? tl("Pausando") : tl("Ativando")}
                     >
-                      {bot.status === "active" ? tl("Pausar") : tl("Ativar")}
+                      {agent.status === "active" ? tl("Pausar") : tl("Ativar")}
                     </AsyncActionButton>
                   </div>
                 </article>
@@ -252,10 +252,10 @@ export function ControlPlaneHome({
                 {tl("ID")}
               </span>
               <input
-                value={botId}
+                value={agentId}
                 onChange={(event) => setBotId(event.target.value.toUpperCase())}
                 placeholder={tl("EXEMPLO_BOT")}
-                className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
+                className="field-shell text-[var(--text-primary)]"
               />
             </label>
 
@@ -267,7 +267,7 @@ export function ControlPlaneHome({
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder={tl("Exemplo Bot")}
-                className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
+                className="field-shell text-[var(--text-primary)]"
               />
             </label>
 
@@ -279,7 +279,7 @@ export function ControlPlaneHome({
                 <input
                   value={color}
                   onChange={(event) => setColor(event.target.value)}
-                  className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                 />
               </label>
               <label className="block sm:col-span-2">
@@ -289,7 +289,7 @@ export function ControlPlaneHome({
                 <input
                   value={colorRgb}
                   onChange={(event) => setColorRgb(event.target.value)}
-                  className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                 />
               </label>
             </div>
@@ -302,7 +302,7 @@ export function ControlPlaneHome({
                 <input
                   value={nextStorageNamespace}
                   readOnly
-                  className="field-shell px-4 py-3 text-sm text-[var(--text-secondary)]"
+                  className="field-shell text-[var(--text-secondary)]"
                 />
               </label>
               <label className="block">
@@ -312,14 +312,14 @@ export function ControlPlaneHome({
                 <input
                   value={healthPort}
                   onChange={(event) => setHealthPort(event.target.value)}
-                  className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
+                  className="field-shell text-[var(--text-primary)]"
                 />
               </label>
             </div>
 
             <AsyncActionButton
               type="button"
-              onClick={() => void handleCreateBot()}
+              onClick={() => void handleCreateAgent()}
               loading={isPending("create")}
               status={getStatus("create")}
               loadingLabel={tl("Criando bot")}
@@ -343,7 +343,7 @@ export function ControlPlaneHome({
           <textarea
             readOnly
             value={prettyJson(coreTools)}
-            className="field-shell mt-4 min-h-[260px] w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
           />
         </div>
 
@@ -355,7 +355,7 @@ export function ControlPlaneHome({
           <textarea
             readOnly
             value={prettyJson(coreProviders)}
-            className="field-shell mt-4 min-h-[260px] w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
           />
         </div>
 
@@ -367,7 +367,7 @@ export function ControlPlaneHome({
           <textarea
             readOnly
             value={prettyJson({ policies: corePolicies, capabilities: coreCapabilities })}
-            className="field-shell mt-4 min-h-[260px] w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
           />
         </div>
       </section>

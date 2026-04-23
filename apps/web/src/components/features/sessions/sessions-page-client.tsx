@@ -11,17 +11,18 @@ import {
 } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAppTour } from "@/hooks/use-app-tour";
-import { useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
+import { useContentStable } from "@/hooks/use-content-stable";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
-import { SessionChatComposer } from "@/components/sessions/session-chat-composer";
-import { SessionContextPanel } from "@/components/sessions/session-context-panel";
-import { SessionConversationRail } from "@/components/sessions/session-conversation-rail";
-import {
-  SessionThreadView,
-  type PendingSessionMessage,
-} from "@/components/sessions/session-thread-view";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
+import { ChatComposer } from "@/components/sessions/chat/chat-composer";
+import { ChatHeader } from "@/components/sessions/chat/chat-header";
+import { ChatThread, type PendingChatMessage } from "@/components/sessions/chat/chat-thread";
+import { SessionContextDrawer } from "@/components/sessions/context/session-context-drawer";
+import { SessionRail } from "@/components/sessions/rail/session-rail";
+import { useSessionStream } from "@/hooks/use-session-stream";
+import type { SessionStreamEvent } from "@/lib/contracts/sessions";
 import {
   fetchControlPlaneDashboardJson,
   fetchControlPlaneDashboardJsonAllowError,
@@ -36,11 +37,10 @@ import type {
   SessionSendResponse,
   SessionSummary,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, truncateText } from "@/lib/utils";
 
 const SESSION_FETCH_LIMIT = 200;
 const SESSION_THREAD_PAGE_SIZE = 24;
-const MIN_VISIBLE_FRAGMENT_EXECUTIONS = 3;
 const NEW_SESSION_PLACEHOLDER_ID = "__new_session__";
 
 function normalizeSelectedBotId(
@@ -48,7 +48,7 @@ function normalizeSelectedBotId(
   availableBotIds: string[],
 ) {
   if (!candidate) return undefined;
-  const match = availableBotIds.find((botId) => botId.toLowerCase() === candidate.toLowerCase());
+  const match = availableBotIds.find((agentId) => agentId.toLowerCase() === candidate.toLowerCase());
   return match ?? undefined;
 }
 
@@ -73,27 +73,24 @@ function mergeSessionHistoryPages(
   return messages;
 }
 
-function shouldSurfaceSessionInRail(session: SessionSummary) {
-  if (session.query_count > 0) return true;
-  if (session.running_count > 0) return true;
-  if (session.failed_count > 0) return true;
-  if (session.execution_count >= MIN_VISIBLE_FRAGMENT_EXECUTIONS) return true;
-  if (session.latest_response_preview?.trim()) return true;
-  if (session.name?.trim()) return true;
-  return false;
+function resolveSessionTitle(summary: SessionSummary | null | undefined): string {
+  if (!summary) return "";
+  if (summary.name?.trim()) return summary.name.trim();
+  if (summary.latest_query_preview?.trim()) return truncateText(summary.latest_query_preview.trim(), 52);
+  if (summary.latest_message_preview?.trim()) return truncateText(summary.latest_message_preview.trim(), 52);
+  return `Conversation ${summary.session_id.slice(0, 8)}`;
 }
 
 function SessionsPageContent() {
   const { t } = useAppI18n();
   const { currentStep, status } = useAppTour();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isDesktop = useMediaQuery("(min-width: 1080px)");
-  const showDesktopContextPanel = useMediaQuery("(min-width: 1380px)");
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
-  const queryBotId = searchParams.get("bot");
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
+  const queryBotId = searchParams.get("agent");
 
   const [activeBotId, setActiveBotId] = useState<string | undefined>(() =>
     normalizeSelectedBotId(queryBotId, availableBotIds)
@@ -107,16 +104,16 @@ function SessionsPageContent() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [mobileContextOpen, setMobileContextOpen] = useState(false);
-  const [pendingMessages, setPendingMessages] = useState<PendingSessionMessage[]>([]);
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  const [threadScrolled, setThreadScrolled] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
   const [olderDetailPages, setOlderDetailPages] = useState<SessionDetail[]>([]);
   const [loadingOlderDetailPages, setLoadingOlderDetailPages] = useState(false);
-  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [pendingRequest, setPendingRequest] = useState<{
     requestId: string;
     text: string;
     sessionId: string;
-    botId: string;
+    agentId: string;
     startedAt: number;
   } | null>(null);
 
@@ -142,14 +139,11 @@ function SessionsPageContent() {
     if (isDesktop) {
       setMobileRailOpen(false);
     }
-    if (showDesktopContextPanel) {
-      setMobileContextOpen(false);
-    }
-  }, [isDesktop, showDesktopContextPanel]);
+  }, [isDesktop]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.innerWidth >= 1024) return;
+    if (window.innerWidth >= 768) return;
     if (status !== "running") return;
 
     const isRailStep = currentStep?.id === "tour.sessions.rail";
@@ -163,9 +157,9 @@ function SessionsPageContent() {
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString());
     if (activeBotId) {
-      params.set("bot", activeBotId);
+      params.set("agent", activeBotId);
     } else {
-      params.delete("bot");
+      params.delete("agent");
     }
     if (search.trim()) {
       params.set("search", search.trim());
@@ -196,6 +190,11 @@ function SessionsPageContent() {
     queryKey: sessionsQueryKey,
     enabled: availableBotIds.length > 0,
     refetchInterval: 15_000,
+    notifyOnChangeProps: ["data", "error"],
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     queryFn: async ({ signal }) => {
       const response = await fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
         "/sessions",
@@ -215,32 +214,9 @@ function SessionsPageContent() {
     },
   });
 
-  const sessions = useMemo(() => sessionsQuery.data?.items ?? [], [sessionsQuery.data]);
-  const sessionsUnavailable = sessionsQuery.data?.unavailable ?? false;
-  const visibleSessions = useMemo(() => {
-    if (search.trim()) {
-      return sessions;
-    }
-
-    const meaningful = sessions.filter(shouldSurfaceSessionInRail);
-
-    if (selectedSessionId) {
-      const selected = sessions.find((session) => session.session_id === selectedSessionId);
-      const remainder = meaningful.filter(
-        (session) => session.session_id !== selectedSessionId,
-      );
-
-      if (selected && !shouldSurfaceSessionInRail(selected)) {
-        return [selected, ...remainder.slice(0, 2)];
-      }
-    }
-
-    if (meaningful.length > 0) {
-      return meaningful.slice(0, 3);
-    }
-
-    return sessions.slice(0, Math.min(3, sessions.length));
-  }, [search, selectedSessionId, sessions]);
+  const stableSessionsPayload = useContentStable(sessionsQuery.data);
+  const sessions = useMemo(() => stableSessionsPayload?.items ?? [], [stableSessionsPayload]);
+  const sessionsUnavailable = stableSessionsPayload?.unavailable ?? false;
   const selectedSessionSummary = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
     [selectedSessionId, sessions]
@@ -264,11 +240,51 @@ function SessionsPageContent() {
     [detailQueryBaseKey],
   );
 
+  const handleSessionStreamEvent = useCallback(
+    (event: SessionStreamEvent) => {
+      const invalidating = new Set([
+        "task_started",
+        "task_progress",
+        "task_complete",
+        "task_failed",
+        "tool_call_end",
+        "artifact_ready",
+        "approval_required",
+        "approval_resolved",
+        "session_completed",
+      ]);
+      if (!invalidating.has(event.type)) return;
+      void queryClient.invalidateQueries({ queryKey: detailQueryBaseKey });
+      void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+    },
+    [queryClient, detailQueryBaseKey, sessionsQueryKey],
+  );
+
+  const streamSessionId =
+    selectedSessionId && selectedSessionId !== NEW_SESSION_PLACEHOLDER_ID
+      ? selectedSessionId
+      : null;
+  const { connected: streamConnected } = useSessionStream({
+    agentId: detailBotId ?? null,
+    sessionId: streamSessionId,
+    enabled: Boolean(detailBotId && streamSessionId),
+    onEvent: handleSessionStreamEvent,
+  });
+
   const detailQuery = useControlPlaneQuery<SessionDetail>({
     tier: "realtime",
     queryKey: detailQueryKey,
     enabled: Boolean(detailBotId && selectedSessionId),
-    refetchInterval: pendingRequest ? 2_000 : 15_000,
+    refetchInterval: streamConnected
+      ? false
+      : pendingRequest
+        ? 2_000
+        : 15_000,
+    notifyOnChangeProps: ["data", "error"],
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     queryFn: async ({ signal }) => {
       if (!detailBotId || !selectedSessionId) {
         throw new Error(t("sessions.noSelection"));
@@ -286,8 +302,9 @@ function SessionsPageContent() {
     },
   });
 
+  const stableDetailPayload = useContentStable(detailQuery.data);
   const activeDetail =
-    detailQuery.data?.summary.session_id === selectedSessionId ? detailQuery.data : null;
+    stableDetailPayload?.summary.session_id === selectedSessionId ? stableDetailPayload : null;
   const loadedHistoryMessages = useMemo(
     () => mergeSessionHistoryPages(activeDetail, olderDetailPages),
     [activeDetail, olderDetailPages],
@@ -303,19 +320,6 @@ function SessionsPageContent() {
     setOlderDetailPages([]);
     setLoadingOlderDetailPages(false);
   }, [detailBotId, selectedSessionId]);
-
-  useEffect(() => {
-    if (!selectedSessionId) {
-      setLoadingSessionId(null);
-      return;
-    }
-
-    if (activeDetail?.summary.session_id === selectedSessionId || detailQuery.error) {
-      setLoadingSessionId((current) =>
-        current === selectedSessionId ? null : current,
-      );
-    }
-  }, [activeDetail?.summary.session_id, detailQuery.error, selectedSessionId]);
 
   useEffect(() => {
     if (!pendingRequest || !activeDetail) return;
@@ -338,29 +342,10 @@ function SessionsPageContent() {
   useEffect(() => {
     if (sessionsQuery.isLoading) return;
     if (isNewChatMode) return;
-    if (!selectedSessionId) {
-      if (isDesktop && visibleSessions.length > 0) {
-        setSelectedSessionId(visibleSessions[0]?.session_id ?? null);
-      }
-      return;
+    if (!selectedSessionId && sessions.length > 0 && isDesktop) {
+      setSelectedSessionId(sessions[0].session_id);
     }
-    if (visibleSessions.some((session) => session.session_id === selectedSessionId)) {
-      return;
-    }
-    if (pendingRequest?.sessionId === selectedSessionId) {
-      return;
-    }
-    if (isDesktop && visibleSessions.length > 0) {
-      setSelectedSessionId(visibleSessions[0]?.session_id ?? null);
-    }
-  }, [
-    isDesktop,
-    isNewChatMode,
-    pendingRequest?.sessionId,
-    selectedSessionId,
-    visibleSessions,
-    sessionsQuery.isLoading,
-  ]);
+  }, [isDesktop, isNewChatMode, selectedSessionId, sessions, sessionsQuery.isLoading]);
 
   const visiblePendingMessages = useMemo(() => {
     const targetSessionId = selectedSessionId ?? NEW_SESSION_PLACEHOLDER_ID;
@@ -411,28 +396,24 @@ function SessionsPageContent() {
     t,
   ]);
 
-  const handleBotChange = useCallback(
-    (botId: string | undefined) => {
+  const handleAgentChange = useCallback(
+    (agentId: string | undefined) => {
       const hasSelectedSession = Boolean(selectedSessionId);
       const canPreserveSelection =
         hasSelectedSession &&
-        (!botId ||
+        (!agentId ||
           normalizeSelectedBotId(selectedSummary?.bot_id, availableBotIds) ===
-            normalizeSelectedBotId(botId, availableBotIds));
+            normalizeSelectedBotId(agentId, availableBotIds));
 
-      setActiveBotId(normalizeSelectedBotId(botId, availableBotIds));
-      setMobileContextOpen(false);
+      setActiveBotId(normalizeSelectedBotId(agentId, availableBotIds));
       setComposerError(null);
+      setContextDrawerOpen(false);
 
-      if (!hasSelectedSession) {
-        return;
-      }
+      if (!hasSelectedSession) return;
 
       setIsNewChatMode(false);
 
-      if (canPreserveSelection) {
-        return;
-      }
+      if (canPreserveSelection) return;
 
       setSelectedSessionId(null);
       resetThreadState();
@@ -442,9 +423,6 @@ function SessionsPageContent() {
 
   const handleSelectSession = useCallback(
     (session: SessionSummary) => {
-      if (session.session_id !== selectedSessionId) {
-        setLoadingSessionId(session.session_id);
-      }
       setActiveBotId(
         normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id
       );
@@ -459,7 +437,7 @@ function SessionsPageContent() {
         setMobileRailOpen(false);
       }
     },
-    [availableBotIds, isDesktop, selectedSessionId]
+    [availableBotIds, isDesktop]
   );
 
   const handleNewChat = useCallback(() => {
@@ -467,10 +445,9 @@ function SessionsPageContent() {
       const candidate = selectedSummary?.bot_id ?? current;
       return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
     });
-    setLoadingSessionId(null);
     setSelectedSessionId(null);
     setIsNewChatMode(true);
-    setMobileContextOpen(false);
+    setContextDrawerOpen(false);
     resetThreadState();
     if (!isDesktop) {
       setMobileRailOpen(false);
@@ -478,18 +455,15 @@ function SessionsPageContent() {
   }, [availableBotIds, isDesktop, resetThreadState, selectedSummary?.bot_id]);
 
   const sendMessage = useCallback(
-    async (
-      text: string,
-      options?: {
-        requestId?: string;
-        sessionId?: string | null;
-      }
-    ) => {
+    async (text: string, options?: { requestId?: string; sessionId?: string | null }) => {
       const trimmedText = text.trim();
       const sendBotId = effectiveBotId;
       if (!trimmedText || !sendBotId || composerSubmitting) return;
 
-      const requestId = options?.requestId ?? globalThis.crypto?.randomUUID?.() ?? `session-send-${Date.now()}`;
+      const requestId =
+        options?.requestId ??
+        globalThis.crypto?.randomUUID?.() ??
+        `session-send-${Date.now()}`;
       const draftSessionId = options?.sessionId ?? selectedSessionId ?? null;
       const optimisticSessionId = draftSessionId ?? NEW_SESSION_PLACEHOLDER_ID;
       const timestamp = new Date().toISOString();
@@ -555,7 +529,7 @@ function SessionsPageContent() {
           requestId,
           text: trimmedText,
           sessionId: resolvedSessionId,
-          botId: sendBotId,
+          agentId: sendBotId,
           startedAt: Date.now(),
         });
         setSelectedSessionId(resolvedSessionId);
@@ -605,53 +579,40 @@ function SessionsPageContent() {
     [pendingMessages, sendMessage]
   );
 
-  const sessionTransitioning = Boolean(
-    selectedSessionId &&
-      loadingSessionId === selectedSessionId &&
-      activeDetail?.summary.session_id !== selectedSessionId
-  );
-
   const mobileRailPresence = useAnimatedPresence(!isDesktop && mobileRailOpen, null, {
     duration: 220,
   });
-  const mobileContextPresence = useAnimatedPresence(
-    !showDesktopContextPanel && mobileContextOpen,
-    null,
-    { duration: 220 }
-  );
-  useBodyScrollLock(mobileRailPresence.shouldRender || mobileContextPresence.shouldRender);
+  useBodyScrollLock(mobileRailPresence.shouldRender);
   useEscapeToClose(mobileRailPresence.shouldRender, () => setMobileRailOpen(false));
-  useEscapeToClose(mobileContextPresence.shouldRender, () => setMobileContextOpen(false));
 
-  const composerDisabled = !effectiveBotId || sessionTransitioning;
-  const composerPlaceholder = sessionTransitioning
-    ? t("sessions.thread.loadingConversation", {
-        defaultValue: "Loading conversation...",
-      })
-    : composerDisabled
-    ? t("sessions.composer.selectBotToStart", {
-        defaultValue: "Select a specific bot here to start a chat.",
-      })
-    : t("sessions.composer.enabledPlaceholder");
-  const composerHelper = sessionTransitioning
-    ? t("sessions.thread.loadingConversation", {
-        defaultValue: "Loading conversation...",
-      })
-    : composerDisabled
-    ? t("sessions.thread.noBotDescription", {
-        defaultValue: "Choose a specific bot in the composer to start a new chat.",
-      })
-    : pendingRequest
-      ? t("sessions.thread.waitingForReply", {
-          defaultValue: "Waiting for the bot reply...",
-        })
-      : selectedSessionId
-        ? t("sessions.thread.continueConversation", {
-            defaultValue: "Continue the current conversation.",
-          })
-        : t("sessions.thread.startConversationDescription", {
-            defaultValue: "Start a new conversation with the selected bot.",
-          });
+  const composerDisabled = !effectiveBotId;
+  const showThinking = Boolean(
+    pendingRequest ||
+      (selectedSummary?.running_count && selectedSummary.running_count > 0) ||
+      (selectedSummary?.latest_status === "running" || selectedSummary?.latest_status === "retrying"),
+  );
+
+  const resolvedTitle = selectedSummary
+    ? resolveSessionTitle(selectedSummary)
+    : isNewChatMode
+      ? t("chat.thread.empty", { defaultValue: "Start a conversation" })
+      : t("chat.thread.empty", { defaultValue: "Start a conversation" });
+
+  const effectiveAgentLabel = useMemo(() => {
+    if (!effectiveBotId) return null;
+    const agent = agents.find((entry) => entry.id === effectiveBotId);
+    return agent?.label ?? effectiveBotId;
+  }, [agents, effectiveBotId]);
+
+  const modelLabel = useMemo(() => {
+    if (!activeDetail) return null;
+    for (let index = activeDetail.messages.length - 1; index >= 0; index -= 1) {
+      const message = activeDetail.messages[index];
+      const model = message.model?.trim() || message.linked_execution?.model?.trim() || null;
+      if (model) return model;
+    }
+    return null;
+  }, [activeDetail]);
 
   const tourVariant =
     sessionsQuery.error?.message || sessionsUnavailable
@@ -664,150 +625,127 @@ function SessionsPageContent() {
 
   return (
     <div
-      className="animate-in flex h-full min-h-0 overflow-hidden bg-[var(--surface-canvas)] text-[var(--text-primary)]"
+      className="animate-in flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]"
       {...tourRoute("sessions", tourVariant)}
     >
-      <div className="hidden h-full min-h-0 w-[22rem] shrink-0 lg:block xl:w-[23rem]" {...tourAnchor("sessions.conversation-rail")}>
-        <SessionConversationRail
-          search={search}
-          onSearchChange={setSearch}
-          sessions={visibleSessions}
+      <div className="hidden md:flex" {...tourAnchor("sessions.conversation-rail")}>
+        <SessionRail
+          sessions={sessions}
           selectedSessionId={selectedSessionId}
-          loading={sessionsQuery.isLoading}
-          refreshing={sessionsQuery.isFetching && !sessionsQuery.isLoading}
-          loadingSessionId={loadingSessionId}
-          error={sessionsQuery.error?.message}
-          unavailable={sessionsUnavailable}
-          onRefresh={() => {
-            void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
-          }}
           onSelectSession={handleSelectSession}
           onNewChat={handleNewChat}
+          search={search}
+          onSearchChange={setSearch}
+          loading={sessionsQuery.isLoading}
+          error={sessionsQuery.error?.message ?? null}
+          unavailable={sessionsUnavailable}
         />
       </div>
 
-      <div
-        className={cn(
-          "grid min-h-0 flex-1",
-          showDesktopContextPanel
-            ? "grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_23.5rem]"
-            : "grid-cols-1"
-        )}
-      >
-        <div className="min-h-0 min-w-0" {...tourAnchor("sessions.thread")}>
-          <SessionThreadView
-            botId={effectiveBotId}
-            hasSelectedSession={Boolean(selectedSessionId)}
-            detail={activeDetail}
-            summary={selectedSummary}
-            historyMessages={loadedHistoryMessages}
-            pendingMessages={visiblePendingMessages}
-            loading={Boolean(selectedSessionId && detailQuery.isLoading && !activeDetail)}
-            transitioning={sessionTransitioning}
-            loadingOlderHistory={loadingOlderDetailPages}
-            hasOlderHistory={hasOlderMessages}
-            onLoadOlderHistory={loadOlderMessages}
-            error={detailQuery.error?.message ?? null}
-            showRailToggle={!isDesktop}
-            onOpenRail={() => setMobileRailOpen(true)}
-            showContextToggle={Boolean(selectedSummary)}
-            onOpenContext={() => setMobileContextOpen(true)}
-            onRetryPendingMessage={handleRetryPendingMessage}
-            footer={
-              <div {...tourAnchor("sessions.composer")}>
-                <SessionChatComposer
-                  botId={effectiveBotId}
-                  onBotChange={handleBotChange}
-                  lockedBot={Boolean(selectedSessionId && effectiveBotId)}
-                  value={draft}
-                  onChange={(value) => {
-                    setDraft(value);
-                    if (composerError) {
-                      setComposerError(null);
-                    }
-                  }}
-                  onSubmit={() => void sendMessage(draft)}
-                  submitting={composerSubmitting}
-                  disabled={composerDisabled}
-                  helperText={composerHelper}
-                  error={composerError}
-                  placeholder={composerPlaceholder}
-                />
-              </div>
-            }
-          />
-        </div>
-
-        {showDesktopContextPanel ? (
-          <div {...tourAnchor("sessions.context-panel")}>
-            <SessionContextPanel detail={activeDetail} summary={selectedSummary} />
-          </div>
-        ) : null}
+      <div className="flex min-h-0 flex-1 flex-col" {...tourAnchor("sessions.thread")}>
+        <ChatHeader
+          title={resolvedTitle}
+          agentId={effectiveBotId ?? null}
+          sessionId={streamSessionId}
+          onOpenRail={() => setMobileRailOpen(true)}
+          onOpenContext={Boolean(selectedSummary) ? () => setContextDrawerOpen(true) : undefined}
+          showRailToggle
+          showContextToggle={Boolean(selectedSummary)}
+          scrolled={threadScrolled}
+          sessionActive={Boolean(
+            selectedSummary &&
+              (selectedSummary.latest_status === "running" ||
+                selectedSummary.latest_status === "retrying" ||
+                selectedSummary.latest_status === "queued"),
+          )}
+          sessionPaused={selectedSummary?.latest_status === "paused"}
+        />
+        <ChatThread
+          messages={loadedHistoryMessages}
+          pendingMessages={visiblePendingMessages}
+          orphanExecutions={activeDetail?.orphan_executions ?? []}
+          showThinking={showThinking}
+          loading={Boolean(selectedSessionId && detailQuery.isLoading && !activeDetail)}
+          error={detailQuery.error?.message ?? null}
+          agentLabel={effectiveAgentLabel}
+          onRetryPending={handleRetryPendingMessage}
+          onLoadOlder={loadOlderMessages}
+          hasOlder={hasOlderMessages}
+          loadingOlder={loadingOlderDetailPages}
+          onScrollStateChange={setThreadScrolled}
+          agentId={effectiveBotId ?? null}
+          sessionId={streamSessionId}
+          footer={
+            <div {...tourAnchor("sessions.composer")}>
+              <ChatComposer
+                value={draft}
+                onChange={(value) => {
+                  setDraft(value);
+                  if (composerError) setComposerError(null);
+                }}
+                onSubmit={() => void sendMessage(draft)}
+                agentId={effectiveBotId ?? null}
+                onAgentChange={handleAgentChange}
+                lockedAgent={Boolean(selectedSessionId && effectiveBotId)}
+                modelLabel={modelLabel}
+                disabled={composerDisabled}
+                busy={composerSubmitting}
+                helper={
+                  composerDisabled
+                    ? t("sessions.composer.selectAgentToStart", {
+                        defaultValue: "Select a specific agent to start a chat.",
+                      })
+                    : null
+                }
+                error={composerError}
+              />
+            </div>
+          }
+        />
       </div>
+
+      <SessionContextDrawer
+        open={contextDrawerOpen}
+        onOpenChange={setContextDrawerOpen}
+        detail={activeDetail}
+        summary={selectedSummary}
+      />
 
       {mobileRailPresence.shouldRender ? (
         <>
-          <div
-            className={cn(
-              "app-overlay-backdrop z-[48] transition-opacity duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] lg:hidden",
-              mobileRailPresence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-            )}
+          <button
+            type="button"
+            aria-label={t("chat.rail.close", { defaultValue: "Close" })}
             onClick={() => setMobileRailOpen(false)}
+            className={cn(
+              "fixed inset-0 z-[48] cursor-default border-0 bg-[color:var(--overlay-backdrop-bg)] backdrop-blur-[6px] transition-opacity md:hidden",
+              mobileRailPresence.isVisible ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
           />
           <div
             className={cn(
-              "fixed inset-y-0 left-0 z-[49] w-[min(24rem,calc(100vw-1rem))] overflow-hidden border-r border-[var(--border-subtle)] bg-[var(--surface-canvas)] shadow-[0_28px_90px_rgba(0,0,0,0.18)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] lg:hidden",
+              "fixed inset-y-0 left-0 z-[49] w-[min(320px,calc(100vw-48px))] overflow-hidden shadow-[var(--shadow-floating)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.22,1,0.36,1)] md:hidden",
               mobileRailPresence.isVisible
                 ? "translate-x-0 opacity-100"
-                : "pointer-events-none -translate-x-4 opacity-0"
+                : "pointer-events-none -translate-x-2 opacity-0",
             )}
             role="dialog"
             aria-modal="true"
-            aria-label={t("sessions.page.botConversations")}
+            aria-label={t("chat.rail.title", { defaultValue: "Conversations" })}
           >
-            <SessionConversationRail
-              search={search}
-              onSearchChange={setSearch}
-              sessions={visibleSessions}
+            <SessionRail
+              sessions={sessions}
               selectedSessionId={selectedSessionId}
-              loading={sessionsQuery.isLoading}
-              refreshing={sessionsQuery.isFetching && !sessionsQuery.isLoading}
-              loadingSessionId={loadingSessionId}
-              error={sessionsQuery.error?.message}
-              unavailable={sessionsUnavailable}
-              onRefresh={() => {
-                void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
-              }}
               onSelectSession={handleSelectSession}
               onNewChat={handleNewChat}
+              search={search}
+              onSearchChange={setSearch}
+              loading={sessionsQuery.isLoading}
+              error={sessionsQuery.error?.message ?? null}
+              unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}
               className="border-r-0"
             />
-          </div>
-        </>
-      ) : null}
-
-      {mobileContextPresence.shouldRender ? (
-        <>
-          <div
-            className={cn(
-              "app-overlay-backdrop z-[48] transition-opacity duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] xl:hidden",
-              mobileContextPresence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-            )}
-            onClick={() => setMobileContextOpen(false)}
-          />
-          <div
-            className={cn(
-              "fixed inset-y-0 right-0 z-[49] w-[min(23rem,calc(100vw-1rem))] overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--surface-canvas)] shadow-[0_28px_90px_rgba(0,0,0,0.18)] transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)] xl:hidden",
-              mobileContextPresence.isVisible
-                ? "translate-x-0 opacity-100"
-                : "pointer-events-none translate-x-4 opacity-0"
-            )}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t("sessions.page.conversationInfo", { defaultValue: "Conversation info" })}
-          >
-            <SessionContextPanel detail={activeDetail} summary={selectedSummary} />
           </div>
         </>
       ) : null}
@@ -819,45 +757,30 @@ export default function SessionsPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-full min-h-0 overflow-hidden bg-[var(--surface-canvas)]">
-          <div className="hidden h-full w-[22rem] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:block">
-            <div className="space-y-3 px-4 py-4">
-              <div className="skeleton h-4 w-28 rounded-xl" />
-              <div className="skeleton h-12 w-full rounded-[1rem]" />
-              <div className="skeleton h-12 w-full rounded-[1rem]" />
-              <div className="skeleton h-11 w-full rounded-[1rem]" />
-              {Array.from({ length: 7 }).map((_, index) => (
-                <div key={index} className="skeleton h-[78px] w-full rounded-[1rem]" />
+        <div className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)]">
+          <div className="hidden h-full w-72 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--shell)] md:block">
+            <div className="h-14 border-b border-[var(--divider-hair)]" />
+            <div className="p-2">
+              <div className="h-9 w-full animate-pulse rounded-[var(--radius-input)] bg-[var(--panel-soft)]" />
+            </div>
+            <div className="flex flex-col gap-1 p-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-[44px] w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]"
+                />
               ))}
             </div>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="border-b border-[var(--border-subtle)] px-4 py-4 sm:px-6">
-              <div className="flex items-center gap-3">
-                <div className="skeleton-circle h-11 w-11" />
-                <div className="space-y-2">
-                  <div className="skeleton h-4 w-44 rounded-xl" />
-                  <div className="skeleton h-3 w-28 rounded-xl" />
-                </div>
-              </div>
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden px-4 py-5 sm:px-6">
-              <div className="mx-auto max-w-[52rem] space-y-4">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className={cn(
-                      "skeleton h-24 rounded-[1.2rem]",
-                      index % 2 === 0 ? "w-[min(100%,38rem)]" : "ml-auto w-[min(100%,30rem)]"
-                    )}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="border-t border-[var(--border-subtle)] px-4 py-4 sm:px-6">
-              <div className="mx-auto max-w-[52rem] rounded-[1.5rem] border border-[var(--border-subtle)] p-4">
-                <div className="skeleton h-[54px] w-full rounded-[1rem]" />
-              </div>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="h-12 border-b border-[var(--divider-hair)]" />
+            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-6 py-8">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-20 w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]"
+                />
+              ))}
             </div>
           </div>
         </div>

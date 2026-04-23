@@ -313,7 +313,9 @@ function prettifyModelId(modelId: string) {
     .replace(/:latest$/i, "")
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (m) => m.toUpperCase())
-    .replace(/\bGpt\b/g, "GPT");
+    .replace(/\bGpt\b/g, "GPT")
+    .replace(/\bLlama\b/g, "Llama")
+    .replace(/\bQwen\b/g, "Qwen");
 }
 
 /* ------------------------------------------------------------------ */

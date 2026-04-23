@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import koda.config as config_module
-from koda.state_primary import (
+from koda.state.primary import (
     get_primary_state_backend,
     primary_execute,
     primary_fetch_all,

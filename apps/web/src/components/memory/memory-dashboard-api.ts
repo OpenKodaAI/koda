@@ -47,7 +47,7 @@ export class MemoryDashboardRequestError extends Error {
 }
 
 function createEmptyMemoryMapResponse(
-  botId: string,
+  agentId: string,
   options: {
     days?: number;
     includeInactive?: boolean;
@@ -59,7 +59,7 @@ function createEmptyMemoryMapResponse(
   const limit = options.limit ?? 160;
 
   return {
-    bot_id: botId,
+    bot_id: agentId,
     stats: {
       total_memories: 0,
       rendered_memories: 0,
@@ -94,8 +94,8 @@ function createEmptyMemoryMapResponse(
   };
 }
 
-function buildDashboardPath(botId: string, suffix: string, query?: URLSearchParams) {
-  const base = `/api/control-plane/dashboard/agents/${encodeURIComponent(botId)}`;
+function buildDashboardPath(agentId: string, suffix: string, query?: URLSearchParams) {
+  const base = `/api/control-plane/dashboard/agents/${encodeURIComponent(agentId)}`;
   return query && query.toString() ? `${base}${suffix}?${query.toString()}` : `${base}${suffix}`;
 }
 
@@ -122,10 +122,10 @@ async function fetchDashboardJson<T>(
 }
 
 function normalizeMemoryMapResponse(
-  botId: string,
+  agentId: string,
   payload: Omit<MemoryMapResponse, "bot_id"> & Partial<Pick<MemoryMapResponse, "bot_id">>,
 ): MemoryMapResponse {
-  const fallback = createEmptyMemoryMapResponse(botId, {
+  const fallback = createEmptyMemoryMapResponse(agentId, {
     days: payload.filters?.applied?.days,
     includeInactive: payload.filters?.applied?.include_inactive,
     limit: payload.filters?.applied?.limit,
@@ -134,7 +134,7 @@ function normalizeMemoryMapResponse(
   return {
     ...fallback,
     ...payload,
-    bot_id: payload.bot_id ?? botId,
+    bot_id: payload.bot_id ?? agentId,
     stats: {
       ...fallback.stats,
       ...(payload.stats ?? {}),
@@ -160,7 +160,7 @@ function normalizeMemoryMapResponse(
 }
 
 function normalizeMemoryCurationResponse(
-  botId: string,
+  agentId: string,
   payload: Omit<MemoryCurationResponse, "bot_id" | "page"> &
     Partial<Pick<MemoryCurationResponse, "bot_id" | "page">>,
 ): MemoryCurationResponse {
@@ -169,7 +169,7 @@ function normalizeMemoryCurationResponse(
 
   return {
     ...payload,
-    bot_id: payload.bot_id ?? botId,
+    bot_id: payload.bot_id ?? agentId,
     page: payload.page ?? {
       limit: itemCount + clusterCount,
       offset: 0,
@@ -180,7 +180,7 @@ function normalizeMemoryCurationResponse(
 }
 
 export async function fetchMemoryMap(
-  botId: string,
+  agentId: string,
   params: MemoryMapParams,
 ): Promise<MemoryMapResponse> {
   const query = new URLSearchParams({
@@ -198,14 +198,14 @@ export async function fetchMemoryMap(
 
   const payload = await fetchDashboardJson<
     Omit<MemoryMapResponse, "bot_id"> & Partial<Pick<MemoryMapResponse, "bot_id">>
-  >(buildDashboardPath(botId, "/memory-map", query), {
+  >(buildDashboardPath(agentId, "/memory-map", query), {
     signal: params.signal,
   });
-  return normalizeMemoryMapResponse(botId, payload);
+  return normalizeMemoryMapResponse(agentId, payload);
 }
 
 export async function fetchMemoryCurationList(
-  botId: string,
+  agentId: string,
   params: MemoryCurationListParams,
 ): Promise<MemoryCurationResponse> {
   const query = new URLSearchParams({
@@ -227,15 +227,15 @@ export async function fetchMemoryCurationList(
   const payload = await fetchDashboardJson<
     Omit<MemoryCurationResponse, "bot_id" | "page"> &
       Partial<Pick<MemoryCurationResponse, "bot_id" | "page">>
-  >(buildDashboardPath(botId, "/memory-curation", query), {
+  >(buildDashboardPath(agentId, "/memory-curation", query), {
     signal: params.signal,
   });
 
-  return normalizeMemoryCurationResponse(botId, payload);
+  return normalizeMemoryCurationResponse(agentId, payload);
 }
 
 export async function fetchMemoryCurationDetail(
-  botId: string,
+  agentId: string,
   entry: { kind: "memory"; id: string } | { kind: "cluster"; id: string },
 ): Promise<MemoryReviewDetail | MemoryClusterReviewDetail> {
   const suffix =
@@ -243,16 +243,16 @@ export async function fetchMemoryCurationDetail(
       ? `/memory-curation/${encodeURIComponent(entry.id)}`
       : `/memory-curation/clusters/${encodeURIComponent(entry.id)}`;
   return fetchDashboardJson<MemoryReviewDetail | MemoryClusterReviewDetail>(
-    buildDashboardPath(botId, suffix),
+    buildDashboardPath(agentId, suffix),
   );
 }
 
 export async function postMemoryCurationAction(
-  botId: string,
+  agentId: string,
   payload: MemoryCurationActionPayload,
 ): Promise<void> {
   await fetchDashboardJson<Record<string, unknown>>(
-    buildDashboardPath(botId, "/memory-curation/actions"),
+    buildDashboardPath(agentId, "/memory-curation/actions"),
     {
       method: "POST",
       headers: {

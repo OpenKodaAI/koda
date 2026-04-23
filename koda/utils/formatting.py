@@ -266,29 +266,29 @@ def format_error_message(error_text: str) -> str:
         or "login required" in lower
     ):
         return (
-            "\U0001f511 <b>Autenticação</b>\n"
-            "O provedor está sem credenciais válidas ou perdeu a sessão de login.\n\n"
-            "<i>Reautentique o CLI do provider e tente novamente.</i>"
+            "\U0001f511 <b>Authentication</b>\n"
+            "The provider is missing valid credentials or the login session expired.\n\n"
+            "<i>Re-authenticate the provider CLI and try again.</i>"
         )
     if "timeout" in lower or "timed out" in lower:
         return (
             "\u23f1 <b>Timeout</b>\n"
-            "O provedor demorou demais para concluir a tarefa.\n\n"
-            "<i>Tente simplificar a pergunta ou use /model auto para escolher um modelo mais leve.</i>"
+            "The provider took too long to complete the task.\n\n"
+            "<i>Try simplifying the question or use /model auto to select a lighter model.</i>"
         )
     if "budget" in lower or "cost" in lower:
         return (
-            "\U0001f4b0 <b>Or\u00e7amento</b>\n"
-            "Limite de custo atingido.\n\n"
-            "<i>Use /resetcost para reiniciar ou escolha um modelo mais econ\u00f4mico com /model.</i>"
+            "\U0001f4b0 <b>Budget</b>\n"
+            "Cost limit reached.\n\n"
+            "<i>Use /resetcost to reset or pick a cheaper model with /model.</i>"
         )
     if "overloaded" in lower:
         return (
-            "\U0001f504 <b>Sobrecarregado</b>\n"
-            "O servi\u00e7o est\u00e1 temporariamente indispon\u00edvel.\n\n"
-            "<i>Aguarde um momento e tente novamente.</i>"
+            "\U0001f504 <b>Overloaded</b>\n"
+            "The service is temporarily unavailable.\n\n"
+            "<i>Wait a moment and try again.</i>"
         )
-    return f"\u274c <b>Erro</b>\n{escape_html(error_text[:500])}\n\n<i>Use /retry para tentar novamente.</i>"
+    return f"\u274c <b>Error</b>\n{escape_html(error_text[:500])}\n\n<i>Use /retry to try again.</i>"
 
 
 def safe_markdown_to_telegram_html(text: str) -> str:

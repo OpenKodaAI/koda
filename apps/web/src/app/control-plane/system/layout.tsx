@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { ControlPlaneUnavailable } from "@/components/control-plane/control-plane-unavailable";
 import { SettingsSidebar } from "@/components/control-plane/system/settings-sidebar";
 import { UnsavedChangesGuard } from "@/components/control-plane/system/unsaved-changes-guard";
 import { SettingsModalHost } from "@/components/control-plane/system/settings-modal-host";
@@ -11,22 +10,8 @@ import {
   getControlPlaneCoreIntegrations,
   getGeneralSystemSettings,
 } from "@/lib/control-plane";
-import {
-  buildControlPlaneSetupHref,
-  resolveControlPlaneDashboardAccess,
-} from "@/lib/control-plane-dashboard-access";
 
 export default async function SystemSettingsLayout({ children }: { children: React.ReactNode }) {
-  const access = await resolveControlPlaneDashboardAccess();
-
-  if (access.status === "setup_required") {
-    return redirect(buildControlPlaneSetupHref("/control-plane/system"));
-  }
-
-  if (access.status === "unavailable") {
-    return <ControlPlaneUnavailable />;
-  }
-
   let settings: Awaited<ReturnType<typeof getGeneralSystemSettings>> | null = null;
   let coreIntegrations: Awaited<ReturnType<typeof getControlPlaneCoreIntegrations>> | null = null;
 
@@ -37,13 +22,13 @@ export default async function SystemSettingsLayout({ children }: { children: Rea
     ]);
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return redirect(buildControlPlaneSetupHref("/control-plane/system"));
+      redirect("/login");
     }
-    return <ControlPlaneUnavailable />;
+    throw error;
   }
 
   if (!settings || !coreIntegrations) {
-    return <ControlPlaneUnavailable />;
+    redirect("/login");
   }
 
   return (

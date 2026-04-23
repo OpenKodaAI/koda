@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -110,6 +109,16 @@ struct PersistUploadedRecordRequest<'a> {
     staging_path: &'a Path,
     content_hash: String,
     size_bytes: u64,
+}
+
+/// Maximum number of bytes accepted per artifact upload. Controlled by
+/// `ARTIFACT_MAX_UPLOAD_BYTES`. Returns `None` when unset, which disables
+/// the limit (legacy behaviour for tests and one-off development runs).
+fn max_upload_bytes() -> Option<u64> {
+    match std::env::var("ARTIFACT_MAX_UPLOAD_BYTES") {
+        Ok(raw) => raw.trim().parse::<u64>().ok().filter(|value| *value > 0),
+        Err(_) => None,
+    }
 }
 
 fn mime_type_for(path: &Path) -> String {
@@ -661,6 +670,7 @@ impl ArtifactEngineService for ArtifactServer {
         &self,
         request: Request<tonic::Streaming<PutArtifactRequest>>,
     ) -> Result<Response<PutArtifactResponse>, Status> {
+        let max_upload_bytes = max_upload_bytes();
         let mut stream = request.into_inner();
         let first = stream
             .message()
@@ -703,11 +713,19 @@ impl ArtifactEngineService for ArtifactServer {
         let mut hasher = Sha256::new();
         let mut size_bytes = 0u64;
         if !first.data.is_empty() {
+            size_bytes += first.data.len() as u64;
+            if let Some(limit) = max_upload_bytes {
+                if size_bytes > limit {
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(Status::resource_exhausted(format!(
+                        "artifact upload exceeds ARTIFACT_MAX_UPLOAD_BYTES ({limit} bytes)"
+                    )));
+                }
+            }
             file.write_all(&first.data).await.map_err(|error| {
                 Status::internal(format!("failed to write upload chunk: {error}"))
             })?;
             hasher.update(&first.data);
-            size_bytes += first.data.len() as u64;
         }
         while let Some(chunk) = stream.message().await.map_err(|error| {
             Status::internal(format!("failed to read artifact upload stream: {error}"))
@@ -758,22 +776,34 @@ impl ArtifactEngineService for ArtifactServer {
                 ));
             }
             if !chunk.data.is_empty() {
+                size_bytes += chunk.data.len() as u64;
+                if let Some(limit) = max_upload_bytes {
+                    if size_bytes > limit {
+                        let _ = fs::remove_file(&staging_path).await;
+                        return Err(Status::resource_exhausted(format!(
+                            "artifact upload exceeds ARTIFACT_MAX_UPLOAD_BYTES ({limit} bytes)"
+                        )));
+                    }
+                }
                 file.write_all(&chunk.data).await.map_err(|error| {
                     Status::internal(format!("failed to write upload chunk: {error}"))
                 })?;
                 hasher.update(&chunk.data);
-                size_bytes += chunk.data.len() as u64;
             }
         }
         file.flush().await.map_err(|error| {
             Status::internal(format!("failed to flush upload staging file: {error}"))
         })?;
         drop(file);
+        // sha2 0.11's `finalize()` returns a `hybrid-array::Array<u8, N>` which
+        // does not implement `std::fmt::LowerHex` directly — unlike the prior
+        // `GenericArray`. Convert the raw bytes to lowercase hex explicitly so
+        // the content-hash string stays identical across sha2 versions.
         let digest = hasher.finalize();
         let mut content_hash = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            // Writing into a String cannot fail.
-            let _ = write!(&mut content_hash, "{byte:02x}");
+        for byte in digest.as_slice() {
+            use std::fmt::Write as _;
+            write!(content_hash, "{byte:02x}").expect("write to string never fails");
         }
         let object_key = match object_key_override {
             Some(object_key) => object_key,
@@ -1055,6 +1085,8 @@ mod tests {
                 bucket: bucket.to_string(),
                 objects: Arc::new(StdMutex::new(HashMap::new())),
             };
+            // axum 0.8 switched route capture syntax from `:param` / `*splat`
+            // to `{param}` / `{*splat}`. Mixed-mode routers raise at startup.
             let app = Router::new()
                 .route("/{bucket}", head(head_bucket))
                 .route("/{bucket}/", head(head_bucket))
@@ -1186,16 +1218,6 @@ mod tests {
         );
     }
 
-    fn command_available(program: &str) -> bool {
-        Command::new(program)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-
     fn pick_unused_port() -> u16 {
         let listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -1323,13 +1345,15 @@ mod tests {
         client
     }
 
+    // Requires PostgreSQL's `initdb` / `pg_ctl` binaries on PATH (the
+    // harness spins up an ephemeral cluster per run). CI runners don't
+    // install postgres client tooling, so the test is opt-in via the
+    // KODA_INTEGRATION_TESTS env flag — set it locally with postgres
+    // installed to exercise the roundtrip.
     #[tokio::test(flavor = "current_thread")]
+    #[ignore = "requires local PostgreSQL; run with KODA_INTEGRATION_TESTS=1 cargo test -- --ignored"]
     async fn object_storage_roundtrip_is_durable_across_instances() {
         let _env_lock = env_lock().lock().await;
-        if !command_available("initdb") || !command_available("pg_ctl") {
-            eprintln!("skipping postgres durability test because initdb/pg_ctl are unavailable");
-            return;
-        }
         let postgres = PostgresHarness::start();
         let fake_s3 = FakeS3Server::start("artifact-proof-bucket").await;
         let artifact_root = TempDir::new().unwrap();

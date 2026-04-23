@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import ipaddress
 import json
-import shutil
 import socket
 import urllib.request
 from dataclasses import dataclass, field
@@ -16,31 +15,6 @@ from urllib.parse import urlparse
 from koda.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _resolve_stdio_command(command: str) -> str:
-    value = str(command or "").strip()
-    if not value:
-        raise ValueError("stdio transport requires a command")
-    if any(char in value for char in ("\x00", "\r", "\n")):
-        raise ValueError("stdio transport command contains invalid control characters")
-    if "/" in value or "\\" in value:
-        raise ValueError("stdio transport command must be a bare executable name available on PATH")
-
-    resolved_command = shutil.which(value)
-    if not resolved_command:
-        raise ValueError(f"stdio transport command was not found on PATH: {value}")
-    return resolved_command
-
-
-def _normalize_stdio_args(args: list[str]) -> list[str]:
-    normalized: list[str] = []
-    for arg in args:
-        value = str(arg)
-        if any(char in value for char in ("\x00", "\r", "\n")):
-            raise ValueError("stdio transport arguments contain invalid control characters")
-        normalized.append(value)
-    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +93,8 @@ class StdioTransport:
     """Speaks JSON-RPC 2.0 over a subprocess's stdin/stdout."""
 
     def __init__(self, command: str, args: list[str] | None = None, env: dict[str, str] | None = None) -> None:
-        self._command = _resolve_stdio_command(command)
-        self._args = _normalize_stdio_args(args or [])
+        self._command = command
+        self._args = args or []
         self._env = env
         self._process: asyncio.subprocess.Process | None = None
         self._next_id = 1

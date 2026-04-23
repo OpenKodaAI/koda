@@ -144,7 +144,7 @@ class TestHandleVoice:
         ):
             await handle_voice(mock_update, mock_context)
             call_text = mock_update.message.reply_text.call_args[0][0]
-            assert "transcrever" in call_text.lower()
+            assert "transcribe" in call_text.lower()
 
     @pytest.mark.asyncio
     async def test_successful_transcription_enqueues_text(self, mock_update, mock_context):

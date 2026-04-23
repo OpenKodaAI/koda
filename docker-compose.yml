@@ -18,15 +18,27 @@ services:
         condition: service_started
       memory:
         condition: service_started
+      artifact:
+        condition: service_started
+      retrieval:
+        condition: service_started
+      runtime-kernel:
+        condition: service_started
     environment:
       HOME: "/var/lib/koda/runtime/home"
       CLAUDE_HOME: "/var/lib/koda/runtime/home"
       CLAUDE_CONFIG_DIR: "/var/lib/koda/runtime/claude-config"
+      # Keep Playwright looking at the build-time install path regardless of
+      # the runtime HOME override. See Dockerfile for the full explanation.
+      PLAYWRIGHT_BROWSERS_PATH: "/var/lib/koda/playwright-browsers"
       CONTROL_PLANE_ENABLED: "true"
       CONTROL_PLANE_BIND: "0.0.0.0"
       CONTROL_PLANE_PORT: "${CONTROL_PLANE_PORT:-8090}"
       SECURITY_GRPC_TARGET: "security:50065"
       MEMORY_GRPC_TARGET: "memory:50063"
+      ARTIFACT_GRPC_TARGET: "artifact:50064"
+      RETRIEVAL_GRPC_TARGET: "retrieval:50062"
+      RUNTIME_KERNEL_GRPC_TARGET: "runtime-kernel:50061"
       HEALTHCHECK_URL: "http://127.0.0.1:${CONTROL_PLANE_PORT:-8090}/health"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
@@ -63,6 +75,11 @@ services:
     networks:
       - frontend
       - backend
+    # Makes `host.docker.internal` resolvable on Linux. Required for the
+    # control plane to reach an Ollama daemon running on the host at
+    # http://host.docker.internal:11434.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
@@ -138,6 +155,78 @@ services:
       MEMORY_GRPC_TARGET: "0.0.0.0:50063"
       KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
       KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  artifact:
+    build:
+      context: .
+      dockerfile: Dockerfile.artifact
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      ARTIFACT_GRPC_TARGET: "0.0.0.0:50064"
+      ARTIFACT_MAX_UPLOAD_BYTES: "${ARTIFACT_MAX_UPLOAD_BYTES:-268435456}"
+      ARTIFACT_RATE_LIMIT_PER_SECOND: "${ARTIFACT_RATE_LIMIT_PER_SECOND:-100}"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+      KNOWLEDGE_V2_S3_BUCKET: "${KNOWLEDGE_V2_S3_BUCKET:-koda-objects}"
+      KNOWLEDGE_V2_S3_PREFIX: "${KNOWLEDGE_V2_S3_PREFIX:-koda}"
+      KNOWLEDGE_V2_S3_ENDPOINT_URL: "${KNOWLEDGE_V2_S3_ENDPOINT_URL:-http://seaweedfs:8333}"
+      KNOWLEDGE_V2_S3_REGION: "${KNOWLEDGE_V2_S3_REGION:-us-east-1}"
+      KNOWLEDGE_V2_S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}"
+      KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}"
+    tmpfs:
+      - /tmp/koda/artifact-store
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  retrieval:
+    build:
+      context: .
+      dockerfile: Dockerfile.retrieval
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RETRIEVAL_GRPC_TARGET: "0.0.0.0:50062"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  runtime-kernel:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime-kernel
+    restart: unless-stopped
+    environment:
+      RUNTIME_KERNEL_GRPC_TARGET: "0.0.0.0:50061"
+      RUNTIME_KERNEL_ROOT: "${RUNTIME_KERNEL_ROOT:-/tmp/koda-runtime/default/kernel}"
+    tmpfs:
+      - /tmp/koda-runtime
     networks:
       - backend
     deploy:
@@ -241,3 +330,4 @@ volumes:
   postgres-data:
   seaweedfs-data:
   tmp-images:
+

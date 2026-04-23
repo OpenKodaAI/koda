@@ -14,21 +14,19 @@ The recommended bundled storage path uses:
 ## Recommended Flow
 
 ```bash
-npm install -g @openkodaai/koda
+npm install -g koda
 koda install --headless
 ```
 
 For source-based administration or contributor workflows you can still use the repository wrapper,
 which installs the npm CLI locally and stages the release bundle into `.koda-release/`.
-That wrapper only automates dependency installation on apt-based Linux with `sudo`.
 
 ## Reverse Proxy
 
 The default production overlay keeps both the dashboard and the control plane bound to localhost. A reverse proxy should:
 
 - publish `/` to the Koda web UI
-- publish `/control-plane/setup` to the dedicated onboarding surface
-- publish `/control-plane` to the control-plane home and operator surface
+- publish `/control-plane` to the Koda dashboard setup and operator surface
 - terminate TLS
 - optionally keep `/setup` only as a compatibility redirect
 - publish `/api/control-plane/*`
@@ -59,7 +57,7 @@ The expected post-bootstrap flow is:
 1. connect and verify providers
 2. connect and verify integrations
 3. inspect `connection_status`, `checked_via`, and recent integration health when something is degraded
-4. grant integrations per bot in the agent editor instead of assuming system-level configuration is enough
+4. grant integrations per agent in the agent editor instead of assuming system-level configuration is enough
 
 ## Restart And Boot Persistence
 
@@ -78,40 +76,56 @@ Adjust `WorkingDirectory`, install it as a real unit, and enable it after the co
 - set and rotate `WEB_OPERATOR_SESSION_SECRET` so dashboard operator sessions remain stable across restarts
 - keep Docker volumes persistent across restarts
 
+## Public Deployment Checklist
+
+For any deploy reachable from the public internet:
+
+1. **`KODA_ENV=production`** — this blocks `CONTROL_PLANE_AUTH_MODE=development|open` and
+   `ALLOW_LOOPBACK_BOOTSTRAP=true` at boot. Both are rejected with a hard failure.
+2. **`ALLOW_LOOPBACK_BOOTSTRAP=false`** — the first-owner flow then requires the bootstrap
+   code. Do NOT enable loopback trust behind a reverse proxy that might forward an arbitrary
+   `X-Forwarded-For`.
+3. **Bootstrap code via SSH:** on first boot the control plane writes
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and echoes it once to the
+   container log. SSH in, `cat` the file, paste it into `/setup`. The file is deleted after
+   successful registration.
+4. **HTTPS everywhere.** The session cookie is named `koda_operator_session` and is sent
+   with `Secure; HttpOnly; SameSite=Strict`. Without TLS at the reverse proxy, the `Secure`
+   flag means the browser never sends the cookie back.
+5. **Strict CSP on auth screens.** `/login`, `/setup`, and `/forgot-password` enforce a
+   strict Content-Security-Policy that disallows cross-origin scripts and iframing. Do not
+   patch in `'unsafe-inline'`.
+6. **Password policy.** Minimum 12 characters, 3-of-4 character classes, a top-500
+   common-passwords deny list, and substring-of-identifier rejection. Override with
+   `CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH` only upward.
+7. **Recovery codes are single-use.** After any password reset, every remaining code is
+   invalidated. The owner must regenerate a fresh batch from Settings › Security (requires
+   current password).
+8. **Account lockout + rate limits** are already enforced — 5 failed logins per 5 minutes
+   per IP, 5 password resets per hour per IP, 3 regenerations per hour per user. Responses
+   are deliberately slowed to a ~300 ms floor so the caller cannot distinguish between
+   "account does not exist", "wrong password", and "invalid recovery code".
+9. **Audit.** Every auth event writes a structured `security.*` event through
+   `emit_security()`. Ensure your logging backend persists these.
+10. **`CONTROL_PLANE_API_TOKEN`** is optional and should be left blank unless you need a
+    break-glass CLI credential; the standard flow no longer uses it.
+
 ## Post-Install Validation
 
 Run:
 
 ```bash
-koda doctor
+python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
 ```
 
-Then finish product configuration through `/control-plane/setup` in the dashboard:
-
-1. paste the short-lived setup code printed by `koda install --headless`
-2. create the local owner account
-3. sign in to open the operator session
-4. configure access policy and the default provider
-5. optionally connect the first Telegram agent
-6. continue ongoing operations from `/control-plane`
-
-If the headless setup code expires before you reach the dashboard, generate another one from the host:
-
-```bash
-koda auth issue-code
-```
+Then finish product configuration through `/control-plane` in the dashboard.
 
 ## Upgrade Path
 
-Choose one update path:
-
-- global install path:
-  `npm install -g @openkodaai/koda && koda update`
-- one-off path without a global upgrade:
-  `npx @openkodaai/koda@latest update`
-
-In both cases the CLI runs doctor checks and rolls back automatically if the new bundle is unhealthy.
-Afterward, verify control-plane health and setup status.
+- install the new npm CLI release or run `npx koda@latest update`
+- rerun `koda update`
+- let the CLI run doctor checks and rollback automatically if the new bundle is unhealthy
+- verify control-plane health and setup status
 
 ## Existing Bundled Object-Storage Installs
 

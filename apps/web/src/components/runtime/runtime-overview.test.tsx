@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BotCatalogProvider } from "@/components/providers/bot-catalog-provider";
+import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import type { RuntimeOverview } from "@/lib/runtime-types";
 
@@ -11,15 +11,23 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-create-agent", () => ({
+  useCreateAgent: () => ({ creating: false, createAgent: vi.fn() }),
+}));
+
 vi.mock("@/hooks/use-runtime-overview", () => ({
   useRuntimeOverview: vi.fn(),
 }));
 
 function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
   return {
-    botId: "ATLAS",
-    botLabel: "ATLAS",
-    botColor: "#6E97D9",
+    agentId: "ATLAS",
+    agentLabel: "ATLAS",
+    agentColor: "#6E97D9",
     baseUrl: "http://localhost:8080",
     fetchedAt: "2026-03-19T00:00:00.000Z",
     health: null,
@@ -63,7 +71,7 @@ function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
 }
 
 describe("RuntimeOverviewScreen", () => {
-  it("renders a compact pulse board with live executions and bots", async () => {
+  it("renders a compact pulse board with live executions and agents", async () => {
     const { useRuntimeOverview } = await import("@/hooks/use-runtime-overview");
     vi.mocked(useRuntimeOverview).mockReturnValue({
       overviews: {
@@ -73,7 +81,7 @@ describe("RuntimeOverviewScreen", () => {
       refreshing: false,
       connected: { ATLAS: true },
       error: null,
-      refreshBot: vi.fn(),
+      refreshAgent: vi.fn(),
       lastUpdated: Date.now(),
     });
 
@@ -81,8 +89,8 @@ describe("RuntimeOverviewScreen", () => {
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <BotCatalogProvider
-          initialBots={[
+        <AgentCatalogProvider
+          initialAgents={[
             {
               id: "ATLAS",
               label: "ATLAS",
@@ -92,13 +100,13 @@ describe("RuntimeOverviewScreen", () => {
           ]}
         >
           <RuntimeOverviewScreen />
-        </BotCatalogProvider>
+        </AgentCatalogProvider>
       </I18nProvider>
     );
 
     expect(screen.getByTestId("runtime-overview-screen")).toBeInTheDocument();
     expect(screen.getByText("Execuções ao vivo")).toBeInTheDocument();
-    expect(screen.getByText("Bots")).toBeInTheDocument();
+    expect(screen.getByText("Agentes")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-live-list")).toBeInTheDocument();
     expect(screen.getByText(/Revisar onboarding do ambiente/i)).toBeInTheDocument();
     expect(screen.getAllByText("ATLAS").length).toBeGreaterThan(0);

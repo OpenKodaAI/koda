@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Koda Control Plane API",
-    "version": "1.0.6",
+    "version": "1.0.0",
     "description": "Maintained public contract for platform setup, control-plane product configuration, and runtime access."
   },
   "servers": [
@@ -42,7 +42,7 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Compatibility page that points operators to the canonical Next.js dashboard onboarding route at /control-plane/setup"
+            "description": "Compatibility page that points operators to the Next.js dashboard setup flow"
           }
         }
       }
@@ -63,7 +63,7 @@
         "summary": "Onboarding status",
         "responses": {
           "200": {
-            "description": "Current quickstart, provider, agent, and storage status, including the legacy /setup bridge and the canonical dashboard setup URL."
+            "description": "Current quickstart, provider, agent, and storage status"
           }
         }
       }
@@ -182,27 +182,6 @@
         }
       }
     },
-    "/api/control-plane/auth/legacy/exchange": {
-      "post": {
-        "summary": "Exchange the break-glass token for a browser session",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Compatibility path that returns a browser session for legacy installations."
-          }
-        }
-      }
-    },
     "/api/control-plane/auth/tokens": {
       "get": {
         "summary": "List operator API tokens",
@@ -314,7 +293,7 @@
         "summary": "Current operator-facing general settings model",
         "responses": {
           "200": {
-            "description": "General settings payload used by the dashboard. Includes provider connections, connection-default toggles, and global settings. Per-bot integration grants remain part of each agent spec under resource_access_policy.integration_grants."
+            "description": "General settings payload used by the dashboard. Includes provider connections, connection-default toggles, and global settings. Per-agent integration grants remain part of each agent spec under resource_access_policy.integration_grants."
           }
         }
       },
@@ -328,11 +307,11 @@
                 "type": "object"
               }
             }
-          }
+        }
         },
         "responses": {
           "200": {
-            "description": "Updated general settings payload. Global settings can enable integration surfaces, but canonical core connection state lives under the connection-default routes and per-bot authorization still lives in each agent spec."
+            "description": "Updated general settings payload. Global settings can enable integration surfaces, but canonical core connection state lives under the connection-default routes and per-agent authorization still lives in each agent spec."
           }
         }
       }

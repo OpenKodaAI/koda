@@ -148,7 +148,16 @@ def _sanitize_env(
     except Exception:
         # Fail-safe: return minimal environment on RPC failure
         # Never fall through to unsanitized os.environ
-        _log.warning("security_guard_rpc_unavailable: falling back to minimal safe environment")
+        #
+        # Log at WARNING only when SECURITY_GRPC_TARGET is explicitly configured
+        # (operator expected the sidecar to be reachable). In dev/compose-lite
+        # setups where the Rust security service isn't deployed, the sidecar is
+        # intentionally absent and the minimal-safe-env fallback is the nominal
+        # behavior — log at DEBUG to avoid spamming logs on every LLM turn.
+        if os.environ.get("SECURITY_GRPC_TARGET"):
+            _log.warning("security_guard_rpc_unavailable: falling back to minimal safe environment")
+        else:
+            _log.debug("security_guard_rpc_unavailable_nominal: sidecar not configured, using minimal safe env")
         return _minimal_safe_env(source, allowed_provider_keys, overrides, safe_env_keys=safe_env_keys)
 
 

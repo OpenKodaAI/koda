@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import koda.config as config_module
 from koda.state.agent_scope import normalize_agent_scope
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_val,

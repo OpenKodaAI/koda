@@ -285,7 +285,7 @@ class TestCmdProviderModelDbEnvCoverage:
         mock_context.args = ["list"]
         with patch("koda.handlers.commands.get_agent_runtime_settings", return_value=settings):
             await cmd_featuremodel(mock_update, mock_context)
-        assert "Modelos padrao por funcionalidade deste AGENT" in mock_update.message.reply_text.call_args.args[0]
+        assert "Default per-feature models for this agent" in mock_update.message.reply_text.call_args.args[0]
 
         mock_context.args = ["image"]
         with patch("koda.handlers.commands.get_agent_runtime_settings", return_value=settings):
@@ -302,7 +302,7 @@ class TestCmdProviderModelDbEnvCoverage:
         ):
             await cmd_featuremodel(mock_update, mock_context)
         mock_set.assert_called_once_with("image", "codex", "gpt-image-1.5")
-        assert "Modelo padrao do AGENT atualizado" in mock_update.message.reply_text.call_args.args[0]
+        assert "Agent default updated" in mock_update.message.reply_text.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_featuremodel_text_setter_accepts_non_llm_function_provider_ids(self, mock_update, mock_context):
@@ -591,7 +591,7 @@ class TestCmdTasksTaskCoverage:
             await cmd_task(mock_update, mock_context)
 
         text = mock_update.message.reply_text.call_args.args[0]
-        assert "Tarefa #7" in text
+        assert "Task #7" in text
         assert "Provider" in text
 
 
@@ -928,7 +928,7 @@ class TestCmdVoiceMemoryCoverage:
         ):
             mock_context.args = []
             await cmd_digest(mock_update, mock_context)
-        assert "Digest não configurado" in mock_update.message.reply_text.call_args.args[0]
+        assert "Digest is not configured" in mock_update.message.reply_text.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_forget_usage_and_invalid_id_paths(self, mock_update, mock_context):
@@ -990,7 +990,7 @@ class TestCmdVoiceMemoryCoverage:
             patch("koda.memory.config.MEMORY_DIGEST_ENABLED", True),
         ):
             await cmd_digest(mock_update, mock_context)
-        assert "Horário inválido" in mock_update.message.reply_text.call_args.args[0]
+        assert "Invalid time" in mock_update.message.reply_text.call_args.args[0]
 
         mock_context.args = ["now"]
         with (

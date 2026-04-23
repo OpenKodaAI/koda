@@ -11,15 +11,15 @@ import {
 } from "recharts";
 import { getCurrentLanguage } from "@/lib/i18n";
 import { cn, formatCost } from "@/lib/utils";
-import { getBotChartColor, getBotLabel } from "@/lib/bot-constants";
+import { getAgentChartColor, getAgentLabel } from "@/lib/agent-constants";
 
 interface CostChartProps {
-  data: { botId: string; dailyCosts: { date: string; cost: number }[] }[];
+  data: { agentId: string; dailyCosts: { date: string; cost: number }[] }[];
   className?: string;
 }
 
 function mergeDailyCosts(
-  data: { botId: string; dailyCosts: { date: string; cost: number }[] }[]
+  data: { agentId: string; dailyCosts: { date: string; cost: number }[] }[]
 ): Record<string, unknown>[] {
   const dateMap = new Map<string, Record<string, unknown>>();
 
@@ -28,7 +28,7 @@ function mergeDailyCosts(
       if (!dateMap.has(entry.date)) {
         dateMap.set(entry.date, { date: entry.date });
       }
-      dateMap.get(entry.date)![series.botId] = entry.cost;
+      dateMap.get(entry.date)![series.agentId] = entry.cost;
     }
   }
 
@@ -67,7 +67,7 @@ const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: Cu
               style={{ backgroundColor: entry.color }}
             />
             <span className="text-[var(--text-secondary)]">
-              {getBotLabel(entry.dataKey)}
+              {getAgentLabel(entry.dataKey)}
             </span>
           </div>
           <span className="font-medium tabular-nums text-[var(--text-primary)]">
@@ -82,7 +82,7 @@ const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: Cu
 export const CostChart = memo(function CostChart({ data, className }: CostChartProps) {
   const mergedData = useMemo(() => mergeDailyCosts(data), [data]);
   const series = useMemo(() => data.filter((entry) => entry.dailyCosts.length > 0), [data]);
-  const botIds = useMemo(() => series.map((entry) => entry.botId), [series]);
+  const agentIds = useMemo(() => series.map((entry) => entry.agentId), [series]);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -95,21 +95,21 @@ export const CostChart = memo(function CostChart({ data, className }: CostChartP
   return (
     <div className={cn(className)}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {botIds.map((botId) => (
+        {agentIds.map((agentId) => (
           <span
-            key={botId}
+            key={agentId}
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-medium text-[var(--text-secondary)]"
             style={{
-              borderColor: `color-mix(in srgb, ${getBotChartColor(botId)} 58%, #2b2d31)`,
-              background: `linear-gradient(180deg, color-mix(in srgb, ${getBotChartColor(botId)} 28%, #2e3137) 0%, color-mix(in srgb, ${getBotChartColor(botId)} 16%, #17181b) 100%)`,
+              borderColor: `color-mix(in srgb, ${getAgentChartColor(agentId)} 58%, #2b2d31)`,
+              background: `linear-gradient(180deg, color-mix(in srgb, ${getAgentChartColor(agentId)} 28%, #2e3137) 0%, color-mix(in srgb, ${getAgentChartColor(agentId)} 16%, #17181b) 100%)`,
               color: "var(--text-primary)",
             }}
           >
             <span
               className="h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: getBotChartColor(botId) }}
+              style={{ backgroundColor: getAgentChartColor(agentId) }}
             />
-            {getBotLabel(botId)}
+            {getAgentLabel(agentId)}
           </span>
         ))}
       </div>
@@ -121,10 +121,10 @@ export const CostChart = memo(function CostChart({ data, className }: CostChartP
           margin={{ top: 8, right: 10, bottom: 2, left: isMobile ? -14 : 2 }}
         >
           <defs>
-            {botIds.map((botId) => (
+            {agentIds.map((agentId) => (
               <linearGradient
-                key={botId}
-                id={`cost-gradient-${botId}`}
+                key={agentId}
+                id={`cost-gradient-${agentId}`}
                 x1="0"
                 y1="0"
                 x2="0"
@@ -132,12 +132,12 @@ export const CostChart = memo(function CostChart({ data, className }: CostChartP
               >
                 <stop
                   offset="0%"
-                  stopColor={getBotChartColor(botId)}
+                  stopColor={getAgentChartColor(agentId)}
                   stopOpacity={0.42}
                 />
                 <stop
                   offset="100%"
-                  stopColor={getBotChartColor(botId)}
+                  stopColor={getAgentChartColor(agentId)}
                   stopOpacity={0.06}
                 />
               </linearGradient>
@@ -166,19 +166,19 @@ export const CostChart = memo(function CostChart({ data, className }: CostChartP
             />
           )}
           <Tooltip content={<CustomTooltip />} />
-          {botIds.map((botId) => (
+          {agentIds.map((agentId) => (
             <Area
-              key={botId}
+              key={agentId}
               type="monotone"
-              dataKey={botId}
-              stroke={getBotChartColor(botId)}
+              dataKey={agentId}
+              stroke={getAgentChartColor(agentId)}
               strokeWidth={2.2}
-              fill={`url(#cost-gradient-${botId})`}
+              fill={`url(#cost-gradient-${agentId})`}
               dot={false}
               isAnimationActive={false}
               activeDot={{
                 r: 4,
-                fill: getBotChartColor(botId),
+                fill: getAgentChartColor(agentId),
                 stroke: "var(--panel)",
                 strokeWidth: 2,
               }}

@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from koda.config import AGENT_ID, POD_NAME
 from koda.logging_config import get_logger
-from koda.state_primary import (
+from koda.state.primary import (
     postgres_primary_mode,
     primary_execute,
     primary_fetch_all,
@@ -28,8 +28,17 @@ def _now_iso() -> str:
 
 
 def _current_agent_scope() -> str:
-    normalized = str(AGENT_ID or "default").strip().lower()
-    return normalized or "default"
+    """Return the canonical agent id used as ``agent_id`` in tasks / sessions.
+
+    Uppercase to match ``cp_agent_definitions.id`` and the writes performed
+    by ``audit_events``. The previous lowercase convention caused dashboard
+    reads — which derive the scope from the uppercase ``cp_agent_definitions``
+    id — to miss every row written from this module, leaving the frontend
+    executions/usage panels empty even though the runtime was persisting
+    data correctly.
+    """
+    normalized = str(AGENT_ID or "default").strip().upper()
+    return normalized or "DEFAULT"
 
 
 def _primary_backend() -> Any | None:

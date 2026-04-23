@@ -386,10 +386,6 @@ _OPS_COMMANDS = frozenset(
         "jira",
         "confluence",
         "http_request",
-        "cron_list",
-        "cron_add",
-        "cron_delete",
-        "cron_toggle",
         "write",
         "edit",
         "rm",
@@ -842,9 +838,6 @@ def _resolve_operational_command(
             path=resolved_action.path,
         )
 
-    if command in {"cron_list", "cron_add", "cron_delete", "cron_toggle"}:
-        return _operational_resolution_from_contract(command, raw_args=args)
-
     return None
 
 
@@ -863,16 +856,6 @@ def _canonical_operational_request(command_name: str, raw_args: str) -> tuple[st
             tokens = args.split(maxsplit=2)
             if len(tokens) >= 2:
                 return "http_request", args
-        if normalized_command == "cron":
-            action = _first_token(args)
-            if action == "list":
-                return "cron_list", args
-            if action == "add":
-                return "cron_add", args
-            if action == "del":
-                return "cron_delete", args
-            if action in {"enable", "disable"}:
-                return "cron_toggle", args
         return normalized_command, args
     return "gws", canonicalize_gws_command_args(service, args)
 
@@ -1938,6 +1921,7 @@ async def request_agent_cmd_approval(
     session_id: str | None = None,
     requests: list[dict[str, Any]] | None = None,
     preview_text: str | None = None,
+    task_id: int | None = None,
 ) -> str:
     """Show inline keyboard for agent-cmd write approval. Returns op_id."""
     await _ensure_persistence_loaded()
@@ -1955,6 +1939,7 @@ async def request_agent_cmd_approval(
         "agent_id": agent_id,
         "session_id": session_id,
         "chat_id": chat_id,
+        "task_id": task_id,
         "requests": list(requests or []),
         "grants": [],
         "preview_text": preview_text or "",
@@ -1996,6 +1981,19 @@ async def request_agent_cmd_approval(
         parse_mode=ParseMode.HTML,
     )
 
+    try:
+        from koda.services.approval_broker import publish_approval_required
+
+        await publish_approval_required(
+            approval_id=op_id,
+            session_id=session_id,
+            task_id=task_id,
+            description=description,
+            preview_text=preview_text,
+        )
+    except Exception:
+        log.debug("approval_broker_publish_failed", exc_info=True)
+
     return op_id
 
 
@@ -2007,6 +2005,17 @@ def resolve_agent_cmd_approval(op_id: str, decision: str, *, grants: list[dict[s
         if grants is not None:
             op["grants"] = list(grants)
         op["event"].set()
+        try:
+            from koda.services.approval_broker import spawn_publish_resolved
+
+            spawn_publish_resolved(
+                approval_id=op_id,
+                decision=decision,
+                session_id=str(op.get("session_id") or "").strip() or None,
+                task_id=op.get("task_id"),
+            )
+        except Exception:
+            log.debug("approval_broker_spawn_resolved_failed", exc_info=True)
 
 
 def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:

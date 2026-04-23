@@ -8,7 +8,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   FormInput,
@@ -97,7 +97,7 @@ function CategoryBadge({ category }: { category: string }) {
 /* -------------------------------------------------------------------------- */
 
 export function TabSkills() {
-  const { state, developerMode, updateAgentSpecField } = useBotEditor();
+  const { state, developerMode, updateAgentSpecField } = useAgentEditor();
   const { tl } = useAppI18n();
 
   const skillPolicy = useMemo(
@@ -178,7 +178,7 @@ export function TabSkills() {
               size={15}
               className="text-[var(--text-quaternary)]"
             />
-            <h3 className="eyebrow">{tl("Agent skills")}</h3>
+            <h3 className="eyebrow">{tl("Bot skills")}</h3>
           </div>
           <ToggleField
             label={tl("Ativado")}

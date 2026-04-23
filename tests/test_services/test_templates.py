@@ -9,14 +9,12 @@ import pytest
 from koda.services.templates import (
     _SKILL_TEMPLATES,
     add_template,
-    build_relevant_skills_awareness_prompt,
     build_skills_awareness_prompt,
     delete_template,
     get_all_templates,
     get_skill_template,
     get_template,
     list_template_names,
-    select_relevant_skills,
 )
 
 
@@ -205,17 +203,3 @@ class TestSkillsAwareness:
     def test_empty_when_no_skills(self):
         with patch("koda.services.templates._SKILL_TEMPLATES", {}):
             assert build_skills_awareness_prompt() == ""
-
-    def test_relevant_skills_awareness_prompt_filters_to_matching_skills(self):
-        result = build_relevant_skills_awareness_prompt("Faça um code review com foco em segurança e arquitetura.")
-        assert "security" in result.lower()
-        assert "architecture" in result.lower()
-
-    def test_relevant_skills_awareness_prompt_returns_empty_when_irrelevant(self):
-        assert build_relevant_skills_awareness_prompt("me diga oi") == ""
-
-    def test_select_relevant_skills_returns_scored_entries(self):
-        result = select_relevant_skills("Preciso de architecture review com foco em security.")
-        assert result
-        assert result[0]["name"]
-        assert float(result[0]["score"]) >= 1.0

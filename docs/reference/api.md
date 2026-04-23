@@ -12,21 +12,21 @@ This document is a guide to the public shape of the platform, not a replacement 
 
 ### Dashboard Setup
 
-- `GET /control-plane/setup` on the Next.js web app
 - `GET /control-plane` on the Next.js web app
 
 Purpose:
 
-- canonical first-boot configuration flow on `/control-plane/setup`
-- control-plane home and catalog on `/control-plane` after auth/setup is complete
-- operator session entry and ongoing product configuration inside the dashboard
+- canonical first-boot configuration flow
+- operator session entry
+- ongoing product configuration inside the dashboard
 
 ### Compatibility Setup Bridge
+
 - `GET /setup`
 
 Purpose:
 
-- compatibility page that points operators to `/control-plane/setup`
+- compatibility page that points operators to the dashboard flow
 - bridge for older quickstart links and published reverse-proxy routes
 
 ### Control Plane
@@ -56,8 +56,8 @@ The control plane now separates two different concerns for integrations:
 - system-level connection defaults:
   - catalog and canonical connection state live under `/api/control-plane/connections/catalog` and `/api/control-plane/connections/defaults/{connection_key}`
   - health history for a given core integration remains available under `/api/control-plane/integrations/{integration_id}/health`
-- bot-level authorization:
-  - each bot still needs explicit grants in `resource_access_policy.integration_grants` inside its agent spec
+- agent-level authorization:
+  - each agent still needs explicit grants in `resource_access_policy.integration_grants` inside its agent spec
 
 Operationally, the expected lifecycle is:
 
@@ -65,7 +65,7 @@ Operationally, the expected lifecycle is:
 2. configure or update the connection default in the control plane
 3. run `verify` so Koda records `status`, `checked_via`, `auth_expired`, and probe metadata
 4. inspect `health` if the integration is degraded or if runtime authentication starts failing
-5. grant the integration per bot through the agent editor or agent-spec API
+5. grant the integration per agent through the agent editor or agent-spec API
 
 Canonical core connection payloads are keyed by `connection_key`. Typical keys include:
 
@@ -97,7 +97,7 @@ Purpose:
 ## Intended Usage
 
 - infrastructure bootstrap happens through Docker and `.env`
-- product bootstrap happens through `/control-plane/setup` in the dashboard
+- product bootstrap happens through `/control-plane` in the dashboard
 - ongoing product management happens through the control plane and its HTTP APIs
 - runtime operations are exposed through dedicated runtime routes, not mixed into setup endpoints
 

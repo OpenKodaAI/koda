@@ -169,6 +169,22 @@ class ControlPlaneSupervisor:
             "KNOWLEDGE_V2_S3_ACCESS_KEY_ID",
             "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY",
             "KNOWLEDGE_V2_S3_PREFIX",
+            # gRPC sidecar targets set by the compose orchestrator. Workers must inherit
+            # these from the parent env; otherwise the child's koda.config defaults
+            # to 127.0.0.1:<port> which only resolves inside the supervisor container,
+            # and every RPC fails with "Connection refused".
+            "SECURITY_GRPC_TARGET",
+            "MEMORY_GRPC_TARGET",
+            "ARTIFACT_GRPC_TARGET",
+            "RETRIEVAL_GRPC_TARGET",
+            "RUNTIME_KERNEL_GRPC_TARGET",
+            # Playwright's runtime resolver keys off this env; without it the
+            # child defaults to $HOME/.cache/ms-playwright, which is a fresh
+            # empty volume in the standard compose. Every browser tool then
+            # fails with "Browser is not running. It may not be installed or
+            # failed to start." even though the Dockerfile installed
+            # Chromium into /var/lib/koda/playwright-browsers.
+            "PLAYWRIGHT_BROWSERS_PATH",
         }
         env = {key: value for key, value in os.environ.items() if key in _SAFE_RUNTIME_PARENT_ENV_KEYS}
         env.update(runtime.process_env)

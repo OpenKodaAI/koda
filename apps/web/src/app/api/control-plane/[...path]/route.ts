@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
@@ -13,7 +13,10 @@ import "@/lib/contracts/memory";
 import { controlPlaneFetch, sanitizeControlPlanePayload } from "@/lib/control-plane";
 import { getControlPlaneMutationInvalidation } from "@/lib/control-plane-cache";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
-import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
+import {
+  getWebOperatorTokenFromCookie,
+  setOwnerExistsHintCookie,
+} from "@/lib/web-operator-session";
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -28,7 +31,6 @@ const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "auth/bootstrap/exchange",
   "auth/login",
   "auth/register-owner",
-  "auth/legacy/exchange",
 ]);
 
 function isPublicControlPlanePath(path: string[]) {
@@ -174,13 +176,23 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
 
   if (contentType?.includes("application/json")) {
     const payload = await response.json().catch(() => null);
-    return new Response(
-      JSON.stringify(sanitizeControlPlanePayload(pathname, payload)),
-      {
-        status: response.status,
-        headers,
-      },
-    );
+    const sanitized = sanitizeControlPlanePayload(pathname, payload);
+    const finalResponse = new NextResponse(JSON.stringify(sanitized), {
+      status: response.status,
+      headers,
+    });
+    // Sync the owner-exists hint cookie whenever we observe it from the
+    // control plane. Server Component pages cannot set cookies directly, so
+    // we do it here on the next response the client sees.
+    if (
+      pathname === "/api/control-plane/auth/status" ||
+      pathname === "/api/control-plane/onboarding/status"
+    ) {
+      if (sanitized && typeof sanitized === "object" && "has_owner" in sanitized) {
+        setOwnerExistsHintCookie(finalResponse, Boolean((sanitized as { has_owner?: boolean }).has_owner));
+      }
+    }
+    return finalResponse;
   }
 
   return new Response(response.body, {

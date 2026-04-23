@@ -65,7 +65,7 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
           ControlPlaneNavIcon,
           "primary",
           "catalog",
-          "intent",
+          "viewport",
           "startsWith",
         ),
       ],
@@ -80,7 +80,7 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
           ExecutionsNavIcon,
           "primary",
           "live",
-          "intent",
+          "viewport",
           "startsWith",
         ),
         buildItem(
@@ -90,7 +90,7 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
           SessionsNavIcon,
           "primary",
           "live",
-          "intent",
+          "viewport",
           "startsWith",
         ),
         buildItem(
@@ -109,7 +109,7 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
     {
       label: t("sidebar.sections.analysis"),
       items: [
-        buildItem(t, "/memory", "memory", MemoryNavIcon, "primary", "live", "intent", "memory"),
+        buildItem(t, "/memory", "memory", MemoryNavIcon, "primary", "live", "viewport", "memory"),
         buildItem(t, "/costs", "costs", CostsNavIcon, "primary", "live", "viewport", "startsWith"),
       ],
     },
@@ -128,7 +128,7 @@ export function buildSidebarFooterSections(t: AppTranslator): SidebarNavSection[
           GeneralSettingsNavIcon,
           "footer",
           "catalog",
-          "intent",
+          "viewport",
           "startsWith",
         ),
       ],
@@ -149,7 +149,7 @@ export function isSidebarItemActive(pathname: string, item: SidebarNavItem) {
     return (
       pathname === "/control-plane" ||
       pathname.startsWith("/control-plane/agents/") ||
-      pathname.startsWith("/control-plane/bots/")
+      pathname.startsWith("/control-plane/agents/")
     );
   }
 

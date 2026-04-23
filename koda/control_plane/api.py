@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import os
 import urllib.parse
@@ -11,7 +13,6 @@ from typing import Any, cast
 
 from aiohttp import ContentTypeError, web
 
-from koda.logging_config import get_logger
 from koda.services.http_client import inspect_url
 from koda.services.link_analyzer import fetch_link_metadata
 
@@ -29,7 +30,7 @@ from .dashboard_service import (
     list_dashboard_execution_summaries,
     list_dashboard_schedules,
 )
-from .manager import get_control_plane_manager
+from .manager import GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec, render_setup_page
 from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
 from .settings import (
@@ -78,66 +79,13 @@ def _clip_preview_text(value: Any, *, limit: int) -> str | None:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
-def _append_query_params(url: str, params: dict[str, str]) -> str:
-    parsed = urllib.parse.urlsplit(url)
-    existing = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    for key, value in params.items():
-        existing.append((key, value))
-    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(existing)))
-
-
-def _oauth_relay_completion_page(*, success: bool) -> str:
-    title = "Authentication complete" if success else "Authentication failed"
-    detail = (
-        "You can return to the Koda dashboard and continue."
-        if success
-        else "Return to the Koda dashboard and try the sign-in flow again."
-    )
-    return f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-    <style>
-      body {{
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #08111a;
-        color: #f4f7fb;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-        padding: 24px;
-      }}
-      main {{
-        width: min(560px, 100%);
-        border-radius: 24px;
-        padding: 28px;
-        background: rgba(11, 22, 34, 0.92);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-      }}
-      h1 {{ margin: 0 0 12px; font-size: 2rem; }}
-      p {{ margin: 0; color: #b9c4d0; line-height: 1.6; }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>{title}</h1>
-      <p>{detail}</p>
-    </main>
-  </body>
-</html>"""
-
-
 _PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
     "/api/control-plane/onboarding/status",
     "/api/control-plane/auth/status",
     "/api/control-plane/auth/bootstrap/exchange",
     "/api/control-plane/auth/login",
     "/api/control-plane/auth/register-owner",
-    "/api/control-plane/auth/legacy/exchange",
+    "/api/control-plane/auth/password/recover",
 )
 
 
@@ -170,13 +118,15 @@ def _authorize_request(request: web.Request) -> web.Response | None:
             display_name="Development Operator",
         )
         return None
-    if CONTROL_PLANE_AUTH_MODE != "token":
+    if CONTROL_PLANE_AUTH_MODE == "token":
+        context = _optional_auth_context(request)
+        if context is None:
+            return web.json_response({"error": "operator session is required"}, status=401)
+        request["operator_auth"] = context
         return None
-    context = _optional_auth_context(request)
-    if context is None:
-        return web.json_response({"error": "operator session is required"}, status=401)
-    request["operator_auth"] = context
-    return None
+    # Unknown mode — fail closed. settings.py validates at boot, so this is a
+    # defence-in-depth check.
+    return web.json_response({"error": "operator session is required"}, status=401)
 
 
 def _request_auth_context(request: web.Request) -> OperatorAuthContext | None:
@@ -293,8 +243,22 @@ async def onboarding_status(request: web.Request) -> web.Response:
 
 
 async def onboarding_bootstrap(request: web.Request) -> web.Response:
-    payload = await _json_payload(request)
-    return web.json_response(_manager().complete_onboarding(payload))
+    return web.json_response(
+        {
+            "error": "onboarding_bootstrap_removed",
+            "message": (
+                "The combined onboarding bootstrap is no longer used. "
+                "Create the owner account via /api/control-plane/auth/register-owner, "
+                "then configure providers/agents/integrations from the dashboard."
+            ),
+        },
+        status=410,
+    )
+
+
+def _extract_request_origin(request: web.Request) -> tuple[str | None, str | None]:
+    """Return (remote_ip, forwarded_for) for bootstrap loopback checks."""
+    return request.remote, request.headers.get("X-Forwarded-For")
 
 
 async def auth_status(request: web.Request) -> web.Response:
@@ -308,13 +272,54 @@ async def auth_bootstrap_exchange(request: web.Request) -> web.Response:
 
 async def auth_register_owner(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
+    remote_ip, forwarded_for = _extract_request_origin(request)
     return web.json_response(
         _auth_service().register_owner(
             registration_token=str(payload.get("registration_token") or ""),
+            bootstrap_code=str(payload.get("bootstrap_code") or ""),
             username=str(payload.get("username") or ""),
             email=str(payload.get("email") or ""),
             password=str(payload.get("password") or ""),
             display_name=str(payload.get("display_name") or ""),
+            remote_ip=remote_ip,
+            forwarded_for=forwarded_for,
+        ),
+        status=201,
+    )
+
+
+async def auth_password_recover(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _auth_service().reset_password_with_recovery_code(
+            identifier=str(payload.get("identifier") or ""),
+            recovery_code=str(payload.get("recovery_code") or ""),
+            new_password=str(payload.get("new_password") or ""),
+        )
+    )
+
+
+async def auth_password_change(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _auth_service().change_password(
+            _require_auth_context(request),
+            current_password=str(payload.get("current_password") or ""),
+            new_password=str(payload.get("new_password") or ""),
+        )
+    )
+
+
+async def auth_recovery_codes_summary(request: web.Request) -> web.Response:
+    return web.json_response(_auth_service().recovery_codes_summary(_require_auth_context(request)))
+
+
+async def auth_recovery_codes_regenerate(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(
+        _auth_service().regenerate_recovery_codes(
+            _require_auth_context(request),
+            current_password=str(payload.get("current_password") or ""),
         ),
         status=201,
     )
@@ -346,11 +351,6 @@ async def auth_issue_bootstrap_code(request: web.Request) -> web.Response:
         ),
         status=201,
     )
-
-
-async def auth_legacy_exchange(request: web.Request) -> web.Response:
-    payload = await _json_payload(request)
-    return web.json_response(_auth_service().exchange_legacy_token(str(payload.get("token") or "")))
 
 
 async def auth_list_tokens(request: web.Request) -> web.Response:
@@ -485,8 +485,8 @@ async def delete_squad(request: web.Request) -> web.Response:
 
 
 async def delete_agent(request: web.Request) -> web.Response:
-    _manager().archive_agent(request.match_info["agent_id"])
-    return web.json_response({"ok": True})
+    removed = _manager().delete_agent(request.match_info["agent_id"])
+    return web.json_response({"ok": True, "deleted": removed})
 
 
 async def list_dashboard_agent_summaries_route(request: web.Request) -> web.Response:
@@ -668,6 +668,110 @@ async def post_dashboard_session_message_route(request: web.Request) -> web.Resp
     return web.json_response(result, status=202)
 
 
+async def list_dashboard_session_approvals_route(request: web.Request) -> web.Response:
+    from koda.services.approval_broker import list_pending_for_session
+
+    agent_id = request.match_info["agent_id"]
+    session_id = request.match_info.get("session_id")
+    items = list_pending_for_session(agent_id=agent_id, session_id=session_id)
+    return web.json_response({"items": items})
+
+
+async def list_dashboard_agent_approvals_route(request: web.Request) -> web.Response:
+    from koda.services.approval_broker import list_pending_for_session
+
+    agent_id = request.match_info["agent_id"]
+    items = list_pending_for_session(agent_id=agent_id, session_id=None)
+    return web.json_response({"items": items})
+
+
+async def list_skills_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
+    import re
+
+    from koda.services.templates import _SKILL_TEMPLATES
+
+    when_to_use_re = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
+    items: list[dict[str, Any]] = []
+    for name, content in sorted(_SKILL_TEMPLATES.items()):
+        match = when_to_use_re.search(content)
+        description = match.group(1).strip().split(". ")[0] if match else ""
+        items.append(
+            {
+                "id": name,
+                "title": name.replace("-", " ").replace("_", " "),
+                "description": description,
+                "category": "skill",
+            }
+        )
+    return web.json_response({"items": items})
+
+
+async def list_agent_tools_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
+    try:
+        from koda.utils.approval import _OPS_COMMANDS, WRITE_CLASSIFIERS
+    except ImportError:
+        return web.json_response({"items": []})
+
+    tool_descriptions = {
+        "shell": "Execute shell commands in the agent workspace",
+        "git": "Git operations (status, log, diff, commit, push)",
+        "gh": "GitHub CLI operations (PRs, issues, releases)",
+        "glab": "GitLab CLI operations",
+        "docker": "Docker container operations",
+        "pip": "Python package manager",
+        "npm": "Node package manager",
+        "gws": "Google Workspace (Gmail, Calendar, Drive, Sheets)",
+        "jira": "Jira issue tracker",
+        "confluence": "Confluence wiki",
+        "http_request": "HTTP request (GET/POST/etc)",
+        "cron": "Scheduled jobs",
+        "write": "Write a file",
+        "edit": "Edit a file",
+        "rm": "Remove a file",
+        "mkdir": "Create a directory",
+        "cat": "Read a file",
+        "search": "Search the web or docs",
+        "fetch": "Fetch a URL",
+        "curl": "HTTP request via curl",
+        "browse": "Browser automation",
+        "screenshot": "Capture a screenshot",
+    }
+
+    items = []
+    for tool_id in sorted(set(_OPS_COMMANDS) | set(WRITE_CLASSIFIERS.keys())):
+        items.append(
+            {
+                "id": tool_id,
+                "title": tool_id,
+                "description": tool_descriptions.get(tool_id, ""),
+                "category": "tool",
+            }
+        )
+    return web.json_response({"items": items})
+
+
+async def post_dashboard_approval_route(request: web.Request) -> web.Response:
+    from koda.services.approval_broker import resolve_approval
+
+    payload = await _json_payload(request)
+    approval_id = request.match_info["approval_id"]
+    raw_decision = str(payload.get("decision") or "").strip()
+    rationale = str(payload.get("rationale") or "").strip() or None
+    if not raw_decision:
+        return web.json_response({"error": "missing decision"}, status=400)
+    try:
+        summary = await resolve_approval(
+            approval_id=approval_id,
+            decision=raw_decision,
+            rationale=rationale,
+        )
+    except KeyError:
+        return web.json_response({"error": "approval not found"}, status=404)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"approval": summary})
+
+
 async def list_dashboard_agent_dlq_route(request: web.Request) -> web.Response:
     try:
         limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
@@ -838,30 +942,18 @@ async def oauth_relay_handler(request: web.Request) -> web.Response:
             aio.ClientSession() as session,
             session.get(internal_url, timeout=aio.ClientTimeout(total=10)) as resp,
         ):
-            await resp.read()
+            body = await resp.text()
             clear_oauth_relay_target(session_id)
-            if 200 <= resp.status < 300:
-                return web.Response(
-                    status=200,
-                    text=_oauth_relay_completion_page(success=True),
-                    content_type="text/html",
-                )
-            get_logger(__name__).warning(
-                "oauth_relay_cli_callback_unexpected_status",
-                session_id=session_id,
-                status=resp.status,
-                content_type=resp.content_type or "",
-            )
+            # Return the CLI's response (usually HTML with a success message)
             return web.Response(
-                status=502,
-                text=_oauth_relay_completion_page(success=False),
-                content_type="text/html",
+                status=resp.status,
+                text=body,
+                content_type=resp.content_type or "text/html",
             )
-    except Exception:
-        get_logger(__name__).exception("oauth_relay_cli_callback_failed", session_id=session_id)
+    except Exception as exc:
         return web.Response(
             status=502,
-            text="Failed to reach CLI auth server.",
+            text=f"Failed to reach CLI auth server: {exc}",
             content_type="text/plain",
         )
 
@@ -870,9 +962,16 @@ async def get_general_system_settings(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_general_system_settings())
 
 
+async def get_persistence_diagnostics(request: web.Request) -> web.Response:
+    return web.json_response(_manager().get_persistence_diagnostics())
+
+
 async def put_general_system_settings(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(_manager().put_general_system_settings(payload))
+    try:
+        return web.json_response(_manager().put_general_system_settings(payload))
+    except GeneralPayloadValidationError as exc:
+        return web.json_response({"errors": exc.errors}, status=400)
 
 
 async def get_provider_connection(request: web.Request) -> web.Response:
@@ -905,13 +1004,23 @@ async def get_provider_login_session(request: web.Request) -> web.Response:
 
 async def submit_provider_login_code(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _manager().submit_provider_login_code(
-            request.match_info["provider_id"],
-            request.match_info["session_id"],
-            payload,
+    provider_id = request.match_info["provider_id"]
+    session_id = request.match_info["session_id"]
+    manager = _manager()
+    # The submit call blocks on the CLI subprocess for up to 45 seconds; run
+    # it in the default thread pool so the event loop stays responsive to the
+    # frontend's 2.5s polling of the same login session.
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            functools.partial(manager.submit_provider_login_code, provider_id, session_id, payload),
         )
-    )
+    except KeyError:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "login_session_expired"}), content_type="application/json"
+        ) from None
+    return web.json_response(result)
 
 
 async def verify_provider_connection(request: web.Request) -> web.Response:
@@ -1506,7 +1615,22 @@ async def get_ollama_models(request: web.Request) -> web.Response:
     import asyncio
 
     manager = _manager()
-    payload = await asyncio.get_event_loop().run_in_executor(None, manager.get_ollama_model_catalog)
+    # Resolve connection inputs on the event loop (they touch the DB through
+    # `_merged_global_env`), then hand only the blocking HTTP probe off to a
+    # worker thread. Running the DB bits inside `run_in_executor` would escape
+    # the async loop that owns the asyncpg connection pool, raising
+    # `no running event loop` / `connection was closed in the middle of operation`.
+    auth_mode, base_url, api_key = manager._resolve_ollama_connection_inputs(
+        env=manager._merged_global_env(),
+    )
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager._fetch_ollama_model_catalog(
+            auth_mode=auth_mode,
+            base_url=base_url,
+            api_key=api_key,
+        ),
+    )
     return web.json_response(payload)
 
 
@@ -1574,7 +1698,7 @@ async def list_mcp_connections(request: web.Request) -> web.Response:
 
 
 def _mcp_connection_key(request: web.Request) -> str:
-    raw = request.match_info.get("server_key") or request.match_info["connection_key"]
+    raw = str(request.match_info.get("server_key") or request.match_info["connection_key"])
     return raw.removeprefix("mcp:") if raw.startswith("mcp:") else raw
 
 
@@ -1789,7 +1913,7 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
     state = request.query.get("state", "")
     code = request.query.get("code", "")
     error = request.query.get("error", "")
-    from koda.services.mcp_oauth import _validate_frontend_callback_uri, handle_oauth_callback
+    from koda.services.mcp_oauth import handle_oauth_callback
 
     result = await handle_oauth_callback(state, code, error=error or None)
     wants_json = request.query.get("mode") == "json" or "application/json" in request.headers.get("Accept", "")
@@ -1802,30 +1926,11 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
     ).strip()
     if not frontend_target:
         return web.json_response(result, status=200 if result.get("success") else 400)
-    try:
-        frontend_target = _validate_frontend_callback_uri(frontend_target)
-    except ValueError:
-        return web.json_response(result, status=200 if result.get("success") else 400)
     if result.get("success"):
         raise web.HTTPFound(
-            _append_query_params(
-                frontend_target,
-                {
-                    "status": "success",
-                    "server_key": str(result["server_key"]),
-                    "agent_id": str(result["agent_id"]),
-                },
-            )
+            f"{frontend_target}?status=success&server_key={result['server_key']}&agent_id={result['agent_id']}"
         )
-    raise web.HTTPFound(
-        _append_query_params(
-            frontend_target,
-            {
-                "status": "error",
-                "error": str(result.get("error", "token_exchange_failed")),
-            },
-        )
-    )
+    raise web.HTTPFound(f"{frontend_target}?status=error&error={result.get('error', 'token_exchange_failed')}")
 
 
 async def refresh_oauth_token_route(request: web.Request) -> web.Response:
@@ -1852,130 +1957,6 @@ async def get_oauth_status_route(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_oauth_token_status(agent_id, server_key))
 
 
-def register_legacy_bot_aliases(app: web.Application) -> None:
-    """Keep legacy /bots surfaces working while /agents remains canonical."""
-
-    aliases: list[tuple[str, str, Callable[[web.Request], Awaitable[web.StreamResponse]]]] = [
-        ("get", "/api/control-plane/dashboard/bots/summary", list_dashboard_agent_summaries_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/summary", get_dashboard_agent_summary_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/stats", get_dashboard_agent_stats_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/executions", list_dashboard_agent_executions_route),
-        (
-            "get",
-            "/api/control-plane/dashboard/bots/{agent_id}/executions/{task_id}",
-            get_dashboard_execution_detail_route,
-        ),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/sessions", list_dashboard_agent_sessions_route),
-        (
-            "post",
-            "/api/control-plane/dashboard/bots/{agent_id}/sessions/messages",
-            post_dashboard_session_message_route,
-        ),
-        (
-            "get",
-            "/api/control-plane/dashboard/bots/{agent_id}/sessions/{session_id}",
-            get_dashboard_session_detail_route,
-        ),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/dlq", list_dashboard_agent_dlq_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/costs", get_dashboard_agent_costs_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/schedules", list_dashboard_agent_schedules_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/cron", list_dashboard_agent_schedules_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/audit", list_dashboard_audit_route),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/memory-map", get_dashboard_memory_map),
-        ("get", "/api/control-plane/dashboard/bots/{agent_id}/memory-curation", list_dashboard_memory_curation),
-        (
-            "get",
-            "/api/control-plane/dashboard/bots/{agent_id}/memory-curation/{memory_id}",
-            get_dashboard_memory_curation_detail,
-        ),
-        (
-            "get",
-            "/api/control-plane/dashboard/bots/{agent_id}/memory-curation/clusters/{cluster_id}",
-            get_dashboard_memory_curation_cluster,
-        ),
-        (
-            "post",
-            "/api/control-plane/dashboard/bots/{agent_id}/memory-curation/actions",
-            post_dashboard_memory_curation_action,
-        ),
-        ("get", "/api/control-plane/bots", list_agents),
-        ("post", "/api/control-plane/bots", create_agent),
-        ("get", "/api/control-plane/bots/{agent_id}", get_agent),
-        ("patch", "/api/control-plane/bots/{agent_id}", patch_agent),
-        ("delete", "/api/control-plane/bots/{agent_id}", delete_agent),
-        ("post", "/api/control-plane/bots/{agent_id}/clone", clone_agent),
-        ("post", "/api/control-plane/bots/{agent_id}/publish", publish_agent),
-        ("post", "/api/control-plane/bots/{agent_id}/activate", activate_agent),
-        ("post", "/api/control-plane/bots/{agent_id}/pause", pause_agent),
-        ("get", "/api/control-plane/bots/{agent_id}/runtime-access", get_runtime_access),
-        ("get", "/api/control-plane/bots/{agent_id}/agent-spec", get_agent_spec),
-        ("put", "/api/control-plane/bots/{agent_id}/agent-spec", put_agent_spec),
-        ("get", "/api/control-plane/bots/{agent_id}/compiled-prompt", get_compiled_prompt),
-        ("post", "/api/control-plane/bots/{agent_id}/validate", validate_agent),
-        ("post", "/api/control-plane/bots/{agent_id}/publish-checks", publish_checks),
-        ("get", "/api/control-plane/bots/{agent_id}/tool-policy", get_tool_policy),
-        ("put", "/api/control-plane/bots/{agent_id}/tool-policy", put_tool_policy),
-        ("get", "/api/control-plane/bots/{agent_id}/model-policy", get_model_policy),
-        ("put", "/api/control-plane/bots/{agent_id}/model-policy", put_model_policy),
-        ("get", "/api/control-plane/bots/{agent_id}/autonomy-policy", get_autonomy_policy),
-        ("put", "/api/control-plane/bots/{agent_id}/autonomy-policy", put_autonomy_policy),
-        ("get", "/api/control-plane/bots/{agent_id}/execution-policy", get_execution_policy),
-        ("put", "/api/control-plane/bots/{agent_id}/execution-policy", put_execution_policy),
-        ("get", "/api/control-plane/bots/{agent_id}/policy-catalog", get_execution_policy_catalog),
-        (
-            "post",
-            "/api/control-plane/bots/{agent_id}/execution-policy/evaluate",
-            evaluate_execution_policy,
-        ),
-        ("get", "/api/control-plane/bots/{agent_id}/knowledge-candidates", list_knowledge_candidates),
-        (
-            "post",
-            "/api/control-plane/bots/{agent_id}/knowledge-candidates/{candidate_id}/approve",
-            approve_knowledge_candidate,
-        ),
-        (
-            "post",
-            "/api/control-plane/bots/{agent_id}/knowledge-candidates/{candidate_id}/reject",
-            reject_knowledge_candidate,
-        ),
-        ("get", "/api/control-plane/bots/{agent_id}/runbooks", list_runbooks),
-        ("post", "/api/control-plane/bots/{agent_id}/runbooks/{runbook_id}/revalidate", revalidate_runbook),
-        ("get", "/api/control-plane/bots/{agent_id}/retrieval-traces", list_retrieval_traces),
-        ("get", "/api/control-plane/bots/{agent_id}/retrieval-traces/{trace_id}", get_retrieval_trace),
-        ("get", "/api/control-plane/bots/{agent_id}/answer-traces", list_answer_traces),
-        ("get", "/api/control-plane/bots/{agent_id}/answer-traces/{answer_trace_id}", get_answer_trace),
-        ("get", "/api/control-plane/bots/{agent_id}/knowledge-graph", list_knowledge_graph),
-        ("get", "/api/control-plane/bots/{agent_id}/evaluation-cases", list_evaluation_cases),
-        ("post", "/api/control-plane/bots/{agent_id}/evaluation-cases/seed", seed_evaluation_cases),
-        ("patch", "/api/control-plane/bots/{agent_id}/evaluation-cases/{case_key}", patch_evaluation_case),
-        ("get", "/api/control-plane/bots/{agent_id}/knowledge-evals/runs", list_evaluation_runs),
-        ("get", "/api/control-plane/bots/{agent_id}/sections/{section}", get_section),
-        ("put", "/api/control-plane/bots/{agent_id}/sections/{section}", put_section),
-        ("get", "/api/control-plane/bots/{agent_id}/documents/{kind}", get_document),
-        ("post", "/api/control-plane/bots/{agent_id}/documents/{kind}", upsert_document),
-        ("put", "/api/control-plane/bots/{agent_id}/documents/{kind}", upsert_document),
-        ("delete", "/api/control-plane/bots/{agent_id}/documents/{kind}", delete_document),
-        ("get", "/api/control-plane/bots/{agent_id}/knowledge-assets", list_knowledge_assets),
-        ("post", "/api/control-plane/bots/{agent_id}/knowledge-assets", create_knowledge_asset),
-        ("put", "/api/control-plane/bots/{agent_id}/knowledge-assets/{asset_id}", update_knowledge_asset),
-        ("delete", "/api/control-plane/bots/{agent_id}/knowledge-assets/{asset_id}", delete_knowledge_asset),
-        ("get", "/api/control-plane/bots/{agent_id}/templates", list_templates),
-        ("post", "/api/control-plane/bots/{agent_id}/templates", create_template),
-        ("put", "/api/control-plane/bots/{agent_id}/templates/{asset_id}", update_template),
-        ("delete", "/api/control-plane/bots/{agent_id}/templates/{asset_id}", delete_template),
-        ("get", "/api/control-plane/bots/{agent_id}/skills", list_skills),
-        ("post", "/api/control-plane/bots/{agent_id}/skills", create_skill),
-        ("put", "/api/control-plane/bots/{agent_id}/skills/{asset_id}", update_skill),
-        ("delete", "/api/control-plane/bots/{agent_id}/skills/{asset_id}", delete_skill),
-        ("get", "/api/control-plane/bots/{agent_id}/secrets/{secret_key}", get_secret),
-        ("put", "/api/control-plane/bots/{agent_id}/secrets/{secret_key}", put_secret),
-        ("delete", "/api/control-plane/bots/{agent_id}/secrets/{secret_key}", delete_secret),
-    ]
-
-    for method, path, handler in aliases:
-        getattr(app.router, f"add_{method}")(path, handler)
-
-
 def setup_control_plane_routes(app: web.Application) -> None:
     # OAuth relay for CLI-based provider auth inside Docker
     app.router.add_get("/api/control-plane/oauth-relay/{session_id}", oauth_relay_handler)
@@ -1991,7 +1972,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_post("/api/control-plane/auth/register-owner", auth_register_owner)
     app.router.add_post("/api/control-plane/auth/login", auth_login)
     app.router.add_post("/api/control-plane/auth/logout", auth_logout)
-    app.router.add_post("/api/control-plane/auth/legacy/exchange", auth_legacy_exchange)
+    app.router.add_post("/api/control-plane/auth/password/recover", auth_password_recover)
+    app.router.add_post("/api/control-plane/auth/password/change", auth_password_change)
+    app.router.add_get("/api/control-plane/auth/recovery-codes", auth_recovery_codes_summary)
+    app.router.add_post("/api/control-plane/auth/recovery-codes/regenerate", auth_recovery_codes_regenerate)
     app.router.add_get("/api/control-plane/auth/tokens", auth_list_tokens)
     app.router.add_post("/api/control-plane/auth/tokens", auth_create_token)
     app.router.add_delete("/api/control-plane/auth/tokens/{token_id}", auth_delete_token)
@@ -2024,6 +2008,26 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/dashboard/agents/{agent_id}/sessions/{session_id}",
         get_dashboard_session_detail_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/agents/{agent_id}/sessions/{session_id}/approvals",
+        list_dashboard_session_approvals_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/agents/{agent_id}/approvals",
+        list_dashboard_agent_approvals_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/dashboard/agents/{agent_id}/approvals/{approval_id}",
+        post_dashboard_approval_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/skills",
+        list_skills_catalog_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/agents/{agent_id}/tools",
+        list_agent_tools_catalog_route,
     )
     app.router.add_get("/api/control-plane/dashboard/dlq", list_dashboard_dlq_route)
     app.router.add_get("/api/control-plane/dashboard/agents/{agent_id}/dlq", list_dashboard_agent_dlq_route)
@@ -2114,6 +2118,7 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/system-settings", put_system_settings)
     app.router.add_get("/api/control-plane/system-settings/general", get_general_system_settings)
     app.router.add_put("/api/control-plane/system-settings/general", put_general_system_settings)
+    app.router.add_get("/api/control-plane/_diag/persistence", get_persistence_diagnostics)
     app.router.add_get("/api/control-plane/providers/{provider_id}/connection", get_provider_connection)
     app.router.add_put(
         "/api/control-plane/providers/{provider_id}/connection/api-key",
@@ -2303,5 +2308,3 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/status", get_oauth_status_route
     )
-
-    register_legacy_bot_aliases(app)

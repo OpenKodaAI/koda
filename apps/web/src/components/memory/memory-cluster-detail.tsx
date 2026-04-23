@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { getBotLabel } from "@/lib/bot-constants";
+import { getAgentLabel } from "@/lib/agent-constants";
 import { getMemoryTypeLabel, getMemoryTypeMeta } from "@/lib/memory-constants";
 import type { MemoryClusterReviewDetail } from "@/lib/types";
 import { formatDateTime, formatRelativeTime } from "@/lib/utils";
@@ -58,7 +58,7 @@ export function MemoryClusterDetail({
 }) {
   const { t } = useAppI18n();
   const typeMeta = getMemoryTypeMeta(detail.cluster.dominant_type);
-  const mapHref = `/memory?bot=${detail.cluster.bot_id}&search=${encodeURIComponent(
+  const mapHref = `/memory?agent=${detail.cluster.bot_id}&search=${encodeURIComponent(
     detail.cluster.summary
   )}`;
 
@@ -76,7 +76,7 @@ export function MemoryClusterDetail({
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: typeMeta.color }} />
             {getMemoryTypeLabel(detail.cluster.dominant_type, t)}
           </span>
-          <span>{getBotLabel(detail.cluster.bot_id)}</span>
+          <span>{getAgentLabel(detail.cluster.bot_id)}</span>
           <span>•</span>
           <span>{t("memory.map.memoryCount", { count: detail.cluster.member_count })}</span>
           <span>•</span>

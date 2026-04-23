@@ -16,13 +16,11 @@ export class ControlPlaneRequestError extends Error {
   }
 }
 
-export type ControlPlaneBotOrganization = {
+export type ControlPlaneAgentOrganization = {
   workspace_id?: string | null;
   workspace_name?: string | null;
-  workspace_color?: string | null;
   squad_id?: string | null;
   squad_name?: string | null;
-  squad_color?: string | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -45,7 +43,6 @@ export type ControlPlaneWorkspaceSquad = {
   workspace_id: string;
   name: string;
   description: string;
-  color: string;
   bot_count: number;
   spec?: SquadSpec;
   documents?: ScopePromptDocuments;
@@ -57,7 +54,6 @@ export type ControlPlaneWorkspace = {
   id: string;
   name: string;
   description: string;
-  color: string;
   bot_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;
@@ -85,7 +81,7 @@ export type ControlPlaneWorkspaceTree = {
   total_bot_count: number;
 };
 
-export type ControlPlaneBotSummary = {
+export type ControlPlaneAgentSummary = {
   id: string;
   display_name: string;
   status: string;
@@ -97,7 +93,7 @@ export type ControlPlaneBotSummary = {
   storage_namespace: string;
   runtime_endpoint: Record<string, unknown>;
   metadata: Record<string, unknown>;
-  organization: ControlPlaneBotOrganization;
+  organization: ControlPlaneAgentOrganization;
   default_model_provider_id?: string;
   default_model_provider_label?: string;
   default_model_id?: string;
@@ -150,7 +146,7 @@ export type GeneralSystemSettingsValueSource =
 export type GeneralSystemSettingsVariable = {
   key: string;
   type: "text" | "secret";
-  scope: "system_only" | "bot_grant";
+  scope: "system_only" | "agent_grant";
   description: string;
   value: string;
   preview: string;
@@ -167,7 +163,7 @@ export type GeneralSystemSettingsCredentialField = {
   value?: string;
   preview?: string;
   value_present?: boolean;
-  usage_scope?: "system_only" | "bot_grant";
+  usage_scope?: "system_only" | "agent_grant";
   clear?: boolean;
 };
 
@@ -428,6 +424,22 @@ export type GeneralSystemSettings = {
       knowledge_policy: ControlPlaneKnowledgePolicy;
       autonomy_policy: ControlPlaneAutonomyPolicy;
     };
+    scheduler: {
+      scheduler_enabled: boolean;
+      scheduler_poll_interval_seconds?: number | null;
+      scheduler_lease_seconds?: number | null;
+      scheduler_run_max_attempts?: number | null;
+      scheduler_retry_base_delay?: number | null;
+      scheduler_retry_max_delay?: number | null;
+      scheduler_min_interval_seconds?: number | null;
+      runbook_governance_enabled: boolean;
+      runbook_governance_hour?: number | null;
+      runbook_revalidation_stale_days?: number | null;
+      runbook_revalidation_min_verified_runs?: number | null;
+      runbook_revalidation_min_success_rate?: number | null;
+      runbook_revalidation_correction_threshold?: number | null;
+      runbook_revalidation_rollback_threshold?: number | null;
+    };
     variables: GeneralSystemSettingsVariable[];
     provider_connections: Record<string, GeneralSystemSettingsProviderConnection>;
   };
@@ -570,6 +582,8 @@ export type ControlPlaneCoreProviders = {
   fallback_order?: string[];
   governance?: Record<string, unknown>;
   providers: Record<string, Record<string, unknown>>;
+  model_functions?: Array<{ id: string; title: string; description: string }>;
+  functional_model_catalog?: Record<string, Array<Record<string, unknown>>>;
 };
 
 export type ControlPlaneCorePolicies = Record<string, unknown>;
@@ -578,7 +592,7 @@ export type ControlPlaneCoreCapabilities = {
   providers: Array<Record<string, unknown>>;
 };
 
-export type ControlPlaneBot = ControlPlaneBotSummary & {
+export type ControlPlaneAgent = ControlPlaneAgentSummary & {
   sections: Record<string, Record<string, unknown>>;
   documents: Record<string, string>;
   knowledge_assets: Array<Record<string, unknown>>;
@@ -645,6 +659,53 @@ export type McpEnvSchemaField = {
   input_type?: string;
 };
 
+/* -------------------------------------------------------------------------- */
+/*  ConnectionProfile — declarative per-integration connection contract        */
+/* -------------------------------------------------------------------------- */
+
+export type ConnectionStrategy =
+  | "none"
+  | "api_key"
+  | "connection_string"
+  | "dual_token"
+  | "local_path"
+  | "local_app"
+  | "oauth_only"
+  | "oauth_preferred";
+
+export type RuntimeConstraintKey =
+  | "allowed_domains"
+  | "allowed_paths"
+  | "allowed_db_envs"
+  | "allow_private_network"
+  | "read_only_mode";
+
+export type ConnectionField = {
+  key: string;
+  label: string;
+  required?: boolean;
+  input_type?: "password" | "text" | "textarea" | "switch";
+  help?: string | null;
+};
+
+export type ConnectionProfile = {
+  strategy: ConnectionStrategy;
+  oauth_provider?: string | null;
+  oauth_scopes?: string[];
+  fields?: ConnectionField[];
+  scope_fields?: ConnectionField[];
+  read_only_toggle?: ConnectionField | null;
+  path_argument?: ConnectionField | null;
+  local_app_name?: string | null;
+  local_app_detection_hint?: string | null;
+};
+
+export type CatalogExtension = {
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
+  default_tool_policy?: "auto" | "always_ask";
+};
+
 export type McpServerCatalogEntry = {
   server_key: string;
   display_name: string;
@@ -674,6 +735,8 @@ export type McpServerCatalogEntry = {
   logo_key?: string | null;
   metadata?: Record<string, unknown>;
   metadata_json?: string | null;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
   created_at?: string;
   updated_at?: string;
 };
@@ -728,6 +791,8 @@ export type ControlPlaneConnectionCatalogEntry = {
   logo_key?: string | null;
   metadata?: Record<string, unknown> | null;
   enabled?: boolean;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
 };
 
 export type ControlPlaneAgentConnection = {
@@ -802,6 +867,8 @@ export type ControlPlaneCoreIntegration = {
   health_probe?: string;
   supports_persistence?: boolean;
   connection?: ControlPlaneCoreIntegrationConnection;
+  connection_profile?: ConnectionProfile | null;
+  runtime_constraints?: RuntimeConstraintKey[];
   [key: string]: unknown;
 };
 
@@ -923,7 +990,6 @@ export type ControlPlaneOnboardingStatus = {
   };
   openapi_url?: string;
   setup_url?: string;
-  dashboard_setup_url?: string;
 };
 
 export type ControlPlaneAuthStatus = {
@@ -933,6 +999,9 @@ export type ControlPlaneAuthStatus = {
   auth_mode: string;
   session_required: boolean;
   recovery_available: boolean;
+  onboarding_complete?: boolean;
+  loopback_trust_enabled?: boolean;
+  bootstrap_file_path?: string;
   session_subject?: string | null;
   operator?: {
     id?: string | null;
@@ -942,6 +1011,10 @@ export type ControlPlaneAuthStatus = {
   } | null;
 };
 
+// Stored-secret previews must never reach the browser. The backend already
+// emits "" for these fields (see manager.py serializers), and this set is the
+// last line of defence: any payload carrying a non-empty value under these
+// keys is forcibly zeroed before the response leaves the proxy.
 const PREVIEW_ONLY_KEYS = new Set([
   "preview",
   "api_key_preview",
@@ -1084,9 +1157,9 @@ export async function controlPlaneFetchJson<T>(
   return sanitizeControlPlanePayload(pathname, payload as T);
 }
 
-export async function getControlPlaneBots() {
+export async function getControlPlaneAgents() {
   const payload = await controlPlaneFetchJson<{
-    items: ControlPlaneBotSummary[];
+    items: ControlPlaneAgentSummary[];
   }>("/api/control-plane/agents", {}, {
     tier: "catalog",
     tags: [CONTROL_PLANE_CACHE_TAGS.catalog],
@@ -1105,9 +1178,9 @@ export async function getControlPlaneWorkspaces() {
   );
 }
 
-export async function getControlPlaneBot(botId: string) {
-  return controlPlaneFetchJson<ControlPlaneBot>(
-    `/api/control-plane/agents/${botId}`,
+export async function getControlPlaneAgent(agentId: string) {
+  return controlPlaneFetchJson<ControlPlaneAgent>(
+    `/api/control-plane/agents/${agentId}`,
     {},
     {
       tier: "live",
@@ -1115,41 +1188,41 @@ export async function getControlPlaneBot(botId: string) {
   );
 }
 
-export async function getControlPlaneCompiledPrompt(botId: string) {
+export async function getControlPlaneCompiledPrompt(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneCompiledPrompt>(
-    `/api/control-plane/agents/${botId}/compiled-prompt`,
+    `/api/control-plane/agents/${agentId}/compiled-prompt`,
     {},
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
 
-export async function getControlPlaneExecutionPolicy(botId: string) {
+export async function getControlPlaneExecutionPolicy(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneExecutionPolicyPayload>(
-    `/api/control-plane/agents/${botId}/execution-policy`,
+    `/api/control-plane/agents/${agentId}/execution-policy`,
     {},
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
 
-export async function getControlPlaneExecutionPolicyCatalog(botId: string) {
+export async function getControlPlaneExecutionPolicyCatalog(agentId: string) {
   return controlPlaneFetchJson<{
     agent_id: string;
     catalog: ControlPlaneExecutionPolicyCatalog;
     policy: ControlPlaneExecutionPolicy;
-  }>(`/api/control-plane/agents/${botId}/policy-catalog`, {}, {
+  }>(`/api/control-plane/agents/${agentId}/policy-catalog`, {}, {
     tier: "detail",
-    tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+    tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
   });
 }
 
 export async function evaluateControlPlaneExecutionPolicy(
-  botId: string,
+  agentId: string,
   payload: {
     policy?: ControlPlaneExecutionPolicy;
     action?: Record<string, unknown>;
@@ -1158,14 +1231,14 @@ export async function evaluateControlPlaneExecutionPolicy(
   },
 ) {
   return controlPlaneFetchJson<ControlPlaneExecutionPolicyEvaluation>(
-    `/api/control-plane/agents/${botId}/execution-policy/evaluate`,
+    `/api/control-plane/agents/${agentId}/execution-policy/evaluate`,
     {
       method: "POST",
       body: JSON.stringify(payload),
     },
     {
       tier: "detail",
-      tags: [CONTROL_PLANE_CACHE_TAGS.bot(botId)],
+      tags: [CONTROL_PLANE_CACHE_TAGS.agent(agentId)],
     },
   );
 }
@@ -1192,19 +1265,22 @@ export async function getControlPlaneSystemSettings() {
 }
 
 export async function getGeneralSystemSettings() {
+  // Always bypass the fetch cache: this payload is what the user just edited,
+  // so any staleness causes the UI to "revert" to the pre-save state even
+  // though the backend persisted correctly.
   return controlPlaneFetchJson<GeneralSystemSettings>(
     "/api/control-plane/system-settings/general",
     {},
     {
-      tier: "catalog",
+      tier: "live",
       tags: [CONTROL_PLANE_CACHE_TAGS.systemGeneral],
     },
   );
 }
 
-export async function getControlPlaneRuntimeAccess(botId: string) {
+export async function getControlPlaneRuntimeAccess(agentId: string) {
   return controlPlaneFetchJson<ControlPlaneRuntimeAccess>(
-    `/api/control-plane/agents/${botId}/runtime-access`,
+    `/api/control-plane/agents/${agentId}/runtime-access`,
     {},
     {
       tier: "live",
@@ -1218,7 +1294,7 @@ type ControlPlaneRuntimeAccessRequest = {
 };
 
 export async function getServerControlPlaneRuntimeAccess(
-  botId: string,
+  agentId: string,
   options: ControlPlaneRuntimeAccessRequest = {},
 ) {
   const searchParams = new URLSearchParams();
@@ -1230,7 +1306,7 @@ export async function getServerControlPlaneRuntimeAccess(
   }
   const suffix = searchParams.size ? `?${searchParams.toString()}` : "";
   const response = await controlPlaneFetch(
-    `/api/control-plane/agents/${botId}/runtime-access${suffix}`,
+    `/api/control-plane/agents/${agentId}/runtime-access${suffix}`,
     {},
     {
       tier: "live",

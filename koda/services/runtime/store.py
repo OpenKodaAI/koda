@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from koda.services.runtime.postgres_store import PostgresRuntimeStore
-from koda.state_primary import get_primary_state_backend, postgres_primary_mode
+from koda.state.primary import get_primary_state_backend, postgres_primary_mode
 
 
 class RuntimeStore:

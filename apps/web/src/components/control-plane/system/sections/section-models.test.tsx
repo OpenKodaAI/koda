@@ -214,7 +214,7 @@ describe("ProviderAccordionItem", () => {
     expect(screen.getAllByText("Claude Code CLI").length).toBeGreaterThanOrEqual(2);
     expect(
       screen.getByText(
-        "A autenticação da Anthropic é gerenciada pelo Claude Code CLI instalado nesta máquina. Configure o CLI com `claude auth login` antes de conectar.",
+        "Opcional: se você já autenticou o Claude Code em outra máquina e montou o CLAUDE_CONFIG_DIR no container, basta clicar em Verificar para detectar a sessão. Caso contrário use a opção de assinatura acima.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Servidor Ollama")).not.toBeInTheDocument();

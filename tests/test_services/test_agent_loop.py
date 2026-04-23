@@ -132,7 +132,7 @@ SCHEDULER_EXECUTION_POLICY = {
         {
             "id": "allow-cron-add",
             "decision": "allow",
-            "selectors": {"tool_id": ["cron_add"]},
+            "selectors": {"tool_id": ["job_create"]},
         },
         {
             "id": "allow-job-create",
@@ -178,7 +178,7 @@ class TestAgentLoop:
         context = _make_context()
 
         initial = _make_result(
-            result='Let me check. <agent_cmd tool="cron_list">{}</agent_cmd>',
+            result='Let me check. <agent_cmd tool="job_list">{}</agent_cmd>',
         )
 
         # Mock the provider resume call.
@@ -194,16 +194,16 @@ class TestAgentLoop:
                 new_callable=AsyncMock,
                 return_value=resume_result,
             ),
-            patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_handler,
+            patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_handler,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
             mock_handler.return_value = AgentToolResult(
-                tool="cron_list",
+                tool="job_list",
                 success=True,
-                output="No cron jobs found.",
+                output="No jobs found.",
             )
-            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"cron_list": mock_handler}):
+            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_list": mock_handler}):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
         assert result.result == "You have no cron jobs."
@@ -260,27 +260,27 @@ class TestAgentLoop:
         # Resume always returns the same agent_cmd
         async def _mock_streaming(*args, **kwargs):
             return _make_result(
-                result='<agent_cmd tool="cron_list">{}</agent_cmd>',
+                result='<agent_cmd tool="job_list">{}</agent_cmd>',
                 cost_usd=0.01,
                 session_id="sess-1",
             )
 
         initial = _make_result(
-            result='<agent_cmd tool="cron_list">{}</agent_cmd>',
+            result='<agent_cmd tool="job_list">{}</agent_cmd>',
         )
 
         with (
             patch("koda.services.queue_manager._run_with_provider_fallback", side_effect=_mock_streaming),
-            patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_handler,
+            patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_handler,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
             mock_handler.return_value = AgentToolResult(
-                tool="cron_list",
+                tool="job_list",
                 success=True,
                 output="No jobs.",
             )
-            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"cron_list": mock_handler}):
+            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_list": mock_handler}):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
         # Should stop after 2 iterations (first execution + cycle detected on second)
@@ -295,7 +295,7 @@ class TestAgentLoop:
         context = _make_context()
 
         initial = _make_result(
-            result='Before <agent_cmd tool="cron_list">{}</agent_cmd> After',
+            result='Before <agent_cmd tool="job_list">{}</agent_cmd> After',
         )
 
         with (
@@ -304,16 +304,16 @@ class TestAgentLoop:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_handler,
+            patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_handler,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
             mock_handler.return_value = AgentToolResult(
-                tool="cron_list",
+                tool="job_list",
                 success=True,
                 output="No jobs.",
             )
-            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"cron_list": mock_handler}):
+            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_list": mock_handler}):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
         assert "<agent_cmd" not in result.result
@@ -399,7 +399,7 @@ class TestAgentLoop:
         item = _make_item()
         context = _make_context()
         initial = _make_result(
-            result='<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>',
+            result='<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>',
         )
         resume_result = _make_result(result="Need more evidence before writing.", cost_usd=0.01)
 
@@ -428,11 +428,11 @@ class TestAgentLoop:
                 "<risk>Wrong schedule would create noisy automation</risk>"
                 "<success>The cron job is listed after creation</success>"
                 "</action_plan>"
-                '<agent_cmd tool="cron_list">{}</agent_cmd>'
-                '<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+                '<agent_cmd tool="job_list">{}</agent_cmd>'
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
             ),
         )
-        resume_result = _make_result(result="Cron created.", cost_usd=0.01)
+        resume_result = _make_result(result="Job created.", cost_usd=0.01)
 
         with (
             patch(
@@ -449,20 +449,20 @@ class TestAgentLoop:
                 new_callable=AsyncMock,
                 side_effect=_resolved_agent_cmd_approval("approved_scope"),
             ),
-            patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_list,
-            patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
+            patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_list,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
-            mock_list.return_value = AgentToolResult(tool="cron_list", success=True, output="No cron jobs found.")
-            mock_add.return_value = AgentToolResult(tool="cron_add", success=True, output="Cron created.")
+            mock_list.return_value = AgentToolResult(tool="job_list", success=True, output="No jobs found.")
+            mock_add.return_value = AgentToolResult(tool="job_create", success=True, output="Job created.")
             with patch(
                 "koda.services.tool_dispatcher._TOOL_HANDLERS",
-                {"cron_list": mock_list, "cron_add": mock_add},
+                {"job_list": mock_list, "job_create": mock_add},
             ):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
-        assert result.result == "Cron created."
+        assert result.result == "Job created."
         assert mock_add.await_count == 1
         assert ctx.confidence_reports[-1]["blocked"] is False
 
@@ -516,7 +516,7 @@ class TestAgentLoop:
         context = _make_context()
         initial = _make_result(
             result=(
-                '<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
                 '<agent_cmd tool="browser_screenshot">{}</agent_cmd>'
             ),
         )
@@ -533,7 +533,7 @@ class TestAgentLoop:
             patch(
                 "koda.services.tool_dispatcher._TOOL_HANDLERS",
                 {
-                    "cron_add": AsyncMock(),
+                    "job_create": AsyncMock(),
                     "browser_screenshot": mock_screenshot,
                 },
             ),
@@ -619,11 +619,11 @@ class TestAgentLoop:
                 "<risk>Wrong schedule would create noisy automation</risk>"
                 "<success>The cron job is listed after creation</success>"
                 "</action_plan>"
-                '<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
             ),
             tool_uses=[{"name": "Read", "input": {"file_path": "/tmp/README.md"}}],
         )
-        resume_result = _make_result(result="Cron created.", cost_usd=0.01)
+        resume_result = _make_result(result="Job created.", cost_usd=0.01)
 
         with (
             patch(
@@ -640,18 +640,18 @@ class TestAgentLoop:
                 new_callable=AsyncMock,
                 side_effect=_resolved_agent_cmd_approval("approved_scope"),
             ),
-            patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
-            mock_add.return_value = AgentToolResult(tool="cron_add", success=True, output="Cron created.")
+            mock_add.return_value = AgentToolResult(tool="job_create", success=True, output="Job created.")
             with patch(
                 "koda.services.tool_dispatcher._TOOL_HANDLERS",
-                {"cron_add": mock_add},
+                {"job_create": mock_add},
             ):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
-        assert result.result == "Cron created."
+        assert result.result == "Job created."
         assert mock_add.await_count == 1
         assert ctx.confidence_reports[-1]["read_evidence_count"] == 1
         assert ctx.confidence_reports[-1]["blocked"] is False
@@ -678,7 +678,7 @@ class TestAgentLoop:
                 "<verification>Read the resulting file and run checks</verification>"
                 "<success>The resulting state is validated</success>"
                 "</action_plan>"
-                '<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
             ),
             tool_uses=[
                 {"name": "Read", "input": {"file_path": "/tmp/README.md"}},
@@ -686,7 +686,7 @@ class TestAgentLoop:
             ],
         )
         resume_after_write = _make_result(result="Write complete.", cost_usd=0.01)
-        verification_turn = _make_result(result='<agent_cmd tool="cron_list">{}</agent_cmd>', cost_usd=0.01)
+        verification_turn = _make_result(result='<agent_cmd tool="job_list">{}</agent_cmd>', cost_usd=0.01)
         final_verified = _make_result(result="Verified and complete.", cost_usd=0.01)
 
         with (
@@ -699,16 +699,16 @@ class TestAgentLoop:
             patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
-            patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
-            patch("koda.services.tool_dispatcher._handle_cron_list", new_callable=AsyncMock) as mock_list,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
+            patch("koda.services.tool_dispatcher._handle_job_list", new_callable=AsyncMock) as mock_list,
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
-            mock_add.return_value = AgentToolResult(tool="cron_add", success=True, output="Cron created.")
-            mock_list.return_value = AgentToolResult(tool="cron_list", success=True, output="Cron exists.")
+            mock_add.return_value = AgentToolResult(tool="job_create", success=True, output="Job created.")
+            mock_list.return_value = AgentToolResult(tool="job_list", success=True, output="Cron exists.")
             with patch(
                 "koda.services.tool_dispatcher._TOOL_HANDLERS",
-                {"cron_add": mock_add, "cron_list": mock_list},
+                {"job_create": mock_add, "job_list": mock_list},
             ):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
@@ -739,7 +739,7 @@ class TestAgentLoop:
                 "<verification>Read the resulting file and run checks</verification>"
                 "<success>The resulting state is validated</success>"
                 "</action_plan>"
-                '<agent_cmd tool="cron_add">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
             ),
             tool_uses=[
                 {"name": "Read", "input": {"file_path": "/tmp/README.md"}},
@@ -758,7 +758,7 @@ class TestAgentLoop:
             patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
             patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
-            patch("koda.services.tool_dispatcher._handle_cron_add", new_callable=AsyncMock) as mock_add,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
             patch(
                 "koda.utils.approval.request_agent_cmd_approval",
                 new_callable=AsyncMock,
@@ -767,8 +767,8 @@ class TestAgentLoop:
         ):
             from koda.services.tool_dispatcher import AgentToolResult
 
-            mock_add.return_value = AgentToolResult(tool="cron_add", success=True, output="Cron created.")
-            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"cron_add": mock_add}):
+            mock_add.return_value = AgentToolResult(tool="job_create", success=True, output="Job created.")
+            with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_create": mock_add}):
                 result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
 
         assert result.result == "Change applied."

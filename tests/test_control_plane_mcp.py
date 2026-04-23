@@ -312,23 +312,6 @@ class TestMCPCatalog:
         assert result["command"] == []
         assert result["url"] is None
 
-    def test_upsert_query_uses_non_id_returning_clause(self, monkeypatch: pytest.MonkeyPatch):
-        recorded_queries: list[str] = []
-
-        def capture_execute(query: str, params: tuple[Any, ...] = ()) -> int:
-            recorded_queries.append(query)
-            return 1
-
-        monkeypatch.setattr(manager_mod, "execute", capture_execute)
-        monkeypatch.setattr(manager_mod, "fetch_one", lambda query, params=(): {"server_key": params[0]})
-
-        mgr = object.__new__(manager_mod.ControlPlaneManager)
-        mgr.upsert_mcp_catalog_entry("linear", {"display_name": "Linear"})
-
-        assert recorded_queries
-        assert "RETURNING server_key" in recorded_queries[-1]
-        assert "RETURNING id" not in recorded_queries[-1]
-
     def test_delete_cascades_connections_and_policies(self, mcp_manager):
         mgr, db = mcp_manager
         mgr.upsert_mcp_catalog_entry("linear", {"display_name": "Linear"})

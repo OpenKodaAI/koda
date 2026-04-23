@@ -65,14 +65,13 @@ These settings belong in the control plane, not in `.env`:
 - per-agent models and runtime behavior
 - prompt layers, templates, skills, and knowledge attachments
 
-Global configuration and per-bot authorization are intentionally different layers:
+Global configuration and per-agent authorization are intentionally different layers:
 
 - the control plane stores system-level provider connections and core connection defaults
-- each bot still authorizes integrations through `resource_access_policy.integration_grants` in its agent spec
+- each agent still authorizes integrations through `resource_access_policy.integration_grants` in its agent spec
 
 ## Public Setup And Management Surfaces
 
-- `/control-plane/setup`
 - `/control-plane`
 - `/setup`
 - `/api/control-plane/onboarding/status`
@@ -84,7 +83,6 @@ Global configuration and per-bot authorization are intentionally different layer
 - `/api/control-plane/auth/logout`
 - `/api/control-plane/auth/tokens*`
 - `/api/control-plane/auth/sessions*`
-- `/api/control-plane/web-auth`
 - `/api/control-plane/system-settings`
 - `/api/control-plane/system-settings/general`
 - `/api/control-plane/connections/catalog`

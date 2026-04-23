@@ -111,7 +111,7 @@ const PROVIDER_HIGHLIGHT_COPY: Record<string, string> = {
   claude: "Anthropic para raciocínio profundo, revisão de código e fluxos oficiais do Claude Code.",
   codex: "OpenAI para tarefas agentic, execução assistida e modelos GPT com API key ou login oficial.",
   gemini: "Google Gemini para geração multimodal, AI Studio e autenticação oficial via Gemini CLI.",
-  elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por bot.",
+  elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por agent.",
   ollama: "Ollama para modelos locais ou remotos com descoberta real do catálogo no endpoint configurado.",
   sora: "Sora amplia os fluxos de mídia da OpenAI para geração visual e vídeo quando disponível.",
   kokoro: "Kokoro entrega TTS local com vozes sob demanda e operação otimizada para ambientes self-hosted.",
@@ -328,7 +328,7 @@ function ProviderListView({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={tl("Buscar provedores...")}
-              className="field-shell w-full py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
               aria-label={tl("Buscar provedores")}
             />
           </div>

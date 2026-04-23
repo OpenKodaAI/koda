@@ -1,11 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BotEditorProvider, useBotEditor } from "@/hooks/use-bot-editor";
+import { AgentEditorProvider, useAgentEditor } from "@/hooks/use-agent-editor";
 import { ToastProvider } from "@/hooks/use-toast";
 import { TabRecursos } from "@/components/control-plane/editor/tabs/tab-recursos";
 import type {
-  ControlPlaneBot,
+  ControlPlaneAgent,
   ControlPlaneCoreCapabilities,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
@@ -33,7 +33,7 @@ vi.mock("@/hooks/use-app-i18n", () => ({
   }),
 }));
 
-function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
+function makeAgent(overrides: Partial<ControlPlaneAgent> = {}): ControlPlaneAgent {
   return {
     id: "ATLAS",
     display_name: "ATLAS",
@@ -49,10 +49,8 @@ function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
     organization: {
       workspace_id: null,
       workspace_name: null,
-      workspace_color: null,
       squad_id: null,
       squad_name: null,
-      squad_color: null,
     },
     applied_version: 1,
     desired_version: 1,
@@ -153,7 +151,7 @@ const systemSettings: ControlPlaneSystemSettings = {
 };
 
 function DeveloperHarness() {
-  const { developerMode, setDeveloperMode } = useBotEditor();
+  const { developerMode, setDeveloperMode } = useAgentEditor();
   return (
     <button type="button" onClick={() => setDeveloperMode(!developerMode)}>
       toggle developer
@@ -161,13 +159,13 @@ function DeveloperHarness() {
   );
 }
 
-function renderTab(bot: ControlPlaneBot) {
+function renderTab(agent: ControlPlaneAgent) {
   return render(
     <ToastProvider>
-      <BotEditorProvider bot={bot} core={core} workspaces={workspaces} systemSettings={systemSettings}>
+      <AgentEditorProvider agent={agent} core={core} workspaces={workspaces} systemSettings={systemSettings}>
         <DeveloperHarness />
         <TabRecursos />
-      </BotEditorProvider>
+      </AgentEditorProvider>
     </ToastProvider>,
   );
 }
@@ -183,7 +181,7 @@ describe("TabRecursos", () => {
 
       if (url === "/api/control-plane/agents/ATLAS" && method === "GET") {
         return Promise.resolve(
-          new Response(JSON.stringify(makeBot()), {
+          new Response(JSON.stringify(makeAgent()), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
@@ -192,7 +190,7 @@ describe("TabRecursos", () => {
 
       if (url === "/api/control-plane/agents/ATLAS/agent-spec" && method === "PUT") {
         return Promise.resolve(
-          new Response(JSON.stringify(makeBot()), {
+          new Response(JSON.stringify(makeAgent()), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
@@ -214,7 +212,7 @@ describe("TabRecursos", () => {
 
   it("filters the model envelope to general providers and keeps advanced sections closed by default", async () => {
     const user = userEvent.setup();
-    renderTab(makeBot());
+    renderTab(makeAgent());
 
     await user.click(screen.getByRole("button", { name: /modelo principal/i }));
 

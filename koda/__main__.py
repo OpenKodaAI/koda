@@ -150,7 +150,7 @@ def main() -> None:
     if not ALLOWED_USER_IDS:
         log.warning(
             "allowed_user_ids_empty",
-            msg="ALLOWED_USER_IDS is not configured — bot will reject all messages until allowed user IDs are set "
+            msg="ALLOWED_USER_IDS is not configured — agent will reject all messages until allowed user IDs are set "
             "in the channel settings.",
         )
 
@@ -167,7 +167,7 @@ def main() -> None:
     except Exception:
         pass
     try:
-        import koda.state_primary as _sp
+        import koda.state.primary as _sp
 
         _sp._BRIDGE_LOOP = None
         _sp._BRIDGE_THREAD = None

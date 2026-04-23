@@ -25,7 +25,9 @@ describe("storage codecs", () => {
 
   it("round-trips valid persisted values and falls back for invalid ones", () => {
     expect(localeStorageCodec.parse(JSON.stringify("pt-BR"))).toBe("pt-BR");
-    expect(localeStorageCodec.parse(JSON.stringify("de-DE"))).toBe(DEFAULT_LANGUAGE);
+    expect(localeStorageCodec.parse(JSON.stringify("de-DE"))).toBe("de-DE");
+    expect(localeStorageCodec.parse(JSON.stringify("fr-FR"))).toBe("fr-FR");
+    expect(localeStorageCodec.parse(JSON.stringify("xx-XX"))).toBe(DEFAULT_LANGUAGE);
     expect(sidebarCollapsedStorageCodec.parse(JSON.stringify(true))).toBe(true);
     expect(sidebarCollapsedStorageCodec.parse("not-json")).toBe(false);
   });

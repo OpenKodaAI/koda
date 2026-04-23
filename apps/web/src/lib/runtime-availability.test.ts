@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveRuntimeAvailability } from "@/lib/runtime-availability";
 import type {
-  RuntimeBotHealth,
+  RuntimeAgentHealth,
   RuntimeEnvironment,
   RuntimeQueueItem,
   RuntimeReadiness,
@@ -30,7 +30,7 @@ describe("resolveRuntimeAvailability", () => {
           startup: { phase: "ready" },
         },
       }),
-      health: endpoint<RuntimeBotHealth>({
+      health: endpoint<RuntimeAgentHealth>({
         data: {
           status: "healthy",
           database: { reachable: true },
@@ -62,7 +62,7 @@ describe("resolveRuntimeAvailability", () => {
           startup: { phase: "bootstrapping" },
         },
       }),
-      health: endpoint<RuntimeBotHealth>({
+      health: endpoint<RuntimeAgentHealth>({
         data: {
           status: "healthy",
           database: { reachable: true },
@@ -95,7 +95,7 @@ describe("resolveRuntimeAvailability", () => {
           startup: { phase: "ready" },
         },
       }),
-      health: endpoint<RuntimeBotHealth>({
+      health: endpoint<RuntimeAgentHealth>({
         data: {
           status: "healthy",
           database: { reachable: true },

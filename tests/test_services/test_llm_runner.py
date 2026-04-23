@@ -134,6 +134,10 @@ class TestProviderHealthSnapshot:
 
 class TestProviderFallbackChain:
     def test_filters_out_ineligible_provider_from_snapshot_env(self, monkeypatch):
+        monkeypatch.setattr(
+            "koda.services.llm_runner.PROVIDER_FALLBACK_ORDER",
+            ["claude", "codex"],
+        )
         monkeypatch.setenv(
             "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON",
             json.dumps(
@@ -149,10 +153,22 @@ class TestProviderFallbackChain:
         assert "claude" not in chain
         assert "codex" in chain
 
-    def test_keeps_default_chain_when_snapshot_env_is_absent(self, monkeypatch):
+    def test_chain_contains_only_primary_when_fallback_order_is_empty(self, monkeypatch):
+        monkeypatch.setattr("koda.services.llm_runner.PROVIDER_FALLBACK_ORDER", [])
         monkeypatch.delenv("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", raising=False)
 
         chain = get_provider_fallback_chain("claude")
 
-        assert chain
+        assert chain == ["claude"]
+
+    def test_chain_respects_configured_fallback_order(self, monkeypatch):
+        monkeypatch.setattr(
+            "koda.services.llm_runner.PROVIDER_FALLBACK_ORDER",
+            ["codex"],
+        )
+        monkeypatch.delenv("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", raising=False)
+
+        chain = get_provider_fallback_chain("claude")
+
         assert chain[0] == "claude"
+        assert "codex" in chain

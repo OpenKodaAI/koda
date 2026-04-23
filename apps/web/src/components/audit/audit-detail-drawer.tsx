@@ -100,7 +100,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
               </div>
 
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <DrawerMetric label={t("common.bot")} value={renderedEntry.bot_id ?? "—"} mono />
+                <DrawerMetric label={t("common.agent")} value={renderedEntry.bot_id ?? "—"} mono />
                 <DrawerMetric label={t("common.task")} value={renderedEntry.task_id != null ? `#${renderedEntry.task_id}` : "—"} mono />
                 <DrawerMetric label={t("common.cost")} value={formatCost(renderedEntry.cost_usd)} mono />
                 <DrawerMetric label={t("common.duration")} value={formatDuration(renderedEntry.duration_ms)} mono />

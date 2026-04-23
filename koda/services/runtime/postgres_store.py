@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -11,7 +10,7 @@ from typing import Any, cast
 from koda.config import AGENT_ID
 from koda.services.provider_env import validate_runtime_path
 from koda.services.runtime.redaction import redact_json_dumps, redact_value
-from koda.state_primary import (
+from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
     primary_fetch_one,
@@ -29,8 +28,15 @@ def _agent_scope() -> str:
     return normalized or "default"
 
 
-def _redacted_json(value: Any) -> Any:
-    return json.loads(redact_json_dumps(value))
+def _redacted_json(value: Any) -> str:
+    """Return the redacted JSON as a string for TEXT column storage.
+
+    Every ``*_json`` column in the runtime schema is ``TEXT``; asyncpg would
+    reject a dict with ``DataError: expected str, got dict``. We pass the
+    serialized JSON directly — callers that need the object representation
+    can ``json.loads`` on read.
+    """
+    return redact_json_dumps(value)
 
 
 def _validated_path(value: str | None, *, allow_empty: bool = False) -> str | None:
@@ -161,7 +167,10 @@ class PostgresRuntimeStore:
         values_sql: list[str] = []
         params: list[Any] = [_now()]
         for item in updates:
-            values_sql.append("(?, ?, ?, ?, ?, ?, ?, ?)")
+            # Explicit casts keep Postgres from treating every VALUES column
+            # as TEXT — without them the WHERE target.task_id = source.task_id
+            # fails with "operator does not exist: bigint = text".
+            values_sql.append("(?::text, ?::bigint, ?::text, ?::integer, ?::text, ?::integer, ?::text, ?::text)")
             params.extend(
                 [
                     self._agent_scope,
@@ -1348,9 +1357,12 @@ class PostgresRuntimeStore:
         self,
         *,
         task_id: int | None = None,
+        task_ids: list[int] | None = None,
         env_id: int | None = None,
         after_seq: int = 0,
     ) -> list[dict[str, Any]]:
+        if task_ids is not None and not task_ids:
+            return []
         query = """
             SELECT id, task_id, env_id, attempt, phase, event_type, severity, payload_json,
                    artifact_refs_json, resource_snapshot_ref, created_at
@@ -1361,6 +1373,9 @@ class PostgresRuntimeStore:
         if task_id is not None:
             query += " AND task_id = ?"
             params.append(task_id)
+        elif task_ids is not None:
+            query += f" AND task_id IN ({', '.join('?' for _ in task_ids)})"
+            params.extend(task_ids)
         if env_id is not None:
             query += " AND env_id = ?"
             params.append(env_id)
@@ -1381,6 +1396,17 @@ class PostgresRuntimeStore:
             }
             for row in rows
         ]
+
+    def list_task_ids_for_session(self, session_id: str) -> list[int]:
+        rows = self._fetch_all(
+            """
+            SELECT id FROM tasks
+             WHERE agent_id = ? AND session_id = ?
+             ORDER BY id ASC
+            """,
+            (self._agent_scope, session_id),
+        )
+        return [int(row["id"]) for row in rows if row.get("id") is not None]
 
     def list_artifacts(self, task_id: int) -> list[dict[str, Any]]:
         rows = self._fetch_all(

@@ -96,6 +96,16 @@ def _functional_default(function_id: str) -> tuple[str, str]:
     return provider_id, model_id
 
 
+def resolve_functional_default(function_id: str) -> tuple[str, str]:
+    """Public resolver for per-function default provider/model.
+
+    Returns ``("", "")`` when the operator has not configured a default for the
+    given function id. This is the canonical entry point for services that want
+    to honour the operator's choice in the Models section of the dashboard.
+    """
+    return _functional_default(function_id)
+
+
 # --- Owner identity ---
 OWNER_NAME: str = _env("OWNER_NAME", "")
 OWNER_EMAIL: str = _env("OWNER_EMAIL", "")
@@ -267,12 +277,8 @@ PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
 DEFAULT_MODEL: str = PROVIDER_DEFAULT_MODELS.get(DEFAULT_PROVIDER, CLAUDE_DEFAULT_MODEL)
 AVAILABLE_MODELS: list[str] = [model for models in PROVIDER_MODELS.values() for model in models]
 PROVIDER_FALLBACK_ORDER: list[str] = [
-    provider
-    for provider in _env_csv("PROVIDER_FALLBACK_ORDER", "claude,codex,gemini,ollama")
-    if provider in AVAILABLE_PROVIDERS
+    provider for provider in _env_csv("PROVIDER_FALLBACK_ORDER", "") if provider in AVAILABLE_PROVIDERS
 ]
-if not PROVIDER_FALLBACK_ORDER:
-    PROVIDER_FALLBACK_ORDER = AVAILABLE_PROVIDERS.copy()
 TRANSCRIPT_REPLAY_LIMIT: int = int(_env("TRANSCRIPT_REPLAY_LIMIT", "10"))
 MODEL_PRICING_USD: dict = _env_json_object("MODEL_PRICING_USD")
 
@@ -542,15 +548,11 @@ MCP_ENABLED: bool = _env("MCP_ENABLED", "false").lower() in ("1", "true", "yes")
 MCP_OAUTH_ENABLED: bool = _env("MCP_OAUTH_ENABLED", "true").lower() in ("1", "true", "yes")
 MCP_OAUTH_CALLBACK_BASE_URL: str = _env("MCP_OAUTH_CALLBACK_BASE_URL", "")
 
-# --- MongoDB ---
-MONGO_ENABLED: bool = _env("MONGO_ENABLED", "false").lower() == "true"
-
 # --- PostgreSQL ---
 POSTGRES_ENABLED: bool = STATE_BACKEND == "postgres" or _env("POSTGRES_ENABLED", "false").lower() == "true"
 POSTGRES_URL: str = _env("POSTGRES_URL", "") or _env("KNOWLEDGE_V2_POSTGRES_DSN", "")
 POSTGRES_QUERY_TIMEOUT: int = int(_env("POSTGRES_QUERY_TIMEOUT", "30"))
 POSTGRES_MAX_ROWS: int = int(_env("POSTGRES_MAX_ROWS", "100"))
-POSTGRES_MAX_ROWS_CAP: int = int(_env("POSTGRES_MAX_ROWS_CAP", "10000"))
 DB_POOL_MAX_SIZE: int = int(_env("DB_POOL_MAX_SIZE", "5"))
 
 # --- PostgreSQL Write ---
@@ -572,10 +574,6 @@ POSTGRES_SSH_PORT: int = int(_env("POSTGRES_SSH_PORT", "22"))
 POSTGRES_SSH_USER: str = _env("POSTGRES_SSH_USER", "")
 POSTGRES_SSH_KEY_FILE: str = _env("POSTGRES_SSH_KEY_FILE", "")
 POSTGRES_SSH_PASSWORD: str = _env("POSTGRES_SSH_PASSWORD", "")
-
-# --- SQLite ---
-SQLITE_ENABLED: bool = _env("SQLITE_ENABLED", "false").lower() == "true"
-SQLITE_ALLOWED_PATHS: list[str] = [p.strip() for p in _env("SQLITE_ALLOWED_PATHS", "").split(",") if p.strip()]
 
 
 # --- PostgreSQL Per-Environment Config ---
@@ -641,13 +639,6 @@ POSTGRES_ENV_DEFAULT: PostgresEnvConfig | None = (
 POSTGRES_AVAILABLE_ENVS: list[str] = [k for k, v in [("dev", POSTGRES_ENV_DEV), ("prod", POSTGRES_ENV_PROD)] if v] or (
     ["default"] if POSTGRES_ENV_DEFAULT else []
 )
-
-# --- Redis ---
-REDIS_ENABLED: bool = _env("REDIS_ENABLED", "false").lower() == "true"
-
-# --- MySQL ---
-MYSQL_ENABLED: bool = _env("MYSQL_ENABLED", "false").lower() == "true"
-MYSQL_AVAILABLE_ENVS: list[str] = [e.strip() for e in _env("MYSQL_AVAILABLE_ENVS", "default").split(",") if e.strip()]
 
 POSTGRES_ENV_CONFIGS: dict[str, PostgresEnvConfig] = {}
 if POSTGRES_ENV_DEV:
@@ -958,44 +949,44 @@ If you are missing evidence or sources, gather read-only evidence first instead 
 """
 
 _default_voice_active_prompt = """\
-## 🎙️ VOICE MODE ATIVO
+## 🎙️ VOICE MODE ACTIVE
 
-Sua resposta será convertida em áudio por um motor TTS e enviada como voice note no Telegram. \
-Escreva como se estivesse falando em voz alta para uma pessoa.
+Your response will be converted to audio by a TTS engine and sent as a voice note on Telegram. \
+Write as if speaking aloud to a person.
 
 <voice_rules>
-Prosa corrida e fluida, sem nenhuma formatação. O motor TTS não interpreta bullet points, \
-headers, bold, italic, code blocks, tabelas ou listas — esses elementos criam áudio confuso e quebrado.
+Flowing, continuous prose with no formatting. The TTS engine does not interpret bullet points, \
+headers, bold, italic, code blocks, tables, or lists — those elements create broken, confusing audio.
 
-Escreva como uma pessoa fala. Use transições naturais como "bom,", "então,", "olha,", \
-"na verdade,", "tipo assim,". Use pausas breves com vírgulas e reticências, e marcadores \
-de pensamento como "é o seguinte...".
+Write the way a person speaks. Use natural transitions like "so,", "alright,", "look,", \
+"actually,", "thing is,". Use short pauses with commas and ellipses, and thinking markers \
+like "here's the deal...".
 
-Mantenha respostas curtas para escuta confortável, idealmente menos de 60 segundos de áudio. \
-Se o tema for complexo, dê um resumo e ofereça aprofundar.
+Keep responses short enough for comfortable listening, ideally under 60 seconds of audio. \
+If the topic is complex, give a summary and offer to go deeper.
 
-Use português brasileiro falado naturalmente. Diga "a gente" em vez de "nós", "tipo" para \
-exemplos, "né" para confirmação, "aí" como conector.
+Write in spoken English, naturally. Use contractions ("it's", "you're", "don't"), everyday \
+phrasing, and soft connectors ("so", "then", "anyway") where they help the rhythm.
 
-Descreva URLs e caminhos de arquivo verbalmente ("lá no repositório do projeto", \
-"na documentação oficial do React"). O TTS não sabe pronunciar URLs.
+Describe URLs and file paths verbally ("in the project repo", \
+"in the React official docs"). The TTS cannot pronounce URLs.
 
-Se a resposta precisar de código, avise verbalmente ("essa resposta precisa de código, vou mandar como texto") \
-e escreva uma resposta formatada normal em vez de tentar ler código em voz alta.
+If the response needs code, say so verbally ("this answer needs code, I'll send it as text") \
+and write a normal formatted response instead of trying to read code aloud.
 
-Escreva números e símbolos por extenso. Diga "maior que" e não ">", "igual a" e não "=", \
-"barra" e não "/". O TTS lê esses caracteres de forma estranha.
+Spell out numbers and symbols. Say "greater than" instead of ">", "equals" instead of "=", \
+"slash" instead of "/". The TTS mispronounces those characters.
 
-Use pontuação para criar ritmo natural. Vírgulas para pausas curtas, pontos para pausas maiores, \
-reticências para hesitação. Quebre em sentenças curtas e claras.
+Use punctuation to create natural rhythm. Commas for short pauses, periods for longer pauses, \
+ellipses for hesitation. Break into short, clear sentences.
 </voice_rules>
 
 <voice_example>
-Bom, então, sobre essa questão de performance que você perguntou... o problema principal \
-tá naquela função de busca, sabe? Ela faz uma query pra cada resultado, tipo um loop \
-de consultas. O ideal seria trocar por uma query só que traz tudo de uma vez. Isso vai \
-diminuir bastante o tempo de resposta, principalmente quando tem muitos dados. Se quiser, \
-posso fazer essa mudança agora e te mando o código formatado.
+So, about that performance question you asked... the main issue \
+is in that search function, you know? It runs a query for every result, like a loop \
+of lookups. The right move would be a single query that pulls everything at once. That should \
+cut the response time a lot, especially with large datasets. If you want, \
+I can make that change now and send the code formatted as text.
 </voice_example>
 """
 VOICE_ACTIVE_PROMPT_TEXT: str = (_env("VOICE_ACTIVE_PROMPT_TEXT", "") or "").strip()
@@ -1368,7 +1359,6 @@ RUNTIME_SUPERVISED_ATTACH_ENABLED: bool = _env("RUNTIME_SUPERVISED_ATTACH_ENABLE
 RUNTIME_OPERATOR_SESSION_TTL_SECONDS: int = int(_env("RUNTIME_OPERATOR_SESSION_TTL_SECONDS", "1800"))
 RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS: int = int(_env("RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS", "900"))
 BROWSER_ALLOW_PRIVATE_NETWORK: bool = _bool_env("BROWSER_ALLOW_PRIVATE_NETWORK", False)
-SKILLS_V2_ENABLED: bool = _bool_env("SKILLS_V2_ENABLED", True)
 RUNTIME_BROWSER_TRANSPORT: str = _env("RUNTIME_BROWSER_TRANSPORT", "novnc")
 RUNTIME_BROWSER_DISPLAY_BASE: int = int(_env("RUNTIME_BROWSER_DISPLAY_BASE", "90"))
 RUNTIME_BROWSER_VNC_BASE_PORT: int = int(_env("RUNTIME_BROWSER_VNC_BASE_PORT", "5900"))

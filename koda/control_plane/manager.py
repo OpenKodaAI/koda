@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
+    PROMOTION_MODES,
     normalize_string_list,
     resolve_allowed_tool_ids,
     resolve_core_integration_catalog,
@@ -61,6 +62,7 @@ from koda.services.provider_auth import (
     MANAGED_PROVIDER_IDS,
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
+    PROVIDER_AUTH_TOKEN_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
     PROVIDER_PROJECT_ENV_KEYS,
     PROVIDER_TITLES,
@@ -132,6 +134,7 @@ from .settings import (
     AGENT_SECTIONS,
     CONTROL_PLANE_AUTO_IMPORT,
     CONTROL_PLANE_RUNTIME_DIR,
+    CONTROL_PLANE_SKIP_DEFAULT_SEED,
     DASHBOARD_AGENT_CONSTANTS_PATH,
     DOCUMENT_KINDS,
     ROOT_DIR,
@@ -184,6 +187,22 @@ _KNOWLEDGE_ENTRY_METADATA_FIELDS: tuple[str, ...] = (
 _RESERVED_MCP_SERVER_KEYS: frozenset[str] = frozenset(
     {"docker", "filesystem", "github", "gitlab", "memory", "puppeteer"}
 )
+_ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
+_ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
+_ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
+_ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
+
+
+class GeneralPayloadValidationError(ValueError):
+    """Raised when ``put_general_system_settings`` payload fails structural validation.
+
+    Carries a list of ``{field, code, message}`` dicts so the API layer can surface
+    per-field errors back to the dashboard.
+    """
+
+    def __init__(self, errors: list[dict[str, str]]) -> None:
+        self.errors = list(errors)
+        super().__init__(f"invalid general settings payload: {len(self.errors)} error(s)")
 
 
 def _normalize_mcp_server_key(server_key: Any) -> str:
@@ -407,6 +426,7 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "allowed_user_ids": ("ALLOWED_USER_IDS", "csv"),
         "knowledge_admin_user_ids": ("KNOWLEDGE_ADMIN_USER_IDS", "csv"),
         "rate_limit_per_minute": ("RATE_LIMIT_PER_MINUTE", "int"),
+        "time_format": ("TIME_FORMAT", "string"),
     },
     "providers": {
         "functional_defaults": ("MODEL_FUNCTION_DEFAULTS_JSON", "json"),
@@ -687,14 +707,14 @@ _GENERAL_MODEL_USAGE_PROFILES: dict[str, dict[str, Any]] = {
     },
     "quality": {
         "label": "Qualidade",
-        "description": "Prioriza a melhor qualidade possível com os modelos maiores disponíveis.",
+        "description": "Prioritizes the highest quality with the largest available models.",
         "tier": "large",
     },
 }
 _GENERAL_MEMORY_PROFILES: dict[str, dict[str, Any]] = {
     "conservative": {
         "label": "Conservador",
-        "description": "Memória menor, recall mais seletivo e menor custo de manutenção.",
+        "description": "Smaller memory footprint, more selective recall, and lower maintenance cost.",
         "settings": {
             "max_recall": 8,
             "recall_threshold": 0.78,
@@ -726,7 +746,7 @@ _GENERAL_MEMORY_PROFILES: dict[str, dict[str, Any]] = {
     },
     "strong_learning": {
         "label": "Aprendizado forte",
-        "description": "Aumenta retenção e recall para agentes que precisam aprender continuamente.",
+        "description": "Increases retention and recall for agents that must learn continuously.",
         "settings": {
             "max_recall": 30,
             "recall_threshold": 0.55,
@@ -744,7 +764,7 @@ _GENERAL_MEMORY_PROFILES: dict[str, dict[str, Any]] = {
 _GENERAL_KNOWLEDGE_PROFILES: dict[str, dict[str, Any]] = {
     "curated_only": {
         "label": "Curado apenas",
-        "description": "Usa somente conhecimento canônico e runbooks aprovados.",
+        "description": "Uses only canonical knowledge and approved runbooks.",
         "settings": {
             "max_results": 4,
             "recall_threshold": 0.7,
@@ -757,7 +777,7 @@ _GENERAL_KNOWLEDGE_PROFILES: dict[str, dict[str, Any]] = {
     },
     "curated_workspace": {
         "label": "Curado + workspace",
-        "description": "Mistura conhecimento aprovado com documentos dinâmicos do workspace.",
+        "description": "Mixes approved knowledge with dynamic workspace documents.",
         "settings": {
             "max_results": 6,
             "recall_threshold": 0.63,
@@ -769,8 +789,8 @@ _GENERAL_KNOWLEDGE_PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "curated_workspace_patterns": {
-        "label": "Curado + workspace + padrões",
-        "description": "Inclui padrões observados como camada fraca adicional de grounding.",
+        "label": "Curated + workspace + patterns",
+        "description": "Includes observed patterns as an additional weak grounding layer.",
         "settings": {
             "max_results": 8,
             "recall_threshold": 0.57,
@@ -842,14 +862,14 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
         "fields": (
             {
                 "key": "JIRA_URL",
-                "label": "URL da instância",
+                "label": "Instance URL",
                 "input_type": "url",
                 "storage": "env",
                 "required": True,
             },
             {
                 "key": "JIRA_USERNAME",
-                "label": "Usuário ou email",
+                "label": "Username or email",
                 "input_type": "email",
                 "storage": "env",
                 "required": True,
@@ -865,18 +885,18 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "confluence": {
         "title": "Confluence",
-        "description": "Credenciais globais para leitura governada de páginas e espaços do Confluence.",
+        "description": "Global credentials for governed reading of Confluence pages and spaces.",
         "fields": (
             {
                 "key": "CONFLUENCE_URL",
-                "label": "URL da instância",
+                "label": "Instance URL",
                 "input_type": "url",
                 "storage": "env",
                 "required": True,
             },
             {
                 "key": "CONFLUENCE_USERNAME",
-                "label": "Usuário ou email",
+                "label": "Username or email",
                 "input_type": "email",
                 "storage": "env",
                 "required": True,
@@ -892,7 +912,7 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "gws": {
         "title": "Google Workspace",
-        "description": "Credencial de serviço usada para operacoes aprovadas do Google Workspace.",
+        "description": "Service credential used for approved Google Workspace operations.",
         "fields": (
             {
                 "key": "GWS_CREDENTIALS_FILE",
@@ -916,7 +936,7 @@ _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
         "fields": (
             {
                 "key": "AWS_DEFAULT_REGION",
-                "label": "Região padrão",
+                "label": "Default region",
                 "input_type": "text",
                 "storage": "env",
                 "required": True,
@@ -1484,6 +1504,7 @@ class ControlPlaneManager:
         if CONTROL_PLANE_AUTO_IMPORT:
             self.import_legacy_state()
         self._seed_authoritative_mcp_catalog()
+        self._seed_default_world()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
         self._cleanup_provider_download_jobs()
@@ -1501,6 +1522,140 @@ class ControlPlaneManager:
                     self.upsert_mcp_catalog_entry(server_key, entry)
                 except Exception:
                     log.debug("control_plane_mcp_seed_failed", server_key=server_key, exc_info=True)
+        finally:
+            self._seeding_legacy_state = False
+
+    def _seed_default_world(self) -> None:
+        """Seed sensible global defaults so a fresh install is immediately usable.
+
+        Runs idempotently after MCP catalog seeding and legacy import. Only writes
+        sections that are currently absent — never overwrites operator edits nor
+        values already populated by ``import_legacy_state``. Governed by
+        ``CONTROL_PLANE_SKIP_DEFAULT_SEED`` for tests and customized deploys.
+        """
+        if not self._auto_seed_enabled():
+            return
+        if self._seeding_legacy_state:
+            return
+        if CONTROL_PLANE_SKIP_DEFAULT_SEED:
+            return
+        existing_sections = self._load_global_sections()
+        defaults: dict[str, dict[str, Any]] = {
+            "general": {"rate_limit_per_minute": 30},
+            "providers": {
+                "max_budget_usd": 5.0,
+                "max_total_budget_usd": 50.0,
+                "fallback_order": [],
+                "usage_profile": "balanced",
+            },
+            "tools": {"default_agent_mode": "chat"},
+            "integrations": {},
+            "memory": {
+                "enabled": False,
+                "proactive_enabled": False,
+                "procedural_enabled": False,
+            },
+            "knowledge": {
+                "enabled": False,
+                "promotion_mode": "read_only",
+                "require_freshness_provenance": True,
+            },
+            "scheduler": {
+                "scheduler_enabled": True,
+                "scheduler_default_timezone": "America/Sao_Paulo",
+                "runbook_governance_enabled": False,
+            },
+            "runtime": {
+                "runtime_environments_enabled": True,
+                "runtime_event_stream_enabled": True,
+                "runtime_recovery_enabled": True,
+            },
+        }
+        sections_to_write: dict[str, dict[str, Any]] = {}
+        for section, default_values in defaults.items():
+            current = _safe_json_object(existing_sections.get(section))
+            merged = dict(current)
+            changed = False
+            for key, value in default_values.items():
+                if key not in merged:
+                    merged[key] = value
+                    changed = True
+            if changed:
+                sections_to_write[section] = merged
+        has_any_workspace = bool(fetch_one("SELECT 1 FROM cp_workspaces LIMIT 1"))
+        has_any_squad = bool(fetch_one("SELECT 1 FROM cp_workspace_squads LIMIT 1"))
+        has_any_agent = bool(fetch_one("SELECT 1 FROM cp_agent_definitions LIMIT 1"))
+        seed_workspace = not has_any_workspace
+        seed_squad = not has_any_squad and seed_workspace
+        seed_agent = not has_any_agent
+        if not sections_to_write and not seed_workspace and not seed_squad and not seed_agent:
+            return
+        self._seeding_legacy_state = True
+        try:
+            for section, value in sections_to_write.items():
+                execute(
+                    """
+                    INSERT INTO cp_global_sections (section, data_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+                    """,
+                    (section, json_dump(value), now_iso()),
+                )
+            now = now_iso()
+            if seed_workspace:
+                execute(
+                    """
+                    INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    ("ws_default", "Pessoal", "Workspace inicial.", now, now),
+                )
+            if seed_squad:
+                execute(
+                    """
+                    INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    ("sq_default", "ws_default", "Geral", "Squad inicial.", now, now),
+                )
+            if seed_agent:
+                starter_workspace = "ws_default" if seed_workspace or has_any_workspace else None
+                # Only link to the default squad if we also just created it, avoiding
+                # accidental coupling to a legacy squad the operator may not expect.
+                starter_squad = "sq_default" if seed_squad else None
+                appearance = {"label": "Koda", "color": "#D97757", "color_rgb": "217, 119, 87"}
+                execute(
+                    """
+                    INSERT INTO cp_agent_definitions (
+                        id, display_name, status, appearance_json, storage_namespace,
+                        runtime_endpoint_json, applied_version, desired_version, metadata_json,
+                        workspace_id, squad_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (
+                        "koda",
+                        "Koda",
+                        "paused",
+                        json_dump(appearance),
+                        "koda",
+                        json_dump({}),
+                        json_dump({"origin": "default_seed"}),
+                        starter_workspace if has_any_workspace or seed_workspace else None,
+                        starter_squad,
+                        now,
+                        now,
+                    ),
+                )
+            log.info(
+                "control_plane_default_world_seeded",
+                sections=sorted(sections_to_write.keys()),
+                seeded_workspace=seed_workspace,
+                seeded_squad=seed_squad,
+                seeded_agent=seed_agent,
+            )
         finally:
             self._seeding_legacy_state = False
 
@@ -1571,7 +1726,6 @@ class ControlPlaneManager:
             "id": str(row["id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
-            "color": str(row["color"] or ""),
             "spec": {},
             "documents": documents,
             "agent_count": agent_count,
@@ -1598,7 +1752,6 @@ class ControlPlaneManager:
             "workspace_id": str(row["workspace_id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
-            "color": str(row["color"] or ""),
             "spec": {},
             "documents": documents,
             "agent_count": agent_count,
@@ -1634,10 +1787,8 @@ class ControlPlaneManager:
         return {
             "workspace_id": normalized_workspace_id,
             "workspace_name": str(workspace_row["name"]) if workspace_row is not None else None,
-            "workspace_color": str(workspace_row["color"] or "") if workspace_row is not None else None,
             "squad_id": normalized_squad_id,
             "squad_name": str(squad_row["name"]) if squad_row is not None else None,
-            "squad_color": str(squad_row["color"] or "") if squad_row is not None else None,
         }
 
     def _resolve_agent_organization(
@@ -1770,14 +1921,13 @@ class ControlPlaneManager:
         now = now_iso()
         execute(
             """
-            INSERT INTO cp_workspaces (id, name, description, color, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
                 name,
                 str(payload.get("description") or "").strip(),
-                str(payload.get("color") or "").strip(),
                 now,
                 now,
             ),
@@ -1793,13 +1943,12 @@ class ControlPlaneManager:
         execute(
             """
             UPDATE cp_workspaces
-            SET name = ?, description = ?, color = ?, updated_at = ?
+            SET name = ?, description = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else row["description"] or "").strip(),
-                str(payload.get("color") if "color" in payload else row["color"] or "").strip(),
                 now_iso(),
                 str(row["id"]),
             ),
@@ -1840,15 +1989,14 @@ class ControlPlaneManager:
         now = now_iso()
         execute(
             """
-            INSERT INTO cp_workspace_squads (id, workspace_id, name, description, color, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 squad_id,
                 str(workspace_row["id"]),
                 name,
                 str(payload.get("description") or "").strip(),
-                str(payload.get("color") or "").strip(),
                 now,
                 now,
             ),
@@ -1868,13 +2016,12 @@ class ControlPlaneManager:
         execute(
             """
             UPDATE cp_workspace_squads
-            SET name = ?, description = ?, color = ?, updated_at = ?
+            SET name = ?, description = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else squad_row["description"] or "").strip(),
-                str(payload.get("color") if "color" in payload else squad_row["color"] or "").strip(),
                 now_iso(),
                 str(squad_row["id"]),
             ),
@@ -2357,9 +2504,9 @@ class ControlPlaneManager:
         )
         provider_api_key_env = PROVIDER_API_KEY_ENV_KEYS.get(cast(Any, provider_id))
         if provider_api_key_env:
-            api_key_present, api_key_preview = self._global_secret_preview_state(provider_api_key_env)
+            api_key_present, _api_key_preview = self._global_secret_preview_state(provider_api_key_env)
         else:
-            api_key_present, api_key_preview = False, ""
+            api_key_present = False
         payload = {
             "provider_id": provider_id,
             "title": _safe_json_object(catalog).get("title")
@@ -2381,7 +2528,12 @@ class ControlPlaneManager:
             "login_flow_kind": _safe_json_object(catalog).get("login_flow_kind"),
             "requires_project_id": bool(_safe_json_object(catalog).get("requires_project_id", False)),
             "api_key_present": api_key_present,
-            "api_key_preview": api_key_preview,
+            # The masked preview is intentionally stripped from the API contract:
+            # the browser only sees whether a key is configured, never its shape.
+            # We still compute the local flag `api_key_present` from the same
+            # source (`_global_secret_preview_state`) so the UI knows to hide
+            # the "Set a key" input and show "Connected" instead.
+            "api_key_preview": "",
             "base_url": self._resolve_ollama_base_url(auth_mode=auth_mode, env=env) if provider_id == "ollama" else "",
         }
         payload["connection_status"] = self._provider_connection_status(payload)
@@ -2680,8 +2832,6 @@ class ControlPlaneManager:
                 env.get("PROVIDER_FALLBACK_ORDER") or os.environ.get("PROVIDER_FALLBACK_ORDER")
             )
         ]
-        if not fallback_order:
-            fallback_order = enabled_ids.copy()
         return {
             "default_provider": default_provider,
             "enabled_providers": enabled_ids,
@@ -3142,7 +3292,14 @@ class ControlPlaneManager:
 
     def get_dashboard_execution(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
         normalized, _ = self._require_dashboard_agent(agent_id)
-        return cast(dict[str, Any] | None, self._dashboard_store().get_execution(normalized, task_id))
+        # Delegate to the control-plane dashboard_service, which uses the
+        # canonical uppercase agent_id convention. dashboard_store's
+        # _normalize_scope lowercases and misses rows written by the runtime
+        # (``tasks.agent_id = 'PIXIE_COPY'`` after the recent case-fix
+        # migration), returning 404 for existing executions.
+        from koda.control_plane.dashboard_service import get_dashboard_execution_detail
+
+        return get_dashboard_execution_detail(normalized, task_id)
 
     def list_dashboard_sessions(
         self,
@@ -4100,12 +4257,14 @@ class ControlPlaneManager:
             entry = dict(field)
             key = str(field["key"])
             if str(field.get("storage") or "env") == "secret":
-                value_present, preview = self._stored_global_secret_preview_state(key)
+                value_present, _preview = self._stored_global_secret_preview_state(key)
                 payload.append(
                     {
                         **entry,
                         "value": "",
-                        "preview": preview,
+                        # Preview intentionally stripped — UI only shows
+                        # "configured" / replace actions, never the value.
+                        "preview": "",
                         "value_present": value_present,
                         "usage_scope": "system_only",
                     }
@@ -4137,12 +4296,14 @@ class ControlPlaneManager:
             key = str(field["key"])
             storage = str(field.get("storage") or "env")
             if storage == "secret":
-                value_present, preview = self._agent_secret_preview_state(agent_id, key)
+                value_present, _preview = self._agent_secret_preview_state(agent_id, key)
                 payload.append(
                     {
                         **entry,
                         "value": "",
-                        "preview": preview,
+                        # Preview stripped — per-agent integrations follow
+                        # the same "no preview, replace-only" rule.
+                        "preview": "",
                         "value_present": value_present,
                         "usage_scope": "agent_only",
                     }
@@ -4409,7 +4570,7 @@ class ControlPlaneManager:
                 system_env_meta.pop(env_key, None)
             elif value:
                 env_map[env_key] = value
-                system_env_meta[env_key] = {"description": f"Configuração global de {title}"}
+                system_env_meta[env_key] = {"description": f"Global configuration for {title}"}
             if env_map:
                 section_payload["env"] = env_map
             else:
@@ -5269,7 +5430,6 @@ class ControlPlaneManager:
             },
             "openapi_url": "/openapi/control-plane.json",
             "setup_url": "/setup",
-            "dashboard_setup_url": "/control-plane/setup",
         }
 
     def complete_onboarding(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -5975,6 +6135,7 @@ class ControlPlaneManager:
         clear_api_key = bool(payload.get("clear_api_key"))
         existing_row = self._provider_connection_row(normalized)
         project_id = _trimmed_text(payload.get("project_id")) or _trimmed_text(existing_row["project_id"])
+        verify_after_save = bool(payload.get("verify_after_save", False))
         base_url = ""
         if normalized == "ollama":
             base_url = self._resolve_ollama_base_url(
@@ -6011,6 +6172,17 @@ class ControlPlaneManager:
             last_verified_at="",
             last_error="",
         )
+        if verify_after_save and configured and api_key:
+            try:
+                verification = self.verify_provider_connection(normalized)
+            except Exception:  # noqa: BLE001 - verify failure must not roll back save
+                log.warning(
+                    "control_plane_provider_auto_verify_failed",
+                    provider=normalized,
+                    exc_info=True,
+                )
+            else:
+                return _safe_json_object(verification.get("connection")) or self.get_provider_connection(normalized)
         return self.get_provider_connection(normalized)
 
     def put_provider_local_connection(self, provider_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -6040,14 +6212,19 @@ class ControlPlaneManager:
         normalized = provider_id.strip().lower()
         if normalized not in MANAGED_PROVIDER_IDS:
             raise ValueError(f"unsupported provider connection: {provider_id}")
-        if normalized in {"ollama", "claude"}:
+        # Ollama is a self-hosted endpoint — "login" is a base URL configuration.
+        if normalized == "ollama":
             title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
-            raise ValueError(f"{title} usa API key ou conexão local nesta interface.")
+            raise ValueError(f"{title} uses API key or local connection in this interface.")
         payload = payload or {}
         project_id = _trimmed_text(payload.get("project_id"))
         existing_row = self._provider_connection_row(normalized)
         if not project_id:
             project_id = _trimmed_text(existing_row["project_id"])
+
+        # Kill any lingering login subprocess for this provider so we never
+        # leak a PTY when the operator restarts the wizard.
+        self._terminate_provider_login_sessions(normalized)
 
         handle, state = start_login_process(
             cast(Any, normalized),
@@ -6080,6 +6257,15 @@ class ControlPlaneManager:
     def reauth_provider_connection(self, provider_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.start_provider_login(provider_id, payload)
 
+    _PROVIDER_LOGIN_CODE_MAX_LEN = 512
+    # Give the CLI a short window to either error out (Anthropic rejection is
+    # fast — usually ~1s) or emit a success marker, then return. The frontend
+    # polls every 2.5s and ``_sync_provider_login_session`` runs verification
+    # on each poll, so late transitions (token hitting disk after we've
+    # returned) still get reflected in the UI without blocking the submit
+    # HTTP request longer than necessary.
+    _PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS = 6.0
+
     def submit_provider_login_code(
         self,
         provider_id: str,
@@ -6088,21 +6274,152 @@ class ControlPlaneManager:
     ) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
         code = _trimmed_text(_safe_json_object(payload).get("code"))
+        # Cap the payload defensively. Anthropic/OpenAI/Google authorization
+        # codes fit in under 200 chars; anything larger is either a paste
+        # mishap or a DoS attempt against the subprocess stdin buffer.
+        if code and len(code) > self._PROVIDER_LOGIN_CODE_MAX_LEN:
+            raise ValueError(f"authorization code is too long (max {self._PROVIDER_LOGIN_CODE_MAX_LEN} chars)")
 
-        # Write code to CLI subprocess (Codex, Gemini).
+        # Write code to CLI subprocess (Claude, Codex, Gemini).
         handle = self._provider_login_processes.get(session_id)
         if handle is None:
-            raise KeyError(session_id)
+            # Session is gone from memory — most likely the server restarted,
+            # the process died, or the session already reached a terminal
+            # state. Return the persisted session snapshot so the UI can show
+            # an actionable message ("session expired, start over") instead of
+            # a 500 that stalls the spinner.
+            log.warning(
+                "provider_login_submit_session_missing",
+                provider_id=normalized,
+                session_id=session_id,
+            )
+            try:
+                return self._sync_provider_login_session(normalized, session_id)
+            except KeyError:
+                raise KeyError(session_id) from None
+        log.info(
+            "provider_login_submit_started",
+            provider_id=normalized,
+            session_id=session_id,
+            code_length=len(code or ""),
+            code_has_hash_separator=("#" in (code or "")),
+        )
         if code:
             handle.write(code + "\n")
-            proc = getattr(handle, "process", None)
-            if proc is not None:
-                deadline = time.monotonic() + 6.0
-                while time.monotonic() < deadline:
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(0.3)
+            self._await_provider_login_completion(normalized, handle, session_id=session_id)
         return self._sync_provider_login_session(normalized, session_id)
+
+    def _await_provider_login_completion(
+        self,
+        provider_id: str,
+        handle: Any,
+        *,
+        session_id: str = "",
+    ) -> None:
+        """Block briefly while the CLI processes the pasted code, then return.
+
+        We only wait for three possible outcomes inside the HTTP request
+        window: (1) the CLI exits (success or failure — parse will classify
+        by output + returncode), (2) the CLI emits an obvious OAuth error
+        line, or (3) the deadline elapses. Verification via
+        ``claude auth status --json`` runs in the frontend poll cycle
+        (:py:meth:`get_provider_login_session`) rather than here — a separate
+        ``claude`` subprocess holds ``.claude.json`` briefly and contending
+        for it while ``setup-token`` is mid-exchange can actually slow the
+        token write. Short HTTP response + polling is both simpler and
+        faster than a long blocking submit.
+        """
+        proc = getattr(handle, "process", None)
+        if proc is None:
+            return
+        deadline = time.monotonic() + self._PROVIDER_LOGIN_SUBMIT_DEADLINE_SECONDS
+        started_at = time.monotonic()
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                log.info(
+                    "provider_login_submit_cli_exited",
+                    provider_id=provider_id,
+                    session_id=session_id,
+                    returncode=proc.returncode,
+                    elapsed_seconds=round(time.monotonic() - started_at, 2),
+                )
+                return
+            # Short-circuit on OAuth failure — the CLI prints the error line
+            # and then sits at "Press Enter to retry", so the process stays
+            # alive but the flow is effectively done from the operator's
+            # perspective. Returning early lets parse surface the error.
+            with contextlib.suppress(Exception):
+                output = handle.normalized_output() or ""
+                lower_tail = output[-500:].lower()
+                if "oauth error:" in lower_tail or "invalid code" in lower_tail:
+                    log.info(
+                        "provider_login_submit_cli_reported_error",
+                        provider_id=provider_id,
+                        session_id=session_id,
+                        elapsed_seconds=round(time.monotonic() - started_at, 2),
+                    )
+                    return
+            time.sleep(0.2)
+        output_tail = ""
+        with contextlib.suppress(Exception):
+            output_tail = str(handle.normalized_output() or "")[-500:]
+        log.warning(
+            "provider_login_submit_deadline_reached",
+            provider_id=provider_id,
+            session_id=session_id,
+            elapsed_seconds=round(time.monotonic() - started_at, 2),
+            cli_process_alive=proc.poll() is None,
+            cli_output_tail=output_tail,
+        )
+
+    def _terminate_provider_login_sessions(self, provider_id: str) -> None:
+        """Terminate any in-memory login subprocess owned by this provider.
+
+        Called before starting a fresh login to reclaim the PTY / pipe handles
+        when an operator restarts the wizard mid-flow.
+        """
+        normalized = provider_id.strip().lower()
+        stale_ids = [
+            session_id
+            for session_id, handle in self._provider_login_processes.items()
+            if getattr(handle, "provider_id", "") == normalized
+        ]
+        for session_id in stale_ids:
+            handle = self._provider_login_processes.pop(session_id, None)
+            if handle is None:
+                continue
+            with contextlib.suppress(Exception):
+                handle.terminate()
+
+    def _mark_provider_enabled(self, provider_id: str, *, enabled: bool) -> None:
+        """Flip ``cp_global_sections.providers.{id}_enabled`` without going through
+        the full ``put_general_system_settings`` flow.
+
+        Writes both the flat ``{id}_enabled`` flag (consumed by
+        ``_validate_general_payload``) AND the env-style ``{ID}_ENABLED`` key
+        under ``providers.env`` (consumed by ``_provider_catalog_from_env``
+        when the agent editor / model selectors build their provider lists).
+        Keeping both in sync after a successful verify makes a newly verified
+        provider show up immediately in every downstream view.
+        """
+        normalized = provider_id.strip().lower()
+        if not normalized:
+            return
+        sections = self._system_settings_sections()
+        providers_section = dict(_safe_json_object(sections.get("providers")))
+        flag_key = f"{normalized}_enabled"
+        env_key = f"{normalized.upper()}_ENABLED"
+        env_map = dict(_safe_json_object(providers_section.get("env")))
+        current_flag = providers_section.get(flag_key)
+        current_env = env_map.get(env_key)
+        desired_env = "true" if enabled else "false"
+        already_in_sync = isinstance(current_flag, bool) and current_flag == enabled and current_env == desired_env
+        if already_in_sync:
+            return
+        providers_section[flag_key] = bool(enabled)
+        env_map[env_key] = desired_env
+        providers_section["env"] = env_map
+        self._persist_global_sections({"providers": providers_section})
 
     def verify_provider_connection(self, provider_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
@@ -6147,6 +6464,8 @@ class ControlPlaneManager:
             last_verified_at=now_iso() if result.verified else "",
             last_error=result.last_error,
         )
+        if result.verified:
+            self._mark_provider_enabled(normalized, enabled=True)
         latest_row = fetch_one(
             """
             SELECT id FROM cp_provider_login_sessions
@@ -6187,6 +6506,24 @@ class ControlPlaneManager:
         }
 
     def disconnect_provider_connection(self, provider_id: str) -> dict[str, Any]:
+        """Full reset of a provider's connection state.
+
+        Wipes everything Koda persists about the provider so the next
+        connection attempt starts from zero:
+
+        1. Terminates any in-flight login subprocess.
+        2. Runs the CLI's native logout when available (``claude auth logout``,
+           ``codex logout``) so on-disk OAuth tokens are revoked.
+        3. Best-effort wipe of provider-owned credential files under the
+           runtime HOME (catches tokens left after logout failures).
+        4. Deletes ALL provider-scoped global secrets — API key, auth mode,
+           base URL, project id, verification flag, auth-token (not only the
+           API key as before).
+        5. Purges every ``cp_provider_login_sessions`` row for the provider.
+        6. Resets the ``cp_provider_connections`` row: cleared labels,
+           cleared ``project_id``, cleared ``last_error``, ``configured`` +
+           ``verified`` both false.
+        """
         normalized = provider_id.strip().lower()
         row = self._provider_connection_row(normalized)
         for session_id, handle in list(self._provider_login_processes.items()):
@@ -6205,22 +6542,32 @@ class ControlPlaneManager:
             )
             self._persist_provider_login_session(cancelled)
 
-        auth_mode = _trimmed_text(row["auth_mode"]) or "subscription_login"
-        logout_performed = False
-        logout_message = ""
-        if auth_mode == "api_key":
-            self.delete_global_secret_asset(PROVIDER_API_KEY_ENV_KEYS[cast(Any, normalized)], persist_sections=True)
-        else:
-            logout_performed, logout_message = run_provider_logout(
-                cast(Any, normalized),
-                base_env=self._merged_global_env(),
-                work_dir=self._provider_auth_work_dir(normalized),
+        logout_performed, logout_message = run_provider_logout(
+            cast(Any, normalized),
+            base_env=self._merged_global_env(),
+            work_dir=self._provider_auth_work_dir(normalized),
+        )
+        if not logout_performed and logout_message == "logout not supported":
+            logout_message = ""
+
+        self._wipe_provider_credential_files(normalized)
+        self._purge_provider_global_secrets(normalized)
+
+        with contextlib.suppress(Exception):
+            execute(
+                "DELETE FROM cp_provider_login_sessions WHERE provider_id = ?",
+                (normalized,),
             )
-            if not logout_performed and logout_message == "logout not supported":
-                logout_message = ""
 
         reset_auth_mode = (
-            "api_key" if normalized == "elevenlabs" else "local" if normalized == "ollama" else "subscription_login"
+            "api_key"
+            if normalized == "elevenlabs"
+            # Ollama is a self-hosted endpoint; Claude is authenticated out-of-band
+            # by the operator via ``claude auth login`` on the container shell.
+            # Both start in ``local`` mode after a reset.
+            else "local"
+            if normalized in {"ollama", "claude"}
+            else "subscription_login"
         )
 
         self._persist_provider_connection_row(
@@ -6230,10 +6577,14 @@ class ControlPlaneManager:
             verified=False,
             account_label="",
             plan_label="",
-            project_id=_trimmed_text(row["project_id"]),
+            # ``project_id`` was intentionally persisted before. For a clean
+            # reset we clear it too — operators explicitly asked for "wipe
+            # everything that was persisted".
+            project_id="",
             last_verified_at="",
             last_error="" if logout_performed or not logout_message else logout_message,
         )
+        del row  # old row snapshot is no longer authoritative after the wipe above
         return {
             "connection": self.get_provider_connection(normalized),
             "logout": {
@@ -6241,6 +6592,66 @@ class ControlPlaneManager:
                 "message": logout_message,
             },
         }
+
+    def _purge_provider_global_secrets(self, provider_id: str) -> None:
+        """Delete every provider-scoped entry from the global secrets store."""
+        provider_key = cast(Any, provider_id)
+        secret_env_keys = [
+            key
+            for key_map in (
+                PROVIDER_API_KEY_ENV_KEYS,
+                PROVIDER_AUTH_TOKEN_ENV_KEYS,
+                PROVIDER_AUTH_MODE_ENV_KEYS,
+                PROVIDER_VERIFIED_ENV_KEYS,
+                PROVIDER_BASE_URL_ENV_KEYS,
+                PROVIDER_PROJECT_ENV_KEYS,
+            )
+            if (key := key_map.get(provider_key))
+        ]
+        for env_key in secret_env_keys:
+            with contextlib.suppress(Exception):
+                self.delete_global_secret_asset(env_key, persist_sections=False)
+        if secret_env_keys:
+            self._persist_global_sections({})  # flush the provider-section drift
+
+    def _wipe_provider_credential_files(self, provider_id: str) -> None:
+        """Best-effort removal of CLI-managed credential files on disk.
+
+        Claude Code / Codex CLIs keep OAuth tokens under the runtime HOME.
+        ``*_auth logout`` is supposed to clear them, but failures or older
+        CLI versions leave the tokens behind. Wipe the known paths so the
+        next login starts from a clean slate.
+        """
+        import shutil
+        from pathlib import Path
+
+        home = os.environ.get("HOME") or ""
+        config_dirs: list[Path] = []
+        if provider_id == "claude":
+            claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
+            if claude_config:
+                config_dirs.append(Path(claude_config))
+            if home:
+                config_dirs.append(Path(home) / ".claude")
+        elif provider_id == "codex":
+            codex_home = os.environ.get("CODEX_HOME")
+            if codex_home:
+                config_dirs.append(Path(codex_home))
+            if home:
+                config_dirs.append(Path(home) / ".codex")
+        elif provider_id == "gemini":
+            if home:
+                config_dirs.append(Path(home) / ".gemini")
+
+        for directory in config_dirs:
+            with contextlib.suppress(Exception):
+                if directory.is_dir():
+                    for child in directory.iterdir():
+                        with contextlib.suppress(Exception):
+                            if child.is_dir():
+                                shutil.rmtree(child)
+                            else:
+                                child.unlink(missing_ok=True)
 
     def get_agent_spec(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)
@@ -6524,6 +6935,28 @@ class ControlPlaneManager:
                 "Until you configure Escopo, it only receives agent-local secrets and no shared variables."
             )
 
+        runtime_access_errors: list[str] = []
+        runtime_access_warnings: list[str] = []
+        try:
+            token_present = self.get_secret_asset(normalized, "AGENT_TOKEN", scope="agent") is not None
+        except Exception:
+            token_present = False
+        if not token_present:
+            runtime_access_errors.append(
+                "AGENT_TOKEN is not configured. The Telegram channel will fail to start until "
+                "a bot token is saved in Identidade → Canal Telegram."
+            )
+        allowed_raw = ""
+        try:
+            allowed_raw = self.get_decrypted_secret_value(normalized, "ALLOWED_USER_IDS") or ""
+        except Exception:
+            allowed_raw = ""
+        if not _normalize_user_id_values(allowed_raw):
+            runtime_access_warnings.append(
+                "ALLOWED_USER_IDS is empty. The agent will reply 'Access denied.' to every "
+                "Telegram user until you add at least one numeric user ID in Identidade → Canal Telegram."
+            )
+
         result = {
             **validation,
             "provider_errors": provider_errors,
@@ -6557,8 +6990,19 @@ class ControlPlaneManager:
                 )
         result["runtime_prompt_preview"] = runtime_prompt_preview
         result["prompt_preview"] = runtime_prompt_preview
-        result["warnings"] = [*validation["warnings"], *provenance_warnings, *resource_warnings]
-        result["errors"] = [*validation["errors"], *provider_errors, *resource_errors, *runtime_prompt_errors]
+        result["warnings"] = [
+            *validation["warnings"],
+            *provenance_warnings,
+            *resource_warnings,
+            *runtime_access_warnings,
+        ]
+        result["errors"] = [
+            *validation["errors"],
+            *provider_errors,
+            *resource_errors,
+            *runtime_prompt_errors,
+            *runtime_access_errors,
+        ]
         result["ok"] = not result["errors"]
         return result
 
@@ -6646,7 +7090,7 @@ class ControlPlaneManager:
         feature_flags = validation[0]
         policy = resolve_execution_policy(agent_spec, feature_flags=feature_flags)
         source = _trimmed_text(_safe_json_object(policy).get("source")) or (
-            "execution_policy" if _safe_json_object(agent_spec.get("execution_policy")) else "compiled_legacy"
+            "execution_policy" if _safe_json_object(agent_spec.get("execution_policy")) else "none"
         )
         return {
             "agent_id": normalized,
@@ -7177,6 +7621,42 @@ class ControlPlaneManager:
         )
         return True
 
+    # Tables that hold per-agent state and must be purged on hard delete.
+    # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
+    # is written last so the main row survives if any cascade step fails.
+    _AGENT_CASCADE_TABLES: tuple[str, ...] = (
+        "cp_agent_sections",
+        "cp_agent_documents",
+        "cp_agent_config_versions",
+        "cp_apply_operations",
+        "cp_knowledge_assets",
+        "cp_template_assets",
+        "cp_skill_assets",
+        "cp_mcp_agent_connections",
+        "cp_mcp_tool_policies",
+        "cp_mcp_discovered_tools",
+        "cp_mcp_oauth_tokens",
+        "cp_mcp_oauth_sessions",
+        "cp_agent_connections",
+    )
+
+    def delete_agent(self, agent_id: str) -> bool:
+        """Hard-delete an agent and every dependent cp_* row.
+
+        Returns True if the agent existed and was removed, False if it was
+        already gone (idempotent — repeated DELETE calls should not raise).
+        Runtime / audit tables (tasks, query_history, audit_events) are
+        intentionally left alone so historical records survive.
+        """
+        try:
+            normalized, _ = self._require_agent_row(agent_id)
+        except KeyError:
+            return False
+        for table in self._AGENT_CASCADE_TABLES:
+            execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
+        execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
+        return True
+
     def clone_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         source = self.get_agent(agent_id)
         if source is None:
@@ -7230,6 +7710,63 @@ class ControlPlaneManager:
             "version": int(version_row["id"]) if version_row else self._persist_global_default_version(sections),
         }
 
+    def get_persistence_diagnostics(self) -> dict[str, Any]:
+        """Return the real state of the persistence stack.
+
+        Exposed via ``GET /api/control-plane/_diag/persistence`` so an operator
+        seeing "saves don't persist" can curl/inspect the truth: is the
+        Postgres backend available? How many rows are in cp_global_sections
+        and cp_provider_connections? When was the last write? Without this
+        endpoint the operator has to read source to figure out why writes
+        appear to succeed but revert to defaults.
+        """
+        from koda.state.primary import get_primary_state_backend, postgres_primary_mode
+
+        warnings: list[str] = []
+        backend_available = False
+        schema: str | None = None
+        try:
+            backend = get_primary_state_backend()
+            backend_available = backend is not None
+            if backend is not None:
+                schema = str(getattr(backend, "schema", "") or "") or None
+        except Exception as exc:  # noqa: BLE001 - surface diag failures to the caller
+            warnings.append(f"backend_resolution_failed: {exc!r}")
+
+        if postgres_primary_mode() and not backend_available:
+            warnings.append(
+                "STATE_BACKEND=postgres but KNOWLEDGE_V2_POSTGRES_DSN is empty or the shared "
+                "backend refused to initialize. Saves will fail loudly with primary_backend_unavailable."
+            )
+
+        row_counts: dict[str, int | None] = {}
+        last_updated_at: str | None = None
+        for table in ("cp_global_sections", "cp_provider_connections", "cp_secret_values", "cp_agent_definitions"):
+            try:
+                row = fetch_one(f"SELECT COUNT(*) AS count FROM {table}")
+                row_counts[table] = int(row["count"]) if row and row.get("count") is not None else 0
+            except Exception as exc:  # noqa: BLE001
+                row_counts[table] = None
+                warnings.append(f"{table}_count_failed: {exc!r}")
+
+        try:
+            latest = fetch_one("SELECT MAX(updated_at) AS updated_at FROM cp_global_sections")
+            if latest is not None:
+                raw = latest.get("updated_at")
+                last_updated_at = str(raw) if raw else None
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"last_updated_at_failed: {exc!r}")
+
+        return {
+            "state_backend": STATE_BACKEND,
+            "postgres_primary_mode": postgres_primary_mode(),
+            "primary_backend_available": backend_available,
+            "postgres_schema": schema,
+            "row_counts": row_counts,
+            "last_updated_at": last_updated_at,
+            "warnings": warnings,
+        }
+
     def _persist_global_sections(self, sections: dict[str, dict[str, Any]]) -> int:
         for section, value in sections.items():
             execute(
@@ -7240,6 +7777,20 @@ class ControlPlaneManager:
                 """,
                 (section, json_dump(_safe_json_object(value)), now_iso()),
             )
+        # Post-write verification — read back and confirm the sections we just
+        # wrote are visible. A silent failure in the DB layer (missing row,
+        # no-op backend) becomes a loud 500 here instead of a 200 OK that
+        # mysteriously reverts to defaults on reload.
+        written_keys = {str(section) for section in sections}
+        if written_keys:
+            actual = self._load_global_sections()
+            missing = sorted(key for key in written_keys if key not in actual)
+            if missing:
+                raise RuntimeError(
+                    "persist_global_sections_lost: "
+                    f"{missing} — write returned success but row is not visible on read. "
+                    "Check that STATE_BACKEND=postgres has a working KNOWLEDGE_V2_POSTGRES_DSN."
+                )
         return self._persist_global_default_version(sections)
 
     def _general_ui_meta(self, *, sections: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -7363,7 +7914,10 @@ class ControlPlaneManager:
                     "scope": str(secret.get("usage_scope") or "system_only"),
                     "description": _nonempty_text(secret.get("description")),
                     "value": "",
-                    "preview": str(secret.get("preview") or ""),
+                    # Never ship the masked preview — the UI shows only
+                    # "stored" / action buttons; to see the value the
+                    # operator must replace it.
+                    "preview": "",
                     "value_present": True,
                 }
             )
@@ -7380,11 +7934,11 @@ class ControlPlaneManager:
         default_provider = _nonempty_text(models.get("default_provider")).lower()
         fallback_order = normalize_string_list(models.get("fallback_order"))
         if enabled_providers and default_provider not in enabled_providers:
-            warnings.append("O provider padrão precisa estar habilitado.")
+            warnings.append("The default provider must be enabled.")
         if enabled_providers and not fallback_order:
             warnings.append("Defina ao menos uma ordem de fallback entre os providers habilitados.")
         if fallback_order and any(provider not in enabled_providers for provider in fallback_order):
-            warnings.append("A ordem de fallback contém providers que não estão habilitados.")
+            warnings.append("The fallback order contains providers that are not enabled.")
         for provider_id in enabled_providers:
             connection = provider_connections.get(provider_id, {})
             if provider_id in MANAGED_PROVIDER_IDS and not bool(connection.get("verified")):
@@ -7395,16 +7949,16 @@ class ControlPlaneManager:
         if default_provider in MANAGED_PROVIDER_IDS and not bool(
             _safe_json_object(provider_connections.get(default_provider)).get("verified")
         ):
-            warnings.append("O provider padrão precisa estar conectado e verificado.")
+            warnings.append("The default provider must be connected and verified.")
         if any(
             provider in MANAGED_PROVIDER_IDS
             and not bool(_safe_json_object(provider_connections.get(provider)).get("verified"))
             for provider in fallback_order
         ):
-            warnings.append("A ordem de fallback inclui providers que ainda não foram verificados.")
+            warnings.append("The fallback order includes providers that have not yet been verified.")
         elevenlabs_voice = _nonempty_text(models.get("elevenlabs_default_voice"))
         if elevenlabs_voice and not bool(_safe_json_object(provider_connections.get("elevenlabs")).get("verified")):
-            warnings.append("Conecte e valide o ElevenLabs antes de definir a voz padrão dos agents.")
+            warnings.append("Connect and verify ElevenLabs before setting the default voice for agents.")
         provider_catalog = self.get_core_providers()
         option_map = self._functional_model_option_map(provider_catalog)
         functional_defaults = _normalize_functional_model_defaults(models.get("functional_defaults"))
@@ -7449,7 +8003,7 @@ class ControlPlaneManager:
             ]
             if missing:
                 warnings.append(
-                    f"{template['title']} está habilitado, mas faltam credenciais obrigatórias: {', '.join(missing)}."
+                    f"{template['title']} is enabled, but required credentials are missing: {', '.join(missing)}."
                 )
         return warnings
 
@@ -7740,6 +8294,7 @@ class ControlPlaneManager:
                 or "America/Sao_Paulo"
             ),
             "rate_limit_per_minute": general_section.get("rate_limit_per_minute"),
+            "time_format": _nonempty_text(general_section.get("time_format")) or "24h",
         }
         model_values = {
             "providers_enabled": enabled_providers,
@@ -7844,8 +8399,8 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        provider_connections: dict[str, dict[str, Any]] = {
-            provider_id: _safe_json_object(self.get_provider_connection(provider_id))
+        provider_connections = {
+            provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
         }
@@ -7860,11 +8415,30 @@ class ControlPlaneManager:
             or _nonempty_text(providers_section.get("tts_default_voice"))
             or elevenlabs_prefill_from_env
         )
+        scheduler_values = {
+            "scheduler_enabled": bool(scheduler_section.get("scheduler_enabled", True)),
+            "scheduler_poll_interval_seconds": scheduler_section.get("scheduler_poll_interval_seconds"),
+            "scheduler_lease_seconds": scheduler_section.get("scheduler_lease_seconds"),
+            "scheduler_run_max_attempts": scheduler_section.get("scheduler_run_max_attempts"),
+            "scheduler_retry_base_delay": scheduler_section.get("scheduler_retry_base_delay"),
+            "scheduler_retry_max_delay": scheduler_section.get("scheduler_retry_max_delay"),
+            "scheduler_min_interval_seconds": scheduler_section.get("scheduler_min_interval_seconds"),
+            "runbook_governance_enabled": bool(scheduler_section.get("runbook_governance_enabled", False)),
+            "runbook_governance_hour": scheduler_section.get("runbook_governance_hour"),
+            "runbook_revalidation_stale_days": scheduler_section.get("runbook_revalidation_stale_days"),
+            "runbook_revalidation_min_verified_runs": scheduler_section.get("runbook_revalidation_min_verified_runs"),
+            "runbook_revalidation_min_success_rate": scheduler_section.get("runbook_revalidation_min_success_rate"),
+            "runbook_revalidation_correction_threshold": scheduler_section.get(
+                "runbook_revalidation_correction_threshold"
+            ),
+            "runbook_revalidation_rollback_threshold": scheduler_section.get("runbook_revalidation_rollback_threshold"),
+        }
         values = {
             "account": account_values,
             "models": model_values,
             "resources": resource_values,
             "memory_and_knowledge": memory_values,
+            "scheduler": scheduler_values,
             "variables": self._custom_global_variables_payload(legacy_settings, sections=sections),
             "provider_connections": provider_connections,
         }
@@ -7928,20 +8502,20 @@ class ControlPlaneManager:
                     {
                         "id": "cache",
                         "title": "Cache",
-                        "description": "Ativa cache global para acelerar execuções repetidas.",
+                        "description": "Enables a global cache to speed up repeated executions.",
                         "configurable": True,
                     },
                     {
                         "id": "script_library",
                         "title": "Biblioteca de scripts",
-                        "description": "Habilita scripts reutilizáveis aprovados pelo sistema.",
+                        "description": "Enables system-approved reusable scripts.",
                         "configurable": True,
                     },
                 ],
                 "usage_profiles": [
                     {"id": profile_id, **profile} for profile_id, profile in _GENERAL_MODEL_USAGE_PROFILES.items()
                 ],
-                "memory_presets": [
+                "memory_profiles": [
                     {"id": profile_id, **profile} for profile_id, profile in _GENERAL_MEMORY_PROFILES.items()
                 ],
                 "knowledge_profiles": [
@@ -7951,73 +8525,73 @@ class ControlPlaneManager:
                     {
                         "id": "strict",
                         "label": "Estrita",
-                        "description": "Exige owner e freshness nas fontes críticas.",
+                        "description": "Requires owner and freshness on critical sources.",
                     },
                     {
                         "id": "standard",
-                        "label": "Padrão",
-                        "description": "Mantém governança com menos bloqueios de publicação.",
+                        "label": "Default",
+                        "description": "Keeps governance with fewer publication blocks.",
                     },
                 ],
                 "knowledge_layers": [
                     {
                         "id": "canonical_policy",
-                        "label": "Canônico",
-                        "description": "Políticas, guidelines e conhecimento validado do sistema.",
+                        "label": "Canonical",
+                        "description": "Policies, guidelines, and validated system knowledge.",
                     },
                     {
                         "id": "approved_runbook",
                         "label": "Runbooks aprovados",
-                        "description": "Procedimentos operacionais aprovados e rastreáveis.",
+                        "description": "Approved and traceable operational procedures.",
                     },
                     {
                         "id": "workspace_doc",
                         "label": "Documentos do workspace",
-                        "description": "Documentação contextual do repositório e do workspace atual.",
+                        "description": "Contextual documentation from the repository and current workspace.",
                     },
                     {
                         "id": "observed_pattern",
-                        "label": "Padrões observados",
-                        "description": "Aprendizados semânticos derivados do histórico, sempre como camada mais fraca.",
+                        "label": "Observed patterns",
+                        "description": "Semantic insights derived from history, always as the weakest layer.",
                     },
                 ],
                 "approval_modes": [
                     {
                         "id": "read_only",
                         "label": "Read only",
-                        "description": "Investiga e responde, sem executar mutações.",
+                        "description": "Investigates and responds without executing mutations.",
                     },
                     {
                         "id": "guarded",
                         "label": "Guarded",
-                        "description": "Pode agir com verificação forte e contenção adicional.",
+                        "description": "May act with strong verification and additional containment.",
                     },
                     {
                         "id": "supervised",
                         "label": "Supervised",
-                        "description": "Executa com supervisão humana e checkpoints frequentes.",
+                        "description": "Executes with human supervision and frequent checkpoints.",
                     },
                     {
                         "id": "escalation_required",
                         "label": "Escalation required",
-                        "description": "Precisa escalar antes de qualquer ação sensível.",
+                        "description": "Must escalate before any sensitive action.",
                     },
                 ],
                 "autonomy_tiers": [
                     {
                         "id": "t0",
                         "label": "T0",
-                        "description": "Pesquisa, síntese e análise sem escrita.",
+                        "description": "Research, synthesis, and analysis without writes.",
                     },
                     {
                         "id": "t1",
                         "label": "T1",
-                        "description": "Ações limitadas com forte contenção e baixo risco.",
+                        "description": "Limited actions with strong containment and low risk.",
                     },
                     {
                         "id": "t2",
                         "label": "T2",
-                        "description": "Execução complexa com tool loop, validação e grounding operacional.",
+                        "description": "Complex execution with tool loop, validation, and operational grounding.",
                     },
                 ],
             },
@@ -8056,8 +8630,240 @@ class ControlPlaneManager:
         self._persist_global_sections(sections)
         return self.get_system_settings()
 
+    def _validate_general_payload(self, payload: dict[str, Any]) -> None:
+        """Validate structural constraints on the general settings payload.
+
+        Raises ``GeneralPayloadValidationError`` with a list of field-level errors
+        when the payload would cause surprising or broken runtime behavior. Only
+        rejects payloads that are structurally wrong — no business-logic coercion
+        happens here (that remains inside ``put_general_system_settings``).
+        """
+        errors: list[dict[str, str]] = []
+        account = _safe_json_object(payload.get("account"))
+        models = _safe_json_object(payload.get("models"))
+        memory_and_knowledge = _safe_json_object(payload.get("memory_and_knowledge"))
+        scheduler = _safe_json_object(payload.get("scheduler"))
+        variables_raw = payload.get("variables")
+
+        def _push(field: str, code: str, message: str) -> None:
+            errors.append({"field": field, "code": code, "message": message})
+
+        if "time_format" in account and account.get("time_format") not in (None, ""):
+            requested_tf = _nonempty_text(account.get("time_format")).lower()
+            if requested_tf and requested_tf not in {"24h", "12h"}:
+                _push(
+                    "account.time_format",
+                    "invalid_enum",
+                    f"Invalid time format: {requested_tf}. Use 24h or 12h.",
+                )
+
+        if "rate_limit_per_minute" in account and account.get("rate_limit_per_minute") not in (None, ""):
+            raw = account.get("rate_limit_per_minute")
+            try:
+                parsed = int(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("account.rate_limit_per_minute", "invalid_type", "Rate limit must be an integer.")
+            else:
+                if parsed < 1:
+                    _push("account.rate_limit_per_minute", "min_value", "Rate limit deve ser ao menos 1.")
+
+        budget_value: float | None = None
+        total_budget_value: float | None = None
+        if "max_budget_usd" in models and models.get("max_budget_usd") not in (None, ""):
+            try:
+                budget_value = float(models.get("max_budget_usd"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("models.max_budget_usd", "invalid_type", "Per-task budget must be numeric.")
+            else:
+                if budget_value <= 0:
+                    _push("models.max_budget_usd", "must_be_positive", "Per-task budget must be greater than zero.")
+        if "max_total_budget_usd" in models and models.get("max_total_budget_usd") not in (None, ""):
+            try:
+                total_budget_value = float(models.get("max_total_budget_usd"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push("models.max_total_budget_usd", "invalid_type", "Total budget must be numeric.")
+            else:
+                if total_budget_value < 0:
+                    _push(
+                        "models.max_total_budget_usd",
+                        "must_be_non_negative",
+                        "Total budget cannot be negative.",
+                    )
+        if budget_value is not None and total_budget_value is not None and total_budget_value < budget_value:
+            _push(
+                "models.max_total_budget_usd",
+                "must_gte_max_budget",
+                "Total budget must be greater than or equal to per-task budget.",
+            )
+
+        enabled_providers_specified = "providers_enabled" in models
+        enabled_providers: list[str] = normalize_string_list(models.get("providers_enabled"))
+        if enabled_providers_specified:
+            managed = set(MANAGED_PROVIDER_IDS)
+            for pid in enabled_providers:
+                if pid not in managed:
+                    _push(
+                        "models.providers_enabled",
+                        "unknown_provider",
+                        f"Provider desconhecido: {pid}.",
+                    )
+        if "default_provider" in models and models.get("default_provider") not in (None, ""):
+            dp = _nonempty_text(models.get("default_provider")).lower()
+            if dp and enabled_providers_specified and dp not in enabled_providers:
+                _push(
+                    "models.default_provider",
+                    "must_be_enabled",
+                    f"Default provider '{dp}' is not in the list of enabled providers.",
+                )
+
+        functional_defaults_payload = _safe_json_object(models.get("functional_defaults"))
+        if functional_defaults_payload and enabled_providers_specified:
+            for function_id, selection in functional_defaults_payload.items():
+                selection_obj = _safe_json_object(selection)
+                fd_provider = _nonempty_text(selection_obj.get("provider_id")).lower()
+                if fd_provider and fd_provider not in enabled_providers:
+                    _push(
+                        f"models.functional_defaults.{function_id}.provider_id",
+                        "must_be_enabled",
+                        f"Provider '{fd_provider}' from functional default '{function_id}' is not enabled.",
+                    )
+
+        autonomy_policy = _safe_json_object(memory_and_knowledge.get("autonomy_policy"))
+        autonomy_tier_raw = autonomy_policy.get("default_autonomy_tier")
+        if "default_autonomy_tier" in autonomy_policy and autonomy_tier_raw not in (None, ""):
+            tier = _nonempty_text(autonomy_tier_raw).lower()
+            if tier and tier not in _ALLOWED_AUTONOMY_TIERS:
+                _push(
+                    "memory_and_knowledge.autonomy_policy.default_autonomy_tier",
+                    "invalid_enum",
+                    f"Invalid autonomy tier: {tier}. Use t0, t1, or t2.",
+                )
+
+        memory_policy_raw = _safe_json_object(memory_and_knowledge.get("memory_policy"))
+        memory_profile = _nonempty_text(
+            _safe_json_object(memory_policy_raw.get("profile")).get("id") or memory_policy_raw.get("profile_id")
+        )
+        if memory_profile and memory_profile not in _GENERAL_MEMORY_PROFILES:
+            _push(
+                "memory_and_knowledge.memory_policy.profile",
+                "unknown_profile",
+                f"Unknown memory profile: {memory_profile}.",
+            )
+
+        knowledge_policy_raw = _safe_json_object(memory_and_knowledge.get("knowledge_policy"))
+        knowledge_profile = _nonempty_text(
+            _safe_json_object(knowledge_policy_raw.get("profile")).get("id") or knowledge_policy_raw.get("profile_id")
+        )
+        if knowledge_profile and knowledge_profile not in _GENERAL_KNOWLEDGE_PROFILES:
+            _push(
+                "memory_and_knowledge.knowledge_policy.profile",
+                "unknown_profile",
+                f"Perfil de conhecimento desconhecido: {knowledge_profile}.",
+            )
+        if "provenance_policy" in knowledge_policy_raw and knowledge_policy_raw.get("provenance_policy") not in (
+            None,
+            "",
+        ):
+            provenance = _nonempty_text(knowledge_policy_raw.get("provenance_policy")).lower()
+            if provenance and provenance not in _ALLOWED_PROVENANCE_POLICIES:
+                _push(
+                    "memory_and_knowledge.knowledge_policy.provenance_policy",
+                    "invalid_enum",
+                    f"Invalid provenance policy: {provenance}. Use strict or standard.",
+                )
+
+        _SCHEDULER_POSITIVE_INT_FIELDS = (
+            "scheduler_poll_interval_seconds",
+            "scheduler_lease_seconds",
+            "scheduler_run_max_attempts",
+            "scheduler_retry_base_delay",
+            "scheduler_retry_max_delay",
+            "scheduler_min_interval_seconds",
+            "runbook_revalidation_stale_days",
+            "runbook_revalidation_min_verified_runs",
+            "runbook_revalidation_correction_threshold",
+            "runbook_revalidation_rollback_threshold",
+        )
+        for key in _SCHEDULER_POSITIVE_INT_FIELDS:
+            if key in scheduler and scheduler.get(key) not in (None, ""):
+                try:
+                    parsed = int(scheduler.get(key))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    _push(f"scheduler.{key}", "invalid_type", f"{key} must be an integer.")
+                    continue
+                if parsed < 1:
+                    _push(f"scheduler.{key}", "min_value", f"{key} deve ser ao menos 1.")
+        if "runbook_governance_hour" in scheduler and scheduler.get("runbook_governance_hour") not in (None, ""):
+            try:
+                hour = int(scheduler.get("runbook_governance_hour"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push(
+                    "scheduler.runbook_governance_hour",
+                    "invalid_type",
+                    "The governance hour must be an integer.",
+                )
+            else:
+                if hour < 0 or hour > 23:
+                    _push(
+                        "scheduler.runbook_governance_hour",
+                        "out_of_range",
+                        "The governance hour must be between 0 and 23.",
+                    )
+        if "runbook_revalidation_min_success_rate" in scheduler and scheduler.get(
+            "runbook_revalidation_min_success_rate"
+        ) not in (None, ""):
+            try:
+                rate = float(scheduler.get("runbook_revalidation_min_success_rate"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _push(
+                    "scheduler.runbook_revalidation_min_success_rate",
+                    "invalid_type",
+                    "The minimum success rate must be numeric.",
+                )
+            else:
+                if rate < 0 or rate > 1:
+                    _push(
+                        "scheduler.runbook_revalidation_min_success_rate",
+                        "out_of_range",
+                        "The minimum success rate must be between 0 and 1.",
+                    )
+
+        if variables_raw is not None:
+            if not isinstance(variables_raw, list):
+                _push("variables", "invalid_type", "Variables must be a list.")
+            else:
+                for index, entry in enumerate(variables_raw):
+                    entry_obj = _safe_json_object(entry)
+                    key = _nonempty_text(entry_obj.get("key"))
+                    if not key:
+                        _push(f"variables[{index}].key", "required", "Variable key is required.")
+                    elif not _ENV_KEY_RE.match(key):
+                        _push(
+                            f"variables[{index}].key",
+                            "invalid_format",
+                            f"Chave '{key}' must start with an uppercase letter and contain only A-Z, 0-9, and '_'.",
+                        )
+                    vtype = _nonempty_text(entry_obj.get("type")).lower() or "text"
+                    if vtype not in _ALLOWED_VARIABLE_TYPES:
+                        _push(
+                            f"variables[{index}].type",
+                            "invalid_enum",
+                            f"Invalid type: {vtype}. Use text or secret.",
+                        )
+                    vscope = _nonempty_text(entry_obj.get("scope")).lower() or "system_only"
+                    if vscope not in _ALLOWED_VARIABLE_SCOPES:
+                        _push(
+                            f"variables[{index}].scope",
+                            "invalid_enum",
+                            f"Invalid scope: {vscope}. Use system_only or agent_grant.",
+                        )
+
+        if errors:
+            raise GeneralPayloadValidationError(errors)
+
     def put_general_system_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_seeded()
+        self._validate_general_payload(payload)
         current = self.get_system_settings()
         sections = self._system_settings_sections()
         general_ui = dict(self._general_ui_meta(sections=sections))
@@ -8094,11 +8900,43 @@ class ControlPlaneManager:
             current_general["rate_limit_per_minute"] = account.get("rate_limit_per_minute")
         if "scheduler_default_timezone" in account:
             current_scheduler["scheduler_default_timezone"] = _nonempty_text(account.get("scheduler_default_timezone"))
+        if "time_format" in account:
+            requested_time_format = _nonempty_text(account.get("time_format")).lower()
+            if requested_time_format in {"24h", "12h"}:
+                current_general["time_format"] = requested_time_format
+
+        scheduler_payload = _safe_json_object(payload.get("scheduler"))
+        for bool_key in ("scheduler_enabled", "runbook_governance_enabled"):
+            if bool_key in scheduler_payload:
+                current_scheduler[bool_key] = bool(scheduler_payload.get(bool_key))
+        for int_key in (
+            "scheduler_poll_interval_seconds",
+            "scheduler_lease_seconds",
+            "scheduler_run_max_attempts",
+            "scheduler_retry_base_delay",
+            "scheduler_retry_max_delay",
+            "scheduler_min_interval_seconds",
+            "runbook_governance_hour",
+            "runbook_revalidation_stale_days",
+            "runbook_revalidation_min_verified_runs",
+            "runbook_revalidation_correction_threshold",
+            "runbook_revalidation_rollback_threshold",
+        ):
+            if int_key in scheduler_payload and scheduler_payload.get(int_key) not in (None, ""):
+                with contextlib.suppress(TypeError, ValueError):
+                    current_scheduler[int_key] = int(scheduler_payload.get(int_key))  # type: ignore[arg-type]
+        if "runbook_revalidation_min_success_rate" in scheduler_payload and scheduler_payload.get(
+            "runbook_revalidation_min_success_rate"
+        ) not in (None, ""):
+            with contextlib.suppress(TypeError, ValueError):
+                current_scheduler["runbook_revalidation_min_success_rate"] = float(
+                    scheduler_payload.get("runbook_revalidation_min_success_rate")  # type: ignore[arg-type]
+                )
 
         provider_catalog = self.get_core_providers()
         enabled_providers = normalize_string_list(models.get("providers_enabled"))
-        provider_connections: dict[str, dict[str, Any]] = {
-            provider_id: _safe_json_object(self.get_provider_connection(provider_id))
+        provider_connections = {
+            provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
         }
@@ -8143,7 +8981,7 @@ class ControlPlaneManager:
         if normalized_kokoro_voice:
             voice_metadata = kokoro_voice_metadata(normalized_kokoro_voice)
             if voice_metadata is None:
-                raise ValueError("A voz padrão do Kokoro não existe no catálogo oficial.")
+                raise ValueError("The default Kokoro voice does not exist in the official catalog.")
             current_providers["kokoro_default_voice"] = normalized_kokoro_voice
             current_providers["kokoro_default_language"] = _nonempty_text(voice_metadata.get("language_id")).lower()
             if not _nonempty_text(general_ui.get("kokoro_default_voice_label")):
@@ -8154,20 +8992,14 @@ class ControlPlaneManager:
 
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:
-            raise ValueError("O provider padrão precisa estar habilitado.")
-        if default_provider in MANAGED_PROVIDER_IDS and not bool(
-            _safe_json_object(provider_connections.get(default_provider)).get("verified")
-        ):
-            raise ValueError("O provider padrão precisa estar conectado e verificado.")
-        requested_fallback = normalize_string_list(current_providers.get("fallback_order"))
-        if any(provider not in enabled_providers for provider in requested_fallback):
-            raise ValueError("A ordem de fallback contém providers não habilitados.")
-        if any(
-            provider in MANAGED_PROVIDER_IDS
-            and not bool(_safe_json_object(provider_connections.get(provider)).get("verified"))
-            for provider in requested_fallback
-        ):
-            raise ValueError("A ordem de fallback só pode incluir providers verificados.")
+            default_provider = enabled_providers[0] if enabled_providers else ""
+            current_providers["default_provider"] = default_provider
+        requested_fallback = [
+            provider
+            for provider in normalize_string_list(current_providers.get("fallback_order"))
+            if provider in enabled_providers
+        ]
+        current_providers["fallback_order"] = requested_fallback
 
         usage_profile = _nonempty_text(models.get("usage_profile")).lower() or "balanced"
         general_ui["usage_profile"] = usage_profile
@@ -8192,7 +9024,9 @@ class ControlPlaneManager:
                 )
             )
             if not option:
-                raise ValueError(f"O default de {function_id} referencia um provider/modelo invalido.")
+                # Unknown provider/model: drop silently so the operator can still save
+                # unrelated settings. A warning is surfaced elsewhere.
+                continue
             provider_id = _nonempty_text(option.get("provider_id")).lower()
             provider_payload = _safe_json_object(_safe_json_object(provider_catalog.get("providers")).get(provider_id))
             if function_id in {"general", "transcription"} and not self._provider_selectable_for_function(
@@ -8201,10 +9035,9 @@ class ControlPlaneManager:
                 provider_payload,
                 provider_connections,
             ):
-                raise ValueError(
-                    f"{option.get('provider_title') or provider_id} precisa estar disponivel "
-                    f"antes de virar default de {function_id}."
-                )
+                # Provider not ready yet: drop this functional default so save
+                # proceeds. Warning is surfaced by _warnings_for_system_settings.
+                continue
             normalized_functional_defaults[function_id] = {
                 "provider_id": provider_id,
                 "model_id": _nonempty_text(option.get("model_id")),
@@ -8217,11 +9050,15 @@ class ControlPlaneManager:
             general_default = _safe_json_object(normalized_functional_defaults.get("general"))
             general_provider = _nonempty_text(general_default.get("provider_id")).lower()
             general_model = _nonempty_text(general_default.get("model_id"))
-            if general_provider and general_model:
-                if general_provider not in enabled_providers:
-                    raise ValueError("O default geral precisa usar um provider habilitado.")
+            if general_provider and general_model and general_provider in enabled_providers:
                 current_providers["default_provider"] = general_provider
                 current_providers[f"{general_provider}_default_model"] = general_model
+            elif general_provider and general_model:
+                # General default points to a provider that is not enabled:
+                # drop it from normalized_functional_defaults so the operator
+                # can still save.
+                normalized_functional_defaults.pop("general", None)
+                current_providers["functional_defaults"] = normalized_functional_defaults
             audio_default = _safe_json_object(normalized_functional_defaults.get("audio"))
             audio_provider = _nonempty_text(audio_default.get("provider_id")).lower()
             audio_model = _nonempty_text(audio_default.get("model_id"))
@@ -8232,11 +9069,8 @@ class ControlPlaneManager:
 
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:
-            raise ValueError("O provider padrão precisa estar habilitado.")
-        if default_provider in MANAGED_PROVIDER_IDS and not bool(
-            _safe_json_object(provider_connections.get(default_provider)).get("verified")
-        ):
-            raise ValueError("O provider padrão precisa estar conectado e verificado.")
+            default_provider = enabled_providers[0] if enabled_providers else ""
+            current_providers["default_provider"] = default_provider
         deduped_fallback: list[str] = []
         for provider in [default_provider, *normalize_string_list(current_providers.get("fallback_order"))]:
             if not provider or provider not in enabled_providers or provider in deduped_fallback:
@@ -8312,7 +9146,12 @@ class ControlPlaneManager:
         )
 
         provenance_policy = _nonempty_text(memory_and_knowledge.get("provenance_policy")).lower() or "strict"
-        current_knowledge["promotion_mode"] = "review_queue"
+        promotion_mode = _nonempty_text(memory_and_knowledge.get("promotion_mode")).lower()
+        stored_promotion = _nonempty_text(current_knowledge.get("promotion_mode")).lower()
+        resolved_promotion = promotion_mode or stored_promotion or "review_queue"
+        current_knowledge["promotion_mode"] = (
+            resolved_promotion if resolved_promotion in PROMOTION_MODES else "review_queue"
+        )
         current_knowledge["require_owner_provenance"] = True
         current_knowledge["require_freshness_provenance"] = provenance_policy == "strict"
         effective_knowledge_policy = normalize_knowledge_policy(
@@ -8502,7 +9341,8 @@ class ControlPlaneManager:
                 .get(normalized_secret_key, {})
                 .get("description")
             ),
-            "preview": str(row["preview"] or ""),
+            # Preview stripped — the browser never needs the masked shape.
+            "preview": "",
             "updated_at": str(row["updated_at"] or ""),
         }
 
@@ -8807,7 +9647,8 @@ class ControlPlaneManager:
                 "id": int(row["id"]),
                 "scope": "global" if str(row["scope_id"]) == "global" else "agent",
                 "secret_key": str(row["secret_key"]),
-                "preview": str(row["preview"] or ""),
+                # Preview stripped — see _current_global_secrets for rationale.
+                "preview": "",
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
@@ -8830,7 +9671,8 @@ class ControlPlaneManager:
             "id": int(row["id"]),
             "scope": normalized_scope,
             "secret_key": normalized_secret_key,
-            "preview": str(row["preview"] or ""),
+            # Preview stripped — browser sees only presence, never shape.
+            "preview": "",
             "updated_at": str(row["updated_at"] or ""),
         }
 
@@ -8982,6 +9824,16 @@ class ControlPlaneManager:
             "runtime_base_url": f"http://127.0.0.1:{health_port}",
         }
         runtime_endpoint.update(_safe_json_object(json_load(agent_row["runtime_endpoint_json"], {})))
+        # Post-update: re-read health_port in case runtime_endpoint_json overrode it, then
+        # propagate to process_env so the spawned worker binds the same port the supervisor
+        # expects to poll for liveness/idle checks. Without this the worker falls back to
+        # config.HEALTH_PORT default (8080) while the supervisor polls the per-agent value.
+        _hp = runtime_endpoint.get("health_port")
+        effective_health_port = int(_hp) if isinstance(_hp, (int, str)) else int(health_port)
+        runtime_endpoint["health_port"] = effective_health_port
+        runtime_endpoint["health_url"] = f"http://127.0.0.1:{effective_health_port}/health"
+        runtime_endpoint["runtime_base_url"] = f"http://127.0.0.1:{effective_health_port}"
+        env["HEALTH_PORT"] = str(effective_health_port)
         appearance = _safe_json_object(json_load(agent_row["appearance_json"], {}))
         appearance.setdefault("label", str(agent_row["display_name"]))
         connection_refs = self._runtime_connection_refs(normalized)
@@ -9338,6 +10190,14 @@ class ControlPlaneManager:
 
         agent_config = _safe_json_object(snapshot.get("agent"))
         runtime_endpoint = _safe_json_object(agent_config.get("runtime_endpoint"))
+        # Propagate the per-agent health port into the spawned worker's env.
+        # Without this the child falls back to config.HEALTH_PORT default (8080)
+        # while the supervisor polls runtime_endpoint.health_url for liveness —
+        # the poll always misses, _is_agent_idle returns False, and graceful
+        # version-bump restarts never fire.
+        endpoint_health_port = runtime_endpoint.get("health_port")
+        if endpoint_health_port is not None:
+            env["HEALTH_PORT"] = str(endpoint_health_port)
         health_url = str(
             runtime_endpoint.get("health_url") or f"http://127.0.0.1:{env.get('HEALTH_PORT', '8080')}/health"
         )
@@ -10043,7 +10903,6 @@ class ControlPlaneManager:
                 vendor_notes = excluded.vendor_notes,
                 default_policy = excluded.default_policy,
                 updated_at = excluded.updated_at
-            RETURNING server_key
             """,
             (
                 normalized_server_key,

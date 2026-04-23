@@ -77,7 +77,7 @@ export function parseHealthPort(value: string): number {
   return parsed;
 }
 
-export function buildBotMetadataPayload(input: {
+export function buildAgentMetadataPayload(input: {
   displayName: string;
   status: string;
   storageNamespace: string;

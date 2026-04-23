@@ -117,7 +117,7 @@ _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 def strip_for_tts(text: str) -> str:
     """Clean text for speech synthesis — remove code, markdown, URLs."""
     # Replace code blocks with placeholder
-    text = _CODE_BLOCK_RE.sub(" bloco de código omitido ", text)
+    text = _CODE_BLOCK_RE.sub(" code block omitted ", text)
     # Remove inline code
     text = _INLINE_CODE_RE.sub("", text)
     # Convert markdown links to just the text

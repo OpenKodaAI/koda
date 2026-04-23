@@ -9,7 +9,7 @@ import type {
 } from "@/lib/types";
 
 type ExecutionFilters = {
-  botIds?: string[];
+  agentIds?: string[];
   status?: string;
   search?: string;
   sessionId?: string;
@@ -17,7 +17,7 @@ type ExecutionFilters = {
 };
 
 type CostsFilters = {
-  botIds?: string[];
+  agentIds?: string[];
   period?: "7d" | "30d" | "90d";
   groupBy?: CostGroupBy;
   model?: string;
@@ -26,13 +26,13 @@ type CostsFilters = {
 };
 
 type DlqFilters = {
-  botIds?: string[];
+  agentIds?: string[];
   retryFilter?: string;
   limit?: number;
 };
 
 type SessionsFilters = {
-  botId?: string;
+  agentId?: string;
   search?: string;
   limit?: number;
 };
@@ -43,26 +43,26 @@ function normalizeStringArray(values?: string[]) {
 
 export const queryKeys = {
   dashboard: {
-    botStatsSummary: () => ["dashboard", "bots", "summary"] as const,
-    botStatsDetail: (botId: string) => ["dashboard", "bots", botId, "stats"] as const,
+    agentStatsSummary: () => ["dashboard", "agents", "summary"] as const,
+    agentStatsDetail: (agentId: string) => ["dashboard", "agents", agentId, "stats"] as const,
     executions: (filters: ExecutionFilters) =>
       [
         "dashboard",
         "executions",
         {
           ...filters,
-          botIds: normalizeStringArray(filters.botIds),
+          agentIds: normalizeStringArray(filters.agentIds),
         },
       ] as const,
-    executionDetail: (botId: string, taskId: number, language?: string) =>
-      ["dashboard", "executions", botId, taskId, language ?? ""] as const,
+    executionDetail: (agentId: string, taskId: number, language?: string) =>
+      ["dashboard", "executions", agentId, taskId, language ?? ""] as const,
     costs: (filters: CostsFilters) =>
       [
         "dashboard",
         "costs",
         {
           ...filters,
-          botIds: normalizeStringArray(filters.botIds),
+          agentIds: normalizeStringArray(filters.agentIds),
         },
       ] as const,
     dlq: (filters: DlqFilters) =>
@@ -71,7 +71,7 @@ export const queryKeys = {
         "dlq",
         {
           ...filters,
-          botIds: normalizeStringArray(filters.botIds),
+          agentIds: normalizeStringArray(filters.agentIds),
         },
       ] as const,
     sessions: (filters: SessionsFilters) =>
@@ -82,16 +82,20 @@ export const queryKeys = {
           ...filters,
         },
       ] as const,
-    sessionDetail: (botId: string, sessionId: string) =>
-      ["dashboard", "sessions", botId, sessionId] as const,
-    botSchedules: (botId: string) =>
-      ["dashboard", "bots", botId, "schedules"] as const,
+    sessionDetail: (agentId: string, sessionId: string) =>
+      ["dashboard", "sessions", agentId, sessionId] as const,
+    agentSchedules: (agentId: string) =>
+      ["dashboard", "agents", agentId, "schedules"] as const,
   },
   runtime: {
-    overview: (botId: string, language?: string) =>
-      ["runtime", "overview", botId, language ?? ""] as const,
-    task: (botId: string, taskId: number) =>
-      ["runtime", "task", botId, taskId] as const,
+    overview: (agentId: string, language?: string) =>
+      ["runtime", "overview", agentId, language ?? ""] as const,
+    task: (agentId: string, taskId: number) =>
+      ["runtime", "task", agentId, taskId] as const,
+  },
+  controlPlane: {
+    workspacesTree: () => ["control-plane", "workspaces", "tree"] as const,
+    agents: () => ["control-plane", "agents", "list"] as const,
   },
 };
 

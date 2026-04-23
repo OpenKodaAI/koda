@@ -716,6 +716,14 @@ def compile_legacy_execution_policy(
     *,
     feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
+    """Compile v1 tool/autonomy/resource policies into a v2 execution_policy.
+
+    Used only by ``scripts/migrate_execution_policies.py`` as a one-shot migration
+    helper. The runtime path (``resolve_execution_policy``) no longer falls back
+    here: an agent without an explicit ``execution_policy`` receives an empty
+    policy. After all persisted agent specs have been migrated, this function can
+    be deleted.
+    """
     normalized_spec = {
         "tool_policy": _safe_object(agent_spec.get("tool_policy")),
         "autonomy_policy": _safe_object(agent_spec.get("autonomy_policy")),
@@ -853,10 +861,7 @@ def resolve_execution_policy(
     *,
     feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
-    explicit = normalize_execution_policy(_safe_object(agent_spec.get("execution_policy")))
-    if explicit:
-        return explicit
-    return compile_legacy_execution_policy(agent_spec, feature_flags=feature_flags)
+    return normalize_execution_policy(_safe_object(agent_spec.get("execution_policy")))
 
 
 def _group_catalog_actions(actions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -977,10 +982,12 @@ def _matches_value(pattern: Any, value: Any) -> bool:
     normalized_value = _trimmed(value).lower()
     candidate = normalized_pattern.lower()
     if candidate.startswith("^"):
-        literal_prefix = candidate[1:].strip()
-        if not literal_prefix:
+        try:
+            import re
+
+            return bool(re.search(candidate, normalized_value, re.IGNORECASE))
+        except re.error:
             return False
-        return normalized_value.startswith(literal_prefix)
     if "*" in candidate or "?" in candidate:
         return fnmatch(normalized_value, candidate)
     return normalized_value == candidate

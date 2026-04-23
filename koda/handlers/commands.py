@@ -211,25 +211,25 @@ def _featuremodel_usage_text() -> str:
 
 def _settings_examples_text() -> str:
     return (
-        "Voce tambem pode pedir em linguagem natural, por exemplo:\n"
-        "• mude o provider para OpenAI\n"
-        "• use gpt-5.2 como modelo geral\n"
-        "• para imagem use codex gpt-image-1.5\n"
-        "• mude a voz para pm_alex\n"
-        "• ative modo supervisionado"
+        "You can also ask in natural language, for example:\n"
+        "• switch the provider to OpenAI\n"
+        "• use gpt-5.2 as the general model\n"
+        "• for images, use codex gpt-image-1.5\n"
+        "• change the voice to pm_alex\n"
+        "• enable supervised mode"
     )
 
 
 def _settings_home_text(user_data: dict[str, Any]) -> str:
     lines = [
-        "<b>Ajustes deste AGENT</b>",
+        "<b>Agent settings</b>",
         "",
-        f"Provider geral: <code>{escape_html(str(user_data.get('provider') or ''))}</code>",
-        f"Modelo geral: <code>{escape_html(str(user_data.get('model') or ''))}</code>",
-        f"Modo: <code>{escape_html(str(user_data.get('agent_mode') or 'autonomous'))}</code>",
-        f"Voz: <code>{escape_html(str(user_data.get('tts_voice') or TTS_DEFAULT_VOICE))}</code>",
+        f"General provider: <code>{escape_html(str(user_data.get('provider') or ''))}</code>",
+        f"General model: <code>{escape_html(str(user_data.get('model') or ''))}</code>",
+        f"Mode: <code>{escape_html(str(user_data.get('agent_mode') or 'autonomous'))}</code>",
+        f"Voice: <code>{escape_html(str(user_data.get('tts_voice') or TTS_DEFAULT_VOICE))}</code>",
         "",
-        "<b>Modelos por funcionalidade</b>",
+        "<b>Per-feature models</b>",
     ]
     for function_id in MODEL_FUNCTION_IDS:
         if function_id == "general":
@@ -240,7 +240,7 @@ def _settings_home_text(user_data: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "Essas mudancas afetam apenas este AGENT. Credenciais e defaults globais continuam na interface web.",
+            "These changes only affect this agent. Credentials and global defaults remain in the web interface.",
             "",
             _settings_examples_text(),
         ]
@@ -253,15 +253,15 @@ def _settings_home_markup() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("Provider", callback_data="settings:provider"),
-                InlineKeyboardButton("Modelo", callback_data="settings:model"),
+                InlineKeyboardButton("Model", callback_data="settings:model"),
             ],
             [
-                InlineKeyboardButton("Funcionalidades", callback_data="settings:featuremodel"),
-                InlineKeyboardButton("Modo", callback_data="settings:mode"),
+                InlineKeyboardButton("Features", callback_data="settings:featuremodel"),
+                InlineKeyboardButton("Mode", callback_data="settings:mode"),
             ],
             [
-                InlineKeyboardButton("Voz", callback_data="settings:voice"),
-                InlineKeyboardButton("Nova sessao", callback_data="settings:newsession"),
+                InlineKeyboardButton("Voice", callback_data="settings:voice"),
+                InlineKeyboardButton("New session", callback_data="settings:newsession"),
             ],
         ]
     )
@@ -298,23 +298,9 @@ async def cmd_start(update: Update, context: BotContext) -> None:
         return await reject_unauthorized(update)
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-    await update.message.reply_text(
-        f"{AGENT_NAME} Agent ready.\n\n"
-        "Send any message to query the coding runtime.\n"
-        "Send a photo to analyze images.\n"
-        "Send a document (PDF/DOCX/TXT) to analyze.\n"
-        "Send a voice note to transcribe.\n\n"
-        "Comandos principais:\n"
-        "/settings - Ajustes deste AGENT\n"
-        "/newsession - Nova sessao\n"
-        "/sessions - Sessoes salvas\n"
-        "/voice - Vozes e TTS\n"
-        "/tasks - Tarefas em andamento\n"
-        "/cancel - Cancelar execucao\n"
-        "/help - Ajuda curta\n\n"
-        f"{_settings_examples_text()}\n\n"
-        "Para o restante, pode pedir normalmente em linguagem natural."
-    )
+    from koda.services.agent_welcome import build_start_message
+
+    await update.message.reply_text(build_start_message(AGENT_ID))
 
 
 async def cmd_help(update: Update, context: BotContext) -> None:
@@ -334,20 +320,17 @@ async def cmd_help(update: Update, context: BotContext) -> None:
         f"Provider: <code>{escape_html(provider)}</code>\n"
         f"Model: <code>{escape_html(model)}</code>{auto}\n"
         f"Session: <code>{escape_html(session)}</code>\n\n"
-        f"Comandos principais:\n"
-        f"/settings - Ajustar provider, modelo, modo e defaults deste AGENT\n"
-        f"/newsession - Nova sessao\n"
-        f"/sessions - Listar sessoes\n"
-        f"/setdir [path] - Alterar diretorio de trabalho\n"
-        f"/voice - Vozes e TTS\n"
-        f"/tasks - Tarefas em andamento\n"
-        f"/cancel - Cancelar execucao\n"
-        f"/help - Esta ajuda\n\n"
+        f"Commands\n"
+        f"/settings — adjust provider, model, mode and defaults for this agent\n"
+        f"/newsession — new session\n"
+        f"/sessions — list sessions\n"
+        f"/setdir [path] — change working directory\n"
+        f"/voice — voice &amp; TTS\n"
+        f"/tasks — running tasks\n"
+        f"/cancel — cancel execution\n"
+        f"/help — this help\n\n"
         + f"{escape_html(_settings_examples_text())}\n\n"
-        + (
-            "Comandos avancados continuam disponiveis, mas a ideia e usar linguagem natural "
-            "para a maior parte do trabalho."
-        ),
+        + ("Advanced commands are still available, but the idea is to use natural language for most of the work."),
         parse_mode=ParseMode.HTML,
     )
 
@@ -556,20 +539,20 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
     """Show per-function model defaults for this agent only."""
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
-        await update.message.reply_text("As configuracoes por funcionalidade deste AGENT nao estao disponiveis agora.")
+        await update.message.reply_text("Per-feature settings are not available for this agent right now.")
         return
 
     sync_user_data_with_runtime_settings(context.user_data, settings)
     option_map = _feature_option_map(context.user_data)
     if not option_map:
-        await update.message.reply_text("Nenhum modelo por funcionalidade esta disponivel para este AGENT.")
+        await update.message.reply_text("No per-feature models are available for this agent.")
         return
 
     args = [str(item).strip() for item in (context.args or []) if str(item).strip()]
     if args:
         command = args[0].lower()
         if command == "list":
-            lines = ["Modelos padrao por funcionalidade deste AGENT:\n"]
+            lines = ["Default per-feature models for this agent:\n"]
             for function_id in MODEL_FUNCTION_IDS:
                 if option_map.get(function_id):
                     lines.append(
@@ -586,7 +569,7 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
 
         function_options = option_map.get(function_id, [])
         if not function_options:
-            await update.message.reply_text("Nenhum modelo disponivel para esta funcionalidade neste AGENT.")
+            await update.message.reply_text("No models available for this feature on this agent.")
             return
 
         if len(args) >= 3:
@@ -600,7 +583,7 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
             sync_user_data_with_runtime_settings(context.user_data, updated)
             await update.message.reply_text(
                 f"<b>{escape_html(_feature_function_label(function_id))}</b>\n"
-                f"Modelo padrao do AGENT atualizado para <code>{escape_html(provider_id)}</code> / "
+                f"Agent default updated to <code>{escape_html(provider_id)}</code> / "
                 f"<code>{escape_html(model_id)}</code>.",
                 parse_mode=ParseMode.HTML,
             )
@@ -612,7 +595,7 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
             provider_title = str(item.get("provider_title") or item.get("provider_id") or "")
             grouped.setdefault(provider_title, []).append(item)
         current_selection = _feature_selection_label(context.user_data, function_id)
-        lines.append(f"Atual: <code>{escape_html(current_selection)}</code>\n")
+        lines.append(f"Current: <code>{escape_html(current_selection)}</code>\n")
         for provider_title, items in grouped.items():
             lines.append(f"<b>{escape_html(provider_title)}</b>")
             for item in items:
@@ -627,7 +610,7 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
                     f"{escape_html(title)}{marker}"
                 )
             lines.append("")
-        lines.append(f"Para alterar via texto:\n/featuremodel {function_id} <provider> <modelo>")
+        lines.append(f"To change via text:\n/featuremodel {function_id} <provider> <model>")
         await update.message.reply_text("\n".join(lines).strip(), parse_mode=ParseMode.HTML)
         return
 
@@ -642,11 +625,11 @@ async def cmd_featuremodel(update: Update, context: BotContext) -> None:
         if option_map.get(function_id)
     ]
     if not buttons:
-        await update.message.reply_text("Nenhuma funcionalidade configuravel esta disponivel para este AGENT.")
+        await update.message.reply_text("No configurable features are available for this agent.")
         return
 
     await update.message.reply_text(
-        "Selecione a funcionalidade para ajustar o modelo padrao deste AGENT:",
+        "Select a feature to adjust the agent's default model:",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -794,7 +777,7 @@ async def cmd_tasks(update: Update, context: BotContext) -> None:
             elapsed = _t.time() - ti.started_at
             extra = f" ({elapsed:.0f}s)"
         if ti.status == "retrying":
-            extra = f" (tentativa {ti.attempt})"
+            extra = f" (attempt {ti.attempt})"
         lines.append(f"{icon} #{ti.task_id} \u2014 {escape_html(preview)}{extra}")
         active_ids.add(ti.task_id)
 
@@ -907,22 +890,22 @@ async def cmd_task(update: Update, context: BotContext) -> None:
 
         elapsed = _t.time() - ti.started_at
         mins, secs = divmod(int(elapsed), 60)
-        elapsed_str = f"\nTempo: {mins}m{secs:02d}s" if mins else f"\nTempo: {secs}s"
+        elapsed_str = f"\nElapsed: {mins}m{secs:02d}s" if mins else f"\nElapsed: {secs}s"
 
-    attempt_str = f" (tentativa {attempt}/{max_att})" if attempt and max_att and max_att > 1 else ""
-    cost_str = f"\nCusto: ${cost:.4f}" if cost else ""
-    err_str = f"\nErro: {escape_html(err)}" if err else ""
+    attempt_str = f" (attempt {attempt}/{max_att})" if attempt and max_att and max_att > 1 else ""
+    cost_str = f"\nCost: ${cost:.4f}" if cost else ""
+    err_str = f"\nError: {escape_html(err)}" if err else ""
     query_preview = escape_html(qtext[:200]) if qtext else ""
 
     lines = [
-        f"<b>Tarefa #{task_id}</b>",
+        f"<b>Task #{task_id}</b>",
         f"Status: {icon} {status}{attempt_str}",
         f"Query: {query_preview}",
     ]
     if provider:
         lines.append(f"Provider: {escape_html(provider)}")
     if model:
-        lines.append(f"Modelo: {escape_html(model)}")
+        lines.append(f"Model: {escape_html(model)}")
     if wdir:
         lines.append(f"Dir: {escape_html(os.path.basename(wdir))}")
     if cost_str:
@@ -930,9 +913,9 @@ async def cmd_task(update: Update, context: BotContext) -> None:
     if elapsed_str:
         lines.append(elapsed_str.strip())
     if started:
-        lines.append(f"Iniciada: {started[11:19]}")
+        lines.append(f"Started: {started[11:19]}")
     if completed:
-        lines.append(f"Concluida: {completed[11:19]}")
+        lines.append(f"Completed: {completed[11:19]}")
     if err_str:
         lines.append(err_str.strip())
 
@@ -1593,7 +1576,7 @@ async def cmd_remind(update: Update, context: BotContext) -> None:
     except Exception:
         log.exception("reminder_scheduler_create_failed", user_id=user_id, chat_id=chat_id)
         await update.message.reply_text(
-            "Nao consegui persistir esse lembrete no scheduler canonico agora. Tente novamente em instantes."
+            "Could not persist this reminder in the canonical scheduler right now. Please try again shortly."
         )
         return
     await update.message.reply_text(msg)
@@ -2217,21 +2200,21 @@ def _format_memory_provenance(memory: object) -> str:
     if agent_id:
         provenance.append(f"agent: {agent_id}")
     if origin_kind:
-        provenance.append(f"origem: {origin_kind}")
+        provenance.append(f"origin: {origin_kind}")
     if project_key:
-        provenance.append(f"projeto: {project_key}")
+        provenance.append(f"project: {project_key}")
     if environment:
-        provenance.append(f"ambiente: {environment}")
+        provenance.append(f"environment: {environment}")
     if team:
-        provenance.append(f"time: {team}")
+        provenance.append(f"team: {team}")
     if source_query_id is not None:
         provenance.append(f"query: {source_query_id}")
     if source_task_id is not None:
         provenance.append(f"task: {source_task_id}")
     if source_episode_id is not None:
-        provenance.append(f"episódio: {source_episode_id}")
+        provenance.append(f"episode: {source_episode_id}")
     if isinstance(quality_score, (int, float)):
-        provenance.append(f"qualidade: {quality_score:.2f}")
+        provenance.append(f"quality: {quality_score:.2f}")
     if memory_status:
         provenance.append(f"status: {memory_status}")
     return " | ".join(provenance)
@@ -2394,7 +2377,7 @@ async def cmd_memory(update: Update, context: BotContext) -> None:
                 memory_types = [MemoryType(filters["type"])]
             except ValueError:
                 valid = ", ".join(t.value for t in MemoryType)
-                await update.message.reply_text(f"Tipo inválido: {filters['type']}\nValid: {valid}")
+                await update.message.reply_text(f"Invalid type: {filters['type']}\nValid: {valid}")
                 return
 
         results = await store.search(
@@ -2646,23 +2629,23 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
         pref = get_preference(user_id)
         if pref:
             _uid, _cid, enabled, hour, minute, timezone_name, last_sent = pref
-            status = "✅ Ativo" if enabled else "❌ Desativado"
+            status = "✅ Active" if enabled else "❌ Disabled"
             await update.message.reply_text(
                 f"<b>📋 Digest Config</b>\n\n"
                 f"Status: {status}\n"
-                f"Horário: {hour:02d}:{minute:02d}\n"
+                f"Time: {hour:02d}:{minute:02d}\n"
                 f"Timezone: {escape_html(str(timezone_name or 'UTC'))}\n"
-                f"Último envio: {last_sent or 'nunca'}\n\n"
-                f"Comandos:\n"
-                f"/digest on — Ativar\n"
-                f"/digest off — Desativar\n"
-                f"/digest time HH:MM — Alterar horário\n"
-                f"/digest timezone Area/City — Alterar timezone\n"
-                f"/digest now — Enviar agora",
+                f"Last sent: {last_sent or 'never'}\n\n"
+                f"Commands:\n"
+                f"/digest on — Enable\n"
+                f"/digest off — Disable\n"
+                f"/digest time HH:MM — Change time\n"
+                f"/digest timezone Area/City — Change timezone\n"
+                f"/digest now — Send now",
                 parse_mode=ParseMode.HTML,
             )
         else:
-            await update.message.reply_text("Digest não configurado.\nUse /digest on para ativar (padrão: 09:00).")
+            await update.message.reply_text("Digest is not configured.\nUse /digest on to enable (default: 09:00).")
         return
 
     cmd = context.args[0].lower()
@@ -2673,7 +2656,7 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
         hour = existing[3] if existing else 9
         minute = existing[4] if existing else 0
         set_preference(user_id, chat_id, enabled=True, send_hour=hour, send_minute=minute, timezone=timezone_name)
-        await update.message.reply_text(f"✅ Digest ativado! Envio diário às {hour:02d}:{minute:02d}.")
+        await update.message.reply_text(f"✅ Digest enabled. Daily delivery at {hour:02d}:{minute:02d}.")
 
     elif cmd == "off":
         pref = get_preference(user_id)
@@ -2686,9 +2669,9 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
                 send_minute=pref[4],
                 timezone=pref[5],
             )
-            await update.message.reply_text("❌ Digest desativado.")
+            await update.message.reply_text("❌ Digest disabled.")
         else:
-            await update.message.reply_text("Digest não estava configurado.")
+            await update.message.reply_text("Digest was not configured.")
 
     elif cmd == "time":
         if len(context.args) < 2:
@@ -2701,22 +2684,22 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
             if not (0 <= hour <= 23 and 0 <= minute <= 59):
                 raise ValueError
         except (ValueError, IndexError):
-            await update.message.reply_text("Horário inválido. Use HH:MM (ex: 09:00)")
+            await update.message.reply_text("Invalid time. Use HH:MM (e.g. 09:00)")
             return
         pref = get_preference(user_id)
         timezone_name = pref[5] if pref else "UTC"
         set_preference(user_id, chat_id, enabled=True, send_hour=hour, send_minute=minute, timezone=timezone_name)
-        await update.message.reply_text(f"✅ Digest configurado para {hour:02d}:{minute:02d}")
+        await update.message.reply_text(f"✅ Digest scheduled for {hour:02d}:{minute:02d}")
 
     elif cmd == "timezone":
         if len(context.args) < 2:
-            await update.message.reply_text("Uso: /digest timezone Area/City")
+            await update.message.reply_text("Usage: /digest timezone Area/City")
             return
         timezone_name = context.args[1]
         try:
             ZoneInfo(timezone_name)
         except ZoneInfoNotFoundError:
-            await update.message.reply_text("Timezone inválida. Exemplo: America/Sao_Paulo")
+            await update.message.reply_text("Invalid timezone. Example: America/Sao_Paulo")
             return
         pref = get_preference(user_id)
         hour = pref[3] if pref else 9
@@ -2730,7 +2713,7 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
             send_minute=minute,
             timezone=timezone_name,
         )
-        await update.message.reply_text(f"✅ Timezone do digest configurada para {timezone_name}")
+        await update.message.reply_text(f"✅ Digest timezone set to {timezone_name}")
 
     elif cmd == "now":
         from koda.memory.digest import build_digest
@@ -2739,10 +2722,10 @@ async def cmd_digest(update: Update, context: BotContext) -> None:
         if digest:
             await update.message.reply_text(digest, parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text("Nada para reportar no momento.")
+            await update.message.reply_text("Nothing to report right now.")
 
     else:
-        await update.message.reply_text("Uso: /digest [on|off|time HH:MM|timezone Area/City|now]")
+        await update.message.reply_text("Usage: /digest [on|off|time HH:MM|timezone Area/City|now]")
 
 
 async def cmd_dlq(update: Update, context: BotContext) -> None:

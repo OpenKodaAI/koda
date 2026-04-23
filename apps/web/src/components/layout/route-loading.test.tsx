@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
-  BotEditorRouteLoading,
+  AgentEditorRouteLoading,
   ControlPlaneCatalogLoading,
   ControlPlaneSystemLoading,
   MemoryRouteLoading,
@@ -23,7 +23,7 @@ describe("route loading skeletons", () => {
         <MemoryRouteLoading />
         <ControlPlaneCatalogLoading />
         <ControlPlaneSystemLoading />
-        <BotEditorRouteLoading />
+        <AgentEditorRouteLoading />
         <RuntimeTaskRouteLoading />
       </div>,
     );
@@ -35,7 +35,7 @@ describe("route loading skeletons", () => {
     expect(screen.getByTestId("memory-route-loading")).toBeInTheDocument();
     expect(screen.getByTestId("control-plane-catalog-loading")).toBeInTheDocument();
     expect(screen.getByTestId("control-plane-system-loading")).toBeInTheDocument();
-    expect(screen.getByTestId("bot-editor-route-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-editor-route-loading")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-task-route-loading")).toBeInTheDocument();
   });
 });

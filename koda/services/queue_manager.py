@@ -417,21 +417,21 @@ def _build_operational_reasoning(
     notes: list[str] = []
     if model:
         if provider:
-            notes.append(f"A execução foi conduzida com o provider {provider} e o modelo {model}.")
+            notes.append(f"The run used provider {provider} with model {model}.")
         else:
-            notes.append(f"A execução foi conduzida com o modelo {model}.")
+            notes.append(f"The run used model {model}.")
     if tool_count:
-        notes.append(f"O agent acionou {tool_count} ferramenta(s) ao longo da resolução.")
+        notes.append(f"The agent invoked {tool_count} tool(s) during the resolution.")
     else:
-        notes.append("A resposta foi produzida sem uso de ferramentas auxiliares.")
+        notes.append("The response was produced without invoking any auxiliary tools.")
     if stop_reason:
-        notes.append(f"O ciclo do runtime foi encerrado com stop reason '{stop_reason}'.")
+        notes.append(f"The runtime cycle ended with stop reason '{stop_reason}'.")
     if warning_count:
-        notes.append(f"Foram registrados {warning_count} warning(s) operacionais durante a execução.")
+        notes.append(f"Recorded {warning_count} operational warning(s) during the run.")
     if status == "completed":
-        notes.append(f"A tarefa terminou com sucesso na tentativa {attempt} de {max_attempts}.")
+        notes.append(f"The task completed successfully on attempt {attempt} of {max_attempts}.")
     else:
-        notes.append(f"A tarefa terminou em {status} após {attempt} tentativa(s) de {max_attempts}.")
+        notes.append(f"The task ended as {status} after {attempt} attempt(s) of {max_attempts}.")
     return notes
 
 
@@ -1033,12 +1033,12 @@ def _sync_user_queue_observability(user_id: int) -> None:
 def _build_queue_feedback(task_id: int, ahead_count: int) -> str:
     if ahead_count <= 1:
         return (
-            f"Recebi sua mensagem e coloquei na fila. "
-            f"Vou processa-la assim que a tarefa atual terminar. Referencia: #{task_id}."
+            f"Received your message and queued it. "
+            f"I'll process it once the current task finishes. Reference: #{task_id}."
         )
     return (
-        f"Recebi sua mensagem e coloquei na fila. "
-        f"Ha {ahead_count} tarefas antes dela e vou seguir a ordem de chegada. Referencia: #{task_id}."
+        f"Received your message and queued it. "
+        f"There are {ahead_count} tasks ahead of it; I'll process them in order. Reference: #{task_id}."
     )
 
 
@@ -1340,8 +1340,8 @@ async def _handle_queue_dispatch_failure(
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=(
-                    "Ocorreu uma falha interna ao recuperar sua tarefa da fila. "
-                    "Ela foi isolada para analise segura e nao sera repetida em loop."
+                    "An internal failure occurred while recovering your task from the queue. "
+                    "It has been quarantined for safe analysis and will not loop."
                 ),
             )
 
@@ -1429,9 +1429,9 @@ def _pending_tasks_for_user(user_id: int) -> int:
 
 def _queue_capacity_message(pending_count: int) -> str:
     return (
-        "Sua fila já está cheia no momento. "
-        f"Existem {pending_count} tarefa(s) pendentes para este usuário. "
-        "Aguarde algumas finalizarem antes de enviar novas mensagens."
+        "Your queue is currently full. "
+        f"There are {pending_count} pending task(s) for this user. "
+        "Wait for some to finish before sending new messages."
     )
 
 
@@ -1474,6 +1474,14 @@ def _build_recovered_raw_item(
     raw: dict[str, Any]
     if payload:
         raw = dict(payload)
+        # Strip the _recovered_task marker only when we actually rebuilt the
+        # payload from persisted state. An empty persisted payload ({} — the
+        # default column value when the original persist failed) must still
+        # go through the recovered_task branch below so _parse_queue_item
+        # recognizes the item shape. ``if payload is not None`` was dropping
+        # the marker for ``{}`` → ValueError: too many values to unpack.
+        raw.pop("update", None)
+        raw.pop("_recovered_task", None)
     else:
         raw = {
             "_recovered_task": True,
@@ -1485,9 +1493,7 @@ def _build_recovered_raw_item(
             "session_id": task_row.get("session_id"),
             "image_paths": [],
         }
-    raw.pop("update", None)
-    if payload is not None:
-        raw.pop("_recovered_task", None)
+        raw.pop("update", None)
     raw["_queue_recovered"] = True
     raw["_task_id"] = int(task_row["id"])
     raw["_recovery_count"] = recovery_count
@@ -2173,7 +2179,7 @@ async def _prepare_query_context(
             log.exception("memory_recall_error")
             _query_warnings.append("memory unavailable")
         _metrics.MEMORY_RECALL_DURATION.labels(agent_id=_agent_id_label).observe(time.time() - _recall_start)
-        if memory_context and "## Memória Procedural" in memory_context:
+        if memory_context and "## Procedural Memory" in memory_context:
             _metrics.PROCEDURAL_HITS.labels(agent_id=_agent_id_label).inc()
         else:
             _metrics.PROCEDURAL_MISSES.labels(agent_id=_agent_id_label).inc()
@@ -2370,116 +2376,93 @@ async def _prepare_query_context(
             drop_policy="hard_floor",
         )
 
-    # --- Skills v2 integration ---
-    from koda.config import _bool_env
-
-    _SKILLS_V2_ENABLED = _bool_env("SKILLS_V2_ENABLED", True)
+    # --- Skills selection ---
     _resolved_skill_matches: list = []
+    try:
+        from koda.skills._composer import (
+            compose_output_requirements,
+            compose_skill_prompt,
+            resolve_skill_graph,
+        )
+        from koda.skills._registry import get_shared_registry
+        from koda.skills._selector import get_shared_selector
+        from koda.skills._telemetry import emit_skill_selection
 
-    if _SKILLS_V2_ENABLED:
+        registry = get_shared_registry()
+        registry.reload_if_stale()
+
+        _agent_custom_skills: list[dict[str, Any]] = []
+        _agent_skill_policy: dict[str, Any] | None = None
         try:
-            from koda.skills._composer import (
-                compose_output_requirements,
-                compose_skill_prompt,
-                resolve_skill_graph,
-            )
-            from koda.skills._registry import get_shared_registry
-            from koda.skills._selector import get_shared_selector
-            from koda.skills._telemetry import emit_skill_selection
+            from koda.control_plane import get_control_plane_manager
 
-            registry = get_shared_registry()
-            registry.reload_if_stale()
+            cpm = get_control_plane_manager()
+            if cpm is not None:
+                agent_spec: dict[str, Any] = getattr(cpm, "get_cached_agent_spec", lambda: {})()
+                _agent_custom_skills = agent_spec.get("custom_skills", [])
+                _agent_skill_policy = agent_spec.get("skill_policy") or None
+        except Exception:  # noqa: BLE001
+            pass
 
-            # Load agent-specific skills and policy from control plane
-            _agent_custom_skills: list[dict[str, Any]] = []
-            _agent_skill_policy: dict[str, Any] | None = None
-            try:
-                from koda.control_plane import get_control_plane_manager
+        if _agent_custom_skills:
+            merged_skills = registry.merge_agent_skills(_agent_custom_skills)
+        else:
+            merged_skills = registry.get_all()
 
-                cpm = get_control_plane_manager()
-                if cpm is not None:
-                    agent_spec: dict[str, Any] = getattr(cpm, "get_cached_agent_spec", lambda: {})()
-                    _agent_custom_skills = agent_spec.get("custom_skills", [])
-                    _agent_skill_policy = agent_spec.get("skill_policy") or None
-            except Exception:  # noqa: BLE001
-                pass  # Graceful: continue with global skills only
+        from koda.skills._index import get_shared_index
 
-            # Merge global + agent-specific skills
-            if _agent_custom_skills:
-                merged_skills = registry.merge_agent_skills(_agent_custom_skills)
-            else:
-                merged_skills = registry.get_all()
+        skill_index = get_shared_index()
+        skill_index.rebuild(merged_skills)
 
-            # Rebuild index with merged skills for this query
-            from koda.skills._index import get_shared_index
+        selector = get_shared_selector()
 
-            skill_index = get_shared_index()
-            skill_index.rebuild(merged_skills)
+        skill_matches = selector.select(
+            item.query_text,
+            max_skills=_agent_skill_policy.get("max_skills", 6) if _agent_skill_policy else 6,
+            agent_skill_policy=_agent_skill_policy,
+        )
 
-            selector = get_shared_selector()
+        if skill_matches:
+            resolved = resolve_skill_graph(skill_matches, registry)
+            _resolved_skill_matches = resolved
+            skill_prompt = compose_skill_prompt(resolved, token_budget=1600, progressive=True)
 
-            skill_matches = selector.select(
-                item.query_text,
-                max_skills=_agent_skill_policy.get("max_skills", 6) if _agent_skill_policy else 6,
-                agent_skill_policy=_agent_skill_policy,
-            )
+            if skill_prompt:
+                best_score = max(m.composite_score for m in resolved)
+                effective_priority = max(15, 30 - int(best_score * 15))
 
-            if skill_matches:
-                resolved = resolve_skill_graph(skill_matches, registry)
-                _resolved_skill_matches = resolved
-                skill_prompt = compose_skill_prompt(resolved, token_budget=1600, progressive=True)
+                _append_prompt_segment(
+                    prompt_segments,
+                    segment_id="active_skills",
+                    text=skill_prompt,
+                    category="skills",
+                    priority=effective_priority,
+                    compression_strategy="head_and_tail",
+                    drop_policy="drop",
+                )
 
-                if skill_prompt:
-                    best_score = max(m.composite_score for m in resolved)
-                    effective_priority = max(15, 30 - int(best_score * 15))
-
+                output_req = compose_output_requirements(resolved)
+                if output_req:
                     _append_prompt_segment(
                         prompt_segments,
-                        segment_id="active_skills",
-                        text=skill_prompt,
+                        segment_id="skill_output_requirements",
+                        text=output_req,
                         category="skills",
-                        priority=effective_priority,
-                        compression_strategy="head_and_tail",
+                        priority=10,
+                        compression_strategy="truncate_tail",
                         drop_policy="drop",
                     )
 
-                    output_req = compose_output_requirements(resolved)
-                    if output_req:
-                        _append_prompt_segment(
-                            prompt_segments,
-                            segment_id="skill_output_requirements",
-                            text=output_req,
-                            category="skills",
-                            priority=10,
-                            compression_strategy="truncate_tail",
-                            drop_policy="drop",
-                        )
-
-                emit_skill_selection(
-                    user_id=getattr(item, "user_id", None),
-                    task_id=getattr(item, "task_id", None),
-                    query_text=item.query_text,
-                    matches=skill_matches,
-                    resolved=resolved,
-                    included_in_prompt=bool(skill_prompt),
-                )
-        except Exception:
-            log.exception("skills_v2_selection_failed")
-    else:
-        # Legacy fallback
-        from koda.services.templates import build_relevant_skills_awareness_prompt
-
-        relevant_skills_prompt = build_relevant_skills_awareness_prompt(item.query_text)
-        if relevant_skills_prompt:
-            _append_prompt_segment(
-                prompt_segments,
-                segment_id="relevant_skills_awareness",
-                text=relevant_skills_prompt,
-                category="extras",
-                priority=35,
-                compression_strategy="truncate_tail",
-                drop_policy="drop",
+            emit_skill_selection(
+                user_id=getattr(item, "user_id", None),
+                task_id=getattr(item, "task_id", None),
+                query_text=item.query_text,
+                matches=skill_matches,
+                resolved=resolved,
+                included_in_prompt=bool(skill_prompt),
             )
+    except Exception:
+        log.exception("skills_selection_failed")
 
     has_blocking_artifact_gap = any(dossier.has_blocking_gaps for dossier in artifact_dossiers)
     if has_blocking_artifact_gap:
@@ -3610,6 +3593,7 @@ async def _run_agent_loop(
                         }
                     ],
                     preview_text=policy_evaluation.preview_text,
+                    task_id=ctx.task_id,
                 )
                 try:
                     from koda.utils.approval import _PENDING_AGENT_CMD_OPS
@@ -3826,14 +3810,14 @@ async def _run_agent_loop(
                 await runtime.record_warning(
                     task_id=task_id,
                     warning_type="repeated_diff",
-                    message="O diff do workspace não mudou por dois ciclos consecutivos de escrita.",
+                    message="The workspace diff did not change across two consecutive write cycles.",
                     details={"iteration": _iteration + 1, "diff_hash": diff_hash},
                 )
                 await runtime.pause_environment(
                     task_id=task_id,
-                    reason="Guardrail do runtime: diff repetido em ciclos consecutivos.",
+                    reason="Runtime guardrail: repeated diff across consecutive cycles.",
                 )
-                guardrail_message = "Guardrail do runtime acionado: diff repetido em ciclos consecutivos."
+                guardrail_message = "Runtime guardrail triggered: repeated diff across consecutive cycles."
             elif no_change_detected:
                 await runtime.record_guardrail_hit(
                     task_id=task_id,
@@ -3844,14 +3828,14 @@ async def _run_agent_loop(
                 await runtime.record_warning(
                     task_id=task_id,
                     warning_type="no_change",
-                    message="Nenhuma mudança observável foi detectada por dois ciclos consecutivos.",
+                    message="No observable change was detected across two consecutive cycles.",
                     details={"iteration": _iteration + 1, "diff_hash": diff_hash},
                 )
                 await runtime.pause_environment(
                     task_id=task_id,
-                    reason="Guardrail do runtime: nenhuma mudança observável em ciclos consecutivos.",
+                    reason="Runtime guardrail: no observable change across consecutive cycles.",
                 )
-                guardrail_message = "Guardrail do runtime acionado: nenhuma mudança observável em ciclos consecutivos."
+                guardrail_message = "Runtime guardrail triggered: no observable change across consecutive cycles."
             elif repeated_failure_streak >= 3:
                 await runtime.record_guardrail_hit(
                     task_id=task_id,
@@ -3862,14 +3846,14 @@ async def _run_agent_loop(
                 await runtime.record_warning(
                     task_id=task_id,
                     warning_type="repeated_failure",
-                    message="A mesma falha se repetiu por três ciclos consecutivos.",
+                    message="The same failure repeated across three consecutive cycles.",
                     details={"iteration": _iteration + 1, "failure_fingerprint": failure_fingerprint},
                 )
                 await runtime.pause_environment(
                     task_id=task_id,
-                    reason="Guardrail do runtime: falha repetida por três ciclos.",
+                    reason="Runtime guardrail: same failure repeated across three cycles.",
                 )
-                guardrail_message = "Guardrail do runtime acionado: a mesma falha se repetiu por três ciclos."
+                guardrail_message = "Runtime guardrail triggered: the same failure repeated across three cycles."
         if guardrail_message:
             current_result.warnings.append(guardrail_message)
             break
@@ -3977,16 +3961,14 @@ async def _run_agent_loop(
             await runtime.record_warning(
                 task_id=task_id,
                 warning_type="retry_exhausted",
-                message="Loop do agente atingiu o limite de iterações.",
+                message="Agent loop reached the iteration limit.",
                 details={"iterations": MAX_AGENT_TOOL_ITERATIONS},
             )
             await runtime.pause_environment(
                 task_id=task_id,
-                reason="Loop do agente atingiu o limite de iterações e foi pausado.",
+                reason="Agent loop reached the iteration limit and was paused.",
             )
-        guardrail_message = (
-            f"Guardrail do runtime acionado: limite de iterações ({MAX_AGENT_TOOL_ITERATIONS}) atingido."
-        )
+        guardrail_message = f"Runtime guardrail triggered: iteration limit ({MAX_AGENT_TOOL_ITERATIONS}) reached."
 
     # Clean up status messages
     for msg_id in status_msg_ids:
@@ -4740,8 +4722,8 @@ async def _execute_single_task(
     execution_timeline.append(
         _make_timeline_item(
             "task.assigned",
-            "Tarefa atribuída",
-            summary="A execução foi encaminhada para a fila de processamento.",
+            "Task assigned",
+            summary="The run was forwarded to the processing queue.",
             details={"task_id": task_id},
         )
     )
@@ -4846,9 +4828,9 @@ async def _execute_single_task(
             execution_timeline.append(
                 _make_timeline_item(
                     "task.started",
-                    "Processamento iniciado",
+                    "Processing started",
                     status="info",
-                    summary="A tarefa entrou em execução.",
+                    summary="The task began execution.",
                     details={"attempt": task_info.attempt},
                 )
             )
@@ -4902,9 +4884,9 @@ async def _execute_single_task(
                 execution_timeline.append(
                     _make_timeline_item(
                         "task.failed",
-                        "Orçamento excedido",
+                        "Budget exceeded",
                         status="error",
-                        summary="A execução foi interrompida antes de rodar o modelo.",
+                        summary="The run was aborted before invoking the model.",
                         details={"error": str(e)},
                     )
                 )
@@ -5265,12 +5247,12 @@ async def _execute_single_task(
                     success_timeline.append(
                         _make_timeline_item(
                             "task.completed" if final_status == "completed" else "task.needs_review",
-                            "Execucao concluida" if final_status == "completed" else "Encaminhada para revisao",
+                            "Execution completed" if final_status == "completed" else "Forwarded for review",
                             status="success" if final_status == "completed" else "warning",
                             summary=(
-                                "A resposta final foi enviada ao usuario."
+                                "The final response was sent to the user."
                                 if final_status == "completed"
-                                else "A resposta foi bloqueada pelo grounding gate e encaminhada para revisao."
+                                else "The response was blocked by the grounding gate and forwarded for review."
                             ),
                             details={
                                 "attempt": attempt,
@@ -5433,9 +5415,9 @@ async def _execute_single_task(
                         execution_timeline.append(
                             _make_timeline_item(
                                 "task.retried",
-                                "Nova tentativa agendada",
+                                "Retry scheduled",
                                 status="warning",
-                                summary=f"A tentativa {attempt} falhou e será repetida em {delay}s.",
+                                summary=f"Attempt {attempt} failed and will be retried in {delay}s.",
                                 details={"attempt": attempt, "delay_seconds": delay, "error": last_error},
                             )
                         )
@@ -5482,9 +5464,9 @@ async def _execute_single_task(
             failed_timeline.append(
                 _make_timeline_item(
                     "task.failed",
-                    "Execução falhou",
+                    "Execution failed",
                     status="error",
-                    summary="Todas as tentativas foram consumidas sem sucesso.",
+                    summary="All retry attempts were exhausted without success.",
                     details={"attempts": max_attempts, "error": last_error},
                 )
             )
@@ -5676,9 +5658,9 @@ async def _execute_single_task(
         exception_timeline.append(
             _make_timeline_item(
                 "task.failed",
-                "Falha inesperada",
+                "Unexpected failure",
                 status="error",
-                summary="A execução encerrou por exceção fora do fluxo de retry.",
+                summary="The run ended due to an exception outside the retry flow.",
                 details={"error": error_str},
             )
         )
@@ -5875,7 +5857,8 @@ def build_runtime_context(application: Any, user_id: int, *, bot_override: Any |
     """Build a lightweight context object for background scheduled runs."""
     from types import SimpleNamespace
 
-    user_data = application.user_data.setdefault(user_id, {})
+    # mappingproxy view auto-creates entries on __getitem__ — see recover_pending_tasks.
+    user_data = application.user_data[user_id]
     return SimpleNamespace(
         application=application,
         bot=bot_override or application.bot,
@@ -5916,7 +5899,7 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
         recovery_count = int(persisted_item.get("recovery_count") or 0)
 
         if recovery_count >= QUEUE_MAX_RECOVERY_ATTEMPTS:
-            error_message = "A tarefa excedeu o limite de recuperacoes automaticas da fila e foi movida para a DLQ."
+            error_message = "The task exceeded the queue's automatic recovery limit and was moved to the DLQ."
             failed_raw_item = _build_recovered_raw_item(
                 task_row,
                 payload=payload,
@@ -5991,7 +5974,10 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
             summary["exhausted"] += 1
             continue
 
-        init_user_data(application.user_data.setdefault(user_id, {}), user_id=user_id)
+        # application.user_data is a mappingproxy in python-telegram-bot >= v20;
+        # it auto-creates per-user dict entries on __getitem__ access, but has
+        # no .setdefault. Using [] triggers the default-factory behavior.
+        init_user_data(application.user_data[user_id], user_id=user_id)
         runtime_preprovisioned = False
         env_id: int | None = None
         if RUNTIME_ENVIRONMENTS_ENABLED:
@@ -6078,7 +6064,7 @@ async def requeue_dlq_entry(
     work_dir = cast(str | None, (payload or {}).get("work_dir"))
     session_id = cast(str | None, (payload or {}).get("session_id"))
 
-    init_user_data(application.user_data.setdefault(user_id, {}), user_id=user_id)
+    init_user_data(application.user_data[user_id], user_id=user_id)
     context = build_runtime_context(application, user_id, bot_override=bot_override)
     provider_sessions = context.user_data.get("provider_sessions", {})
     task_id = create_task(

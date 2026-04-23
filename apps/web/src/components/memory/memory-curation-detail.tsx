@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight, DatabaseZap, SearchX } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { getBotLabel } from "@/lib/bot-constants";
+import { getAgentLabel } from "@/lib/agent-constants";
 import { getMemoryTypeLabel, getMemoryTypeMeta } from "@/lib/memory-constants";
 import type {
   MemoryClusterReviewDetail,
@@ -145,7 +145,7 @@ function MemoryReviewDetailPane({
 }) {
   const { t } = useAppI18n();
   const meta = getMemoryTypeMeta(detail.item.memory_type);
-  const mapHref = `/memory?bot=${detail.item.bot_id}&search=${encodeURIComponent(detail.item.title)}`;
+  const mapHref = `/memory?agent=${detail.item.bot_id}&search=${encodeURIComponent(detail.item.title)}`;
   const mergeOptions = detail.similar_memories.map((item) => ({
     value: item.memory_id,
     label: item.title,
@@ -172,7 +172,7 @@ function MemoryReviewDetailPane({
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: meta.color }} />
               {getMemoryTypeLabel(detail.item.memory_type, t)}
             </span>
-            <span>{getBotLabel(detail.item.bot_id)}</span>
+            <span>{getAgentLabel(detail.item.bot_id)}</span>
             {detail.item.session_id ? (
               <>
                 <span>•</span>

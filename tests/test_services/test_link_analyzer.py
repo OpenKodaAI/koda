@@ -118,9 +118,9 @@ class TestBuildLinkKeyboard:
         keyboard = build_link_keyboard(meta)
         # Video should have 3 rows
         assert len(keyboard.inline_keyboard) == 3
-        # First row: Transcrição + Thumbnail
+        # First row: Transcript + Thumbnail
         assert len(keyboard.inline_keyboard[0]) == 2
-        assert "Transcrição" in keyboard.inline_keyboard[0][0].text
+        assert "Transcript" in keyboard.inline_keyboard[0][0].text
         assert "Thumbnail" in keyboard.inline_keyboard[0][1].text
         # All callback_data should start with "link:"
         for row in keyboard.inline_keyboard:
@@ -135,9 +135,9 @@ class TestBuildLinkKeyboard:
         keyboard = build_link_keyboard(meta)
         # Article should have 2 rows
         assert len(keyboard.inline_keyboard) == 2
-        # First row: Resumo + Pontos-Chave
-        assert "Resumo" in keyboard.inline_keyboard[0][0].text
-        assert "Pontos-Chave" in keyboard.inline_keyboard[0][1].text
+        # First row: Summary + Key Points
+        assert "Summary" in keyboard.inline_keyboard[0][0].text
+        assert "Key Points" in keyboard.inline_keyboard[0][1].text
 
 
 class TestBuildAnalysisPrompt:
@@ -149,7 +149,7 @@ class TestBuildAnalysisPrompt:
         )
         prompt = build_analysis_prompt("summary", meta)
         assert "https://example.com" in prompt
-        assert "resumo" in prompt.lower()
+        assert "summary" in prompt.lower()
         assert "Test" in prompt
 
     def test_transcript_prompt(self):

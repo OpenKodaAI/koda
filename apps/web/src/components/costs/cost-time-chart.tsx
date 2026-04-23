@@ -15,13 +15,14 @@ import {
   type ChartConfig,
   ChartTooltip,
 } from "@/components/ui/line-charts-9";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getCurrentLanguage } from "@/lib/i18n";
 import { cn, formatCost } from "@/lib/utils";
-import { getBotLabel } from "@/lib/bot-constants";
+import { getAgentLabel } from "@/lib/agent-constants";
 import type { CostTimePoint } from "@/lib/types";
 
-export type CostTimelineMode = "bot" | "model";
+export type CostTimelineMode = "agent" | "model";
 
 const BOT_PALETTE = ["#FF4B33", "#FF8A3D", "#FFC552", "#94E676", "#7AC6FF"];
 const MODEL_PALETTE = ["#FF613F", "#FF8F5A", "#FFC85E", "#7FD7B8", "#78A6FF"];
@@ -59,27 +60,27 @@ function formatAxisValue(value: number) {
 }
 
 function getPointValue(point: CostTimePoint, key: string, mode: CostTimelineMode) {
-  return mode === "bot" ? (point.by_bot[key] ?? 0) : (point.by_model[key] ?? 0);
+  return mode === "agent" ? (point.by_bot[key] ?? 0) : (point.by_model[key] ?? 0);
 }
 
 function getTopDriver(point: CostTimePoint, mode: CostTimelineMode) {
-  const source = mode === "bot" ? point.by_bot : point.by_model;
+  const source = mode === "agent" ? point.by_bot : point.by_model;
   const winner = Object.entries(source).sort((left, right) => right[1] - left[1])[0]?.[0];
   if (!winner) return null;
-  return mode === "bot" ? getBotLabel(winner) : winner;
+  return mode === "agent" ? getAgentLabel(winner) : winner;
 }
 
 function buildSeries(points: CostTimePoint[], mode: CostTimelineMode) {
   const totals = new Map<string, number>();
 
   for (const point of points) {
-    const source = mode === "bot" ? point.by_bot : point.by_model;
+    const source = mode === "agent" ? point.by_bot : point.by_model;
     for (const [key, value] of Object.entries(source)) {
       totals.set(key, (totals.get(key) ?? 0) + value);
     }
   }
 
-  const palette = mode === "bot" ? BOT_PALETTE : MODEL_PALETTE;
+  const palette = mode === "agent" ? BOT_PALETTE : MODEL_PALETTE;
 
   return [...totals.entries()]
     .sort((left, right) => right[1] - left[1])
@@ -89,7 +90,7 @@ function buildSeries(points: CostTimePoint[], mode: CostTimelineMode) {
       dataKey: `series_${index}`,
       total,
       color: palette[index % palette.length],
-      label: mode === "bot" ? getBotLabel(key) : key,
+      label: mode === "agent" ? getAgentLabel(key) : key,
     })) satisfies CostSeries[];
 }
 
@@ -188,13 +189,12 @@ export function CostTimeChart({
     return (
       <div
         className={cn(
-          "flex min-h-[360px] items-center justify-center rounded-[18px] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm text-[var(--text-tertiary)]",
-        className
-      )}
-    >
-        {t("costs.page.timeChart.empty", {
-          defaultValue: "Not enough data to build the temporal origin.",
-        })}
+          "flex min-h-[360px] items-center justify-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+          className
+        )}
+      >
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--text-quaternary)]" />
+        <span>{t("costs.page.timeChart.emptyShort", { defaultValue: "No data" })}</span>
       </div>
     );
   }
@@ -269,19 +269,16 @@ export function CostTimeChart({
               </p>
             </div>
 
-            <div className="segmented-control segmented-control--single-row cost-time-chart__mode-toggle self-start">
-              {(["bot", "model"] as CostTimelineMode[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => onModeChange?.(item)}
-                  className={cn("segmented-control__option", mode === item && "is-active")}
-                  aria-pressed={mode === item}
-                >
-                  {item === "bot" ? t("costs.mode.byBot") : t("costs.mode.byModel")}
-                </button>
-              ))}
-            </div>
+            <SoftTabs
+              items={[
+                { id: "agent", label: t("costs.mode.byAgent") },
+                { id: "model", label: t("costs.mode.byModel") },
+              ]}
+              value={mode}
+              onChange={(id) => onModeChange?.(id as CostTimelineMode)}
+              ariaLabel={t("costs.page.timeChart.modeLabel", { defaultValue: "Group by" })}
+              className="self-start"
+            />
           </div>
         </div>
 

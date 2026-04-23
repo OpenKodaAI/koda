@@ -9,7 +9,7 @@ from statistics import median
 from typing import Any, cast
 
 from koda.control_plane.manager import _normalize_agent_id, get_control_plane_manager
-from koda.state_primary import primary_fetch_all, primary_fetch_one, run_coro_sync
+from koda.state.primary import primary_fetch_all, primary_fetch_one, run_coro_sync
 
 
 def _now_utc() -> datetime:
@@ -48,9 +48,17 @@ def _parse_iso(value: Any) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # Mixing aware + naive datetimes raises ``TypeError`` when subtracting.
+    # Historical rows have both shapes (TEXT ISO with or without tz suffix),
+    # so normalize to UTC-aware for arithmetic safety.
+    if parsed.tzinfo is None:
+        from datetime import UTC
+
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def _iso(value: Any) -> str | None:
@@ -95,8 +103,13 @@ def _normalize_text(value: Any) -> str:
 
 
 def _serialize_task(row: dict[str, Any]) -> dict[str, Any]:
+    agent_id = str(row.get("agent_id") or "") or None
     return {
         "id": int(row["id"]),
+        # Both keys: legacy web code reads ``bot_id``, newer paths read
+        # ``agent_id``. Emit both until the rename is finished in the web.
+        "agent_id": agent_id,
+        "bot_id": agent_id,
         "user_id": int(row.get("user_id") or 0),
         "chat_id": int(row.get("chat_id") or 0),
         "status": str(row.get("status") or "queued"),
@@ -263,6 +276,14 @@ def _fetch_latest_episodes(agent_ids: list[str], task_ids: list[int]) -> dict[in
     return {int(row["task_id"]): row for row in rows if row.get("task_id") is not None}
 
 
+def _pending_approval_id_for_task(*, agent_id: str, session_id: str | None, task_id: int) -> str | None:
+    try:
+        from koda.services.approval_broker import find_pending
+    except Exception:
+        return None
+    return find_pending(agent_id=agent_id, session_id=session_id, task_id=task_id)
+
+
 def _serialize_execution_summary(
     row: dict[str, Any],
     trace: dict[str, Any] | None,
@@ -274,9 +295,23 @@ def _serialize_execution_summary(
     source_refs = _safe_list((episode or {}).get("source_refs_json"))
     winning_sources = [str(item) for item in _safe_list((episode or {}).get("winning_sources_json"))]
     answer_gate_reasons = [str(item) for item in _safe_list((episode or {}).get("answer_gate_reasons_json"))]
+    pending_approval_id = _pending_approval_id_for_task(
+        agent_id=str(row.get("agent_id") or ""),
+        session_id=str(row.get("session_id") or "") or None,
+        task_id=int(row.get("id") or 0),
+    )
+    agent_id = str(row.get("agent_id") or "")
     return {
         "task_id": int(row["id"]),
-        "agent_id": str(row.get("agent_id") or ""),
+        # Both keys intentionally. The frontend type ``ExecutionSummary`` uses
+        # ``bot_id`` from the legacy naming (migration-in-progress from "bot"
+        # to "agent"). Dropping ``bot_id`` from the response broke the
+        # executions table and detail panes silently — React rendered the
+        # rows but every ``getAgentColor(execution.bot_id)`` / key lookup
+        # fell through with ``undefined``. Emit both until the rename
+        # lands across the web tree.
+        "agent_id": agent_id,
+        "bot_id": agent_id,
         "status": str(row.get("status") or "queued"),
         "query_text": str(row.get("query_text") or "") or None,
         "model": str(row.get("model") or "") or None,
@@ -308,6 +343,7 @@ def _serialize_execution_summary(
         "answer_citation_coverage": float((episode or {}).get("answer_citation_coverage") or 0.0),
         "answer_gate_status": str((episode or {}).get("answer_gate_status") or "") or None,
         "answer_gate_reasons": answer_gate_reasons,
+        "pending_approval_id": pending_approval_id,
         "post_write_review_required": bool((episode or {}).get("post_write_review_required")),
         "stale_sources_present": bool((episode or {}).get("stale_sources_present")),
         "ungrounded_operationally": bool((episode or {}).get("ungrounded_operationally")),
@@ -778,6 +814,7 @@ def list_dashboard_dlq(
             "user_id": int(row.get("user_id") or 0),
             "chat_id": int(row.get("chat_id") or 0),
             "agent_id": str(row.get("agent_id") or "") or None,
+            "bot_id": str(row.get("agent_id") or "") or None,
             "pod_name": str(row.get("pod_name") or "") or None,
             "query_text": str(row.get("query_text") or ""),
             "model": str(row.get("model") or "") or None,
@@ -884,6 +921,7 @@ def list_dashboard_audit(
             "timestamp": _iso(row.get("timestamp")),
             "event_type": str(row.get("event_type") or ""),
             "agent_id": str(row.get("agent_id") or "") or None,
+            "bot_id": str(row.get("agent_id") or "") or None,
             "pod_name": str(row.get("pod_name") or "") or None,
             "user_id": row.get("user_id"),
             "task_id": row.get("task_id"),
@@ -899,14 +937,14 @@ def list_dashboard_audit(
 
 def _task_type_label(task_type: str) -> str:
     mapping = {
-        "reply": "Resposta",
-        "research": "Pesquisa",
-        "summarization": "Resumo",
+        "reply": "Reply",
+        "research": "Research",
+        "summarization": "Summary",
         "jira_update": "Jira",
-        "triage": "Triagem",
-        "memory_lookup": "Memória",
-        "content_generation": "Geração",
-        "other": "Outro",
+        "triage": "Triage",
+        "memory_lookup": "Memory",
+        "content_generation": "Generation",
+        "other": "Other",
     }
     return mapping.get(task_type, task_type)
 

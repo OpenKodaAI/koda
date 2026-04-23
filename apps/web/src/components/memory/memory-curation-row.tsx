@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { getBotColor, getBotLabel } from "@/lib/bot-constants";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { getMemoryTypeLabel } from "@/lib/memory-constants";
 import type {
   MemoryClusterReviewItem,
@@ -51,21 +51,21 @@ export function MemoryCurationRow({
   item,
   selected,
   checked,
-  showBot,
+  showAgent,
   onSelect,
   onCheckChange,
 }: {
   item: RowItem;
   selected: boolean;
   checked: boolean;
-  showBot: boolean;
+  showAgent: boolean;
   onSelect: () => void;
   onCheckChange: (checked: boolean) => void;
 }) {
   const { t } = useAppI18n();
   const isMemory = "memory_id" in item;
-  const botColor = getBotColor(item.bot_id);
-  const botLabel = getBotLabel(item.bot_id);
+  const agentColor = getAgentColor(item.bot_id);
+  const agentLabel = getAgentLabel(item.bot_id);
   const title = isMemory
     ? item.title
     : t("memory.curation.detail.memoriesConnected", { count: item.member_count });
@@ -101,7 +101,7 @@ export function MemoryCurationRow({
           ? "bg-[color-mix(in_srgb,var(--text-primary)_4%,transparent)]"
           : "hover:bg-[color-mix(in_srgb,var(--text-primary)_2%,transparent)]"
       )}
-      style={selected ? { boxShadow: `inset 2px 0 0 ${botColor}` } : undefined}
+      style={selected ? { boxShadow: `inset 2px 0 0 ${agentColor}` } : undefined}
     >
       <input
         type="checkbox"
@@ -123,16 +123,16 @@ export function MemoryCurationRow({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
-                {showBot ? (
+                {showAgent ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span
                       className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: botColor }}
+                      style={{ backgroundColor: agentColor }}
                     />
-                    {botLabel}
+                    {agentLabel}
                   </span>
                 ) : null}
-                {showBot ? <span>•</span> : null}
+                {showAgent ? <span>•</span> : null}
                 <span>{typeLabel}</span>
               </div>
 

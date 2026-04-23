@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,7 +81,7 @@ async def test_recover_pending_tasks_requeues_persisted_fifo_item():
         "image_paths": ["img-1.png"],
     }
     application = MagicMock()
-    application.user_data = {}
+    application.user_data = defaultdict(dict)
     application.bot = AsyncMock()
     runtime = _RuntimeStub(
         _RuntimeStoreStub(
@@ -162,7 +163,7 @@ async def test_recover_pending_tasks_moves_task_to_dlq_after_recovery_limit():
         )
     )
     application = MagicMock()
-    application.user_data = {}
+    application.user_data = defaultdict(dict)
     application.bot = AsyncMock()
 
     try:
@@ -225,7 +226,7 @@ async def test_requeue_dlq_entry_creates_fresh_task_and_appends_history():
         ),
     }
     application = MagicMock()
-    application.user_data = {}
+    application.user_data = defaultdict(dict)
     application.bot = AsyncMock()
 
     try:

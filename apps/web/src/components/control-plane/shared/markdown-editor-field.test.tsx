@@ -29,7 +29,7 @@ describe("MarkdownEditorField", () => {
     });
   });
 
-  it("defaults to writing mode and still supports preview, copy and paste actions", async () => {
+  it("defaults to edit mode and toggles to preview", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
 
@@ -41,16 +41,19 @@ describe("MarkdownEditorField", () => {
       />,
     );
 
-    expect(screen.getByText("Lado a lado")).toBeInTheDocument();
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copiar" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Colar" })).toBeInTheDocument();
-    expect(screen.getByText("Escrever").closest("button")?.className).not.toContain("button-pill");
+    const editButton = screen.getByText("Editar").closest("button");
+    const previewButton = screen.getByText("Preview").closest("button");
+    expect(editButton).toHaveAttribute("aria-pressed", "true");
+    expect(previewButton).toHaveAttribute("aria-pressed", "false");
 
-    await user.type(screen.getByRole("textbox"), " atualizado");
+    const textbox = screen.getByRole("textbox");
+    expect(textbox).toBeInTheDocument();
+
+    await user.type(textbox, " atualizado");
     expect(onChange).toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Preview" }));
+    if (!previewButton) throw new Error("Preview button not found");
+    await user.click(previewButton);
     expect(screen.getByText("Heading")).toBeInTheDocument();
   });
 });

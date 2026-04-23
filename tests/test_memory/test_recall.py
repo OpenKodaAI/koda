@@ -158,11 +158,11 @@ async def test_build_memory_context_formats():
 
     context = await build_memory_context(mock_store, "tell me about the API", user_id=111)
 
-    assert "Memória de Longo Prazo" in context
+    assert "Long-term Memory" in context
     assert "API uses REST" in context
     assert "Deploy on Monday" in context
-    assert "### Eventos Recentes" in context
-    assert "### Fatos Relevantes" in context
+    assert "### Recent Events" in context
+    assert "### Relevant Facts" in context
 
 
 @pytest.mark.asyncio

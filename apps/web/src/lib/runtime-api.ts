@@ -1,8 +1,8 @@
 import "server-only";
 
 import {
-  getControlPlaneBot,
-  type ControlPlaneBot,
+  getControlPlaneAgent,
+  type ControlPlaneAgent,
   getServerControlPlaneRuntimeAccess,
   type ControlPlaneServerRuntimeAccess,
 } from "@/lib/control-plane";
@@ -10,7 +10,7 @@ import { resolveRuntimeAvailability } from "@/lib/runtime-availability";
 import { normalizeRuntimeRequestError } from "@/lib/runtime-errors";
 import { translateLiteralForLanguage } from "@/lib/i18n";
 import type {
-  RuntimeBotHealth,
+  RuntimeAgentHealth,
   RuntimeBrowserSession,
   RuntimeBrowserState,
   RuntimeCheckpoint,
@@ -48,7 +48,7 @@ type RuntimeAccessOptions = {
   includeSensitive?: boolean;
 };
 
-export interface RuntimeBotConfig {
+export interface RuntimeAgentConfig {
   id: string;
   label: string;
   color: string;
@@ -87,16 +87,16 @@ function deriveRuntimeBaseUrl(healthUrl: string) {
   }
 }
 
-function buildBotConfigFromControlPlane(bot: ControlPlaneBot): RuntimeBotConfig {
-  const appearance = bot.appearance || {};
-  const runtimeEndpoint = bot.runtime_endpoint || {};
+function buildAgentConfigFromControlPlane(agent: ControlPlaneAgent): RuntimeAgentConfig {
+  const appearance = agent.appearance || {};
+  const runtimeEndpoint = agent.runtime_endpoint || {};
   const healthUrl =
     String(runtimeEndpoint.health_url || "").trim() ||
     `http://127.0.0.1:${String(runtimeEndpoint.health_port || "8080")}/health`;
 
   return {
-    id: bot.id,
-    label: String(appearance.label || bot.display_name || bot.id),
+    id: agent.id,
+    label: String(appearance.label || agent.display_name || agent.id),
     color: String(appearance.color || "#A7ADB4"),
     colorRgb: String(appearance.color_rgb || "167, 173, 180"),
     healthUrl,
@@ -105,56 +105,56 @@ function buildBotConfigFromControlPlane(bot: ControlPlaneBot): RuntimeBotConfig 
       deriveRuntimeBaseUrl(healthUrl),
     runtimeRequestToken: null,
     accessScopeToken: null,
-    status: bot.status,
+    status: agent.status,
   };
 }
 
 function applyRuntimeAccess(
-  bot: RuntimeBotConfig,
+  agent: RuntimeAgentConfig,
   runtimeAccess: ControlPlaneServerRuntimeAccess | null,
-): RuntimeBotConfig {
+): RuntimeAgentConfig {
   if (!runtimeAccess) {
-    return bot;
+    return agent;
   }
 
   return {
-    ...bot,
-    healthUrl: runtimeAccess.health_url || bot.healthUrl,
-    runtimeBaseUrl: runtimeAccess.runtime_base_url || bot.runtimeBaseUrl,
+    ...agent,
+    healthUrl: runtimeAccess.health_url || agent.healthUrl,
+    runtimeBaseUrl: runtimeAccess.runtime_base_url || agent.runtimeBaseUrl,
     runtimeRequestToken:
-      runtimeAccess.runtime_request_token || bot.runtimeRequestToken,
-    accessScopeToken: runtimeAccess.access_scope_token || bot.accessScopeToken,
+      runtimeAccess.runtime_request_token || agent.runtimeRequestToken,
+    accessScopeToken: runtimeAccess.access_scope_token || agent.accessScopeToken,
   };
 }
 
-export async function getRuntimeBotConfig(
-  botId: string,
+export async function getRuntimeAgentConfig(
+  agentId: string,
   options: RuntimeAccessOptions = {},
-): Promise<RuntimeBotConfig | null> {
-  const [botFromControlPlane, runtimeAccess] = await Promise.all([
-    getControlPlaneBot(botId).catch(() => null),
-    getServerControlPlaneRuntimeAccess(botId, options).catch(() => null),
+): Promise<RuntimeAgentConfig | null> {
+  const [agentFromControlPlane, runtimeAccess] = await Promise.all([
+    getControlPlaneAgent(agentId).catch(() => null),
+    getServerControlPlaneRuntimeAccess(agentId, options).catch(() => null),
   ]);
 
-  const baseBot = botFromControlPlane
-    ? buildBotConfigFromControlPlane(botFromControlPlane)
+  const baseAgent = agentFromControlPlane
+    ? buildAgentConfigFromControlPlane(agentFromControlPlane)
     : null;
-  if (!baseBot) {
+  if (!baseAgent) {
     return null;
   }
 
-  return applyRuntimeAccess(baseBot, runtimeAccess);
+  return applyRuntimeAccess(baseAgent, runtimeAccess);
 }
 
-export async function requireRuntimeBotConfig(
-  botId: string,
+export async function requireRuntimeAgentConfig(
+  agentId: string,
   options: RuntimeAccessOptions = {},
-): Promise<RuntimeBotConfig> {
-  const bot = await getRuntimeBotConfig(botId, options);
-  if (!bot) {
-    throw new RuntimeRequestError("Bot not found", 404);
+): Promise<RuntimeAgentConfig> {
+  const agent = await getRuntimeAgentConfig(agentId, options);
+  if (!agent) {
+    throw new RuntimeRequestError("Agent not found", 404);
   }
-  return bot;
+  return agent;
 }
 
 function buildRuntimeUrl(
@@ -180,27 +180,27 @@ async function parseResponseBody(response: Response) {
   return response.text().catch(() => "");
 }
 
-async function runtimeFetchForBot(
-  bot: RuntimeBotConfig,
+async function runtimeFetchForAgent(
+  agent: RuntimeAgentConfig,
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
 ) {
   const headers = new Headers(init.headers);
 
-  if (bot.runtimeRequestToken) {
-    headers.set("X-Runtime-Token", bot.runtimeRequestToken);
+  if (agent.runtimeRequestToken) {
+    headers.set("X-Runtime-Token", agent.runtimeRequestToken);
   }
 
   if (
     !headers.has("X-Runtime-Access-Scope") &&
-    bot.accessScopeToken &&
+    agent.accessScopeToken &&
     searchParams?.get("include_sensitive")?.trim().toLowerCase() === "true"
   ) {
-    headers.set("X-Runtime-Access-Scope", bot.accessScopeToken);
+    headers.set("X-Runtime-Access-Scope", agent.accessScopeToken);
   }
 
-  return fetch(buildRuntimeUrl(bot.runtimeBaseUrl, pathname, searchParams), {
+  return fetch(buildRuntimeUrl(agent.runtimeBaseUrl, pathname, searchParams), {
     ...init,
     headers,
     cache: "no-store",
@@ -209,23 +209,23 @@ async function runtimeFetchForBot(
 }
 
 export async function runtimeFetch(
-  botId: string,
+  agentId: string,
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
   access: RuntimeAccessOptions = {},
 ) {
-  const bot = await requireRuntimeBotConfig(botId, {
+  const agent = await requireRuntimeAgentConfig(agentId, {
     capability: access.capability ?? "read",
     includeSensitive:
       access.includeSensitive ??
       searchParams?.get("include_sensitive")?.trim().toLowerCase() === "true",
   });
-  return runtimeFetchForBot(bot, pathname, init, searchParams);
+  return runtimeFetchForAgent(agent, pathname, init, searchParams);
 }
 
-async function runtimeFetchJsonForBot<T>(
-  bot: RuntimeBotConfig,
+async function runtimeFetchJsonForAgent<T>(
+  agent: RuntimeAgentConfig,
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
@@ -233,8 +233,8 @@ async function runtimeFetchJsonForBot<T>(
   const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   try {
-    const response = await runtimeFetchForBot(
-      bot,
+    const response = await runtimeFetchForAgent(
+      agent,
       pathname,
       { ...init, timeoutMs },
       searchParams,
@@ -264,19 +264,19 @@ async function runtimeFetchJsonForBot<T>(
 }
 
 export async function runtimeFetchJson<T>(
-  botId: string,
+  agentId: string,
   pathname: string,
   init: RuntimeRequestInit = {},
   searchParams?: URLSearchParams,
   access: RuntimeAccessOptions = {},
 ): Promise<RuntimeJsonResponse<T>> {
-  const bot = await requireRuntimeBotConfig(botId, {
+  const agent = await requireRuntimeAgentConfig(agentId, {
     capability: access.capability ?? "read",
     includeSensitive:
       access.includeSensitive ??
       searchParams?.get("include_sensitive")?.trim().toLowerCase() === "true",
   });
-  return runtimeFetchJsonForBot(bot, pathname, init, searchParams);
+  return runtimeFetchJsonForAgent(agent, pathname, init, searchParams);
 }
 
 function buildRuntimeSnapshot(
@@ -317,7 +317,7 @@ function buildRuntimeSnapshot(
 function buildHealthFromReadiness(
   readiness: RuntimeReadiness | null,
   snapshot: ReturnType<typeof buildRuntimeSnapshot> | null,
-): RuntimeBotHealth | null {
+): RuntimeAgentHealth | null {
   if (!readiness && !snapshot) {
     return null;
   }
@@ -335,24 +335,24 @@ function buildHealthFromReadiness(
 }
 
 async function fetchReadiness(
-  bot: RuntimeBotConfig,
+  agent: RuntimeAgentConfig,
 ): Promise<RuntimeJsonResponse<RuntimeReadiness>> {
-  return runtimeFetchJsonForBot<RuntimeReadiness>(bot, "/api/runtime/readiness");
+  return runtimeFetchJsonForAgent<RuntimeReadiness>(agent, "/api/runtime/readiness");
 }
 
 export async function getRuntimeOverview(
-  botId: string,
+  agentId: string,
   language?: string | null,
 ): Promise<RuntimeOverview> {
-  const bot = await requireRuntimeBotConfig(botId);
+  const agent = await requireRuntimeAgentConfig(agentId);
   const [readiness, queues, environments] = await Promise.all([
-    fetchReadiness(bot),
-    runtimeFetchJsonForBot<{ items?: RuntimeQueueItem[] }>(
-      bot,
+    fetchReadiness(agent),
+    runtimeFetchJsonForAgent<{ items?: RuntimeQueueItem[] }>(
+      agent,
       "/api/runtime/queues",
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeEnvironment[] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeEnvironment[] }>(
+      agent,
       "/api/runtime/environments",
     ),
   ]);
@@ -371,7 +371,7 @@ export async function getRuntimeOverview(
     health,
     queues,
     environments,
-    hasRuntimeToken: Boolean(bot.runtimeRequestToken),
+    hasRuntimeToken: Boolean(agent.runtimeRequestToken),
   });
 
   const activeTaskIds = Array.from(
@@ -453,10 +453,10 @@ export async function getRuntimeOverview(
   ].filter((value): value is string => Boolean(value));
 
   return {
-    botId: bot.id,
-    botLabel: bot.label,
-    botColor: bot.color,
-    baseUrl: bot.runtimeBaseUrl,
+    agentId: agent.id,
+    agentLabel: agent.label,
+    agentColor: agent.color,
+    baseUrl: agent.runtimeBaseUrl,
     fetchedAt: new Date().toISOString(),
     health: health.data,
     snapshot,
@@ -471,7 +471,7 @@ export async function getRuntimeOverview(
 }
 
 export async function getRuntimeTaskSnapshot(
-  botId: string,
+  agentId: string,
   taskId: number,
   options: { includeSensitive?: boolean } = {},
 ) {
@@ -487,7 +487,7 @@ export async function getRuntimeTaskSnapshot(
     guardrails?: RuntimeGuardrailHit[];
     asset_refs?: Array<Record<string, unknown>>;
   }>(
-    botId,
+    agentId,
     `/api/runtime/tasks/${taskId}`,
     {},
     searchParams.size ? searchParams : undefined,
@@ -495,7 +495,7 @@ export async function getRuntimeTaskSnapshot(
 }
 
 export async function listRuntimeTaskSnapshots(
-  botId: string,
+  agentId: string,
   taskIds: number[],
   options: { includeSensitive?: boolean } = {},
 ) {
@@ -506,7 +506,7 @@ export async function listRuntimeTaskSnapshots(
   const results = await Promise.all(
     uniqueTaskIds.map(async (taskId) => ({
       taskId,
-      response: await getRuntimeTaskSnapshot(botId, taskId, options),
+      response: await getRuntimeTaskSnapshot(agentId, taskId, options),
     })),
   );
 
@@ -533,10 +533,10 @@ export async function listRuntimeTaskSnapshots(
 }
 
 export async function getRuntimeTaskBundle(
-  botId: string,
+  agentId: string,
   taskId: number,
 ): Promise<RuntimeTaskBundle> {
-  const bot = await requireRuntimeBotConfig(botId);
+  const agent = await requireRuntimeAgentConfig(agentId);
   const [
     detail,
     events,
@@ -552,58 +552,58 @@ export async function getRuntimeTaskBundle(
     loop,
     sessions,
   ] = await Promise.all([
-    runtimeFetchJsonForBot<{
+    runtimeFetchJsonForAgent<{
       task?: RuntimeTaskDetail;
       environment?: RuntimeEnvironment | null;
       warnings?: RuntimeTaskBundle["warnings"];
       guardrails?: RuntimeTaskBundle["guardrails"];
-    }>(bot, `/api/runtime/tasks/${taskId}`),
-    runtimeFetchJsonForBot<{ items?: RuntimeEvent[] }>(
-      bot,
+    }>(agent, `/api/runtime/tasks/${taskId}`),
+    runtimeFetchJsonForAgent<{ items?: RuntimeEvent[] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/events`,
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeTaskBundle["artifacts"] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeTaskBundle["artifacts"] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/artifacts`,
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeCheckpoint[] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeCheckpoint[] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/checkpoints`,
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeTaskBundle["terminals"] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeTaskBundle["terminals"] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/terminals`,
     ),
-    runtimeFetchJsonForBot<{
+    runtimeFetchJsonForAgent<{
       browser?: RuntimeBrowserState;
       sessions?: RuntimeBrowserSession[];
-    }>(bot, `/api/runtime/tasks/${taskId}/browser`),
-    runtimeFetchJsonForBot<{ items?: RuntimeWorkspaceTreeEntry[] }>(
-      bot,
+    }>(agent, `/api/runtime/tasks/${taskId}/browser`),
+    runtimeFetchJsonForAgent<{ items?: RuntimeWorkspaceTreeEntry[] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/workspace/tree`,
     ),
-    runtimeFetchJsonForBot<RuntimeWorkspaceStatus>(
-      bot,
+    runtimeFetchJsonForAgent<RuntimeWorkspaceStatus>(
+      agent,
       `/api/runtime/tasks/${taskId}/workspace/status`,
     ),
-    runtimeFetchJsonForBot<RuntimeWorkspaceDiff>(
-      bot,
+    runtimeFetchJsonForAgent<RuntimeWorkspaceDiff>(
+      agent,
       `/api/runtime/tasks/${taskId}/workspace/diff`,
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeTaskBundle["services"] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeTaskBundle["services"] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/services`,
     ),
-    runtimeFetchJsonForBot<{ items?: RuntimeTaskBundle["resources"] }>(
-      bot,
+    runtimeFetchJsonForAgent<{ items?: RuntimeTaskBundle["resources"] }>(
+      agent,
       `/api/runtime/tasks/${taskId}/resources`,
     ),
-    runtimeFetchJsonForBot<{
+    runtimeFetchJsonForAgent<{
       cycles?: RuntimeTaskBundle["loopCycles"];
       guardrails?: RuntimeTaskBundle["guardrails"];
-    }>(bot, `/api/runtime/tasks/${taskId}/loop`),
-    runtimeFetchJsonForBot<RuntimeSessions>(
-      bot,
+    }>(agent, `/api/runtime/tasks/${taskId}/loop`),
+    runtimeFetchJsonForAgent<RuntimeSessions>(
+      agent,
       `/api/runtime/tasks/${taskId}/sessions`,
     ),
   ]);
@@ -632,14 +632,14 @@ export async function getRuntimeTaskBundle(
   ].filter((value): value is string => Boolean(value));
 
   return {
-    botId,
+    agentId,
     fetchedAt: new Date().toISOString(),
     availability: {
       health: "unknown",
       database: "unknown",
       runtime: "available",
       browser: browser.ok ? "available" : "partial",
-      attach: bot.runtimeRequestToken ? "available" : "unavailable",
+      attach: agent.runtimeRequestToken ? "available" : "unavailable",
       errors,
     },
     task: detail.data.task,

@@ -8,7 +8,7 @@ import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
-import { MaskedSecretPreview, SecretInput } from "@/components/ui/secret-controls";
+import { SecretInput } from "@/components/ui/secret-controls";
 import { renderIntegrationLogo } from "./integration-logos";
 import type { GeneralSystemSettingsCredentialField } from "@/lib/control-plane";
 import type { IntegrationCatalogEntry } from "./integration-catalog-data";
@@ -143,7 +143,9 @@ export function IntegrationConnectionModal({
               >
                 <div className="space-y-2">
                   {field.storage === "secret" && field.value_present ? (
-                    <MaskedSecretPreview preview={field.preview} />
+                    <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                      {tl("Configurada")}
+                    </span>
                   ) : null}
                   {field.storage === "secret" ? (
                     <SecretInput
@@ -159,7 +161,7 @@ export function IntegrationConnectionModal({
                     />
                   ) : (
                     <input
-                      className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+                      className="field-shell text-[var(--text-primary)]"
                       type={field.input_type === "password" ? "password" : "text"}
                       value={field.value || ""}
                       onChange={(e) =>

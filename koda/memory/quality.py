@@ -14,7 +14,7 @@ from koda.state.memory_store import (
     get_memory_quality_counters,
     increment_memory_quality_counter,
 )
-from koda.state_primary import (
+from koda.state.primary import (
     primary_fetch_one,
     require_primary_state_backend,
     run_coro_sync,

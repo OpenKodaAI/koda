@@ -25,7 +25,7 @@ dependencies = [
     "kokoro-onnx>=0.5.0,<1.0",
     "openpyxl>=3.1,<4.0",
     "pillow>=12.1.1,<13.0",
-    "pypdf>=6.9.2,<7.0.0",
+    "pypdf>=6.10.2,<7.0.0",
     "soundfile>=0.12,<1.0",
     "python-docx>=1.1,<2.0",
     "PyYAML>=6.0,<7.0",
@@ -35,12 +35,15 @@ dependencies = [
     "pybreaker>=1.0,<2.0",
     "cryptography>=46.0.7,<47.0",
     "grpcio>=1.74,<2.0",
+    # lxml is pulled in transitively; pin a floor here so Snyk/pip-audit stop
+    # flagging CVE-2026-41066 on older wheels.
+    "lxml>=6.1.0,<7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0,<9.0",
-    "pytest-asyncio>=0.23,<1.0",
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
     "pytest-cov>=4.0,<5.0",
     "ruff>=0.3,<1.0",
     "mypy>=1.8,<2.0",
@@ -153,8 +156,8 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0,<9.0",
-    "pytest-asyncio>=0.23,<1.0",
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
     "pytest-cov>=4.0,<5.0",
     "ruff>=0.3,<1.0",
     "mypy>=1.8,<2.0",

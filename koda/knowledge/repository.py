@@ -13,7 +13,7 @@ from koda.config import AGENT_ID
 from koda.knowledge.config import KNOWLEDGE_V2_STORAGE_MODE
 from koda.knowledge.types import ArtifactEvidenceNode, GraphEntity, GraphRelation, RetrievalTrace
 from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
-from koda.state_primary import primary_execute, primary_fetch_all, primary_fetch_val
+from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_val
 
 
 def _scope(agent_id: str | None) -> str:

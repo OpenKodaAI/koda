@@ -24,7 +24,6 @@ PUBLIC_DOCS = [
     ROOT / "docs" / "architecture" / "overview.md",
     ROOT / "docs" / "architecture" / "runtime.md",
     ROOT / "docs" / "reference" / "api.md",
-    ROOT / "docs" / "reference" / "releases.md",
     ROOT / "CONTRIBUTING.md",
     ROOT / "SECURITY.md",
     ROOT / "CODE_OF_CONDUCT.md",
@@ -90,7 +89,6 @@ def test_readme_covers_public_entrypoints() -> None:
     assert "Installation Paths" in readme
     assert "apps/web" in readme
     assert "127.0.0.1:3000" in readme
-    assert "/control-plane/setup" in readme
     assert "/control-plane" in readme
     assert "/setup" in readme
     assert "/api/control-plane/agents/*" in readme

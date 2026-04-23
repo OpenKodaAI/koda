@@ -42,7 +42,8 @@ class TestCmdStart:
         await cmd_start(mock_update, mock_context)
         mock_update.message.reply_text.assert_called_once()
         call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "Agent ready" in call_text
+        assert "Ready." in call_text
+        assert "/settings" in call_text
 
     @pytest.mark.asyncio
     async def test_unauthorized_user(self, unauthorized_update, mock_context):
@@ -57,7 +58,7 @@ class TestCmdSettings:
         await cmd_settings(mock_update, mock_context)
         call_text = mock_update.message.reply_text.call_args.args[0]
         reply_markup = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
-        assert "Ajustes deste AGENT" in call_text
+        assert "Agent settings" in call_text
         assert reply_markup.inline_keyboard
 
 

@@ -1,138 +1,108 @@
 "use client";
 
+import { Workflow } from "lucide-react";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import type { ExecutionSummary } from "@/lib/types";
+import type { ExecutionSummary, Task } from "@/lib/types";
 import {
   cn,
   formatCost,
   formatDateTime,
   formatDuration,
   formatRelativeTime,
-  truncateText,
 } from "@/lib/utils";
-import { getBotColor } from "@/lib/bot-constants";
-import { getSemanticStyle, getSemanticTextStyle, type SemanticTone } from "@/lib/theme-semantic";
-import { Workflow } from "lucide-react";
+import { getAgentColor } from "@/lib/agent-constants";
 
 interface ExecutionTableProps {
   executions: ExecutionSummary[];
-  showBot?: boolean;
+  showAgent?: boolean;
   loading?: boolean;
   onExecutionClick?: (execution: ExecutionSummary) => void;
   selectedExecutionId?: number | null;
 }
 
-function getDurationTone(durationMs: number | null): SemanticTone {
-  if (durationMs == null) return "neutral";
-  if (durationMs < 30000) return "success";
-  if (durationMs <= 300000) return "warning";
-  return "neutral";
+type TaskStatus = Task["status"];
+
+const STATUS_TONE: Record<TaskStatus, StatusDotTone> = {
+  queued: "neutral",
+  running: "info",
+  retrying: "warning",
+  completed: "success",
+  failed: "danger",
+  paused: "warning",
+  cancelled: "neutral",
+};
+
+const TRACE_TONE: Record<ExecutionSummary["trace_source"], StatusDotTone> = {
+  trace: "success",
+  legacy: "warning",
+  missing: "neutral",
+};
+
+function statusTone(status: string): StatusDotTone {
+  return STATUS_TONE[status as TaskStatus] ?? "neutral";
 }
 
-function getStatusDotColor(status: string): string {
-  const map: Record<string, string> = {
-    completed: 'var(--status-completed)',
-    running: 'var(--status-running)',
-    queued: 'var(--status-queued)',
-    failed: 'var(--status-failed)',
-    retrying: 'var(--status-retrying)',
-  };
-  return map[status] ?? 'var(--text-quaternary)';
+function isRunning(status: string) {
+  return status === "running" || status === "retrying";
 }
 
-function SkeletonRow({ showBot }: { showBot: boolean }) {
+function SkeletonRow({ showAgent }: { showAgent: boolean }) {
   return (
     <tr className="animate-pulse">
-      {showBot ? (
-        <td>
+      {showAgent ? (
+        <td className="py-3 pr-4">
           <div className="flex items-center gap-2">
-            <div className="skeleton-circle h-2.5 w-2.5" />
-            <div className="skeleton h-3 w-20 rounded-xl" />
+            <div className="h-1.5 w-1.5 rounded-full bg-[var(--panel-strong)]" />
+            <div className="h-3 w-20 rounded bg-[var(--panel-soft)]" />
           </div>
         </td>
       ) : null}
-      <td>
-        <div className="skeleton h-3 w-14 rounded-xl" />
+      <td className="py-3 pr-4">
+        <div className="h-3 w-14 rounded bg-[var(--panel-soft)]" />
       </td>
-      <td>
+      <td className="py-3 pr-4">
         <div className="flex items-center gap-2">
-          <div className="skeleton-circle h-2.5 w-2.5" />
-          <div className="skeleton h-3 w-20 rounded-xl" />
+          <div className="h-1.5 w-1.5 rounded-full bg-[var(--panel-strong)]" />
+          <div className="h-3 w-20 rounded bg-[var(--panel-soft)]" />
         </div>
       </td>
-      <td>
-        <div className="space-y-2">
-          <div className="skeleton h-3 w-[78%] rounded-xl" />
-          <div className="skeleton h-3 w-[62%] rounded-xl" />
-        </div>
+      <td className="py-3 pr-4">
+        <div className="h-3 w-[70%] rounded bg-[var(--panel-soft)]" />
       </td>
-      <td>
-        <div className="flex items-center gap-2">
-          <div className="skeleton-circle h-2.5 w-2.5" />
-          <div className="skeleton h-3 w-16 rounded-xl" />
-        </div>
+      <td className="py-3 pr-4">
+        <div className="h-1.5 w-1.5 rounded-full bg-[var(--panel-strong)]" />
       </td>
-      <td className="text-right">
-        <div className="ml-auto skeleton h-3 w-16 rounded-xl" />
+      <td className="py-3 pr-4 text-right">
+        <div className="ml-auto h-3 w-14 rounded bg-[var(--panel-soft)]" />
       </td>
-      <td className="text-right">
-        <div className="ml-auto skeleton h-3 w-14 rounded-xl" />
+      <td className="py-3 pr-4 text-right">
+        <div className="ml-auto h-3 w-14 rounded bg-[var(--panel-soft)]" />
       </td>
-      <td className="text-right">
-        <div className="ml-auto space-y-2">
-          <div className="ml-auto skeleton h-3 w-16 rounded-xl" />
-          <div className="ml-auto skeleton h-3 w-24 rounded-xl" />
-        </div>
+      <td className="py-3 text-right">
+        <div className="ml-auto h-3 w-20 rounded bg-[var(--panel-soft)]" />
       </td>
     </tr>
   );
 }
 
-function MobileSkeletonCard({ showBot }: { showBot: boolean }) {
+function MobileSkeletonCard({ showAgent }: { showAgent: boolean }) {
   return (
-    <div className="app-card-row space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
-              <div className="skeleton-circle h-2.5 w-2.5" />
-              <div className="skeleton h-3 w-16 rounded-xl" />
-            </div>
-            <div className="skeleton-circle h-2.5 w-2.5" />
-            {showBot ? (
-              <div className="flex items-center gap-2">
-                <div className="skeleton-circle h-2.5 w-2.5" />
-                <div className="skeleton h-3 w-20 rounded-xl" />
-              </div>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="skeleton h-3 w-12 rounded-xl" />
-            <div className="skeleton-circle h-1.5 w-1.5" />
-            <div className="skeleton h-3 w-16 rounded-xl" />
-          </div>
-          <div className="space-y-2">
-            <div className="skeleton h-3 w-full rounded-xl" />
-            <div className="skeleton h-3 w-[82%] rounded-xl" />
-          </div>
-        </div>
+    <div className="flex animate-pulse flex-col gap-2 border-b border-[color:var(--divider-hair)] py-3 last:border-b-0">
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 w-1.5 rounded-full bg-[var(--panel-strong)]" />
+        <div className="h-3 w-16 rounded bg-[var(--panel-soft)]" />
+        {showAgent ? <div className="h-3 w-20 rounded bg-[var(--panel-soft)]" /> : null}
       </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2.5 text-[12px]">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="border-b border-[rgba(255,255,255,0.06)] px-0 py-2">
-            <div className="skeleton h-2.5 w-14 rounded-xl" />
-            <div className="mt-2 skeleton h-3 w-16 rounded-xl" />
-          </div>
-        ))}
-      </div>
+      <div className="h-3 w-full rounded bg-[var(--panel-soft)]" />
+      <div className="h-3 w-2/3 rounded bg-[var(--panel-soft)]" />
     </div>
   );
 }
 
 export function ExecutionTable({
   executions,
-  showBot = false,
+  showAgent = false,
   loading = false,
   onExecutionClick,
   selectedExecutionId,
@@ -140,215 +110,242 @@ export function ExecutionTable({
   const { t } = useAppI18n();
   const getStatusLabel = (status: string) =>
     t(`runtime.labels.${status}`, { defaultValue: status });
-  const traceSourceMeta: Record<
-    ExecutionSummary["trace_source"],
-    { label: string; tone: SemanticTone }
-  > = {
-    trace: {
-      label: t("executions.table.richTrace"),
-      tone: "success",
-    },
-    legacy: {
-      label: t("executions.table.rebuilt"),
-      tone: "warning",
-    },
-    missing: {
-      label: t("executions.table.noTrace"),
-      tone: "neutral",
-    },
+  const traceLabel: Record<ExecutionSummary["trace_source"], string> = {
+    trace: t("executions.table.richTrace"),
+    legacy: t("executions.table.rebuilt"),
+    missing: t("executions.table.noTrace"),
   };
+
+  const thClass =
+    "py-2.5 pr-4 text-left font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
+  const thRightClass = `${thClass} text-right`;
 
   return (
     <>
       <div className="hidden md:block">
         <div className="max-w-full overflow-x-auto overflow-y-hidden overscroll-x-contain">
-          <table className="glass-table w-full table-fixed">
+          <table className="w-full table-fixed">
             <colgroup>
-              {showBot && <col className="w-[108px]" />}
-              <col className="w-[102px]" />
+              {showAgent && <col className="w-[108px]" />}
+              <col className="w-[92px]" />
               <col className="w-[128px]" />
               <col className="w-[360px]" />
-              <col className="w-[182px]" />
+              <col className="w-[112px]" />
               <col className="w-[88px]" />
               <col className="w-[94px]" />
               <col className="w-[148px]" />
             </colgroup>
             <thead>
-              <tr>
-                {showBot && <th>{t("common.bot")}</th>}
-                <th>{t("executions.table.execution")}</th>
-                <th>{t("common.status")}</th>
-                <th>{t("executions.table.queryColumn")}</th>
-                <th>{t("executions.table.trace")}</th>
-                <th className="text-right">{t("common.cost")}</th>
-                <th className="text-right">{t("common.duration")}</th>
-                <th className="text-right">{t("common.created")}</th>
+              <tr className="border-b border-[color:var(--divider-hair)]">
+                {showAgent && <th className={thClass}>{t("common.agent")}</th>}
+                <th className={thClass}>{t("executions.table.execution")}</th>
+                <th className={thClass}>{t("common.status")}</th>
+                <th className={thClass}>{t("executions.table.queryColumn")}</th>
+                <th className={thClass}>{t("executions.table.trace")}</th>
+                <th className={thRightClass}>{t("common.cost")}</th>
+                <th className={thRightClass}>{t("common.duration")}</th>
+                <th className={thRightClass}>{t("common.created")}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[color:var(--divider-hair)]">
               {loading &&
                 Array.from({ length: 5 }).map((_, i) => (
-                  <SkeletonRow key={i} showBot={showBot} />
+                  <SkeletonRow key={i} showAgent={showAgent} />
                 ))}
               {!loading &&
                 executions.map((execution) => {
                   const isSelected = selectedExecutionId === execution.task_id;
-
                   return (
                     <tr
                       key={`${execution.bot_id}-${execution.task_id}`}
                       onClick={() => onExecutionClick?.(execution)}
                       className={cn(
-                        "group transition-[background-color,border-color,box-shadow] duration-150",
-                        isSelected && "bg-[var(--table-row-selected)]",
-                        onExecutionClick && "cursor-pointer"
+                        "group transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                        onExecutionClick && "cursor-pointer",
+                        isSelected
+                          ? "bg-[var(--hover-tint)]"
+                          : onExecutionClick && "hover:bg-[var(--hover-tint)]",
                       )}
                     >
-                      {showBot && (
-                        <td>
-                          <span className="inline-flex items-center gap-2 font-mono text-xs">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: getBotColor(execution.bot_id) }} />
-                            <span className="truncate">{execution.bot_id}</span>
+                      {showAgent && (
+                        <td className="py-3 pr-4">
+                          <span className="inline-flex items-center gap-1.5">
+                            <StatusDot color={getAgentColor(execution.bot_id)} />
+                            <span className="truncate font-mono text-[0.75rem] text-[var(--text-secondary)]">
+                              {execution.bot_id}
+                            </span>
                           </span>
                         </td>
                       )}
-                      <td>
-                        <span className="font-mono text-xs text-foreground">#{execution.task_id}</span>
-                      </td>
-                      <td>
-                        <span className="inline-flex items-center gap-2">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: getStatusDotColor(execution.status) }} />
-                          <span className="font-mono text-xs">{getStatusLabel(execution.status)}</span>
+                      <td className="py-3 pr-4">
+                        <span className="font-mono text-[0.75rem] text-[var(--text-primary)]">
+                          #{execution.task_id}
                         </span>
                       </td>
-                      <td>
-                        <p className="line-clamp-1 font-mono text-[13px] text-[var(--text-primary)]"
-                           title={execution.query_text ?? t("executions.table.noQuery")}>
+                      <td className="py-3 pr-4">
+                        <span className="inline-flex items-center gap-1.5">
+                          <StatusDot
+                            tone={statusTone(execution.status)}
+                            pulse={isRunning(execution.status)}
+                          />
+                          <span className="font-mono text-[0.75rem] text-[var(--text-secondary)]">
+                            {getStatusLabel(execution.status)}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <p
+                          className="m-0 line-clamp-1 text-[0.8125rem] text-[var(--text-primary)]"
+                          title={execution.query_text ?? t("executions.table.noQuery")}
+                        >
                           {execution.query_text || t("executions.table.noQueryRegistered")}
                         </p>
                       </td>
-                      <td>
-                        <span className="h-2 w-2 rounded-full" style={getSemanticStyle(traceSourceMeta[execution.trace_source].tone)} />
+                      <td className="py-3 pr-4">
+                        <span
+                          className="inline-flex items-center gap-1.5"
+                          title={traceLabel[execution.trace_source]}
+                        >
+                          <StatusDot tone={TRACE_TONE[execution.trace_source]} />
+                          <span className="text-[0.6875rem] text-[var(--text-quaternary)]">
+                            {traceLabel[execution.trace_source]}
+                          </span>
+                        </span>
                       </td>
-                      <td className="text-right">
-                        <p className="font-mono text-xs tabular-nums text-[var(--text-primary)]">
+                      <td className="py-3 pr-4 text-right">
+                        <p className="m-0 font-mono text-[0.75rem] tabular-nums text-[var(--text-primary)]">
                           {formatCost(execution.cost_usd)}
                         </p>
                       </td>
-                      <td className="text-right">
-                        <p
-                          className="font-mono text-xs tabular-nums"
-                          style={getSemanticTextStyle(getDurationTone(execution.duration_ms))}
-                        >
+                      <td className="py-3 pr-4 text-right">
+                        <p className="m-0 font-mono text-[0.75rem] tabular-nums text-[var(--text-secondary)]">
                           {formatDuration(execution.duration_ms)}
                         </p>
                       </td>
-                      <td className="text-right">
-                        <div className="space-y-1 whitespace-nowrap">
-                          <p
-                            className="text-xs text-[var(--text-secondary)]"
-                            title={formatDateTime(execution.created_at)}
-                          >
-                            {formatRelativeTime(execution.created_at)}
-                          </p>
-                          <p className="truncate text-[10.5px] text-[var(--text-quaternary)]">
-                            {formatDateTime(execution.created_at)}
-                          </p>
-                        </div>
+                      <td className="py-3 text-right">
+                        <p
+                          className="m-0 text-[0.75rem] text-[var(--text-secondary)]"
+                          title={formatDateTime(execution.created_at)}
+                        >
+                          {formatRelativeTime(execution.created_at)}
+                        </p>
                       </td>
                     </tr>
                   );
                 })}
               {executions.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={showBot ? 8 : 7}>
-                      <div className="empty-state">
-                        <Workflow className="empty-state-icon h-10 w-10" />
-                        <p className="empty-state-text">{t("executions.table.noResults")}</p>
-                      </div>
-                    </td>
-                  </tr>
+                  <td colSpan={showAgent ? 8 : 7} className="py-12">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <Workflow
+                        className="icon-lg text-[var(--text-quaternary)]"
+                        strokeWidth={1.5}
+                        aria-hidden
+                      />
+                      <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                        {t("executions.table.noResults")}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="space-y-3 p-4 md:hidden">
+      <div className="flex flex-col md:hidden">
         {loading &&
           Array.from({ length: 4 }).map((_, i) => (
-            <MobileSkeletonCard key={i} showBot={showBot} />
+            <MobileSkeletonCard key={i} showAgent={showAgent} />
           ))}
         {!loading &&
-          executions.map((execution) => (
-            <button
-              key={`${execution.bot_id}-${execution.task_id}`}
-              type="button"
-              onClick={() => onExecutionClick?.(execution)}
-              className={cn(
-                "app-card-row app-card-row--interactive block w-full text-left",
-                selectedExecutionId === execution.task_id &&
-                  "border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.028)]"
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-2.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: getStatusDotColor(execution.status) }} />
-                      <span className="font-mono text-xs">{getStatusLabel(execution.status)}</span>
+          executions.map((execution) => {
+            const isSelected = selectedExecutionId === execution.task_id;
+            return (
+              <button
+                key={`${execution.bot_id}-${execution.task_id}`}
+                type="button"
+                onClick={() => onExecutionClick?.(execution)}
+                className={cn(
+                  "flex w-full flex-col gap-2 border-b border-[color:var(--divider-hair)] py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] last:border-b-0",
+                  isSelected
+                    ? "bg-[var(--hover-tint)]"
+                    : onExecutionClick && "hover:bg-[var(--hover-tint)]",
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2 text-[0.75rem]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <StatusDot
+                      tone={statusTone(execution.status)}
+                      pulse={isRunning(execution.status)}
+                    />
+                    <span className="font-mono text-[var(--text-secondary)]">
+                      {getStatusLabel(execution.status)}
                     </span>
-                    <span className="h-2 w-2 rounded-full" style={getSemanticStyle(traceSourceMeta[execution.trace_source].tone)} />
-                    {showBot && (
-                      <span className="inline-flex items-center gap-2 font-mono text-xs">
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: getBotColor(execution.bot_id) }} />
+                  </span>
+                  <span className="text-[var(--text-quaternary)]">·</span>
+                  <span className="font-mono text-[var(--text-quaternary)]">
+                    #{execution.task_id}
+                  </span>
+                  {showAgent ? (
+                    <>
+                      <span className="text-[var(--text-quaternary)]">·</span>
+                      <span className="inline-flex items-center gap-1.5 font-mono text-[var(--text-secondary)]">
+                        <StatusDot color={getAgentColor(execution.bot_id)} />
                         {execution.bot_id}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                    <span className="font-mono">#{execution.task_id}</span>
-                    <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
-                    <span>{formatRelativeTime(execution.created_at)}</span>
-                  </div>
-                  <p className="line-clamp-2 text-sm leading-6 text-[var(--text-primary)]">
-                    {execution.query_text || t("executions.table.noQueryRegistered")}
-                  </p>
+                    </>
+                  ) : null}
+                  <span className="ml-auto text-[var(--text-quaternary)]">
+                    {formatRelativeTime(execution.created_at)}
+                  </span>
                 </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2.5 text-[12px]">
-                <MobileStat label={t("executions.table.tools")} value={String(execution.tool_count)} mono />
-                <MobileStat label={t("common.cost")} value={formatCost(execution.cost_usd)} mono />
-                <MobileStat label={t("common.duration")} value={formatDuration(execution.duration_ms)} mono />
-                <MobileStat
-                  label={t("executions.table.warnings")}
-                  value={execution.warning_count > 0 ? String(execution.warning_count) : "0"}
-                  mono
-                />
-              </div>
-            </button>
-          ))}
+                <p className="m-0 line-clamp-2 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
+                  {execution.query_text || t("executions.table.noQueryRegistered")}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                  <span>
+                    {t("executions.table.tools")}:{" "}
+                    <span className="text-[var(--text-secondary)]">{execution.tool_count}</span>
+                  </span>
+                  <span>
+                    {t("common.cost")}:{" "}
+                    <span className="text-[var(--text-secondary)]">
+                      {formatCost(execution.cost_usd)}
+                    </span>
+                  </span>
+                  <span>
+                    {t("common.duration")}:{" "}
+                    <span className="text-[var(--text-secondary)]">
+                      {formatDuration(execution.duration_ms)}
+                    </span>
+                  </span>
+                  {execution.warning_count > 0 ? (
+                    <span>
+                      {t("executions.table.warnings")}:{" "}
+                      <span className="text-[var(--tone-warning-dot)]">
+                        {execution.warning_count}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+              </button>
+            );
+          })}
         {executions.length === 0 && !loading && (
-          <div className="empty-state">
-            <Workflow className="empty-state-icon h-10 w-10" />
-            <p className="empty-state-text">{t("executions.table.noResults")}</p>
+          <div className="flex flex-col items-center gap-2 py-12 text-center">
+            <Workflow
+              className="icon-lg text-[var(--text-quaternary)]"
+              strokeWidth={1.5}
+              aria-hidden
+            />
+            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+              {t("executions.table.noResults")}
+            </p>
           </div>
         )}
       </div>
     </>
-  );
-}
-
-function MobileStat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="border-b border-[rgba(255,255,255,0.06)] px-0 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-        {label}
-      </p>
-      <p className={cn("mt-1 text-[12px] text-[var(--text-secondary)]", mono && "font-mono tabular-nums")}>
-        {mono ? truncateText(value, 22) : value}
-      </p>
-    </div>
   );
 }

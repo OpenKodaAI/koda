@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,8 +16,6 @@ from koda.services.mcp_client import (
     McpToolCallResult,
     McpToolDefinition,
     StdioTransport,
-    _normalize_stdio_args,
-    _resolve_stdio_command,
 )
 
 # ---------------------------------------------------------------------------
@@ -26,30 +23,23 @@ from koda.services.mcp_client import (
 # ---------------------------------------------------------------------------
 
 
-def _mock_process() -> SimpleNamespace:
+def _mock_process() -> MagicMock:
     """Build a bare mock subprocess; tests wire stdout behavior themselves."""
-
-    async def _drain() -> None:
-        return None
-
-    async def _stderr_readline() -> bytes:
-        return b""
-
-    async def _wait() -> int:
-        return 0
-
-    proc = SimpleNamespace()
+    proc = MagicMock()
     proc.returncode = None
-    proc.stdin = SimpleNamespace(write=MagicMock(), drain=_drain)
-    proc.stdout = SimpleNamespace()
-    proc.stderr = SimpleNamespace(readline=_stderr_readline)
+    proc.stdin = MagicMock()
+    proc.stdin.write = MagicMock()
+    proc.stdin.drain = AsyncMock()
+    proc.stdout = MagicMock()
+    proc.stderr = MagicMock()
+    proc.stderr.readline = AsyncMock(return_value=b"")
     proc.terminate = MagicMock()
     proc.kill = MagicMock()
-    proc.wait = _wait
+    proc.wait = AsyncMock(return_value=0)
     return proc
 
 
-def _wire_stdout_responses(proc: SimpleNamespace, responses: list[dict]) -> None:
+def _wire_stdout_responses(proc: MagicMock, responses: list[dict]) -> None:
     """Make stdout.readline yield responses only *after* stdin.write is called.
 
     Each time stdin.write is called, it enqueues the next response for readline.
@@ -77,7 +67,7 @@ def _wire_stdout_responses(proc: SimpleNamespace, responses: list[dict]) -> None
         except TimeoutError:
             return b""
 
-    proc.stdout.readline = _readline
+    proc.stdout.readline = AsyncMock(side_effect=_readline)
 
 
 # ---------------------------------------------------------------------------
@@ -86,33 +76,6 @@ def _wire_stdout_responses(proc: SimpleNamespace, responses: list[dict]) -> None
 
 
 class TestStdioTransport:
-    def test_resolve_stdio_command_rejects_control_characters(self) -> None:
-        with pytest.raises(ValueError, match="invalid control characters"):
-            _resolve_stdio_command("python\n-m")
-
-    def test_resolve_stdio_command_rejects_explicit_path_command(self, tmp_path) -> None:
-        command = tmp_path / "koda-mcp"
-        command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        command.chmod(0o755)
-
-        with pytest.raises(ValueError, match="bare executable name"):
-            _resolve_stdio_command(str(command))
-
-    def test_resolve_stdio_command_uses_path_lookup_for_bare_commands(self) -> None:
-        with patch("shutil.which", return_value="/usr/local/bin/koda-mcp") as mock_which:
-            resolved = _resolve_stdio_command("koda-mcp")
-
-        assert resolved == "/usr/local/bin/koda-mcp"
-        mock_which.assert_called_once_with("koda-mcp")
-
-    def test_normalize_stdio_args_rejects_null_bytes(self) -> None:
-        with pytest.raises(ValueError, match="invalid control characters"):
-            _normalize_stdio_args(["--config", "bad\x00arg"])
-
-    def test_normalize_stdio_args_rejects_newlines(self) -> None:
-        with pytest.raises(ValueError, match="invalid control characters"):
-            _normalize_stdio_args(["--config", "bad\narg"])
-
     @pytest.mark.asyncio
     async def test_sends_jsonrpc_request(self) -> None:
         response = {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
@@ -176,13 +139,8 @@ class TestStdioTransport:
             transport = StdioTransport("echo")
             await transport.start()
 
-            async def _timeout_wait_for(awaitable, timeout):
-                if hasattr(awaitable, "close"):
-                    awaitable.close()
-                raise TimeoutError
-
             # Patch wait_for so terminate-wait times out, triggering kill path.
-            with patch("asyncio.wait_for", side_effect=_timeout_wait_for):
+            with patch("asyncio.wait_for", side_effect=TimeoutError):
                 await transport.close()
 
             proc.terminate.assert_called_once()

@@ -52,7 +52,7 @@ interface UseRuntimeTaskResult {
 }
 
 export function useRuntimeTask(
-  botId: string,
+  agentId: string,
   taskId: number,
 ): UseRuntimeTaskResult {
   const { tl } = useAppI18n();
@@ -60,12 +60,12 @@ export function useRuntimeTask(
   const [connected, setConnected] = useState(false);
   const lastSeqRef = useRef(0);
 
-  const taskQueryKey = queryKeys.runtime.task(botId, taskId);
+  const taskQueryKey = queryKeys.runtime.task(agentId, taskId);
 
   const fetchBundle = useCallback(
     async (signal?: AbortSignal) => {
       const response = await fetch(
-        `/api/runtime/bots/${botId}/tasks/${taskId}`,
+        `/api/runtime/agents/${agentId}/tasks/${taskId}`,
         { cache: "no-store", signal },
       );
 
@@ -83,12 +83,12 @@ export function useRuntimeTask(
         payload.events.at(-1)?.seq ?? lastSeqRef.current;
       return payload;
     },
-    [botId, taskId, tl],
+    [agentId, taskId, tl],
   );
 
   const taskQuery = useRuntimeQuery<RuntimeTaskBundle>({
     queryKey: taskQueryKey,
-    enabled: Boolean(botId && taskId),
+    enabled: Boolean(agentId && taskId),
     refetchInterval: 18_000,
     queryFn: async ({ signal }) => fetchBundle(signal),
   });
@@ -108,7 +108,7 @@ export function useRuntimeTask(
         ? `?${searchParams.toString()}`
         : "";
       const response = await fetch(
-        `/api/runtime/bots/${botId}/tasks/${taskId}/${resourcePath}${suffix}`,
+        `/api/runtime/agents/${agentId}/tasks/${taskId}/${resourcePath}${suffix}`,
         { cache: "no-store" },
       );
 
@@ -123,7 +123,7 @@ export function useRuntimeTask(
 
       return readJson<T>(response);
     },
-    [botId, taskId, tl],
+    [agentId, taskId, tl],
   );
 
   const mutate = useCallback(
@@ -143,7 +143,7 @@ export function useRuntimeTask(
         fetchInit.body = JSON.stringify(options.body);
       }
       const response = await fetch(
-        `/api/runtime/bots/${botId}/tasks/${taskId}/${resourcePath}${suffix}`,
+        `/api/runtime/agents/${agentId}/tasks/${taskId}/${resourcePath}${suffix}`,
         fetchInit,
       );
 
@@ -159,7 +159,7 @@ export function useRuntimeTask(
       void queryClient.invalidateQueries({ queryKey: taskQueryKey });
       return (payload ?? {}) as RuntimeMutationResult | Record<string, unknown>;
     },
-    [botId, queryClient, taskId, taskQueryKey, tl],
+    [agentId, queryClient, taskId, taskQueryKey, tl],
   );
 
   useEffect(() => {
@@ -169,7 +169,7 @@ export function useRuntimeTask(
     const connect = () => {
       if (disposed) return;
       const es = new EventSource(
-        `/api/runtime/bots/${botId}/stream?task_id=${taskId}&after_seq=${lastSeqRef.current}`,
+        `/api/runtime/agents/${agentId}/stream?task_id=${taskId}&after_seq=${lastSeqRef.current}`,
       );
 
       es.onopen = () => {
@@ -192,7 +192,7 @@ export function useRuntimeTask(
                   ? {
                       ...current,
                       events: mergeEvents(current.events, [
-                        { ...payload, botId },
+                        { ...payload, agentId },
                       ]),
                     }
                   : current,
@@ -221,7 +221,7 @@ export function useRuntimeTask(
       source?.close();
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
     };
-  }, [botId, queryClient, taskId, taskQueryKey]);
+  }, [agentId, queryClient, taskId, taskQueryKey]);
 
   return {
     bundle,

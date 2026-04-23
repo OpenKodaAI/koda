@@ -5,7 +5,15 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { sourceBadgeLabel, sourceBadgeTone } from "@/lib/system-settings-model";
+import { findFieldError } from "@/lib/system-settings-schema";
 import type { GeneralSystemSettingsValueSource } from "@/lib/control-plane";
 
 function SourceBadge({ source }: { source: GeneralSystemSettingsValueSource }) {
@@ -41,10 +49,11 @@ function FieldWithBadge({
 }
 
 export function SectionGeneral() {
-  const { draft, setField } = useSystemSettings();
+  const { draft, setField, sectionErrors } = useSystemSettings();
   const { tl } = useAppI18n();
   const account = draft.values.account;
   const sourceBadges = draft.source_badges ?? {};
+  const errors = sectionErrors.general;
 
   function update(patch: Partial<typeof account>) {
     setField("account", { ...account, ...patch });
@@ -65,9 +74,10 @@ export function SectionGeneral() {
           <FieldShell
             label="Timezone"
             description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
+            error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
           >
             <input
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              className="field-shell text-[var(--text-primary)]"
               value={account.scheduler_default_timezone}
               onChange={(e) => update({ scheduler_default_timezone: e.target.value })}
               placeholder="Ex.: America/Sao_Paulo"
@@ -81,17 +91,24 @@ export function SectionGeneral() {
           <FieldShell
             label="Formato de hora"
             description="Define como os horários são exibidos na interface e nos relatórios."
+            error={findFieldError(errors, "account.time_format")?.message}
           >
-            <select
-              className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
+            <Select
               value={(account as Record<string, unknown>).time_format as string ?? "24h"}
-              onChange={(e) => update({ time_format: e.target.value } as Partial<typeof account>)}
+              onValueChange={(v) => update({ time_format: v } as Partial<typeof account>)}
               disabled={isEnvSourced("account.time_format")}
-              title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
             >
-              <option value="24h">24 horas (14:30)</option>
-              <option value="12h">12 horas (2:30 PM)</option>
-            </select>
+              <SelectTrigger
+
+                title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24h">24 horas (14:30)</SelectItem>
+                <SelectItem value="12h">12 horas (2:30 PM)</SelectItem>
+              </SelectContent>
+            </Select>
           </FieldShell>
         </FieldWithBadge>
       </SettingsFieldGroup>

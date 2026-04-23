@@ -39,7 +39,7 @@ export interface RuntimeHealthSnapshot {
   [key: string]: unknown;
 }
 
-export interface RuntimeBotHealth {
+export interface RuntimeAgentHealth {
   status?: string;
   active_tasks?: number;
   active_processes?: number;
@@ -224,7 +224,7 @@ export interface RuntimeEvent {
   artifact_refs?: string[];
   resource_snapshot_ref?: string | null;
   ts?: string | null;
-  botId?: string;
+  agentId?: string;
   [key: string]: unknown;
 }
 
@@ -436,12 +436,12 @@ export interface RuntimeMutationResult {
 }
 
 export interface RuntimeOverview {
-  botId: string;
-  botLabel: string;
-  botColor: string;
+  agentId: string;
+  agentLabel: string;
+  agentColor: string;
   baseUrl: string;
   fetchedAt: string;
-  health: RuntimeBotHealth | null;
+  health: RuntimeAgentHealth | null;
   snapshot: RuntimeHealthSnapshot | null;
   readiness?: RuntimeReadiness | null;
   availability: RuntimeAvailability;
@@ -453,7 +453,7 @@ export interface RuntimeOverview {
 }
 
 export interface RuntimeTaskBundle {
-  botId: string;
+  agentId: string;
   fetchedAt: string;
   availability: RuntimeAvailability;
   task: RuntimeTaskDetail | null;

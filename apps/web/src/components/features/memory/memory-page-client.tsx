@@ -1,6 +1,5 @@
 "use client";
 
-
 import dynamic from "next/dynamic";
 import {
   Suspense,
@@ -14,14 +13,26 @@ import {
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  DatabaseZap,
+  BrainCircuit,
   RefreshCcw,
   Search,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
+import { Button } from "@/components/ui/button";
 import { PageEmptyState } from "@/components/ui/page-primitives";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  SELECT_ALL_VALUE,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type {
   MemoryGraphEdge,
@@ -30,17 +41,20 @@ import type {
   MemoryMapResponse,
   MemoryTypeKey,
 } from "@/lib/types";
-import { cn, formatDateTime } from "@/lib/utils";
-import { getMemoryTypeLabel } from "@/lib/memory-constants";
+import { cn } from "@/lib/utils";
+import { getMemoryTypeLabel, getMemoryTypeMeta } from "@/lib/memory-constants";
 import { fetchMemoryMap } from "@/components/memory/memory-dashboard-api";
+import { MemoryInspector } from "@/components/memory/memory-inspector";
 
-const MemoryMapCanvas = dynamic(
+const MemoryGraphCanvas = dynamic(
   () =>
-    import("@/components/memory/memory-map-canvas").then((module) => ({
-      default: module.MemoryMapCanvas,
+    import("@/components/memory/memory-graph/memory-graph-canvas").then((module) => ({
+      default: module.MemoryGraphCanvas,
     })),
   {
-    loading: () => <div className="glass-card min-h-[480px] animate-pulse sm:min-h-[620px]" />,
+    loading: () => (
+      <div className="min-h-[520px] w-full animate-pulse rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]" />
+    ),
   },
 );
 
@@ -50,7 +64,9 @@ const MemoryCurationWorkspace = dynamic(
       default: module.MemoryCurationWorkspace,
     })),
   {
-    loading: () => <div className="glass-card min-h-[420px] animate-pulse sm:min-h-[560px]" />,
+    loading: () => (
+      <div className="min-h-[420px] w-full animate-pulse rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] sm:min-h-[560px]" />
+    ),
   },
 );
 
@@ -61,38 +77,31 @@ type EdgeVisibility = {
   source: boolean;
 };
 type MemoryView = "map" | "curation";
+type MetricTone = "neutral" | "accent" | "warning" | "danger" | "success";
 
 const DAY_OPTIONS = [7, 30, 90] as const;
-function MemoryEmptyState() {
+const DEFAULT_EDGE_VISIBILITY: EdgeVisibility = {
+  semantic: true,
+  session: true,
+  source: true,
+};
+
+function MemoryEmptyStateCard() {
   const { t } = useAppI18n();
   return (
-    <div className="glass-card min-h-[420px] px-6 py-10 sm:min-h-[560px]">
+    <div className="flex min-h-[460px] w-full items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]">
       <PageEmptyState
-        title={t("memory.empty.title")}
-        description={t("memory.empty.description")}
-        visual={
-          <div className="relative mb-2 flex h-24 w-24 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)]">
-            <div className="absolute inset-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
-            <svg width="54" height="54" viewBox="0 0 54 54" fill="none" className="relative">
-              <circle cx="27" cy="27" r="5" fill="rgba(255,255,255,0.92)" />
-              <circle cx="14" cy="18" r="3" fill="rgba(200,202,214,0.9)" />
-              <circle cx="39" cy="16" r="3" fill="rgba(124,124,146,0.9)" />
-              <circle cx="40" cy="38" r="3" fill="rgba(15,15,16,0.96)" />
-              <path
-                d="M17 19.5L23 24M31 24L36.5 18.5M31 30.5L37 36.5"
-                stroke="rgba(255,255,255,0.32)"
-                strokeWidth="1.35"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
-        }
+        icon={BrainCircuit}
+        title={t("memory.empty.title", { defaultValue: "Sem memórias ainda" })}
+        description={t("memory.empty.description", {
+          defaultValue: "As memórias aparecerão aqui como uma rede de pontos conectados.",
+        })}
       />
     </div>
   );
 }
 
-interface MemoryFiltersContentProps {
+interface MemoryFiltersPanelProps {
   data: MemoryMapResponse;
   search: string;
   onSearchChange: (value: string) => void;
@@ -108,13 +117,11 @@ interface MemoryFiltersContentProps {
   onToggleType: (value: MemoryTypeKey) => void;
   edgeVisibility: EdgeVisibility;
   onToggleEdge: (key: keyof EdgeVisibility) => void;
-  compact?: boolean;
-  showIntro?: boolean;
-  hidePrimaryFields?: boolean;
-  hideTimeWindow?: boolean;
+  onReset: () => void;
+  searchInputRef?: React.Ref<HTMLInputElement>;
 }
 
-function MemoryFiltersContent({
+function MemoryFiltersPanel({
   data,
   search,
   onSearchChange,
@@ -130,145 +137,183 @@ function MemoryFiltersContent({
   onToggleType,
   edgeVisibility,
   onToggleEdge,
-  compact = false,
-  showIntro = true,
-  hidePrimaryFields = false,
-  hideTimeWindow = false,
-}: MemoryFiltersContentProps) {
+  onReset,
+  searchInputRef,
+}: MemoryFiltersPanelProps) {
   const { t } = useAppI18n();
   const edgeControls: Array<{ key: keyof EdgeVisibility; label: string }> = [
-    { key: "semantic", label: t("memory.filters.edges.semantic") },
-    { key: "session", label: t("memory.filters.edges.session") },
-    { key: "source", label: t("memory.filters.edges.source") },
+    { key: "semantic", label: t("memory.filters.edges.semantic", { defaultValue: "Semânticas" }) },
+    { key: "session", label: t("memory.filters.edges.session", { defaultValue: "Sessão" }) },
+    { key: "source", label: t("memory.filters.edges.source", { defaultValue: "Origem" }) },
   ];
+
   return (
-    <div className={cn("space-y-4", compact && "space-y-4")}>
-      {showIntro && (
-        <div>
-          <p className="eyebrow">{t("memory.filters.title")}</p>
-          <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
-            {t("memory.filters.intro")}
-          </p>
+    <div className="flex w-[320px] max-w-[86vw] flex-col gap-4 p-3">
+      <header className="flex items-center justify-between">
+        <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
+          {t("memory.filters.title", { defaultValue: "Filtros" })}
+        </p>
+        <button
+          type="button"
+          onClick={onReset}
+          className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]"
+        >
+          {t("common.clear", { defaultValue: "Limpar" })}
+        </button>
+      </header>
+
+      <label className="block">
+        <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+          {t("memory.filters.search", { defaultValue: "Buscar" })}
+        </span>
+        <div className="relative">
+          <Search className="icon-xs absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]" />
+          <input
+            ref={searchInputRef}
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={t("memory.filters.searchPlaceholder", { defaultValue: "palavras-chave" })}
+            className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] pl-8 pr-3 text-[0.8125rem] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => onSearchChange("")}
+              aria-label={t("common.clear", { defaultValue: "Limpar" })}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[var(--radius-chip)] p-1 text-[color:var(--text-quaternary)] transition-colors hover:bg-[color:var(--hover-tint)] hover:text-[color:var(--text-primary)]"
+            >
+              <X className="icon-xs" />
+            </button>
+          ) : null}
         </div>
-      )}
+      </label>
 
-      {!hidePrimaryFields && (
-        <>
-          <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-              {t("memory.filters.search")}
-            </span>
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-quaternary)]" />
-              <input
-                value={search}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder={t("memory.filters.searchPlaceholder")}
-                className="field-shell py-3 pl-11 pr-4 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-              />
-            </div>
-          </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+            {t("common.user", { defaultValue: "Usuário" })}
+          </span>
+          <Select
+            value={userId != null ? String(userId) : SELECT_ALL_VALUE}
+            onValueChange={(v) =>
+              onUserChange(v === SELECT_ALL_VALUE ? null : Number(v))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SELECT_ALL_VALUE}>
+                {t("common.allUsers", { defaultValue: "Todos" })}
+              </SelectItem>
+              {data.filters.users.map((user) => (
+                <SelectItem key={user.user_id} value={String(user.user_id)}>
+                  {user.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
 
-          <div className={cn("grid gap-3", compact && "sm:grid-cols-2")}>
-            <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {t("memory.filters.user")}
-              </span>
-              <select
-                value={userId ?? ""}
-                onChange={(event) => onUserChange(event.target.value ? Number(event.target.value) : null)}
-                className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
-              >
-                <option value="">{t("common.allUsers")}</option>
-                {data.filters.users.map((user) => (
-                  <option key={user.user_id} value={user.user_id}>
-                    {user.label} · {user.count}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <label className="block">
+          <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+            {t("common.session", { defaultValue: "Sessão" })}
+          </span>
+          <Select
+            value={sessionId ?? SELECT_ALL_VALUE}
+            onValueChange={(v) =>
+              onSessionChange(v === SELECT_ALL_VALUE ? null : v)
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SELECT_ALL_VALUE}>
+                {t("common.allSessions", { defaultValue: "Todas" })}
+              </SelectItem>
+              {data.filters.sessions.map((session) => (
+                <SelectItem key={session.session_id} value={session.session_id}>
+                  {session.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
 
-            <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {t("memory.filters.session")}
-            </span>
-              <select
-                value={sessionId ?? ""}
-                onChange={(event) => onSessionChange(event.target.value || null)}
-                className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
-              >
-                <option value="">{t("common.allSessions")}</option>
-                {data.filters.sessions.map((session) => (
-                  <option key={session.session_id} value={session.session_id}>
-                    {session.label} · {session.count}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </>
-      )}
-
-      {!hideTimeWindow && (
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-            {t("memory.filters.timeWindow")}
-          </p>
-          <div className="segmented-control segmented-control--full">
-            {DAY_OPTIONS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => onDaysChange(value)}
-                className={cn("segmented-control__option", days === value && "is-active")}
-                aria-pressed={days === value}
-              >
-                {value}d
-              </button>
-            ))}
-          </div>
+      <div>
+        <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+          {t("memory.filters.timeWindow", { defaultValue: "Janela" })}
+        </span>
+        <div className="grid grid-cols-3 gap-1 rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] p-0.5">
+          {DAY_OPTIONS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onDaysChange(value)}
+              className={cn(
+                "h-8 rounded-[var(--radius-pill)] font-mono text-[10.5px] uppercase tracking-[0.12em] transition-colors",
+                days === value
+                  ? "bg-[color:var(--panel-strong)] text-[color:var(--text-primary)]"
+                  : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]",
+              )}
+              aria-pressed={days === value}
+            >
+              {value}d
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       <button
         type="button"
         onClick={() => onIncludeInactiveChange(!includeInactive)}
         className={cn(
-          "button-shell button-shell--secondary w-full justify-between text-sm",
-          includeInactive && "button-shell--primary"
+          "flex h-9 items-center justify-between rounded-[var(--radius-input)] border px-3 text-[0.8125rem] transition-colors",
+          includeInactive
+            ? "border-[color:var(--accent)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
+            : "border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]",
         )}
       >
-        <span>{t("memory.filters.includeInactive")}</span>
-        <span className="chip">{includeInactive ? t("common.on") : t("common.off")}</span>
+        <span>{t("memory.filters.includeInactive", { defaultValue: "Incluir inativas" })}</span>
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.12em]">
+          {includeInactive
+            ? t("common.on", { defaultValue: "on" })
+            : t("common.off", { defaultValue: "off" })}
+        </span>
       </button>
 
       <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-          {t("memory.map.filterTitle")}
-        </p>
-        <div className="flex flex-wrap gap-2">
+        <span className="mb-2 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+          {t("memory.map.filterTitle", { defaultValue: "Tipos" })}
+        </span>
+        <div className="flex flex-wrap gap-1.5">
           {data.filters.types.map((type) => {
-            const active = selectedTypes.includes(type.value);
+            const active = selectedTypes.length === 0 || selectedTypes.includes(type.value);
+            const meta = getMemoryTypeMeta(type.value);
             return (
               <button
                 key={type.value}
                 type="button"
                 onClick={() => onToggleType(type.value)}
                 className={cn(
-                  "button-pill",
-                  active && "is-active"
-                )}
-                style={
+                  "inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 text-[0.75rem] transition-colors",
                   active
-                    ? {
-                        borderColor: `${type.color}44`,
-                        color: "var(--text-primary)",
-                        boxShadow: `0 16px 32px ${type.color}1c`,
-                      }
-                    : undefined
-                }
+                    ? "border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[color:var(--text-primary)]"
+                    : "border-transparent bg-transparent text-[color:var(--text-quaternary)] hover:text-[color:var(--text-secondary)]",
+                )}
+                style={active ? { borderColor: `${meta.color}44` } : undefined}
               >
-                {getMemoryTypeLabel(type.value, t)} · {type.count}
+                <span
+                  aria-hidden
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: meta.color }}
+                />
+                {getMemoryTypeLabel(type.value, t)}
+                <span className="font-mono text-[10.5px] text-[color:var(--text-quaternary)]">
+                  {type.count}
+                </span>
               </button>
             );
           })}
@@ -276,22 +321,24 @@ function MemoryFiltersContent({
       </div>
 
       <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-          {t("memory.map.visibleConnections")}
-        </p>
-        <div className={cn("space-y-2", compact && "grid gap-2 space-y-0 sm:grid-cols-3")}>
+        <span className="mb-2 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
+          {t("memory.map.visibleConnections", { defaultValue: "Conexões" })}
+        </span>
+        <div className="grid grid-cols-3 gap-1">
           {edgeControls.map((item) => (
             <button
               key={item.key}
               type="button"
               onClick={() => onToggleEdge(item.key)}
               className={cn(
-                "button-shell button-shell--secondary w-full justify-between text-sm",
-                edgeVisibility[item.key] && "button-shell--primary"
+                "flex h-8 items-center justify-center rounded-[var(--radius-panel-sm)] border text-[0.75rem] transition-colors",
+                edgeVisibility[item.key]
+                  ? "border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[color:var(--text-primary)]"
+                  : "border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-quaternary)] hover:text-[color:var(--text-secondary)]",
               )}
+              aria-pressed={edgeVisibility[item.key]}
             >
               {item.label}
-              <span className="chip">{edgeVisibility[item.key] ? t("memory.map.visible") : t("memory.map.hidden")}</span>
             </button>
           ))}
         </div>
@@ -302,11 +349,13 @@ function MemoryFiltersContent({
 
 function MemoryPageContent() {
   const { t } = useAppI18n();
-  const { bots } = useBotCatalog();
-  const defaultBotId = bots[0]?.id ?? "";
+  const { agents } = useAgentCatalog();
+  const defaultBotId = agents[0]?.id ?? "";
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
   const [activeBotId, setActiveBotId] = useState(defaultBotId);
   const [data, setData] = useState<MemoryMapResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -320,11 +369,8 @@ function MemoryPageContent() {
   const [search, setSearch] = useState("");
   const [selectedTypes, setSelectedTypes] = useState<MemoryTypeKey[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [edgeVisibility, setEdgeVisibility] = useState<EdgeVisibility>({
-    semantic: true,
-    session: true,
-    source: true,
-  });
+  const [edgeVisibility, setEdgeVisibility] = useState<EdgeVisibility>(DEFAULT_EDGE_VISIBILITY);
+
   const activeControllerRef = useRef<AbortController | null>(null);
   const requestVersionRef = useRef(0);
   const dataRef = useRef<MemoryMapResponse | null>(null);
@@ -342,70 +388,58 @@ function MemoryPageContent() {
     dataRef.current = data;
   }, [data]);
 
-  const fetchData = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
-    if (!activeBotId) {
-      setData(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    const requestId = requestVersionRef.current + 1;
-    requestVersionRef.current = requestId;
-    activeControllerRef.current?.abort();
-
-    const controller = new AbortController();
-    activeControllerRef.current = controller;
-
-    if (!background || !dataRef.current) {
-      setLoading(true);
-    }
-    if (background && dataRef.current) {
-      setRefreshing(true);
-    }
-
-    if (!background) {
-      setError(null);
-    }
-
-    try {
-      const payload = await fetchMemoryMap(activeBotId, {
-        days,
-        includeInactive,
-        limit: 160,
-        userId,
-        sessionId,
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted || requestVersionRef.current !== requestId) {
-        return;
-      }
-
-      setError(null);
-      setData(payload);
-    } catch (err: unknown) {
-      if (controller.signal.aborted || requestVersionRef.current !== requestId) {
-        return;
-      }
-
-      const message =
-        err instanceof Error ? err.message : t("memory.map.fallbackLoadError");
-
-      if (!dataRef.current) {
-        setError(message);
+  const fetchData = useCallback(
+    async ({ background = false }: { background?: boolean } = {}) => {
+      if (!activeBotId) {
         setData(null);
+        setLoading(false);
+        setError(null);
         return;
       }
-    } finally {
-      if (requestVersionRef.current === requestId) {
-        if (activeControllerRef.current === controller) {
-          activeControllerRef.current = null;
+
+      const requestId = requestVersionRef.current + 1;
+      requestVersionRef.current = requestId;
+      activeControllerRef.current?.abort();
+
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+
+      if (!background || !dataRef.current) setLoading(true);
+      if (background && dataRef.current) setRefreshing(true);
+      if (!background) setError(null);
+
+      try {
+        const payload = await fetchMemoryMap(activeBotId, {
+          days,
+          includeInactive,
+          limit: 160,
+          userId,
+          sessionId,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted || requestVersionRef.current !== requestId) return;
+        setError(null);
+        setData(payload);
+      } catch (err: unknown) {
+        if (controller.signal.aborted || requestVersionRef.current !== requestId) return;
+        const message =
+          err instanceof Error
+            ? err.message
+            : t("memory.map.fallbackLoadError", { defaultValue: "Falha ao carregar memórias" });
+        if (!dataRef.current) {
+          setError(message);
+          setData(null);
         }
-        setLoading(false);
-        setRefreshing(false);
+      } finally {
+        if (requestVersionRef.current === requestId) {
+          if (activeControllerRef.current === controller) activeControllerRef.current = null;
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-    }
-  }, [activeBotId, days, includeInactive, sessionId, t, userId]);
+    },
+    [activeBotId, days, includeInactive, sessionId, t, userId],
+  );
 
   useEffect(() => {
     if (activeView !== "map") {
@@ -413,7 +447,6 @@ function MemoryPageContent() {
         activeControllerRef.current?.abort();
       };
     }
-
     void fetchData();
     const interval = window.setInterval(() => {
       void fetchData({ background: true });
@@ -436,9 +469,7 @@ function MemoryPageContent() {
 
   useEffect(() => {
     if (!data || userId == null) return;
-    if (!data.filters.users.some((user) => user.user_id === userId)) {
-      setUserId(null);
-    }
+    if (!data.filters.users.some((user) => user.user_id === userId)) setUserId(null);
   }, [data, userId]);
 
   useEffect(() => {
@@ -450,17 +481,12 @@ function MemoryPageContent() {
 
   const toggleType = useCallback((type: MemoryTypeKey) => {
     setSelectedTypes((current) =>
-      current.includes(type)
-        ? current.filter((value) => value !== type)
-        : [...current, type]
+      current.includes(type) ? current.filter((value) => value !== type) : [...current, type],
     );
   }, []);
 
   const toggleEdge = useCallback((key: keyof EdgeVisibility) => {
-    setEdgeVisibility((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
+    setEdgeVisibility((current) => ({ ...current, [key]: !current[key] }));
   }, []);
 
   const resetFilters = useCallback(() => {
@@ -469,35 +495,25 @@ function MemoryPageContent() {
     setSessionId(null);
     setDays(30);
     setIncludeInactive(false);
-    setEdgeVisibility({
-      semantic: true,
-      session: true,
-      source: true,
-    });
+    setEdgeVisibility(DEFAULT_EDGE_VISIBILITY);
     setSelectedTypes(data?.filters.types.map((type) => type.value) ?? []);
-    setFiltersOpen(false);
   }, [data]);
 
   const visibleGraph = useMemo(() => {
     if (!data) {
-      return {
-        nodes: [] as MemoryNode[],
-        edges: [] as MemoryGraphEdge[],
-      };
+      return { nodes: [] as MemoryNode[], edges: [] as MemoryGraphEdge[] };
     }
 
     const allTypesSelected =
-      selectedTypes.length === 0 ||
-      selectedTypes.length === data.filters.types.length;
-
+      selectedTypes.length === 0 || selectedTypes.length === data.filters.types.length;
     const allowedTypes = new Set(selectedTypes);
     const visibleIds = new Set<string>();
 
     const memoryNodes = data.nodes.filter(
-      (node): node is MemoryGraphNode => node.kind === "memory"
+      (node): node is MemoryGraphNode => node.kind === "memory",
     );
     const learningNodes = data.nodes.filter(
-      (node): node is MemoryLearningNode => node.kind === "learning"
+      (node): node is MemoryLearningNode => node.kind === "learning",
     );
 
     memoryNodes.forEach((node) => {
@@ -511,9 +527,7 @@ function MemoryPageContent() {
         .join(" ")
         .toLowerCase();
       const matchesSearch = deferredSearch.length === 0 || haystack.includes(deferredSearch);
-      if (matchesType && matchesSearch) {
-        visibleIds.add(node.id);
-      }
+      if (matchesType && matchesSearch) visibleIds.add(node.id);
     });
 
     learningNodes.forEach((node) => {
@@ -530,9 +544,7 @@ function MemoryPageContent() {
     });
 
     const nodes = data.nodes.filter((node) => {
-      if (node.kind === "memory") {
-        return visibleIds.has(node.id);
-      }
+      if (node.kind === "memory") return visibleIds.has(node.id);
       return visibleIds.has(node.id) && node.member_ids.some((memberId) => visibleIds.has(memberId));
     });
 
@@ -559,431 +571,250 @@ function MemoryPageContent() {
     if (sessionId) count += 1;
     if (days !== 30) count += 1;
     if (includeInactive) count += 1;
-
     const totalTypes = data?.filters.types.length ?? 0;
-    if (totalTypes > 0 && selectedTypes.length > 0 && selectedTypes.length < totalTypes) {
-      count += 1;
-    }
-
-    if (!edgeVisibility.semantic || !edgeVisibility.session || !edgeVisibility.source) {
-      count += 1;
-    }
-
+    if (totalTypes > 0 && selectedTypes.length > 0 && selectedTypes.length < totalTypes) count += 1;
+    if (!edgeVisibility.semantic || !edgeVisibility.session || !edgeVisibility.source) count += 1;
     return count;
   }, [data, days, edgeVisibility, includeInactive, search, selectedTypes.length, sessionId, userId]);
 
   const setActiveView = useCallback(
     (nextView: MemoryView) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (nextView === "curation") {
-        params.set("view", "curation");
-      } else {
-        params.delete("view");
-      }
-
+      if (nextView === "curation") params.set("view", "curation");
+      else params.delete("view");
       const query = params.toString();
       startTransition(() => {
         router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
       });
-
-      if (nextView === "curation") {
-        setFiltersOpen(false);
-      }
+      if (nextView === "curation") setFiltersOpen(false);
     },
-    [pathname, router, searchParams]
+    [pathname, router, searchParams],
+  );
+
+  const selectedNode: MemoryNode | null = selectedNodeId
+    ? visibleGraph.nodes.find((node) => node.id === selectedNodeId) ?? null
+    : null;
+
+  const relatedNodes = useMemo<MemoryNode[]>(() => {
+    if (!selectedNodeId || !data) return [];
+    const neighborIds = new Set<string>();
+    data.edges.forEach((edge) => {
+      if (edge.source === selectedNodeId) neighborIds.add(edge.target);
+      if (edge.target === selectedNodeId) neighborIds.add(edge.source);
+    });
+    return data.nodes.filter((node) => neighborIds.has(node.id));
+  }, [data, selectedNodeId]);
+
+  const relatedEdges = useMemo<MemoryGraphEdge[]>(() => {
+    if (!selectedNodeId || !data) return [];
+    return data.edges.filter(
+      (edge) => edge.source === selectedNodeId || edge.target === selectedNodeId,
+    );
+  }, [data, selectedNodeId]);
+
+  const handleSelectNode = useCallback((nodeId: string | null) => {
+    startTransition(() => {
+      setSelectedNodeId(nodeId);
+    });
+  }, []);
+
+  const handleRequestSearchFocus = useCallback(() => {
+    setFiltersOpen(true);
+    window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+  }, []);
+
+  const metricItems = useMemo<
+    Array<{ label: string; value: number; tone: MetricTone }>
+  >(() => {
+    if (!data) return [];
+    const memoryCount = visibleGraph.nodes.filter((node) => node.kind === "memory").length;
+    const clusterCount = new Set(
+      visibleGraph.nodes.filter((n) => n.cluster_id).map((n) => n.cluster_id),
+    ).size;
+    return [
+      {
+        label: t("memory.health.active", { defaultValue: "Ativas" }),
+        value: memoryCount,
+        tone: "neutral",
+      },
+      {
+        label: t("memory.health.semanticEdges", { defaultValue: "Sinapses" }),
+        value: visibleGraph.edges.filter((edge) => edge.type === "semantic").length,
+        tone: "neutral",
+      },
+      {
+        label: t("memory.map.clusters", { defaultValue: "Clusters" }),
+        value: clusterCount,
+        tone: "neutral",
+      },
+      {
+        label: t("memory.health.expiring", { defaultValue: "Expirando" }),
+        value: data.stats.expiring_soon,
+        tone: data.stats.expiring_soon > 0 ? "warning" : "neutral",
+      },
+    ];
+  }, [data, t, visibleGraph.edges, visibleGraph.nodes]);
+
+  const showMap = activeView === "map";
+  const showEmpty = showMap && !error && data && data.stats.total_memories === 0 && !loading;
+  const showError = showMap && !!error;
+  const showInitialLoading = showMap && loading && !data;
+  const showCanvas = showMap && data && data.stats.total_memories > 0;
+
+  const controlsRow = (
+    <div className="flex flex-wrap items-center gap-2">
+      <AgentSwitcher
+        activeBotId={activeBotId}
+        onAgentChange={(agentId) => {
+          setActiveBotId(agentId ?? defaultBotId);
+          setSelectedNodeId(null);
+          setSearch("");
+          setSessionId(null);
+          setUserId(null);
+          setSelectedTypes([]);
+          setFiltersOpen(false);
+        }}
+        showAll={false}
+        singleRow
+        className="agent-switcher--compact"
+      />
+      <SoftTabs
+        items={[
+          { id: "map", label: t("memory.views.map", { defaultValue: "Mapa" }) },
+          { id: "curation", label: t("memory.views.curation", { defaultValue: "Curadoria" }) },
+        ]}
+        value={activeView}
+        onChange={(id) => setActiveView(id as "map" | "curation")}
+        ariaLabel={t("memory.map.toggleViewAria", { defaultValue: "Alternar visão" })}
+      />
+      {showMap && data ? (
+        <div className="ml-auto flex items-center gap-2">
+          {metricItems.length > 0 ? (
+            <div className="hidden items-center gap-3 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] px-3 py-1.5 md:flex">
+              {metricItems.map((item) => (
+                <div key={item.label} className="flex items-baseline gap-1.5">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
+                    {item.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono text-[12px] font-medium tabular-nums text-[color:var(--text-primary)]",
+                      item.tone === "warning" && "text-[color:var(--tone-warning-dot)]",
+                    )}
+                  >
+                    {item.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="secondary" size="sm">
+                <SlidersHorizontal className="icon-xs" strokeWidth={1.75} />
+                {t("common.filters", { defaultValue: "Filtros" })}
+                {activeFilterCount > 0 ? (
+                  <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[color:var(--accent-muted)] px-1 font-mono text-[10.5px] text-[color:var(--accent)]">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="p-0">
+              <MemoryFiltersPanel
+                data={data}
+                search={search}
+                onSearchChange={setSearch}
+                userId={userId}
+                onUserChange={setUserId}
+                sessionId={sessionId}
+                onSessionChange={setSessionId}
+                days={days}
+                onDaysChange={setDays}
+                includeInactive={includeInactive}
+                onIncludeInactiveChange={setIncludeInactive}
+                selectedTypes={selectedTypes}
+                onToggleType={toggleType}
+                edgeVisibility={edgeVisibility}
+                onToggleEdge={toggleEdge}
+                onReset={resetFilters}
+                searchInputRef={searchInputRef}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void fetchData()}
+            aria-label={t("memory.map.refreshAria", { defaultValue: "Atualizar" })}
+          >
+            <RefreshCcw
+              className={cn("icon-xs", refreshing && "animate-spin")}
+              strokeWidth={1.75}
+            />
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-4",
-        activeView === "curation" &&
-          "xl:h-[calc(100dvh-var(--shell-topbar-height)-4.5rem)] xl:overflow-hidden 2xl:h-[calc(100dvh-var(--shell-topbar-height)-5.25rem)]"
-      )}
-    >
-      <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(260px,350px)_minmax(220px,280px)_auto]">
-        <div className="min-w-0">
-          <BotSwitcher
-            activeBotId={activeBotId}
-            onBotChange={(botId) => {
-              setActiveBotId(botId ?? defaultBotId);
-              setSelectedNodeId(null);
-              setSearch("");
-              setSessionId(null);
-              setUserId(null);
-              setSelectedTypes([]);
-              setFiltersOpen(false);
-            }}
-            showAll={false}
-            singleRow
-          />
-        </div>
-
-        <div className="min-w-0 self-stretch">
-          <div
-            className="segmented-control segmented-control--single-row h-full min-h-[44px]"
-            role="group"
-            aria-label={t("memory.map.toggleViewAria")}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveView("map")}
-              className={cn(
-                "segmented-control__option",
-                activeView === "map" && "is-active"
-              )}
-              aria-pressed={activeView === "map"}
-            >
-              {t("memory.views.map")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveView("curation")}
-              className={cn(
-                "segmented-control__option",
-                activeView === "curation" && "is-active"
-              )}
-              aria-pressed={activeView === "curation"}
-            >
-              {t("memory.views.curation")}
-            </button>
-          </div>
-        </div>
-
-        <div className="flex min-h-[44px] items-center justify-start sm:justify-end">
-          {activeView === "map" ? (
-            <button
-              type="button"
-              onClick={() => void fetchData()}
-              className="button-shell button-shell--primary h-10 px-4 text-sm"
-              aria-label={t("memory.map.refreshAria")}
-            >
-              <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-              <span>{t("common.refresh")}</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
+    <div className="flex h-[calc(100dvh-var(--shell-topbar-height)-2rem)] flex-col gap-3">
+      {controlsRow}
 
       {activeView === "curation" ? (
-        <MemoryCurationWorkspace activeBotId={activeBotId} />
-      ) : error ? (
-        <div className="glass-card p-6">
-          <p className="text-lg font-semibold text-[var(--text-primary)]">
-            {t("memory.map.unavailableTitle")}
-          </p>
-          <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">{error}</p>
+        <div className="flex-1 overflow-auto">
+          <MemoryCurationWorkspace activeBotId={activeBotId} />
         </div>
-      ) : loading && !data ? (
-        <div className="space-y-4">
-          {/* Controls bar */}
-          <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(260px,350px)_minmax(220px,280px)_auto]">
-            <div className="min-w-0">
-              <div className="skeleton h-11 w-full rounded-xl" />
-            </div>
-            <div className="min-w-0 self-stretch">
-              <div className="skeleton h-11 w-full rounded-xl" />
-            </div>
-            <div className="flex min-h-[44px] items-center justify-end">
-              <div className="skeleton h-10 w-32 rounded-lg" />
-            </div>
+      ) : showError ? (
+        <div className="flex flex-1 items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] p-8 text-center">
+          <div>
+            <p className="text-[0.9375rem] font-medium text-[color:var(--text-primary)]">
+              {t("memory.map.unavailableTitle", { defaultValue: "Mapa indisponível" })}
+            </p>
+            <p className="mt-2 text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
+              {error}
+            </p>
           </div>
-
-          {/* Filter section */}
-          <div className="glass-card min-h-[120px] p-5 sm:p-6" />
-
-          {/* Main content */}
-          <div className="glass-card min-h-[420px] p-5 sm:min-h-[560px] sm:p-6" />
         </div>
-      ) : !activeBotId || !data ? (
-        <div className="glass-card min-h-[420px] px-6 py-10 sm:min-h-[560px]">
+      ) : showInitialLoading ? (
+        <div className="flex-1 animate-pulse rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]" />
+      ) : !activeBotId ? (
+        <div className="flex flex-1 items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]">
           <PageEmptyState
-            title={t("memory.page.noBotsTitle", { defaultValue: "No agents available" })}
-            description={t("memory.page.noBotsDescription", {
-              defaultValue: "Create or publish at least one agent before opening the memory workspace.",
+            icon={BrainCircuit}
+            title={t("memory.page.noAgentsTitle", { defaultValue: "Sem agentes disponíveis" })}
+            description={t("memory.page.noAgentsDescription", {
+              defaultValue: "Crie ou publique ao menos um agente antes de abrir o mapa.",
             })}
           />
         </div>
-      ) : data && data.stats.total_memories === 0 ? (
-        <MemoryEmptyState />
-      ) : (
-        (() => {
-          const currentData = data!;
-
-          return (
-            <>
-              <div className="space-y-4">
-                <section className="glass-card p-5 sm:p-6">
-                  <div className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                      <h2 className="text-[1.42rem] font-semibold tracking-[-0.055em] text-[var(--text-primary)] sm:text-[1.6rem]">
-                        {t("memory.map.mapAndFilters")}
-                      </h2>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="chip">
-                          {t("memory.map.memoryCount", {
-                            count: visibleGraph.nodes.filter((node) => node.kind === "memory").length,
-                          })}
-                        </span>
-                        <span className="chip">
-                          {t("memory.map.connectionsCount", { count: visibleGraph.edges.length })}
-                        </span>
-                        {activeFilterCount > 0 && (
-                          <span className="chip">
-                            {t("memory.map.activeFilters", { count: activeFilterCount })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_240px_240px]">
-                      <label className="block">
-                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                          {t("memory.map.searchMap")}
-                        </span>
-                        <div className="relative">
-                          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-quaternary)]" />
-                          <input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder={t("memory.map.searchPlaceholder")}
-                            className="field-shell py-3 pl-11 pr-4 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-                          />
-                        </div>
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                          {t("common.user")}
-                        </span>
-                        <select
-                          value={userId ?? ""}
-                          onChange={(event) =>
-                            setUserId(event.target.value ? Number(event.target.value) : null)
-                          }
-                          className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
-                        >
-                          <option value="">{t("common.allUsers")}</option>
-                          {currentData.filters.users.map((user) => (
-                            <option key={user.user_id} value={user.user_id}>
-                              {user.label} · {user.count}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                          {t("common.session")}
-                        </span>
-                        <select
-                          value={sessionId ?? ""}
-                          onChange={(event) => setSessionId(event.target.value || null)}
-                          className="field-shell px-4 py-3 text-sm text-[var(--text-primary)]"
-                        >
-                          <option value="">{t("common.allSessions")}</option>
-                          {currentData.filters.sessions.map((session) => (
-                            <option key={session.session_id} value={session.session_id}>
-                              {session.label} · {session.count}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    <div className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-4 xl:flex-row xl:items-end xl:justify-between">
-                      <div className="min-w-0">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                          {t("memory.map.timeWindow")}
-                        </p>
-                        <div className="segmented-control segmented-control--full">
-                          {DAY_OPTIONS.map((value) => (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={() => setDays(value)}
-                            className={cn("segmented-control__option", days === value && "is-active")}
-                            aria-pressed={days === value}
-                          >
-                              {t("memory.map.days", { count: value })}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setIncludeInactive((current) => !current)}
-                          className={cn(
-                            "button-shell button-shell--secondary justify-between gap-4 px-4 text-sm xl:min-w-[220px]",
-                            includeInactive && "button-shell--primary"
-                          )}
-                        >
-                          <span>{t("memory.map.inactiveMemories")}</span>
-                          <span className="chip">{includeInactive ? t("common.on") : t("common.off")}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFiltersOpen((current) => !current)}
-                          className="button-shell button-shell--secondary px-4 text-sm text-[var(--text-secondary)]"
-                        >
-                          <SlidersHorizontal className="h-4 w-4" />
-                          {filtersOpen ? t("common.hideRefinements") : t("common.refine")}
-                        </button>
-                        {activeFilterCount > 0 && (
-                          <button
-                            type="button"
-                            onClick={resetFilters}
-                            className="button-shell button-shell--quiet px-4 text-sm"
-                          >
-                            {t("common.clear")}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {filtersOpen && (
-                      <div className="border-t border-[var(--border-subtle)] pt-4">
-                        <MemoryFiltersContent
-                          data={currentData}
-                          search={search}
-                          onSearchChange={setSearch}
-                          userId={userId}
-                          onUserChange={setUserId}
-                          sessionId={sessionId}
-                          onSessionChange={setSessionId}
-                          days={days}
-                          onDaysChange={setDays}
-                          includeInactive={includeInactive}
-                          onIncludeInactiveChange={setIncludeInactive}
-                          selectedTypes={selectedTypes}
-                          onToggleType={toggleType}
-                          edgeVisibility={edgeVisibility}
-                          onToggleEdge={toggleEdge}
-                          compact
-                          showIntro={false}
-                          hidePrimaryFields
-                          hideTimeWindow
-                        />
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <div className="space-y-4">
-                  <section className="glass-card overflow-hidden p-0">
-                    <MemoryMapCanvas
-                      nodes={visibleGraph.nodes}
-                      edges={visibleGraph.edges}
-                      selectedNodeId={selectedNodeId}
-                      storageScope={activeBotId}
-                      onSelectNode={(nodeId) =>
-                        startTransition(() => {
-                          setSelectedNodeId(nodeId);
-                        })
-                      }
-                    />
-                  </section>
-
-                  <section className="panel-soft p-5 lg:p-6">
-                    <div className="mb-5 flex flex-col gap-4 border-b border-[var(--border-subtle)] pb-5 lg:flex-row lg:items-end lg:justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)]">
-                          <DatabaseZap className="h-4.5 w-4.5 text-[var(--bot-luby)]" />
-                        </span>
-                        <div>
-                          <p className="eyebrow">{t("memory.health.eyebrow")}</p>
-                          <h3 className="mt-1 text-[1.2rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
-                            {t("memory.health.title")}
-                          </h3>
-                        </div>
-                      </div>
-
-                      <span className="chip">
-                        {currentData.semantic_status === "available"
-                          ? t("memory.health.semanticAvailable")
-                          : currentData.semantic_status === "fallback"
-                            ? t("memory.health.semanticFallback")
-                            : t("memory.health.semanticUnavailable")}
-                      </span>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.active")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.active_memories}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.inactive")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.inactive_memories}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.learning")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.learning_nodes}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.expiring")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.expiring_soon}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.semanticEdges")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.semantic_edges}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.contextualEdges")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.contextual_edges}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.maintenance")}
-                        </p>
-                        <p className="mt-2 text-[1.18rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                          {currentData.stats.maintenance_operations}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-4 py-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
-                          {t("memory.health.lastMaintenance")}
-                        </p>
-                        <p className="mt-2 text-sm font-semibold leading-6 text-[var(--text-primary)]">
-                          {currentData.stats.last_maintenance_at
-                            ? formatDateTime(currentData.stats.last_maintenance_at)
-                            : t("memory.health.noMaintenance")}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-              </div>
-            </>
-          );
-        })()
-      )}
+      ) : showEmpty ? (
+        <MemoryEmptyStateCard />
+      ) : showCanvas ? (
+        <div className="relative flex-1">
+          <MemoryGraphCanvas
+            nodes={visibleGraph.nodes}
+            edges={visibleGraph.edges}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={handleSelectNode}
+            onRequestSearchFocus={handleRequestSearchFocus}
+          />
+          <MemoryInspector
+            open={selectedNode != null}
+            onOpenChange={(open) => {
+              if (!open) handleSelectNode(null);
+            }}
+            node={selectedNode}
+            relatedNodes={relatedNodes}
+            relatedEdges={relatedEdges}
+            semanticStatus={data?.semantic_status ?? "missing"}
+            onFocusNode={(nodeId) => handleSelectNode(nodeId)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -993,10 +824,8 @@ export default function MemoryPage() {
     <Suspense
       fallback={
         <div className="space-y-4">
-          <div className="glass-card-sm h-[4.5rem] animate-pulse" />
-          <div className="panel-soft min-h-[168px] animate-pulse" />
-          <div className="glass-card min-h-[480px] animate-pulse sm:min-h-[620px]" />
-          <div className="panel-soft min-h-[220px] animate-pulse" />
+          <div className="h-16 animate-pulse rounded-[var(--radius-panel)] bg-[color:var(--panel-soft)]" />
+          <div className="min-h-[480px] animate-pulse rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]" />
         </div>
       }
     >

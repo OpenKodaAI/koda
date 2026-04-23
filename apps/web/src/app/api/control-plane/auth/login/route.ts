@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
-import { setWebOperatorSessionCookie } from "@/lib/web-operator-session";
+import {
+  setOwnerExistsHintCookie,
+  setWebOperatorSessionCookie,
+} from "@/lib/web-operator-session";
 
 const CONTROL_PLANE_BASE_URL =
   process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
@@ -47,6 +50,7 @@ export async function POST(request: NextRequest) {
       { headers: { "Cache-Control": "no-store" } },
     );
     setWebOperatorSessionCookie(response, data.session_token);
+    setOwnerExistsHintCookie(response, true);
     return response;
   } catch (error) {
     return jsonErrorResponse(error, "Unable to sign in.");

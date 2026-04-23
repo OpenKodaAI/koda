@@ -95,10 +95,10 @@ def _dispatcher_policy_stub(request: pytest.FixtureRequest):
 
 class TestParseAgentCommands:
     def test_single_tag(self):
-        text = 'Hello <agent_cmd tool="cron_list">{}</agent_cmd> world'
+        text = 'Hello <agent_cmd tool="job_list">{}</agent_cmd> world'
         calls, clean = parse_agent_commands(text)
         assert len(calls) == 1
-        assert calls[0].tool == "cron_list"
+        assert calls[0].tool == "job_list"
         assert calls[0].params == {}
         assert "<agent_cmd" not in clean
         assert "Hello" in clean
@@ -106,12 +106,12 @@ class TestParseAgentCommands:
 
     def test_multiple_tags(self):
         text = (
-            '<agent_cmd tool="cron_list">{}</agent_cmd>\n'
+            '<agent_cmd tool="job_list">{}</agent_cmd>\n'
             '<agent_cmd tool="web_search">{"query": "python 3.14"}</agent_cmd>'
         )
         calls, clean = parse_agent_commands(text)
         assert len(calls) == 2
-        assert calls[0].tool == "cron_list"
+        assert calls[0].tool == "job_list"
         assert calls[1].tool == "web_search"
         assert calls[1].params == {"query": "python 3.14"}
         assert "<agent_cmd" not in clean
@@ -123,13 +123,13 @@ class TestParseAgentCommands:
         assert clean == text
 
     def test_invalid_json_skipped(self):
-        text = '<agent_cmd tool="cron_add">{invalid json}</agent_cmd> rest'
+        text = '<agent_cmd tool="job_create">{invalid json}</agent_cmd> rest'
         calls, clean = parse_agent_commands(text)
         assert calls == []
         assert "rest" in clean
 
     def test_multiline_json(self):
-        text = '<agent_cmd tool="cron_add">{\n"expression": "0 3 * * *",\n"command": "echo hi"\n}</agent_cmd>'
+        text = '<agent_cmd tool="job_create">{\n"expression": "0 3 * * *",\n"command": "echo hi"\n}</agent_cmd>'
         calls, clean = parse_agent_commands(text)
         assert len(calls) == 1
         assert calls[0].params["expression"] == "0 3 * * *"
@@ -141,12 +141,12 @@ class TestParseAgentCommands:
         assert calls[0].params == {}
 
     def test_clean_text_collapses_whitespace(self):
-        text = 'Before\n\n\n<agent_cmd tool="cron_list">{}</agent_cmd>\n\n\nAfter'
+        text = 'Before\n\n\n<agent_cmd tool="job_list">{}</agent_cmd>\n\n\nAfter'
         _, clean = parse_agent_commands(text)
         assert "\n\n\n" not in clean
 
     def test_action_plan_removed_from_clean_text(self):
-        text = '<action_plan><summary>plan</summary></action_plan><agent_cmd tool="cron_list">{}</agent_cmd>After'
+        text = '<action_plan><summary>plan</summary></action_plan><agent_cmd tool="job_list">{}</agent_cmd>After'
         _, clean = parse_agent_commands(text)
         assert "action_plan" not in clean
         assert "After" in clean
@@ -395,9 +395,9 @@ class TestEdgeCases:
             await asyncio.sleep(10)
             return AgentToolResult(tool="slow", success=True, output="done")
 
-        call = AgentToolCall(tool="cron_list", params={}, raw_match="")
+        call = AgentToolCall(tool="job_list", params={}, raw_match="")
         with (
-            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"cron_list": _slow_handler}),
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_list": _slow_handler}),
             patch("koda.services.tool_dispatcher.AGENT_TOOL_TIMEOUT", 0.1),
         ):
             result = await execute_tool(call, ctx)
@@ -765,14 +765,13 @@ class TestDBTools:
             ("redis_query", {"command": "GET", "args": ["key"]}),
         ],
     )
-    async def test_native_database_tools_are_removed(self, tool_name, params):
+    async def test_native_database_tools_are_unknown(self, tool_name, params):
         ctx = _make_ctx()
         call = AgentToolCall(tool=tool_name, params=params, raw_match="")
         result = await execute_tool(call, ctx)
         assert not result.success
-        assert "removed from koda" in result.output.lower()
-        assert "mcp" in result.output.lower()
-        assert result.metadata["mcp_only"] is True
+        assert "unknown tool" in result.output.lower()
+        assert tool_name in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -782,18 +781,18 @@ class TestDBTools:
 
 class TestFormatResults:
     def test_format_single_result(self):
-        results = [AgentToolResult(tool="cron_list", success=True, output="No jobs")]
+        results = [AgentToolResult(tool="job_list", success=True, output="No jobs")]
         formatted = format_tool_results(results)
-        assert '<tool_result tool="cron_list" success="true">' in formatted
+        assert '<tool_result tool="job_list" success="true">' in formatted
         assert "No jobs" in formatted
 
     def test_format_multiple_results(self):
         results = [
-            AgentToolResult(tool="cron_list", success=True, output="jobs"),
+            AgentToolResult(tool="job_list", success=True, output="jobs"),
             AgentToolResult(tool="web_search", success=False, output="Error: timeout"),
         ]
         formatted = format_tool_results(results)
-        assert 'tool="cron_list"' in formatted
+        assert 'tool="job_list"' in formatted
         assert 'tool="web_search"' in formatted
         assert 'success="false"' in formatted
 
@@ -880,12 +879,6 @@ class TestIsWriteTool:
         assert resolution.action_id == "admin.insert"
         assert resolution.resource_method == "directory.users.insert"
         assert resolution.access_level == "admin"
-
-    def test_cron_add_is_write(self):
-        assert _is_write_tool("cron_add", {}) is True
-
-    def test_cron_list_is_read(self):
-        assert _is_write_tool("cron_list", {}) is False
 
     def test_web_search_is_read(self):
         assert _is_write_tool("web_search", {}) is False
@@ -1277,8 +1270,8 @@ class TestJobTools:
 async def test_execute_tool_blocks_disallowed_tool_by_policy():
     ctx = _make_ctx()
     call = AgentToolCall(
-        tool="cron_add",
-        params={"expression": "0 3 * * *", "command": "echo backup"},
+        tool="cache_clear",
+        params={},
         raw_match="",
     )
 
@@ -1287,7 +1280,7 @@ async def test_execute_tool_blocks_disallowed_tool_by_policy():
 
     assert result.success is False
     assert result.metadata["policy_blocked"] is True
-    assert "secure default tool subset" in result.output.lower()
+    assert "blocked by integration policy" in result.output.lower()
 
 
 @pytest.mark.asyncio
@@ -1632,7 +1625,7 @@ async def test_execute_tool_passes_allow_private_to_fetch_url():
 
 @pytest.mark.asyncio
 @pytest.mark.real_policy_gate
-async def test_execute_tool_blocks_native_database_tools_even_with_grants():
+async def test_execute_tool_rejects_removed_native_database_tools_even_with_grants():
     ctx = _make_ctx()
     call = AgentToolCall(tool="db_query", params={"sql": "SELECT 1"}, raw_match="")
 
@@ -1643,7 +1636,7 @@ async def test_execute_tool_blocks_native_database_tools_even_with_grants():
         result = await execute_tool(call, ctx)
 
     assert result.success is False
-    assert "mcp" in result.output.lower()
+    assert "unknown tool" in result.output.lower()
 
 
 @pytest.mark.asyncio

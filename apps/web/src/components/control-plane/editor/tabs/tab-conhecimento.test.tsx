@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BotEditorProvider } from "@/hooks/use-bot-editor";
+import { AgentEditorProvider } from "@/hooks/use-agent-editor";
 import { ToastProvider } from "@/hooks/use-toast";
 import { TabConhecimento } from "@/components/control-plane/editor/tabs/tab-conhecimento";
 import type {
-  ControlPlaneBot,
+  ControlPlaneAgent,
   ControlPlaneCoreCapabilities,
   ControlPlaneCorePolicies,
   ControlPlaneCoreProviders,
@@ -32,7 +32,7 @@ vi.mock("@/hooks/use-app-i18n", () => ({
   }),
 }));
 
-function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
+function makeAgent(overrides: Partial<ControlPlaneAgent> = {}): ControlPlaneAgent {
   return {
     id: "ORBITAL_ONE",
     display_name: "Air Compass",
@@ -48,10 +48,8 @@ function makeBot(overrides: Partial<ControlPlaneBot> = {}): ControlPlaneBot {
     organization: {
       workspace_id: null,
       workspace_name: null,
-      workspace_color: null,
       squad_id: null,
       squad_name: null,
-      squad_color: null,
     },
     applied_version: 1,
     desired_version: 1,
@@ -171,14 +169,14 @@ const systemSettings: ControlPlaneSystemSettings = {
 function renderTab() {
   return render(
     <ToastProvider>
-      <BotEditorProvider
-        bot={makeBot()}
+      <AgentEditorProvider
+        agent={makeAgent()}
         core={core}
         workspaces={workspaces}
         systemSettings={systemSettings}
       >
         <TabConhecimento />
-      </BotEditorProvider>
+      </AgentEditorProvider>
     </ToastProvider>,
   );
 }

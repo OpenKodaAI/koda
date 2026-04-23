@@ -2,20 +2,15 @@
 
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import {
-  Activity,
-  AlertTriangle,
-  Bot,
-  Search,
-} from "lucide-react";
-import { BotSwitcher } from "@/components/layout/bot-switcher";
-import { useBotCatalog } from "@/components/providers/bot-catalog-provider";
+import { Activity, Bot as AgentIcon, Search } from "lucide-react";
+import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { resolveBotSelection } from "@/lib/bot-selection";
+import { resolveAgentSelection } from "@/lib/agent-selection";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
-import { getBotColor, getBotLabel } from "@/lib/bot-constants";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import {
   buildRuntimeRoomRows,
   getRuntimeRowSummary,
@@ -25,142 +20,116 @@ import {
 } from "@/lib/runtime-overview-model";
 import type { RuntimeOverview } from "@/lib/runtime-types";
 import { getRuntimeLabel, getRuntimeTone } from "@/lib/runtime-ui";
-import { getSemanticStyle, getSemanticTextStyle } from "@/lib/theme-semantic";
+import type { SemanticTone } from "@/lib/theme-semantic";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { SoftTabs } from "@/components/ui/soft-tabs";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import {
+  PageMetricStrip,
+  PageMetricStripItem,
+} from "@/components/ui/page-primitives";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
+
+function toneToStatusDot(tone: SemanticTone): StatusDotTone {
+  if (tone === "success" || tone === "info" || tone === "warning" || tone === "danger" || tone === "retry" || tone === "neutral") {
+    return tone;
+  }
+  return "neutral";
+}
 
 function RuntimeOverviewSkeleton() {
   return (
-    <div className="runtime-shell runtime-shell--wide space-y-5" data-testid="runtime-overview-skeleton" {...tourRoute("runtime", "loading")}>
-      <div className="runtime-toolbar runtime-toolbar--standard" {...tourAnchor("runtime.header")}>
-        <div className="runtime-toolbar__controls">
-          <div className="skeleton h-11 w-full rounded-xl" />
-          <div className="app-search">
-            <div className="skeleton-circle h-4 w-4" />
-            <div className="skeleton h-4 w-56 rounded-xl" />
-          </div>
-          <div className="runtime-filter-row">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="skeleton h-9 w-24 rounded-full" />
-            ))}
-          </div>
-          <div className="skeleton h-7 w-20 rounded-full justify-self-start lg:justify-self-end" />
+    <div
+      className="runtime-shell space-y-6"
+      data-testid="runtime-overview-skeleton"
+      {...tourRoute("runtime", "loading")}
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="skeleton h-5 w-40 rounded" />
+          <div className="skeleton h-3 w-64 rounded" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="skeleton h-9 w-40 rounded-[var(--radius-pill)]" />
+          <div className="skeleton h-9 w-64 rounded-[var(--radius-input)]" />
+          <div className="skeleton h-9 w-56 rounded-[var(--radius-pill)]" />
         </div>
       </div>
 
       <div className="metric-strip">
         {Array.from({ length: 3 }).map((_, index) => (
           <div key={index} className="metric-strip__item">
-            <div className="skeleton h-3 w-20 rounded-xl" />
-            <div className="mt-2 skeleton h-6 w-16 rounded-xl" />
+            <div className="skeleton h-3 w-20 rounded" />
+            <div className="skeleton mt-2 h-6 w-16 rounded" />
           </div>
         ))}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_300px]">
-        <div className="runtime-panel runtime-panel--dense min-h-[420px]">
-          <div className="runtime-panel__header">
-            <div className="skeleton h-4 w-32 rounded-xl" />
-          </div>
-          <div className="runtime-live-list">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="runtime-live-row">
-                <div className="runtime-live-row__main">
-                  <div className="skeleton-circle h-2.5 w-2.5" />
-                  <div className="skeleton h-3 w-20 rounded-xl" />
-                  <div className="skeleton h-3 w-12 rounded-xl" />
-                  <div className="skeleton h-6 w-20 rounded-full" />
-                  <div className="skeleton h-3 w-[40%] rounded-xl" />
-                </div>
-                <div className="runtime-live-row__side">
-                  <div className="skeleton h-3 w-12 rounded-xl" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="runtime-panel runtime-panel--dense min-h-[420px]">
-          <div className="runtime-panel__header">
-            <div className="skeleton h-4 w-16 rounded-xl" />
-          </div>
-          <div className="runtime-bot-rail">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="runtime-bot-row">
-                <div className="runtime-bot-row__identity">
-                  <div className="skeleton-circle h-2.5 w-2.5" />
-                  <div className="skeleton h-3 w-24 rounded-xl" />
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="skeleton h-3 w-14 rounded-xl" />
-                  <div className="skeleton h-3 w-12 rounded-xl" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_320px]">
+        <section className="min-h-[360px] space-y-2">
+          <div className="skeleton h-4 w-32 rounded" />
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="skeleton h-10 w-full rounded" />
+          ))}
+        </section>
+        <aside className="min-h-[360px] space-y-2">
+          <div className="skeleton h-4 w-16 rounded" />
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="skeleton h-10 w-full rounded" />
+          ))}
+        </aside>
       </div>
     </div>
   );
 }
 
-function InlineAlert({
-  children,
-  tone = "warning",
-}: {
-  children: React.ReactNode;
-  tone?: "warning" | "danger";
-}) {
+function LiveRow({ row, index }: { row: RuntimeRoomRow; index: number }) {
+  const { t } = useAppI18n();
+  const agentColor = getAgentColor(row.agentId);
+  const summary = truncateText(getRuntimeRowSummary(row), 120);
+  const phaseTone = toneToStatusDot(getRuntimeTone(row.phase));
+  const phaseLabel = getRuntimeLabel(row.phase);
+  const isLive = phaseTone === "info" || phaseTone === "warning";
+
   return (
-    <div
+    <Link
+      href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
       className={cn(
-        "runtime-inline-alert",
-        tone === "danger" && "runtime-inline-alert--danger"
+        "group grid w-full gap-4 px-3 py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "grid-cols-[auto_auto_auto_1fr_auto] items-center",
+        "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] rounded-[var(--radius-panel-sm)]",
+        index > 0 && "border-t border-[color:var(--divider-hair)]",
       )}
     >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <div className="min-w-0">{children}</div>
-    </div>
+      <StatusDot color={agentColor} />
+      <span className="font-mono text-[0.75rem] text-[var(--text-secondary)]">
+        {getAgentLabel(row.agentId)}
+      </span>
+      <span className="font-mono text-[0.75rem] text-[var(--text-quaternary)]">
+        #{row.taskId}
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <StatusDot tone={phaseTone} pulse={isLive} />
+        <span className="text-[0.75rem] text-[var(--text-tertiary)]">{phaseLabel}</span>
+        <span className="mx-1 text-[var(--text-quaternary)]">·</span>
+        <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">{summary}</span>
+      </span>
+      <span className="whitespace-nowrap text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+        {row.updatedAt ? formatRelativeTime(row.updatedAt) : t("common.now")}
+      </span>
+    </Link>
   );
 }
 
-function LiveRow({ row }: { row: RuntimeRoomRow }) {
-  const { t } = useAppI18n();
-  const botColor = getBotColor(row.botId);
-  const summary = truncateText(getRuntimeRowSummary(row), 120);
-
-  return (
-    <motion.div layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-      <Link
-        href={`/runtime/${row.botId}/tasks/${row.taskId}`}
-        className="runtime-live-row group"
-      >
-        <div className="runtime-live-row__main">
-          <span className="runtime-inline-dot" style={{ backgroundColor: botColor }} />
-          <span className="runtime-inline-id">{getBotLabel(row.botId)}</span>
-          <span className="runtime-inline-id">#{row.taskId}</span>
-          <span
-            className="runtime-inline-tone"
-            style={getSemanticStyle(getRuntimeTone(row.phase))}
-          >
-            {getRuntimeLabel(row.phase)}
-          </span>
-          <p className="runtime-live-row__title">{summary}</p>
-        </div>
-        <div className="runtime-live-row__side">
-          <span className="runtime-live-row__time">
-            {row.updatedAt ? formatRelativeTime(row.updatedAt) : t("common.now")}
-          </span>
-        </div>
-      </Link>
-    </motion.div>
-  );
-}
-
-function BotRailRow({
+function AgentRailRow({
   overview,
   live,
+  index,
 }: {
   overview: RuntimeOverview;
   live: boolean;
+  index: number;
 }) {
   const { t } = useAppI18n();
   const activeCount = overview.snapshot?.active_environments ?? 0;
@@ -169,20 +138,36 @@ function BotRailRow({
     (overview.snapshot?.cleanup_backlog ?? 0) +
     overview.incidents.length;
   const retainedCount = overview.snapshot?.retained_environments ?? 0;
-  const runtimeTone = live ? "info" : getRuntimeTone(overview.availability.runtime);
+  const runtimeTone = toneToStatusDot(
+    live ? "info" : getRuntimeTone(overview.availability.runtime),
+  );
+  const label = live ? t("runtime.overview.live") : getRuntimeLabel(overview.availability.runtime);
 
   return (
-    <div className="runtime-bot-row">
-      <div className="runtime-bot-row__identity">
-        <span className="runtime-inline-dot" style={{ backgroundColor: overview.botColor }} />
-        <span className="runtime-bot-row__name">{overview.botLabel}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="runtime-bot-row__state" style={getSemanticTextStyle(runtimeTone)}>
-          {live ? t("runtime.overview.live") : getRuntimeLabel(overview.availability.runtime)}
+    <div
+      className={cn(
+        "grid items-center gap-3 px-3 py-2.5",
+        "grid-cols-[auto_1fr_auto]",
+        index > 0 && "border-t border-[color:var(--divider-hair)]",
+      )}
+    >
+      <AgentGlyph
+        agentId={overview.agentId}
+        color={overview.agentColor}
+        variant="list"
+        shape="swatch"
+        className="h-6 w-6 shrink-0"
+      />
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+          {overview.agentLabel}
         </span>
-        <span className="runtime-live-row__time">{activeCount}/{retainedCount}/{attentionCount}</span>
+        <StatusDot tone={runtimeTone} pulse={live} />
+        <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{label}</span>
       </div>
+      <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+        {activeCount}·{retainedCount}·{attentionCount}
+      </span>
     </div>
   );
 }
@@ -193,22 +178,21 @@ export function RuntimeOverviewScreen({
   initialBotIds?: string[];
 }) {
   const { t } = useAppI18n();
-  const { bots } = useBotCatalog();
+  const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>(initialBotIds ?? []);
   const [statusFilter, setStatusFilter] = useState<RuntimeRoomFilter>("all");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const availableBotIds = useMemo(() => bots.map((bot) => bot.id), [bots]);
+  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
-    () => resolveBotSelection(selectedBotIds, availableBotIds),
-    [availableBotIds, selectedBotIds]
+    () => resolveAgentSelection(selectedBotIds, availableBotIds),
+    [availableBotIds, selectedBotIds],
   );
-  const { overviews, loading, connected, error } =
-    useRuntimeOverview(selectedBotIds);
+  const { overviews, loading, connected, error } = useRuntimeOverview(selectedBotIds);
 
   const selectedOverviews = useMemo(() => {
     return visibleBotIds
-      .map((botId) => overviews[botId])
+      .map((agentId) => overviews[agentId])
       .filter((item): item is RuntimeOverview => Boolean(item));
   }, [overviews, visibleBotIds]);
 
@@ -223,7 +207,7 @@ export function RuntimeOverviewScreen({
         row.queue?.query_text,
         row.environment?.branch_name,
         row.environment?.workspace_path,
-        getBotLabel(row.botId),
+        getAgentLabel(row.agentId),
         row.phase,
       ]
         .filter(Boolean)
@@ -238,40 +222,40 @@ export function RuntimeOverviewScreen({
     () => ({
       active: selectedOverviews.reduce(
         (sum, overview) => sum + (overview.snapshot?.active_environments ?? 0),
-        0
+        0,
       ),
       retained: selectedOverviews.reduce(
         (sum, overview) => sum + (overview.snapshot?.retained_environments ?? 0),
-        0
+        0,
       ),
       recovery: selectedOverviews.reduce(
         (sum, overview) => sum + (overview.snapshot?.recovery_backlog ?? 0),
-        0
+        0,
       ),
       cleanup: selectedOverviews.reduce(
         (sum, overview) => sum + (overview.snapshot?.cleanup_backlog ?? 0),
-        0
+        0,
       ),
     }),
-    [selectedOverviews]
+    [selectedOverviews],
   );
 
   const incidentEntries = useMemo(
     () =>
       selectedOverviews.flatMap((overview) =>
         overview.incidents.map((incident) => ({
-          botId: overview.botId,
-          botLabel: overview.botLabel,
+          agentId: overview.agentId,
+          agentLabel: overview.agentLabel,
           incident,
-        }))
+        })),
       ),
-    [selectedOverviews]
+    [selectedOverviews],
   );
 
-  const liveBots = selectedOverviews.filter(
+  const liveAgents = selectedOverviews.filter(
     (overview) =>
-      Boolean(connected[overview.botId]) ||
-      ["available", "partial"].includes(overview.availability.runtime)
+      Boolean(connected[overview.agentId]) ||
+      ["available", "partial"].includes(overview.availability.runtime),
   ).length;
   const attentionCount = totals.recovery + totals.cleanup + incidentEntries.length;
   const visibleRows = roomRows.slice(0, 10);
@@ -281,118 +265,161 @@ export function RuntimeOverviewScreen({
   }
 
   const tourVariant =
-    error ? "unavailable" : loading && selectedOverviews.length === 0 ? "loading" : selectedOverviews.length === 0 ? "empty" : "default";
+    error
+      ? "unavailable"
+      : loading && selectedOverviews.length === 0
+        ? "loading"
+        : selectedOverviews.length === 0
+          ? "empty"
+          : "default";
+
+  const filterItems = [
+    { id: "all", label: t("runtime.overview.filters.all") },
+    { id: "active", label: t("runtime.overview.filters.active") },
+    { id: "retained", label: t("runtime.overview.filters.retained") },
+    { id: "recovery", label: t("runtime.overview.filters.recovery") },
+  ];
 
   return (
-    <div className="runtime-shell runtime-shell--wide space-y-5" data-testid="runtime-overview-screen" {...tourRoute("runtime", tourVariant)}>
-      <div className="runtime-toolbar runtime-toolbar--standard" {...tourAnchor("runtime.header")}>
-        <div className="runtime-toolbar__controls">
-          <div className="runtime-toolbar__bot" {...tourAnchor("runtime.bot-switcher")}>
-            <BotSwitcher
-              multiple
-              selectedBotIds={selectedBotIds}
-              onSelectionChange={setSelectedBotIds}
-            />
-          </div>
+    <div
+      className="runtime-shell space-y-6"
+      data-testid="runtime-overview-screen"
+      {...tourRoute("runtime", tourVariant)}
+    >
+      {/* Header */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-3"
+        {...tourAnchor("runtime.header")}
+      >
+        <div className="w-[200px]" {...tourAnchor("runtime.agent-switcher")}>
+          <AgentSwitcher
+            multiple
+            singleRow
+            selectedBotIds={selectedBotIds}
+            onSelectionChange={setSelectedBotIds}
+            className="agent-switcher--compact"
+          />
+        </div>
 
-          <label className="app-search runtime-search runtime-search--field" {...tourAnchor("runtime.search")}>
-            <Search className="h-4 w-4 text-[var(--text-quaternary)]" />
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] focus-within:border-[var(--accent)]"
+            {...tourAnchor("runtime.search")}
+          >
+            <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("runtime.overview.searchPlaceholder")}
-              className="runtime-search__input"
+              className="w-44 bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
             />
           </label>
 
-          <div className="runtime-filter-row" role="tablist" aria-label={t("runtime.overview.filterLabel")} {...tourAnchor("runtime.filters")}>
-            {[
-              { value: "all", label: t("runtime.overview.filters.all") },
-              { value: "active", label: t("runtime.overview.filters.active") },
-              { value: "retained", label: t("runtime.overview.filters.retained") },
-              { value: "recovery", label: t("runtime.overview.filters.recovery") },
-            ].map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setStatusFilter(item.value as RuntimeRoomFilter)}
-                className={cn(
-                  "runtime-filter-pill",
-                  statusFilter === item.value && "is-active"
-                )}
-                aria-pressed={statusFilter === item.value}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div {...tourAnchor("runtime.filters")}>
+            <SoftTabs
+              items={filterItems}
+              value={statusFilter}
+              onChange={(id) => setStatusFilter(id as RuntimeRoomFilter)}
+              ariaLabel={t("runtime.overview.filterLabel")}
+            />
           </div>
         </div>
       </div>
 
-      <div className="metric-strip" {...tourAnchor("runtime.metrics")}>
-        <div className="metric-strip__item">
-          <span className="metric-label">{t("runtime.overview.metrics.onlineBots")}</span>
-          <span className="metric-value">{`${liveBots}/${selectedOverviews.length || 0}`}</span>
-        </div>
-        <div className="metric-strip__item">
-          <span className="metric-label">{t("runtime.overview.metrics.executions")}</span>
-          <span className="metric-value">{String(totals.active)}</span>
-        </div>
-        <div className="metric-strip__item">
-          <span className="metric-label">{t("runtime.overview.metrics.attention")}</span>
-          <span className={cn("metric-value", attentionCount > 0 && "metric-value--accent")}>{String(attentionCount)}</span>
-        </div>
+      {/* Metric strip */}
+      <div {...tourAnchor("runtime.metrics")}>
+        <PageMetricStrip>
+          <PageMetricStripItem
+            label={t("runtime.overview.metrics.onlineAgents")}
+            value={`${liveAgents}/${selectedOverviews.length || 0}`}
+            hint={t("runtime.overview.metrics.onlineAgentsHint")}
+          />
+          <PageMetricStripItem
+            label={t("runtime.overview.metrics.executions")}
+            value={String(totals.active)}
+            tone={totals.active > 0 ? "accent" : "neutral"}
+            hint={t("runtime.overview.metrics.executionsHint")}
+          />
+          <PageMetricStripItem
+            label={t("runtime.overview.metrics.attention")}
+            value={String(attentionCount)}
+            tone={attentionCount > 0 ? "warning" : "neutral"}
+            hint={t("runtime.overview.metrics.attentionHint")}
+          />
+        </PageMetricStrip>
       </div>
 
-      {error ? (
-        <InlineAlert tone="danger">{error}</InlineAlert>
-      ) : null}
+      {/* Alerts */}
+      {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
 
       {incidentEntries.slice(0, 2).map((entry) => (
-        <InlineAlert key={`${entry.botId}-${entry.incident}`}>
-          <span className="font-semibold text-[var(--text-primary)]">{entry.botLabel}</span>
-          <span className="mx-2 text-[var(--text-quaternary)]">•</span>
-          <span className="text-[var(--text-secondary)]">{entry.incident}</span>
+        <InlineAlert key={`${entry.agentId}-${entry.incident}`} tone="warning">
+          <span className="font-semibold text-[var(--text-primary)]">{entry.agentLabel}</span>
+          <span className="mx-2 text-[var(--text-quaternary)]">·</span>
+          <span>{entry.incident}</span>
         </InlineAlert>
       ))}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_300px]">
-        <section className="runtime-panel runtime-panel--dense">
-          <div className="runtime-panel__header">
-            <p className="runtime-panel__title">{t("runtime.overview.liveExecutions")}</p>
-          </div>
+      {/* Main grid */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_320px]">
+        <section>
+          <header className="mb-2 flex items-baseline justify-between px-3">
+            <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              {t("runtime.overview.liveExecutions")}
+            </h3>
+            <span className="eyebrow">
+              {visibleRows.length} / {roomRows.length}
+            </span>
+          </header>
 
-          <div className="runtime-live-list" data-testid="runtime-live-list">
+          <div
+            className="flex flex-col"
+            data-testid="runtime-live-list"
+          >
             {visibleRows.length === 0 ? (
-              <div className="runtime-empty" {...tourAnchor("runtime.empty-live")}>
-                <Activity className="h-5 w-5" />
-                <p>{t("runtime.overview.noExecutionsMatch")}</p>
+              <div
+                className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
+                {...tourAnchor("runtime.empty-live")}
+              >
+                <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                <p className="m-0">{t("runtime.overview.noExecutionsMatch")}</p>
               </div>
             ) : (
-              visibleRows.map((row) => (
-                <LiveRow key={`${row.botId}-${row.taskId}-${row.source}`} row={row} />
+              visibleRows.map((row, index) => (
+                <LiveRow
+                  key={`${row.agentId}-${row.taskId}-${row.source}`}
+                  row={row}
+                  index={index}
+                />
               ))
             )}
           </div>
         </section>
 
-        <aside className="runtime-panel runtime-panel--dense">
-          <div className="runtime-panel__header">
-            <p className="runtime-panel__title">{t("runtime.overview.bots")}</p>
-          </div>
+        <aside>
+          <header className="mb-2 flex items-baseline justify-between px-3">
+            <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              {t("runtime.overview.agents")}
+            </h3>
+            <span className="eyebrow">{liveAgents}/{selectedOverviews.length || 0}</span>
+          </header>
 
-          <div className="runtime-bot-rail">
+          <div className="flex flex-col">
             {selectedOverviews.length === 0 ? (
-              <div className="runtime-empty" {...tourAnchor("runtime.empty-bots")}>
-                <Bot className="h-5 w-5" />
-                <p>{t("runtime.overview.noVisibleBots")}</p>
+              <div
+                className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
+                {...tourAnchor("runtime.empty-agents")}
+              >
+                <AgentIcon className="h-4 w-4 text-[var(--text-quaternary)]" />
+                <p className="m-0">{t("runtime.overview.noVisibleAgents")}</p>
               </div>
             ) : (
-              selectedOverviews.map((overview) => (
-                <BotRailRow
-                  key={overview.botId}
+              selectedOverviews.map((overview, index) => (
+                <AgentRailRow
+                  key={overview.agentId}
                   overview={overview}
-                  live={Boolean(connected[overview.botId])}
+                  live={Boolean(connected[overview.agentId])}
+                  index={index}
                 />
               ))
             )}

@@ -773,7 +773,7 @@ def normalize_memory_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
 
     promotion_mode = _trimmed(raw.get("promotion_mode")).lower()
     if promotion_mode:
-        raw["promotion_mode"] = promotion_mode
+        raw["promotion_mode"] = promotion_mode if promotion_mode in PROMOTION_MODES else "review_queue"
     for key in ("strategy_default", "citation_policy"):
         value = _trimmed(raw.get(key)).lower()
         if value:
@@ -813,7 +813,7 @@ def normalize_knowledge_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
         raw["allowed_workspace_roots"] = allowed_workspace_roots
     promotion_mode = _trimmed(raw.get("promotion_mode")).lower()
     if promotion_mode:
-        raw["promotion_mode"] = promotion_mode
+        raw["promotion_mode"] = promotion_mode if promotion_mode in PROMOTION_MODES else "review_queue"
     for key in ("strategy_default", "citation_policy", "storage_mode"):
         value = _trimmed(raw.get(key)).lower()
         if value:

@@ -161,7 +161,7 @@ function MarketplaceGrid({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={tl("Buscar integrações e servidores...")}
-                className="field-shell w-full py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
                 aria-label={tl("Buscar integrações e servidores MCP")}
               />
             </div>

@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { McpDiscoveredTool, McpToolPolicy } from "@/lib/control-plane";
 
@@ -65,18 +72,21 @@ export function McpToolPolicyRow({
       </div>
 
       <div className="shrink-0">
-        <select
+        <Select
           value={currentPolicy}
-          onChange={(e) => onPolicyChange(tool.name, e.target.value as McpToolPolicy)}
-          className="field-shell rounded-xl px-3 py-2 text-xs text-[var(--text-primary)]"
-          title={tl("Politica de execucao")}
+          onValueChange={(v) => onPolicyChange(tool.name, v as McpToolPolicy)}
         >
-          {POLICY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {tl(option.label)} — {tl(option.description)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger sizeVariant="sm" className="min-w-[220px]" title={tl("Politica de execucao")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {POLICY_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {tl(option.label)} — {tl(option.description)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );

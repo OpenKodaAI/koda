@@ -18,22 +18,22 @@ describe("control-plane-dashboard", () => {
     vi.unstubAllGlobals();
   });
 
-  it("builds canonical dashboard URLs with repeated bot filters", () => {
+  it("builds canonical dashboard URLs with repeated agent filters", () => {
     expect(
       buildControlPlaneDashboardUrl("/executions", {
-        bot: ["ATLAS", "KODA"],
+        agent: ["ATLAS", "KODA"],
         status: "running",
         limit: 100,
       }),
     ).toBe(
-      "/api/control-plane/dashboard/executions?bot=ATLAS&bot=KODA&status=running&limit=100",
+      "/api/control-plane/dashboard/executions?agent=ATLAS&agent=KODA&status=running&limit=100",
     );
   });
 
   it("fetches dashboard payloads through the canonical proxy", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe(
-        "/api/control-plane/dashboard/costs?period=30d&bot=ATLAS",
+        "/api/control-plane/dashboard/costs?period=30d&agent=ATLAS",
       );
       return jsonResponse({ ok: true });
     });
@@ -42,7 +42,7 @@ describe("control-plane-dashboard", () => {
 
     await expect(
       fetchControlPlaneDashboardJson<{ ok: boolean }>("/costs", {
-        params: { period: "30d", bot: ["ATLAS"] },
+        params: { period: "30d", agent: ["ATLAS"] },
         fallbackError: "failed",
       }),
     ).resolves.toEqual({ ok: true });

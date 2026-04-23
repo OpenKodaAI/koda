@@ -10,7 +10,6 @@ from aiohttp import web
 
 from koda.control_plane import api as control_plane_api
 from koda.control_plane.execution_policy import (
-    _matches_value,
     build_mcp_action_catalog,
     build_policy_catalog,
     evaluate_execution_policy,
@@ -30,87 +29,38 @@ class _Request:
         return dict(self._payload)
 
 
-def test_resolve_execution_policy_compiles_legacy_tool_and_integration_grants() -> None:
+def test_resolve_execution_policy_returns_explicit_policy_only() -> None:
     catalog = build_policy_catalog()
     tool_id = catalog["tool_ids"][0]
 
+    explicit = {
+        "version": 1,
+        "rules": [
+            {
+                "name": f"allow_{tool_id}",
+                "priority": 100,
+                "match": {"tool_id": tool_id},
+                "decision": "allow",
+            }
+        ],
+        "defaults": {"default_approval_mode": "guarded"},
+    }
+
+    policy = resolve_execution_policy({"execution_policy": explicit})
+
+    assert policy["rules"][0]["match"]["tool_id"] == tool_id
+    assert policy["defaults"]["default_approval_mode"] == "guarded"
+
+
+def test_resolve_execution_policy_returns_empty_when_no_explicit_policy() -> None:
     policy = resolve_execution_policy(
         {
-            "tool_policy": {"allowed_tool_ids": [tool_id]},
-            "resource_access_policy": {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.send"],
-                        "allowed_domains": ["googleapis.com"],
-                        "allow_private_network": True,
-                    }
-                }
-            },
+            "tool_policy": {"allowed_tool_ids": ["http_request"]},
             "autonomy_policy": {"default_approval_mode": "guarded"},
         }
     )
 
-    assert policy["source"] == "compiled_legacy"
-    assert any(rule["match"].get("tool_id") == tool_id for rule in policy["rules"])
-    assert any(rule["match"].get("integration_id") == "gws" for rule in policy["rules"])
-    assert policy["defaults"]["default_approval_mode"] == "guarded"
-
-
-def test_resolve_execution_policy_compiles_private_network_legacy_grant_as_preview_rule() -> None:
-    policy = resolve_execution_policy(
-        {
-            "resource_access_policy": {
-                "integration_grants": {
-                    "gws": {
-                        "allow_private_network": True,
-                    }
-                }
-            }
-        }
-    )
-
-    private_network_rule = next(rule for rule in policy["rules"] if rule["reason"] == "legacy_private_network_grant")
-
-    assert private_network_rule["decision"] == "allow_with_preview"
-    assert private_network_rule["match"] == {"integration_id": "gws", "private_network": True}
-
-
-def test_resolve_execution_policy_prefers_explicit_policy_over_legacy_sources() -> None:
-    policy = resolve_execution_policy(
-        {
-            "execution_policy": {
-                "version": 1,
-                "source": "Manual",
-                "rules": [
-                    {
-                        "name": "allow-explicit-web-search",
-                        "priority": "10",
-                        "match": {"tool_id": "web_search", "private_network": "false"},
-                        "decision": "allow_with_preview",
-                    }
-                ],
-            },
-            "tool_policy": {"allowed_tool_ids": ["shell"]},
-            "resource_access_policy": {
-                "integration_grants": {
-                    "shell": {
-                        "allow_actions": ["shell.*"],
-                    }
-                }
-            },
-        }
-    )
-
-    assert policy["source"] == "manual"
-    assert policy["rules"] == [
-        {
-            "name": "allow-explicit-web-search",
-            "priority": 10,
-            "match": {"tool_id": "web_search", "private_network": False},
-            "decision": "allow_with_preview",
-        }
-    ]
-    assert "legacy_sources" not in policy
+    assert policy == {}
 
 
 def test_build_policy_catalog_exposes_action_entries_and_groupings() -> None:
@@ -230,32 +180,6 @@ def test_validate_execution_policy_rejects_invalid_decisions() -> None:
 
     assert errors
     assert not warnings
-
-
-def test_validate_execution_policy_warns_on_unsupported_selector_and_bad_approval_ttl() -> None:
-    errors, warnings = validate_execution_policy(
-        {
-            "version": 1,
-            "rules": [
-                {
-                    "name": "review-shell-rule",
-                    "match": {"tool_id": "shell", "hostname": "internal.example"},
-                    "decision": "allow_with_preview",
-                    "approval_ttl_seconds": 0,
-                }
-            ],
-        }
-    )
-
-    assert errors == ["execution_policy.rules[0].approval_ttl_seconds must be a positive integer."]
-    assert warnings == ["execution_policy.rules[0].match contains unsupported selectors: hostname"]
-
-
-def test_matches_value_treats_caret_pattern_as_literal_prefix() -> None:
-    assert _matches_value("^gmail.", "gmail.send")
-    assert _matches_value("^GMAIL.", "gmail.send")
-    assert not _matches_value("^gmail.", "calendar.send")
-    assert not _matches_value("^   ", "gmail.send")
 
 
 @pytest.mark.asyncio

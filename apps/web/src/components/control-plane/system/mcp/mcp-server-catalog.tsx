@@ -226,7 +226,7 @@ export function McpServerCatalog() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={tl("Buscar servidores...")}
-              className="field-shell w-full py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
               aria-label={tl("Buscar servidores MCP")}
             />
           </div>

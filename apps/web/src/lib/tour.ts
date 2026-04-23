@@ -51,8 +51,7 @@ export type TourPlacement = "top" | "bottom" | "left" | "right" | "center";
 export type TourRoutePattern =
   | "/"
   | "/control-plane"
-  | "/control-plane/agents/:botId"
-  | "/control-plane/bots/:botId"
+  | "/control-plane/agents/:agentId"
   | "/runtime"
   | "/sessions"
   | "/executions"
@@ -252,7 +251,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.controlPlaneEditor.header",
     chapterId: "control_plane_editor",
-    routePattern: "/control-plane/agents/:botId",
+    routePattern: "/control-plane/agents/:agentId",
     routeKey: "control-plane.editor",
     kind: "anchored",
     anchor: "editor.header",
@@ -270,7 +269,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.controlPlaneEditor.steps",
     chapterId: "control_plane_editor",
-    routePattern: "/control-plane/agents/:botId",
+    routePattern: "/control-plane/agents/:agentId",
     routeKey: "control-plane.editor",
     kind: "anchored",
     anchor: "editor.step-rail",
@@ -288,7 +287,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.controlPlaneEditor.publish",
     chapterId: "control_plane_editor",
-    routePattern: "/control-plane/agents/:botId",
+    routePattern: "/control-plane/agents/:agentId",
     routeKey: "control-plane.editor",
     kind: "anchored",
     anchor: "editor.save",
@@ -631,8 +630,8 @@ export function matchesTourRoutePattern(pathname: string, pattern?: TourRoutePat
     return normalizedPathname === pattern;
   }
 
-  if (pattern === "/control-plane/agents/:botId" || pattern === "/control-plane/bots/:botId") {
-    return /^\/control-plane\/(?:agents|bots)\/[^/]+$/.test(normalizedPathname);
+  if (pattern === "/control-plane/agents/:agentId") {
+    return /^\/control-plane\/agents\/[^/]+$/.test(normalizedPathname);
   }
 
   return false;
@@ -644,7 +643,7 @@ export function getTourChapterForPathname(pathname: string): TourChapterId | nul
   if (normalizedPathname.startsWith("/control-plane/system")) {
     return "system_settings";
   }
-  if (/^\/control-plane\/(?:agents|bots)\/[^/]+$/.test(normalizedPathname)) {
+  if (/^\/control-plane\/agents\/[^/]+$/.test(normalizedPathname)) {
     return "control_plane_editor";
   }
   if (normalizedPathname === "/control-plane") {

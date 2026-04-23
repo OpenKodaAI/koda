@@ -31,16 +31,16 @@ class TestRedactStringApiKeysInQueryStrings:
     """API keys in query strings must be redacted."""
 
     def test_api_key_in_url(self):
-        text = "https://api.example.com/v1?api_key=example-key-value"
+        text = "https://api.example.com/v1?api_key=sk-12345abcdef"
         result, changed = _redact_string(text)
-        assert "example-key-value" not in result
+        assert "sk-12345abcdef" not in result
         assert "[REDACTED]" in result
         assert changed is True
 
     def test_access_token_in_url(self):
-        text = "https://example.com/api?access_token=example-access-token"
+        text = "https://example.com/api?access_token=ghp_abcdefghij123456"
         result, changed = _redact_string(text)
-        assert "example-access-token" not in result
+        assert "ghp_abcdefghij123456" not in result
         assert changed is True
 
     def test_token_in_url(self):
@@ -86,15 +86,15 @@ class TestRedactStringPasswordsInKeyValuePairs:
         assert changed is True
 
     def test_api_key_equals(self):
-        text = "api_key=example-inline-key"
+        text = "api_key=sk-abcdef1234567890"
         result, changed = _redact_string(text)
-        assert "example-inline-key" not in result
+        assert "sk-abcdef1234567890" not in result
         assert changed is True
 
     def test_access_token_equals(self):
-        text = "access_token=example-inline-access-token"
+        text = "access_token=ghp_0123456789abcdef"
         result, changed = _redact_string(text)
-        assert "example-inline-access-token" not in result
+        assert "ghp_0123456789abcdef" not in result
         assert changed is True
 
     def test_cookie_equals(self):
@@ -141,17 +141,17 @@ class TestRedactStringCombinedPatterns:
     """Combined and nested patterns must all be redacted."""
 
     def test_multiple_secrets_in_one_string(self):
-        text = "Authorization: Bearer inline-demo-token with api_key=inline-demo-key"
+        text = "Authorization: Bearer tok123 with api_key=sk-456"
         result, changed = _redact_string(text)
-        assert "inline-demo-token" not in result
-        assert "inline-demo-key" not in result
+        assert "tok123" not in result
+        assert "sk-456" not in result
         assert changed is True
 
     def test_bearer_and_query_param(self):
-        text = "bearer example-bearer-token calling https://api.com?secret=example-secret"
+        text = "bearer xyztoken123 calling https://api.com?secret=abc"
         result, changed = _redact_string(text)
-        assert "example-bearer-token" not in result
-        assert "example-secret" not in result
+        assert "xyztoken123" not in result
+        assert "abc" not in result
         assert changed is True
 
 

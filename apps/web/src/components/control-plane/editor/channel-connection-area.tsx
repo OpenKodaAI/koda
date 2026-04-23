@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useBotEditor } from "@/hooks/use-bot-editor";
+import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   IntegrationCardStatusIndicator,
@@ -115,7 +115,7 @@ export function renderChannelLogo(logoKey: string, className?: string) {
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type BotInfo = { username: string; name: string };
+type AgentInfo = { username: string; name: string };
 
 /* ------------------------------------------------------------------ */
 /*  Channel card                                                       */
@@ -124,12 +124,12 @@ type BotInfo = { username: string; name: string };
 function ChannelCard({
   channel,
   connected,
-  botUsername,
+  agentUsername,
   onClick,
 }: {
   channel: ChannelDefinition;
   connected: boolean;
-  botUsername?: string;
+  agentUsername?: string;
   onClick: () => void;
 }) {
   const { tl } = useAppI18n();
@@ -160,7 +160,7 @@ function ChannelCard({
           {channel.label}
         </div>
         <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
-          {connected && botUsername ? `@${botUsername}` : tl(channel.tagline)}
+          {connected && agentUsername ? `@${agentUsername}` : tl(channel.tagline)}
           {!channel.isOfficial && (
             <span className="ml-1 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400/80">
               {tl("(não oficial)")}
@@ -180,13 +180,13 @@ function ChannelCard({
 /* ------------------------------------------------------------------ */
 
 export function ChannelConnectionArea() {
-  const { state } = useBotEditor();
-  const botId = state.bot.id;
+  const { state } = useAgentEditor();
+  const agentId = state.agent.id;
 
-  // PRIMARY source of truth: state.bot.secrets from server component.
+  // PRIMARY source of truth: state.agent.secrets from server component.
   // Build a per-channel connected map by checking if ALL required fields exist.
   const serverConnectedMap = useMemo(() => {
-    const secrets = (state.bot.secrets ?? []) as Record<string, unknown>[];
+    const secrets = (state.agent.secrets ?? []) as Record<string, unknown>[];
     const secretKeys = new Set(
       secrets.map((s) => String(s.secret_key ?? "").toUpperCase()),
     );
@@ -198,11 +198,11 @@ export function ChannelConnectionArea() {
       );
     }
     return result;
-  }, [state.bot.secrets]);
+  }, [state.agent.secrets]);
 
   // Local override per channel: set after connecting/disconnecting in the modal
   const [localOverrideMap, setLocalOverrideMap] = useState<Record<string, boolean | null>>({});
-  const [botInfoMap, setBotInfoMap] = useState<Record<string, BotInfo | null>>({});
+  const [agentInfoMap, setAgentInfoMap] = useState<Record<string, AgentInfo | null>>({});
   const [activeChannel, setActiveChannel] = useState<ChannelDefinition | null>(null);
 
   // Effective connected state per channel
@@ -226,22 +226,22 @@ export function ChannelConnectionArea() {
     });
   }, [serverConnectedMap]);
 
-  // Fetch bot info for each connected channel that has no cached info
+  // Fetch agent info for each connected channel that has no cached info
   useEffect(() => {
     let cancelled = false;
 
     for (const channel of CHANNEL_CATALOG) {
       const connected = getConnected(channel.key);
-      if (!connected || botInfoMap[channel.key]) continue;
+      if (!connected || agentInfoMap[channel.key]) continue;
 
-      fetch(`/api/channels/${encodeURIComponent(botId)}/${channel.key}/status`, { cache: "no-store" })
+      fetch(`/api/channels/${encodeURIComponent(agentId)}/${channel.key}/status`, { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (cancelled || !data) return;
           const username = data.display_id ?? data.bot_username;
           const name = data.display_name ?? data.bot_name ?? "";
           if (username) {
-            setBotInfoMap((prev) => ({
+            setAgentInfoMap((prev) => ({
               ...prev,
               [channel.key]: { username, name },
             }));
@@ -252,21 +252,21 @@ export function ChannelConnectionArea() {
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getConnected, botId]);
+  }, [getConnected, agentId]);
 
   const handleStatusChange = useCallback(
     (channelKey: string, newStatus: ChannelStatus, username?: string, name?: string) => {
       if (newStatus === "connected") {
         setLocalOverrideMap((prev) => ({ ...prev, [channelKey]: true }));
         if (username) {
-          setBotInfoMap((prev) => ({
+          setAgentInfoMap((prev) => ({
             ...prev,
             [channelKey]: { username, name: name ?? "" },
           }));
         }
       } else {
         setLocalOverrideMap((prev) => ({ ...prev, [channelKey]: false }));
-        setBotInfoMap((prev) => ({ ...prev, [channelKey]: null }));
+        setAgentInfoMap((prev) => ({ ...prev, [channelKey]: null }));
       }
     },
     [],
@@ -280,7 +280,7 @@ export function ChannelConnectionArea() {
             key={channel.key}
             channel={channel}
             connected={getConnected(channel.key)}
-            botUsername={botInfoMap[channel.key]?.username}
+            agentUsername={agentInfoMap[channel.key]?.username}
             onClick={() => setActiveChannel(channel)}
           />
         ))}
@@ -288,10 +288,10 @@ export function ChannelConnectionArea() {
 
       {activeChannel ? (
         <ChannelConnectionModal
-          botId={botId}
+          agentId={agentId}
           channel={activeChannel}
           status={getConnected(activeChannel.key) ? "connected" : "disconnected"}
-          botInfo={botInfoMap[activeChannel.key] ?? null}
+          agentInfo={agentInfoMap[activeChannel.key] ?? null}
           onClose={() => setActiveChannel(null)}
           onStatusChange={(status, username, name) =>
             handleStatusChange(activeChannel.key, status, username, name)

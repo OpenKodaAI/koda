@@ -160,7 +160,7 @@ export function CollectionManager({
                         [id]: e.target.value,
                       }))
                     }
-                    className="field-shell w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)] resize-y min-h-[160px]"
+                    className="field-shell resize-y min-h-[160px] font-mono text-xs text-[var(--text-primary)]"
                     spellCheck={false}
                   />
                   {error && expandedId === id && (
@@ -200,7 +200,7 @@ export function CollectionManager({
           <textarea
             value={newItemJson}
             onChange={(e) => setNewItemJson(e.target.value)}
-            className="field-shell w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)] resize-y min-h-[160px]"
+            className="field-shell resize-y min-h-[160px] font-mono text-xs text-[var(--text-primary)]"
             spellCheck={false}
           />
           {error && !expandedId && (
@@ -254,7 +254,7 @@ export function CollectionManager({
           <textarea
             value={JSON.stringify(items, null, 2)}
             readOnly
-            className="field-shell w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)] resize-y min-h-[200px] mt-2"
+            className="field-shell resize-y min-h-[200px] mt-2 font-mono text-xs text-[var(--text-primary)]"
             spellCheck={false}
           />
         )}

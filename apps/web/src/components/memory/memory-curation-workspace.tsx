@@ -12,6 +12,14 @@ import { MemoryCurationActions } from "@/components/memory/memory-curation-actio
 import { MemoryCurationDetail } from "@/components/memory/memory-curation-detail";
 import { MemoryCurationKpis } from "@/components/memory/memory-curation-kpis";
 import { MemoryCurationList } from "@/components/memory/memory-curation-list";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getMemoryTypeLabel, getMemoryTypeMeta, MEMORY_TYPE_ORDER } from "@/lib/memory-constants";
 import type {
@@ -25,7 +33,6 @@ import type {
   MemoryReviewStatus,
   MemoryTypeKey,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import {
   fetchMemoryCurationDetail,
   fetchMemoryCurationList,
@@ -37,7 +44,7 @@ type DetailState = MemoryReviewDetail | MemoryClusterReviewDetail | null;
 type SelectableItem = MemoryReviewItem | MemoryClusterReviewItem;
 
 type SelectedEntry = {
-  botId: string;
+  agentId: string;
   kind: ReviewKind;
   id: string;
 };
@@ -93,13 +100,13 @@ function createEmptyResponse(): MemoryCurationResponse {
 }
 
 function encodeSelection(entry: SelectedEntry) {
-  return `${entry.botId}::${entry.kind}::${entry.id}`;
+  return `${entry.agentId}::${entry.kind}::${entry.id}`;
 }
 
 function decodeSelection(value: string): SelectedEntry {
-  const [botId, kind, id] = value.split("::");
+  const [agentId, kind, id] = value.split("::");
   return {
-    botId,
+    agentId,
     kind: kind as ReviewKind,
     id,
   };
@@ -227,7 +234,7 @@ export function MemoryCurationWorkspace({
     const stillExists = selectedItem
       ? visibleItems.some(
           (item) =>
-            item.bot_id === selectedItem.botId && getSelectableId(item) === selectedItem.id
+            item.bot_id === selectedItem.agentId && getSelectableId(item) === selectedItem.id
         )
       : false;
 
@@ -235,7 +242,7 @@ export function MemoryCurationWorkspace({
 
     const firstItem = visibleItems[0];
     setSelectedItem({
-      botId: firstItem.bot_id,
+      agentId: firstItem.bot_id,
       kind,
       id: getSelectableId(firstItem),
     });
@@ -255,7 +262,7 @@ export function MemoryCurationWorkspace({
 
     const run = async () => {
       try {
-        const payload = await fetchMemoryCurationDetail(selectedItem.botId, {
+        const payload = await fetchMemoryCurationDetail(selectedItem.agentId, {
           kind: selectedItem.kind,
           id: selectedItem.id,
         });
@@ -284,7 +291,7 @@ export function MemoryCurationWorkspace({
   const handleCheckChange = useCallback(
     (item: SelectableItem, checked: boolean) => {
       const entry: SelectedEntry = {
-        botId: item.bot_id,
+        agentId: item.bot_id,
         kind,
         id: getSelectableId(item),
       };
@@ -318,16 +325,16 @@ export function MemoryCurationWorkspace({
       const targetType = decodeSelection(targetKeys[0]).kind;
       targetKeys.forEach((key) => {
         const entry = decodeSelection(key);
-        const current = grouped.get(entry.botId) ?? [];
+        const current = grouped.get(entry.agentId) ?? [];
         current.push(entry.id);
-        grouped.set(entry.botId, current);
+        grouped.set(entry.agentId, current);
       });
 
       setActionBusy(true);
       try {
         await Promise.all(
-          Array.from(grouped.entries()).map(([botId, targetIds]) =>
-            postMemoryCurationAction(botId, {
+          Array.from(grouped.entries()).map(([agentId, targetIds]) =>
+            postMemoryCurationAction(agentId, {
                 target_type: targetType,
                 target_ids: targetIds,
                 action,
@@ -384,68 +391,67 @@ export function MemoryCurationWorkspace({
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
               {t("memory.curation.mode")}
             </span>
-            <div
-              className="segmented-control segmented-control--single-row w-full"
-              role="group"
-              aria-label={t("memory.curation.mode")}
-            >
-              <button
-                type="button"
-                onClick={() => setKind("memory")}
-                className={cn("segmented-control__option", kind === "memory" && "is-active")}
-              >
-                {t("memory.curation.memories")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setKind("cluster")}
-                className={cn("segmented-control__option", kind === "cluster" && "is-active")}
-              >
-                {t("memory.curation.clusters")}
-              </button>
-            </div>
+            <SoftTabs
+              ariaLabel={t("memory.curation.mode")}
+              value={kind}
+              onChange={(id) => setKind(id as ReviewKind)}
+              items={[
+                { id: "memory", label: t("memory.curation.memories") },
+                { id: "cluster", label: t("memory.curation.clusters") },
+              ]}
+            />
           </div>
 
           <label className="block min-w-0">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
               {t("memory.curation.states")}
             </span>
-            <select
-              aria-label={t("memory.curation.states")}
+            <Select
               value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter((event.target.value || "all") as MemoryReviewStatus | "all")
+              onValueChange={(v) =>
+                setStatusFilter(v as MemoryReviewStatus | "all")
               }
-              className="field-shell w-full px-4 py-2.5 text-sm text-[var(--text-primary)]"
             >
-              <option value="all">{t("memory.curation.allStates")}</option>
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {getStatusLabel(option.value)} · {option.count}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-label={t("memory.curation.states")}
+               
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("memory.curation.allStates")}</SelectItem>
+                {statusOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {getStatusLabel(option.value)} · {option.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
 
           <label className="block min-w-0">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
               {t("memory.curation.type")}
             </span>
-            <select
-              aria-label={t("memory.curation.type")}
+            <Select
               value={typeFilter}
-              onChange={(event) =>
-                setTypeFilter((event.target.value || "all") as MemoryTypeKey | "all")
-              }
-              className="field-shell w-full px-4 py-2.5 text-sm text-[var(--text-primary)]"
+              onValueChange={(v) => setTypeFilter(v as MemoryTypeKey | "all")}
             >
-              <option value="all">{t("memory.curation.allTypes")}</option>
-              {typeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {getMemoryTypeLabel(option.value, t)} · {option.count}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-label={t("memory.curation.type")}
+               
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("memory.curation.allTypes")}</SelectItem>
+                {typeOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {getMemoryTypeLabel(option.value, t)} · {option.count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
 
           <label className="block min-w-0">
@@ -453,12 +459,12 @@ export function MemoryCurationWorkspace({
               {t("memory.curation.search")}
             </span>
             <div className="relative">
-              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-quaternary)]" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-quaternary)]" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("memory.curation.searchPlaceholder")}
-                className="field-shell w-full py-2.5 pl-11 pr-4 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
               />
             </div>
           </label>
@@ -511,9 +517,9 @@ export function MemoryCurationWorkspace({
             kind={kind}
             items={visibleItems}
             selectedId={selectedItem?.id ?? null}
-            selectedBotId={selectedItem?.botId ?? null}
+            selectedBotId={selectedItem?.agentId ?? null}
             checkedKeys={selectedKeys}
-            showBot={false}
+            showAgent={false}
             title={listTitle}
             subtitle={listSubtitle}
             loading={loading}
@@ -524,7 +530,7 @@ export function MemoryCurationWorkspace({
             }
             onSelect={(item) =>
               setSelectedItem({
-                botId: item.bot_id,
+                agentId: item.bot_id,
                 kind,
                 id: getSelectableId(item),
               })
@@ -533,7 +539,7 @@ export function MemoryCurationWorkspace({
           />
 
           <MemoryCurationDetail
-            key={`${selectedItem?.botId ?? "none"}:${selectedItem?.kind ?? kind}:${selectedItem?.id ?? "empty"}`}
+            key={`${selectedItem?.agentId ?? "none"}:${selectedItem?.kind ?? kind}:${selectedItem?.id ?? "empty"}`}
             kind={kind}
             detail={detail}
             loading={detailLoading}
@@ -548,7 +554,7 @@ export function MemoryCurationWorkspace({
             onSelectMemory={(memoryId) => {
               setKind("memory");
               setSelectedItem({
-                botId: activeBotId,
+                agentId: activeBotId,
                 kind: "memory",
                 id: String(memoryId),
               });
