@@ -7640,23 +7640,6 @@ class ControlPlaneManager:
         "cp_agent_connections",
     )
 
-    def delete_agent(self, agent_id: str) -> bool:
-        """Hard-delete an agent and every dependent cp_* row.
-
-        Returns True if the agent existed and was removed, False if it was
-        already gone (idempotent — repeated DELETE calls should not raise).
-        Runtime / audit tables (tasks, query_history, audit_events) are
-        intentionally left alone so historical records survive.
-        """
-        try:
-            normalized, _ = self._require_agent_row(agent_id)
-        except KeyError:
-            return False
-        for table in self._AGENT_CASCADE_TABLES:
-            execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
-        execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
-        return True
-
     # Tables that hold per-agent state and must be purged on hard delete.
     # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
     # is written last so the main row survives if any cascade step fails.

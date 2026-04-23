@@ -81,16 +81,18 @@ def execute(query: str, params: tuple[Any, ...] = ()) -> int:
             # never after the RETURNING path already committed the row, which
             # would produce a duplicate-key on retry.
             return int(run_coro_sync(primary_execute(normalized, params)) or 0)
-        # Callers historically expect an int rowid, but TEXT primary keys
-        # (e.g. "usr_<hex>") return strings. Coerce safely: numeric values stay
-        # as ints, non-numeric ids return 0 without crashing and WITHOUT
-        # re-executing the INSERT (the row is already persisted).
+        # Callers historically expect an integer rowcount. Numeric primary
+        # keys return as ints (legacy callers relied on this); TEXT primary
+        # keys (e.g. "boot_<hex>", "usr_<hex>") return strings. In the TEXT
+        # case we still want to report "one row affected" (==1) rather than 0,
+        # since the INSERT did succeed — a 0 return would make idempotent
+        # UPSERT paths re-fire the INSERT and produce a duplicate-key error.
         if inserted is None:
             return 0
         try:
             return int(inserted)
         except (TypeError, ValueError):
-            return 0
+            return 1
     return int(run_coro_sync(primary_execute(normalized, params)) or 0)
 
 
