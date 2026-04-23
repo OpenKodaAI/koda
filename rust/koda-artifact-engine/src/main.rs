@@ -1085,11 +1085,13 @@ mod tests {
                 bucket: bucket.to_string(),
                 objects: Arc::new(StdMutex::new(HashMap::new())),
             };
+            // axum 0.8 switched route capture syntax from `:param` / `*splat`
+            // to `{param}` / `{*splat}`. Mixed-mode routers raise at startup.
             let app = Router::new()
-                .route("/:bucket", head(head_bucket))
-                .route("/:bucket/", head(head_bucket))
+                .route("/{bucket}", head(head_bucket))
+                .route("/{bucket}/", head(head_bucket))
                 .route(
-                    "/:bucket/*key",
+                    "/{bucket}/{*key}",
                     put(put_object).get(get_object).delete(delete_object),
                 )
                 .with_state(state.clone());
