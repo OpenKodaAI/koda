@@ -223,6 +223,17 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v6.0.2
+      - name: Free up runner disk space
+        # ~14GB of preinstalled toolchains we don't use leaves Trivy enough
+        # space to export four Docker image layers without hitting ENOSPC on
+        # /tmp (the runner's default disk is ~22GB and the koda:ci image
+        # alone is ~6GB after uncompression).
+        run: |
+          set +e
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY"
+          docker image prune -af >/dev/null 2>&1 || true
+          df -h /
       - name: Build container images
         run: |
           docker build -t koda:ci .
