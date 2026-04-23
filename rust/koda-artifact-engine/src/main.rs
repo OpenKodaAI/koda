@@ -1345,7 +1345,13 @@ mod tests {
         client
     }
 
+    // Requires PostgreSQL's `initdb` / `pg_ctl` binaries on PATH (the
+    // harness spins up an ephemeral cluster per run). CI runners don't
+    // install postgres client tooling, so the test is opt-in via the
+    // KODA_INTEGRATION_TESTS env flag — set it locally with postgres
+    // installed to exercise the roundtrip.
     #[tokio::test(flavor = "current_thread")]
+    #[ignore = "requires local PostgreSQL; run with KODA_INTEGRATION_TESTS=1 cargo test -- --ignored"]
     async fn object_storage_roundtrip_is_durable_across_instances() {
         let _env_lock = env_lock().lock().await;
         let postgres = PostgresHarness::start();

@@ -95,7 +95,24 @@ jobs:
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit
-        run: cargo audit --file rust/Cargo.lock
+        # Ignored advisories:
+        #   RUSTSEC-2026-0098/0099/0104 — rustls-webpki 0.101.x pulled in
+        #     transitively by aws-smithy-http-client → hyper-rustls 0.24 →
+        #     rustls 0.21 (EOL). The fixed versions only exist on 0.103.x;
+        #     there is no backport for 0.101. Name-constraint / CRL parsing
+        #     defects only trigger when accepting untrusted peer
+        #     certificates. We only talk to AWS S3 / our FakeS3 harness
+        #     through the AWS SDK's bundled CA bundle, so the exposure is
+        #     effectively nil. Track AWS SDK migration to newer rustls.
+        #   RUSTSEC-2025-0134 — rustls-pemfile unmaintained (warning-only).
+        #   RUSTSEC-2026-0097 — rand custom-logger unsoundness (warning).
+        run: |
+          cargo audit --file rust/Cargo.lock \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104 \
+            --ignore RUSTSEC-2025-0134 \
+            --ignore RUSTSEC-2026-0097
 
   sast:
     name: sast
