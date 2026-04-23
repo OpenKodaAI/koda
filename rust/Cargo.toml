@@ -18,7 +18,7 @@ version = "0.1.0"
 [workspace.dependencies]
 anyhow = "1.0"
 prost = "0.13"
-prost-types = "0.13"
+prost-types = "0.14"
 protoc-bin-vendored = "3.1"
 sha2 = "0.11"
 tokio = { version = "1.44", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
