@@ -124,6 +124,54 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  auto-sync-npm-readme:
+    # Automates the "run sync_npm_readme.py --write and commit" chore for
+    # internal PRs so authors never have to remember to rebuild
+    # packages/cli/README.md after editing the root README.md. The fallback
+    # drift check below still runs and blocks merge for PRs this job cannot
+    # touch (fork PRs, or cases where the push-back itself fails).
+    name: auto-sync npm README
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # persist-credentials defaults to true; the resulting token can
+          # push back to this same PR branch (same-repo only — fork PRs
+          # are already excluded by the `if` guard above).
+          fetch-depth: 1
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Regenerate packages/cli/README.md
+        run: uv run python3 scripts/sync_npm_readme.py --write
+      - name: Commit + push if drift detected
+        run: |
+          set -euo pipefail
+          if git diff --quiet packages/cli/README.md; then
+            echo "packages/cli/README.md already in sync — nothing to do."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/cli/README.md
+          git commit -m "chore(docs): sync packages/cli/README.md from root README"
+          git push
+
   repo-hygiene:
     name: repo-hygiene
     runs-on: ubuntu-latest
