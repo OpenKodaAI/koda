@@ -94,7 +94,6 @@ RUN uv export \
 # Copy application code
 COPY koda/ koda/
 COPY docs/openapi/ docs/openapi/
-COPY agent.py ./
 RUN pip install --no-cache-dir --no-deps .
 
 # Pre-download optional embedding assets only when the dependency is present in the image.

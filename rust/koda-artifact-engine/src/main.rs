@@ -795,7 +795,16 @@ impl ArtifactEngineService for ArtifactServer {
             Status::internal(format!("failed to flush upload staging file: {error}"))
         })?;
         drop(file);
-        let content_hash = format!("{:x}", hasher.finalize());
+        // sha2 0.11's `finalize()` returns a `hybrid-array::Array<u8, N>` which
+        // does not implement `std::fmt::LowerHex` directly — unlike the prior
+        // `GenericArray`. Convert the raw bytes to lowercase hex explicitly so
+        // the content-hash string stays identical across sha2 versions.
+        let digest = hasher.finalize();
+        let mut content_hash = String::with_capacity(digest.len() * 2);
+        for byte in digest.as_slice() {
+            use std::fmt::Write as _;
+            write!(content_hash, "{byte:02x}").expect("write to string never fails");
+        }
         let object_key = match object_key_override {
             Some(object_key) => object_key,
             None => default_object_key(&agent_scope, &content_hash, logical_filename),

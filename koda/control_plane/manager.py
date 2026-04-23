@@ -7640,25 +7640,6 @@ class ControlPlaneManager:
         "cp_agent_connections",
     )
 
-    # Tables that hold per-agent state and must be purged on hard delete.
-    # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
-    # is written last so the main row survives if any cascade step fails.
-    _AGENT_CASCADE_TABLES: tuple[str, ...] = (
-        "cp_agent_sections",
-        "cp_agent_documents",
-        "cp_agent_config_versions",
-        "cp_apply_operations",
-        "cp_knowledge_assets",
-        "cp_template_assets",
-        "cp_skill_assets",
-        "cp_mcp_agent_connections",
-        "cp_mcp_tool_policies",
-        "cp_mcp_discovered_tools",
-        "cp_mcp_oauth_tokens",
-        "cp_mcp_oauth_sessions",
-        "cp_agent_connections",
-    )
-
     def delete_agent(self, agent_id: str) -> bool:
         """Hard-delete an agent and every dependent cp_* row.
 

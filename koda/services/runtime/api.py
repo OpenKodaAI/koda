@@ -28,7 +28,10 @@ class _SilentRuntimeMessage:
 
     def __init__(self, text: str = "") -> None:
         self.text = text
-        self.message_id = int(hashlib.sha1(text.encode()).hexdigest()[:8], 16) or 1
+        # Non-cryptographic digest — just need a stable integer message_id
+        # derived from the text body. ``usedforsecurity=False`` makes that
+        # explicit and silences bandit's B324 warning.
+        self.message_id = int(hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()[:8], 16) or 1
 
     async def edit_text(self, text: str, *_args: object, **_kwargs: object) -> _SilentRuntimeMessage:
         self.text = text
@@ -117,7 +120,9 @@ async def _json_payload(request: web.Request) -> dict[str, object]:
 
 def _dashboard_actor_id(*, namespace: str, session_id: str) -> int:
     seed = f"{AGENT_ID}:{namespace}:{session_id}".encode()
-    return 1_000_000_000 + int(hashlib.sha1(seed).hexdigest()[:12], 16) % 900_000_000
+    # Non-cryptographic digest — this id is only used to namespace dashboard
+    # actors; no authentication, no access decisions.
+    return 1_000_000_000 + int(hashlib.sha1(seed, usedforsecurity=False).hexdigest()[:12], 16) % 900_000_000
 
 
 def _include_sensitive(request: web.Request) -> bool:
