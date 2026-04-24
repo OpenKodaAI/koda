@@ -71,12 +71,22 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
       - name: Export pinned Python requirements for audit
+        # Scope the audit to what actually ships to production:
+        #   - runtime dependencies (`[project.dependencies]`)
+        #   - channel integration extras (whatsapp/discord/slack/teams/line/
+        #     channels-all), which become part of the runtime surface when
+        #     operators enable them
+        # Dev tooling (pytest, ruff, mypy, pip-audit, bandit, …) is excluded
+        # via `--no-extra dev` + `--no-default-groups` — those packages only
+        # run in CI, never in production containers, and auditing pip-audit's
+        # own transitive dependencies just causes the tool to flag itself.
         run: |
           uv export \
             --format requirements.txt \
             --locked \
-            --all-groups \
             --all-extras \
+            --no-extra dev \
+            --no-default-groups \
             --no-editable \
             --no-emit-project \
             --no-emit-workspace \
