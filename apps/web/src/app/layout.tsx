@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import { cookies, headers } from "next/headers";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, Fraunces, JetBrains_Mono } from "next/font/google";
 import { SkipToContentLink } from "@/components/layout/skip-to-content-link";
 import { AppShell } from "@/components/layout/app-shell";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
@@ -19,6 +19,13 @@ const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
+});
+
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -81,7 +88,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.variable} ${jetbrainsMono.variable} bg-background text-foreground`}>
+      <body className={`${inter.variable} ${fraunces.variable} ${jetbrainsMono.variable} bg-background text-foreground`}>
         <QueryProvider>
           <ThemeProvider initialThemePreference={initialThemePreference}>
             <I18nProvider initialLanguage={initialLanguage}>

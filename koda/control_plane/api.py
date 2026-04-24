@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from aiohttp import ContentTypeError, web
 
+from koda.logging_config import get_logger
 from koda.services.http_client import inspect_url
 from koda.services.link_analyzer import fetch_link_metadata
 
@@ -38,6 +39,8 @@ from .settings import (
     CONTROL_PLANE_AUTH_MODE,
     DOCUMENT_KINDS,
 )
+
+log = get_logger(__name__)
 
 
 def _manager() -> Any:
@@ -237,25 +240,34 @@ async def setup_page(request: web.Request) -> web.Response:
 
 
 async def onboarding_status(request: web.Request) -> web.Response:
-    # Catch exceptions here instead of letting them bubble into
-    # ``control_plane_error_middleware`` — that middleware translates any
-    # ``KeyError`` into a 404, which is correct for "fetch agent X" but
-    # misleading for this endpoint where a KeyError inside the status
-    # computation (dict lookup on provider/system-settings payloads) would
-    # masquerade as "onboarding endpoint missing" and break the release
-    # smoke test + CLI ``koda doctor`` output.
+    # This endpoint is a *health snapshot* polled by the CLI, setup wizard
+    # and release smoke. A transient failure (seed race, lazy provider row,
+    # storage not yet reachable) should degrade the payload but keep a 2xx
+    # — fail-closed with 4xx/5xx here makes ``koda install --headless``
+    # abort mid-bootstrap instead of letting the caller re-poll.
     try:
         payload = dict(_manager().get_onboarding_status())
         payload.update(_auth_service().onboarding_payload())
+        return web.json_response(payload)
     except Exception as exc:
+        log.warning(
+            "onboarding_status_degraded",
+            error_type=type(exc).__name__,
+            error=str(exc),
+            exc_info=True,
+        )
         return web.json_response(
             {
+                "status": "degraded",
                 "error": "onboarding_status_failed",
                 "message": f"{type(exc).__name__}: {exc}",
-            },
-            status=500,
+                "ready": False,
+                "providers": [],
+                "agents": [],
+                "storage": {"database": {"ready": False}, "object_storage": {"ready": False}},
+                "system": {},
+            }
         )
-    return web.json_response(payload)
 
 
 async def onboarding_bootstrap(request: web.Request) -> web.Response:

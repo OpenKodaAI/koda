@@ -533,7 +533,7 @@ function OverviewPageContent() {
       <div className="relative" {...tourRoute("overview", tourVariant)}>
         <section className="mx-auto flex w-full max-w-[760px] flex-col items-stretch gap-7 pt-10 pb-2">
           <header className="flex flex-col items-center gap-3 text-center">
-            <h1 className="m-0 text-center font-medium text-[var(--text-primary)] [font-size:var(--font-size-display)] [letter-spacing:var(--tracking-display)]">
+            <h1 className="display-serif m-0 text-center font-medium text-[var(--text-primary)] [font-size:var(--font-size-display)]">
               {greeting}
             </h1>
           </header>
