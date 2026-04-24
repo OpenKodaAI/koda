@@ -54,10 +54,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.3
         with:
           version: 10.26.2
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: "22"
           cache: pnpm
@@ -156,7 +156,7 @@ jobs:
           exit "${bandit_status}"
       - name: Upload Bandit SARIF
         if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/bandit.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/bandit.sarif
           category: bandit
@@ -186,13 +186,13 @@ jobs:
             --exit-code 1
       - name: Upload Gitleaks SARIF
         if: always() && github.event_name != 'pull_request' && hashFiles('artifacts/security/gitleaks.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/gitleaks.sarif
           category: gitleaks
       - name: Upload SAST artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sast-artifacts
           path: artifacts/security/
@@ -214,12 +214,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.35.1
+        uses: github/codeql-action/init@v4.35.2
         with:
           languages: ${{ matrix.language }}
           build-mode: none
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4.35.1
+        uses: github/codeql-action/analyze@v4.35.2
         with:
           category: /language:${{ matrix.language }}
           upload: ${{ github.event_name == 'pull_request' && 'never' || 'always' }}
@@ -274,31 +274,31 @@ jobs:
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
       - name: Upload Trivy SARIF for koda
         if: always() && github.event_name != 'pull_request'
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda.sarif
           category: trivy-koda
       - name: Upload Trivy SARIF for koda-web
         if: always() && github.event_name != 'pull_request'
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-web.sarif
           category: trivy-koda-web
       - name: Upload Trivy SARIF for koda-memory
         if: always() && github.event_name != 'pull_request'
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-memory.sarif
           category: trivy-koda-memory
       - name: Upload Trivy SARIF for koda-security
         if: always() && github.event_name != 'pull_request'
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
           category: trivy-koda-security
       - name: Upload container scan artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: container-scan-artifacts
           path: artifacts/security/trivy/

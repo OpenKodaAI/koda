@@ -219,7 +219,7 @@ jobs:
           KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
       - name: Upload pytest artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: python-tests-${{ matrix.python-version }}-artifacts
           path: artifacts/python/${{ matrix.python-version }}/
@@ -236,10 +236,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.3
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -333,10 +333,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.3
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -421,7 +421,7 @@ jobs:
           exit "${bandit_status}"
       - name: Upload Bandit SARIF
         if: always() && hashFiles('artifacts/security/bandit.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/bandit.sarif
           category: bandit
@@ -451,13 +451,13 @@ jobs:
             --exit-code 1
       - name: Upload Gitleaks SARIF
         if: always() && hashFiles('artifacts/security/gitleaks.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/gitleaks.sarif
           category: gitleaks
       - name: Upload SAST artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sast-artifacts
           path: artifacts/security/
@@ -483,12 +483,12 @@ jobs:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.35.1
+        uses: github/codeql-action/init@v4.35.2
         with:
           languages: ${{ matrix.language }}
           build-mode: none
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4.35.1
+        uses: github/codeql-action/analyze@v4.35.2
         with:
           category: /language:${{ matrix.language }}
 
@@ -535,31 +535,31 @@ jobs:
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:release
       - name: Upload Trivy SARIF for koda
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda.sarif
           category: trivy-koda
       - name: Upload Trivy SARIF for koda-web
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-web.sarif
           category: trivy-koda-web
       - name: Upload Trivy SARIF for koda-memory
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-memory.sarif
           category: trivy-koda-memory
       - name: Upload Trivy SARIF for koda-security
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
           category: trivy-koda-security
       - name: Upload container scan artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: container-scan-artifacts
           path: artifacts/security/trivy/
@@ -593,7 +593,7 @@ jobs:
         run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: docker-smoke-artifacts
           path: artifacts/docker/
@@ -628,7 +628,7 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Build release artifacts
@@ -636,7 +636,7 @@ jobs:
           set -euo pipefail
           python3 scripts/build_release_artifacts.py --output-dir "${RELEASE_BUNDLE_DIR}"
       - name: Upload release bundle artifact
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: |
@@ -666,7 +666,7 @@ jobs:
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Smoke test packaged release install
@@ -828,7 +828,7 @@ jobs:
         with:
           name: release-bundle-${{ needs.prepare.outputs.version }}
           path: ${{ env.RELEASE_BUNDLE_DIR }}
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
@@ -1038,7 +1038,7 @@ jobs:
           EOF
           fi
       - name: Create or update GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: ${{ steps.release_mode.outputs.title }}
