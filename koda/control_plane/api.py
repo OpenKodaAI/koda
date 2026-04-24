@@ -237,8 +237,24 @@ async def setup_page(request: web.Request) -> web.Response:
 
 
 async def onboarding_status(request: web.Request) -> web.Response:
-    payload = dict(_manager().get_onboarding_status())
-    payload.update(_auth_service().onboarding_payload())
+    # Catch exceptions here instead of letting them bubble into
+    # ``control_plane_error_middleware`` — that middleware translates any
+    # ``KeyError`` into a 404, which is correct for "fetch agent X" but
+    # misleading for this endpoint where a KeyError inside the status
+    # computation (dict lookup on provider/system-settings payloads) would
+    # masquerade as "onboarding endpoint missing" and break the release
+    # smoke test + CLI ``koda doctor`` output.
+    try:
+        payload = dict(_manager().get_onboarding_status())
+        payload.update(_auth_service().onboarding_payload())
+    except Exception as exc:
+        return web.json_response(
+            {
+                "error": "onboarding_status_failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            },
+            status=500,
+        )
     return web.json_response(payload)
 
 

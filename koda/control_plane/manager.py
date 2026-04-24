@@ -5292,7 +5292,22 @@ class ControlPlaneManager:
         catalog = self._provider_catalog_from_env(env)
         for provider_id, payload in _safe_json_object(catalog.get("providers")).items():
             if provider_id in MANAGED_PROVIDER_IDS:
-                connection = self.get_provider_connection(provider_id)
+                # Fetch the connection defensively — ``_provider_connection_row``
+                # raises ``KeyError`` when the row hasn't been seeded yet
+                # (fresh install, migration race). Treat a missing row as
+                # "not configured" rather than letting the KeyError bubble up
+                # into ``control_plane_error_middleware`` where it would turn
+                # a valid endpoint into a bogus 404.
+                try:
+                    connection = self.get_provider_connection(provider_id)
+                except KeyError:
+                    connection = {
+                        "provider_id": provider_id,
+                        "auth_mode": "api_key",
+                        "configured": False,
+                        "verified": False,
+                        "connection_status": {"state": "not_configured"},
+                    }
                 payload["connection_status"] = connection.get("connection_status")
                 payload["connection"] = connection
                 # Add extra models when using API key authentication
