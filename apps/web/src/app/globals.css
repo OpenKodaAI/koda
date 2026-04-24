@@ -524,7 +524,17 @@ html.dark {
   --color-muted: var(--text-secondary);
   --color-subtle: var(--text-tertiary);
   --font-sans: var(--font-inter);
+  --font-serif: var(--font-fraunces);
   --font-mono: var(--font-jetbrains);
+}
+
+/* Display serif utility — matches the Koda LP headline typography */
+.display-serif {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-optical-sizing: auto;
+  font-feature-settings: "ss01", "ss02";
+  letter-spacing: -0.025em;
+  line-height: 1.02;
 }
 
 *,

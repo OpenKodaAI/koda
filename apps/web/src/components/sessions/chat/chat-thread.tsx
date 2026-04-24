@@ -221,7 +221,7 @@ function ChatThreadImpl({
                 agentLabel ??
                 t("sessions.thread.newChatEyebrow", { defaultValue: "New conversation" })}
             </p>
-            <h1 className="m-0 text-[var(--font-size-display)] font-medium leading-[1.05] tracking-[var(--tracking-display)] text-[var(--text-primary)]">
+            <h1 className="display-serif m-0 text-[var(--font-size-display)] font-medium leading-[1.05] text-[var(--text-primary)]">
               {emptyTitle ??
                 t("sessions.thread.heroTitle", { defaultValue: "What could we build today?" })}
             </h1>
