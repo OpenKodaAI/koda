@@ -1,188 +1,166 @@
-<div align="center" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; width: 100%;">
-  <img src="docs/assets/brand/koda_hero.jpeg" alt="Koda" style="border-radius: 0.5rem;" width="450px" />
-</div>
+<p align="center">
+  <img src="docs/assets/brand/koda-logo.svg" alt="Koda" width="96" height="96" />
+</p>
+
+<h1 align="center">Koda</h1>
 
 <p align="center">
-  <strong>Open-source harness for orchestrating multi-agent, multi-provider AI systems.</strong>
+  The open-source harness for orchestrating multi-agent, multi-provider AI systems.
 </p>
 
 <p align="center">
-  Bring up the platform stack first. Configure providers, agents, access, secrets, and operations through Koda itself.
+  <em>Control plane&nbsp;·&nbsp;durable state&nbsp;·&nbsp;inspectable runtime&nbsp;·&nbsp;Docker-first</em>
 </p>
 
 <p align="center">
-  <a href="docs/install/local.md"><img alt="Quickstart" src="https://img.shields.io/badge/Quickstart-Docker--first-0F766E?style=for-the-badge" /></a>
-  <a href="docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/Documentation-GitHub--native-162126?style=for-the-badge" /></a>
-  <a href="docs/reference/api.md"><img alt="API Reference" src="https://img.shields.io/badge/API-OpenAPI-0B84D8?style=for-the-badge" /></a>
-  <a href="docs/architecture/overview.md"><img alt="Architecture" src="https://img.shields.io/badge/Architecture-Control%20Plane%20%2B%20Web%20%2B%20Runtime-5C6B73?style=for-the-badge" /></a>
+  <a href="https://www.npmjs.com/package/@openkodaai/koda"><img alt="npm" src="https://img.shields.io/npm/v/@openkodaai/koda?style=flat-square&color=0a59d2&label=npm" /></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-4f8a61?style=flat-square" /></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-8f6ccf?style=flat-square" />
+  <img alt="node" src="https://img.shields.io/badge/node-20%2B-c07a96?style=flat-square" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-docker--first-5da9a3?style=flat-square" />
 </p>
 
 <p align="center">
-  <a href="docs/install/local.md"><img alt="Postgres" src="https://img.shields.io/badge/Postgres-Durable%20state-336791?style=flat-square" /></a>
-  <a href="docs/install/local.md"><img alt="SeaweedFS" src="https://img.shields.io/badge/SeaweedFS-S3--compatible%20storage-0F766E?style=flat-square" /></a>
-  <a href="docs/reference/api.md"><img alt="Control Plane" src="https://img.shields.io/badge/Control%20Plane-Public%20HTTP%20surface-111827?style=flat-square" /></a>
-  <a href="docs/architecture/runtime.md"><img alt="Runtime" src="https://img.shields.io/badge/Runtime-Inspectable%20execution-374151?style=flat-square" /></a>
-</p>
-
-<p align="center">
-  <a href="docs/install/local.md"><strong>Install locally</strong></a>
-  ·
-  <a href="docs/install/vps.md"><strong>Deploy on a VPS</strong></a>
-  ·
-  <a href="docs/config/reference.md"><strong>Configuration reference</strong></a>
-  ·
+  <a href="docs/install/local.md"><strong>Quickstart</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/README.md"><strong>Docs</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/architecture/overview.md"><strong>Architecture</strong></a>
+  &nbsp;·&nbsp;
   <a href="docs/openapi/control-plane.json"><strong>OpenAPI</strong></a>
+  &nbsp;·&nbsp;
+  <a href="SECURITY.md"><strong>Security</strong></a>
 </p>
 
-Koda is a control-plane-first platform for orchestrating AI agents with durable state, object storage, knowledge retrieval, memory recall, runtime inspection, and operator-facing setup flows. It is designed to act as a harness: you bring the providers, prompts, policies, and task shapes that fit your use case, and Koda supplies the operational runtime around them.
+<br />
 
-This repository is the canonical open-source monorepo for Koda. It combines:
+## Overview
 
-- the Python platform backend at the repository root
-- the official Next.js operations UI in `apps/web`
-- public docs, OpenAPI, Docker assets, and contributor guidance in one place
+Koda is a control-plane-first platform for orchestrating AI agents. It supplies the operational runtime — durable state, object storage, knowledge retrieval, memory recall, runtime inspection, and an operator dashboard — so you bring the providers, prompts, and policies and Koda runs them as production software.
 
-The public quickstart brings up the platform stack first. Product configuration such as providers, access policy, secrets, agents, and integrations is completed through the control plane and its API surface.
+This repository is the canonical open-source monorepo, combining:
+
+- A Python platform backend at the repository root
+- The Next.js operator UI in `apps/web`
+- Public docs, OpenAPI contract, Docker assets, and contributor guidance
+
+<br />
 
 ## Quickstart
-
-1. Install the npm CLI or use `npx`.
-2. Run the installer.
-3. Open the dashboard and finish bootstrap in the control plane.
-
-```bash
-npm install -g @openkodaai/koda
-koda install
-```
-
-Or run the installer without a global install:
 
 ```bash
 npx @openkodaai/koda@latest install
 ```
 
-Repository contributors can still use the source wrapper:
+The installer verifies prerequisites, stages the release bundle, creates a minimal `.env`, starts the compose stack, runs doctor checks, and prints a dashboard URL plus a short-lived setup code.
 
-```bash
-git clone https://github.com/OpenKodaAI/koda.git /opt/koda
-cd /opt/koda
-./scripts/install.sh
-```
+After install, open the dashboard at `http://127.0.0.1:3000/control-plane/setup` and complete the six-step first-run flow: paste the setup code, create the owner account, save the recovery codes, sign in, configure access, and optionally connect your first agent.
 
-That wrapper automates Docker and Node.js installation only on apt-based Linux hosts with `sudo`. On macOS or
-other environments, install those prerequisites yourself and use the npm CLI path directly.
+If the setup code expires, run `koda auth issue-code` and continue from the same screen.
 
-When the installer completes, start in the dashboard:
+**Installation Paths**
 
-- Dashboard setup: `http://127.0.0.1:3000/control-plane/setup`
-- Control-plane home: `http://127.0.0.1:3000/control-plane`
-- Dashboard overview: `http://127.0.0.1:3000`
+- [Local install](docs/install/local.md) — full walkthrough with diagnostics
+- [VPS deployment](docs/install/vps.md) — hardened, TLS-fronted production
+- [Configuration reference](docs/config/reference.md) — every environment variable
 
-The first-run flow is intentionally linear:
-
-1. open `/control-plane/setup`
-2. paste the short-lived setup code printed by `koda install`
-3. create the local owner account
-4. sign in to open the HTTP-only operator session
-5. finish access policy and default provider setup
-6. optionally connect the first Telegram agent
-
-If the setup code expires before you finish, run `koda auth issue-code` and continue from the same setup screen.
-
-From there you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
-From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
-
-The scoped npm package ships the same product-only release bundle that is attached to GitHub Releases:
-
-- the CLI binary itself
-- the pinned release manifest
-- the compose/bootstrap bundle
-- release checksums and SBOM metadata
-
-That means `npm install -g @openkodaai/koda` installs the product channel, not the source tree.
-
-Public releases are cut from `main` by version. When the repository version changes and the merge to `main` passes
-`pr-quality` and `security`, GitHub Actions creates the matching `v<version>` tag and the release workflow publishes
-the npm package, GHCR images, and GitHub Release assets from that tag. If the tag already exists on the validated
-commit but the GitHub release is still draft, missing assets, or the npm dist-tag is still wrong, the tag-cut
-workflow dispatches the publish workflow again for recovery instead of silently stopping. If that tag already belongs
-to an older commit and publication is incomplete, the workflow now fails loudly so the next merge must ship a new
-patch version instead of trying to reuse an escaped semantic tag.
-
-## What The Stack Starts
-
-- `web` on port `3000` for the operator-facing UI
-- `app` on port `8090` for `/health`, `/setup` compatibility, `/api/control-plane/*`, and `/api/runtime/*`
-- `postgres` for durable state
-- `seaweedfs` plus `seaweedfs-init` for bundled S3-compatible object storage
-
-## Control Plane Surface
-
-The operational UI is part of the product itself. The dashboard runs as the official web frontend and proxies control-plane and runtime calls back to the backend:
-
-<p align="center">
-  <img src="docs/assets/screenshots/setup.png" alt="Koda control plane interface" width="82%" />
-</p>
-
-## What Koda Includes
-
-- A control plane for provider configuration, agent management, secrets, and operational settings
-- A dedicated web dashboard for first-run setup, operations, runtime inspection, and control-plane workflows
-- A runtime API for inspection, orchestration, command execution, and runtime supervision
-- Postgres-backed durable state for runtime, control-plane, knowledge, memory, and audit records
-- SeaweedFS-backed bundled object storage for the quickstart path through a generic S3-compatible contract
-- Retrieval, memory, and artifact services aligned behind typed internal contracts
-- Docker-first deployment for local environments and single-node VPS installs
-- A purpose-agnostic harness that can back research, operations, automation, support, engineering, or domain-specific agent workflows
+<br />
 
 ## Core Capabilities
 
-- Control-plane-first bootstrap with first-run setup directly in the web dashboard instead of hand-maintained per-agent env files
-- Multi-agent orchestration with isolated runtime state, prompt contracts, and operational settings
-- Multi-provider execution so each agent can be configured for the models and tools that fit its role
-- Harness-style architecture that lets operators define agents for any niche, workflow, or task class
-- Durable artifact processing for documents, media, screenshots, and derived evidence
-- Knowledge retrieval and memory recall to ground agent execution with relevant context
-- Runtime visibility through health, setup, dashboard, control-plane, and OpenAPI-backed public surfaces
-- Provider-agnostic architecture with explicit setup and verification flows
-- Production-friendly quickstart with Postgres, SeaweedFS, health checks, and doctor tooling
+|                            |                                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Control-plane-first**    | Providers, agents, secrets, and integrations are configured through the dashboard — not hand-maintained `.env` files per agent.       |
+| **Durable by default**     | Postgres is the source of truth for every service. Object binaries flow through a generic S3-compatible contract.                     |
+| **Inspectable end-to-end** | Every tool call, provider response, and memory write is auditable through OpenAPI-backed surfaces. No hidden state behind the prompt. |
+| **Harness, not monolith**  | No prescribed agent persona or task domain. Operators shape agents around the platform, not the other way around.                     |
+| **Operator-first UX**      | First-run setup, provider wiring, secrets, and agent editing in a dashboard designed for the humans keeping the system running.       |
 
-## How The Platform Is Structured
+<br />
 
-Koda is organized around a few stable layers:
+## What the stack starts
 
-- **Web UI:** Next.js operator interface in `apps/web`
-- **Control plane:** setup, policy, secrets, provider connections, agent definitions, and public onboarding routes
-- **Runtime:** execution supervision, queue orchestration, runtime APIs, and agent tool dispatch
-- **Knowledge and memory:** retrieval, recall, curation, and context assembly
-- **Artifacts and storage:** durable metadata, object-backed binaries, and evidence generation
-- **Infrastructure:** Docker, Postgres, bundled S3-compatible storage, health checks, and operator tooling
+| Service     | Port   | Purpose                          |
+| ----------- | ------ | -------------------------------- |
+| `web`       | `3000` | Next.js operator dashboard       |
+| `app`       | `8090` | Control plane + runtime HTTP API |
+| `postgres`  | `5432` | Durable state (+ `pgvector`)     |
+| `seaweedfs` | `8333` | SeaweedFS — S3-compatible object storage |
 
-For a public architecture walkthrough, start with [Documentation Index](docs/README.md), [Architecture Overview](docs/architecture/overview.md), and [Runtime Architecture](docs/architecture/runtime.md).
+Internal gRPC services for `runtime-kernel`, `memory`, `retrieval`, `artifact`, and `security` also come up on the compose network but are never exposed outside it.
 
-## Installation Paths
+<br />
 
-- [Local install](docs/install/local.md)
-- [VPS install](docs/install/vps.md)
-- [Object storage migration](docs/install/object-storage-migration.md)
-- [Configuration reference](docs/config/reference.md)
-- [Release distribution](docs/reference/releases.md)
+## Architecture
 
-## Public Interfaces
+```
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│ Operators & clients │───▶│    Control plane    │───▶│ External providers  │
+│   dashboard · API   │    │ providers · agents  │    │    model runtimes   │
+│   runtime clients   │    │  secrets · policy   │    │     integrations    │
+└─────────────────────┘    └──────────┬──────────┘    └─────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│   Infrastructure    │───▶│  Runtime & context  │───▶│   Durable storage   │
+│   Docker · doctor   │    │  queue · execution  │    │ Postgres · S3 store │
+│    health checks    │    │ retrieval · memory  │    │  artifacts · state  │
+└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+```
 
-- `/` for the main operations dashboard served by `apps/web`
-- `/control-plane/setup` in `apps/web` as the canonical first-boot configuration surface
-- `/control-plane` in `apps/web` as the control-plane home and agent catalog after auth/setup
-- `/setup` as a compatibility bridge into the dashboard setup flow
-- `/api/control-plane/agents/*` for canonical agent-management operations
-- `/api/control-plane/dashboard/agents/*` for canonical operational dashboard data
-- `/api/runtime/*` for runtime inspection and control
-- [`docs/openapi/control-plane.json`](docs/openapi/control-plane.json) as the maintained public API contract
-- [API reference](docs/reference/api.md) for an operator-facing summary of the HTTP surface
+Koda is organised into six stable domains. Every feature maps cleanly to one of them.
+
+- **Control plane** — setup, provider configuration, secrets, agent definitions, operator APIs
+- **Runtime** — queue orchestration, execution supervision, tool dispatch, provider adapters
+- **Knowledge** — retrieval, evidence sourcing, operator-approved grounding context
+- **Memory** — recall, extraction, curation, durable semantic context
+- **Artifacts** — ingestion, metadata, object-backed binaries, evidence generation
+- **Infrastructure** — Docker, Postgres, S3-compatible storage, health checks, doctor tooling
+
+For the full walkthrough see [Architecture overview](docs/architecture/overview.md) and [Runtime architecture](docs/architecture/runtime.md).
+
+<br />
+
+## Dashboard
+
+<p align="center">
+  <img src="docs/assets/screenshots/setup.png" alt="Koda control plane" width="82%" style="border-radius: 8px;" />
+</p>
+
+The operator dashboard is part of the product itself. It proxies control-plane and runtime calls back to the backend through the same OpenAPI contract anyone else builds against.
+
+<br />
+
+## Public interfaces
+
+- `/` — operations dashboard
+- `/control-plane` — control-plane home and agent catalog
+- `/control-plane/setup` — first-boot configuration surface
+- `/api/control-plane/*` — control-plane HTTP API
+- `/api/control-plane/agents/*` — canonical agent-management operations
+- `/api/runtime/*` — runtime inspection and control
+- [`docs/openapi/control-plane.json`](docs/openapi/control-plane.json) — the maintained public API contract
+
+<br />
+
+## Documentation
+
+**Getting started** — [Local install](docs/install/local.md) · [VPS install](docs/install/vps.md) · [Configuration reference](docs/config/reference.md)
+
+**Concepts** — [Architecture overview](docs/architecture/overview.md) · [Runtime architecture](docs/architecture/runtime.md) · [Security readiness](docs/security/README.md)
+
+**Reference** — [API reference](docs/reference/api.md) · [OpenAPI spec](docs/openapi/control-plane.json) · [Release distribution](docs/reference/releases.md)
+
+**Community** — [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
+
+**For AI agents** — [AGENTS.md](AGENTS.md) · [CLAUDE.md](CLAUDE.md) · [repo map](docs/ai/repo-map.yaml) · [LLM compatibility](docs/ai/llm-compatibility.md)
+
+<br />
 
 ## Development
 
-Backend development:
+<details>
+<summary><strong>Backend</strong></summary>
 
 ```bash
 pip install -e ".[dev]"
@@ -192,7 +170,10 @@ mypy koda/ --ignore-missing-imports
 pytest --cov=koda --cov-report=term-missing
 ```
 
-Web development:
+</details>
+
+<details>
+<summary><strong>Web dashboard</strong></summary>
 
 ```bash
 pnpm install
@@ -200,47 +181,21 @@ cp apps/web/.env.example apps/web/.env.local
 pnpm dev:web
 ```
 
-Containerized local development with live reload:
+</details>
+
+<details>
+<summary><strong>Full dev stack with live reload</strong></summary>
 
 ```bash
 pnpm dev:stack:build
 ```
 
-This development stack mounts the repository directly into the `app` and `web` containers, runs the web UI in Next.js development mode, restarts the control-plane backend automatically on source changes, and keeps frontend build output ephemeral so UI changes are not served from an old image layer. The dev frontend image also pre-seeds the package store and `node_modules` cache so the first boot is much faster than rebuilding the production image on each edit. When dependency manifests change, restarting the dev stack reapplies installs automatically.
+Mounts the repository into the `app` and `web` containers, runs Next.js in dev mode, and restarts the control-plane backend automatically on source changes.
 
-## Documentation
+</details>
 
-- [Documentation index](docs/README.md)
-- [Architecture overview](docs/architecture/overview.md)
-- [Runtime architecture](docs/architecture/runtime.md)
-- [Security readiness](docs/security/README.md)
-- [API reference](docs/reference/api.md)
-- [Local install](docs/install/local.md)
-- [VPS install](docs/install/vps.md)
-- [Configuration reference](docs/config/reference.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Code of conduct](CODE_OF_CONDUCT.md)
-
-## Contributing, Security, And Licensing
-
-Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, validation, and documentation expectations. Security-sensitive reporting guidance lives in [SECURITY.md](SECURITY.md), and community participation expectations live in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-For the application-security baseline, threat model, ASVS mapping, and operational hardening checklist, use [docs/security/README.md](docs/security/README.md).
-
-Koda is published under the Apache-2.0 license.
-
-## Developer And AI-Friendly Entry Points
-
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
-- [docs/ai/repo-map.yaml](docs/ai/repo-map.yaml)
-- [docs/ai/llm-compatibility.md](docs/ai/llm-compatibility.md)
-- [docs/ai/architecture-overview.md](docs/ai/architecture-overview.md)
-- [docs/ai/runtime-flows.md](docs/ai/runtime-flows.md)
-- [docs/ai/configuration-and-prompts.md](docs/ai/configuration-and-prompts.md)
-
-## Validation
+<details>
+<summary><strong>Full validation</strong> (what CI runs)</summary>
 
 ```bash
 ruff check .
@@ -262,27 +217,43 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D war
 cargo test --manifest-path rust/Cargo.toml --workspace
 ```
 
-## GitHub CI
+</details>
 
-Koda validates pull requests with a tiered GitHub Actions pipeline:
+<br />
 
-- `pr-quality` runs required checks for Python quality, Python tests on 3.11 and 3.12, web lint/test/build, repo-hygiene, Rust validation, and Docker smoke coverage
-- `security` runs dependency audits, Bandit, Gitleaks, CodeQL, and container scanning on pull requests, on `main`, and on a weekly schedule
+## CI & releases
 
-Coverage thresholds are sourced from [pyproject.toml](pyproject.toml), not duplicated in workflow files. GitHub uploads `pytest`/coverage artifacts, `vitest` results, and SARIF findings so failures can be reviewed directly in artifacts or in the Security tab.
+Pull requests run a tiered GitHub Actions pipeline:
 
-## Release Distribution
+- **`pr-quality`** — Python quality + tests on 3.11/3.12, web lint/test/build, repo hygiene, Rust validation, Docker smoke
+- **`security`** — dependency audits, Bandit, Gitleaks, CodeQL, container scanning; on every PR, on `main`, and on a weekly schedule
 
-Official product releases are published through three aligned channels:
+Coverage thresholds live in [`pyproject.toml`](pyproject.toml). Artifacts (pytest/coverage, vitest, SARIF) upload to GitHub so failures can be reviewed directly.
 
-- npm as `@openkodaai/koda` for `npm install -g` and `npx`
+Public releases are cut from `main` by version. When a version bump merges and both pipelines pass on the merge commit, the `cut-release-tag` workflow creates a `v<version>` tag and dispatches the release workflow to publish through three aligned channels:
+
+- npm as [`@openkodaai/koda`](https://www.npmjs.com/package/@openkodaai/koda)
 - GHCR images pinned by version in the release manifest
 - GitHub Releases with the bundle archive, manifest, checksums, SBOM, and npm tarball
 
-The release workflow runs quality, test, security, Docker, and packaged-install smoke validation before publish.
-Merges to `main` are picked up by `cut-release-tag`, which creates the semantic tag only after `pr-quality` and
-`security` pass on that exact commit, then dispatches the release workflow in publish mode for the matching tag.
-You can also backfill or recover manually by pushing a `v<version>` tag or by dispatching the `release` workflow in
-`publish` mode from the target ref. When that dispatch starts from `main` or another non-tag ref, the workflow
-validates the commit, creates the semantic tag if needed, and publishes the release in the same run. For the release
-contract and artifact flow, see [Release distribution](docs/reference/releases.md).
+If the tag already points at the merge commit but the GitHub release is still draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
+
+See [Release distribution](docs/reference/releases.md) for the full contract.
+
+<br />
+
+## Contributing, security, license
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and review expectations. Security-sensitive reporting lives in [SECURITY.md](SECURITY.md); community standards in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+For the application-security baseline, threat model, ASVS mapping, and operational hardening checklist, see [docs/security/README.md](docs/security/README.md).
+
+Koda is published under the **Apache-2.0** license.
+
+<br />
+
+<p align="center">
+  <sub>
+    Built to orchestrate, not to lock in.
+  </sub>
+</p>
