@@ -60,7 +60,7 @@ After install, open the dashboard at `http://localhost:3000/control-plane/setup`
 
 If the setup code expires, run `koda auth issue-code` and continue from the same screen.
 
-**Alternative install paths**
+**Installation Paths**
 
 - [Local install](https://github.com/OpenKodaAI/koda/blob/v1.0.10/docs/install/local.md) — full walkthrough with diagnostics
 - [VPS deployment](https://github.com/OpenKodaAI/koda/blob/v1.0.10/docs/install/vps.md) — hardened, TLS-fronted production
@@ -68,7 +68,7 @@ If the setup code expires, run `koda auth issue-code` and continue from the same
 
 <br />
 
-## Why Koda
+## Core Capabilities
 
 |                            |                                                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -87,7 +87,7 @@ If the setup code expires, run `koda auth issue-code` and continue from the same
 | `web`       | `3000` | Next.js operator dashboard       |
 | `app`       | `8090` | Control plane + runtime HTTP API |
 | `postgres`  | `5432` | Durable state (+ `pgvector`)     |
-| `seaweedfs` | `8333` | S3-compatible object storage     |
+| `seaweedfs` | `8333` | SeaweedFS — S3-compatible object storage |
 
 Internal gRPC services for `runtime-kernel`, `memory`, `retrieval`, `artifact`, and `security` also come up on the compose network but are never exposed outside it.
 
@@ -139,6 +139,7 @@ The operator dashboard is part of the product itself. It proxies control-plane a
 - `/control-plane` — control-plane home and agent catalog
 - `/control-plane/setup` — first-boot configuration surface
 - `/api/control-plane/*` — control-plane HTTP API
+- `/api/control-plane/agents/*` — canonical agent-management operations
 - `/api/runtime/*` — runtime inspection and control
 - [`docs/openapi/control-plane.json`](https://github.com/OpenKodaAI/koda/blob/v1.0.10/docs/openapi/control-plane.json) — the maintained public API contract
 
@@ -231,11 +232,13 @@ Pull requests run a tiered GitHub Actions pipeline:
 
 Coverage thresholds live in [`pyproject.toml`](https://github.com/OpenKodaAI/koda/blob/v1.0.10/pyproject.toml). Artifacts (pytest/coverage, vitest, SARIF) upload to GitHub so failures can be reviewed directly.
 
-Releases are cut from `main` by version. When a version bump merges and both pipelines pass on the merge commit, the `cut-release-tag` workflow creates a `v<version>` tag and dispatches the release workflow to publish through three aligned channels:
+Public releases are cut from `main` by version. When a version bump merges and both pipelines pass on the merge commit, the `cut-release-tag` workflow creates a `v<version>` tag and dispatches the release workflow to publish through three aligned channels:
 
 - npm as [`@openkodaai/koda`](https://www.npmjs.com/package/@openkodaai/koda)
 - GHCR images pinned by version in the release manifest
 - GitHub Releases with the bundle archive, manifest, checksums, SBOM, and npm tarball
+
+If the tag already points at the merge commit but the GitHub release is still draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
 
 See [Release distribution](https://github.com/OpenKodaAI/koda/blob/v1.0.10/docs/reference/releases.md) for the full contract.
 
