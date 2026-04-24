@@ -53,12 +53,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.3
         if: env.SNYK_TOKEN != ''
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         if: env.SNYK_TOKEN != ''
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -128,14 +128,14 @@ jobs:
 
       - name: Upload Snyk SARIF for Node manifests
         if: env.SNYK_TOKEN != '' && github.event_name != 'pull_request' && hashFiles('artifacts/security/snyk/node-open-source.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/snyk/node-open-source.sarif
           category: snyk-open-source-node
 
       - name: Upload Snyk SARIF for Python manifests
         if: env.SNYK_TOKEN != '' && github.event_name != 'pull_request' && hashFiles('artifacts/security/snyk/python-open-source.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.35.1
+        uses: github/codeql-action/upload-sarif@v4.35.2
         with:
           sarif_file: artifacts/security/snyk/python-open-source.sarif
           category: snyk-open-source-python
@@ -179,7 +179,7 @@ jobs:
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: snyk-artifacts
           path: artifacts/security/snyk/
