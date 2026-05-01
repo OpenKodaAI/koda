@@ -49,6 +49,13 @@ export function providerLabel(providerId: string) {
   if (providerId === "claude") return "Anthropic";
   if (providerId === "codex") return "OpenAI";
   if (providerId === "gemini") return "Google";
+  if (providerId === "perplexity") return "Perplexity";
+  if (providerId === "mistral") return "Mistral AI";
+  if (providerId === "qwen") return "Qwen (Alibaba)";
+  if (providerId === "kimi") return "Kimi (Moonshot AI)";
+  if (providerId === "groq") return "Groq";
+  if (providerId === "deepseek") return "DeepSeek";
+  if (providerId === "xai") return "xAI Grok";
   return providerId;
 }
 
@@ -59,6 +66,13 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   elevenlabs: "/providers/elevenlabs.svg",
   ollama: "/providers/ollama.svg",
   sora: "/providers/sora.png",
+  perplexity: "/providers/perplexity.svg",
+  mistral: "/providers/mistral.svg",
+  qwen: "/providers/qwen.svg",
+  kimi: "/providers/kimi.svg",
+  groq: "/providers/groq.svg",
+  deepseek: "/providers/deepseek.svg",
+  xai: "/providers/xai.svg",
 };
 
 export const PROVIDER_ICON_COMPONENTS: Record<string, typeof Server> = {
@@ -67,7 +81,18 @@ export const PROVIDER_ICON_COMPONENTS: Record<string, typeof Server> = {
 
 export const MASKED_LOGO_PROVIDERS = new Set(["gemini"]);
 
-export const MONOCHROME_LOGO_PROVIDERS = new Set(["codex", "elevenlabs", "ollama"]);
+export const MONOCHROME_LOGO_PROVIDERS = new Set([
+  "codex",
+  "elevenlabs",
+  "ollama",
+  "perplexity",
+  "mistral",
+  "qwen",
+  "kimi",
+  "groq",
+  "deepseek",
+  "xai",
+]);
 
 export const PROVIDER_ACCENTS: Record<string, string> = {
   claude: "212 120 62",
@@ -77,6 +102,13 @@ export const PROVIDER_ACCENTS: Record<string, string> = {
   ollama: "56 189 248",
   sora: "236 72 153",
   kokoro: "129 140 248",
+  perplexity: "32 178 170",
+  mistral: "248 119 6",
+  qwen: "97 84 219",
+  kimi: "0 113 208",
+  groq: "242 87 53",
+  deepseek: "76 99 230",
+  xai: "200 200 200",
 };
 
 export function providerGlyphColor(providerId: string, emphasized = false) {
@@ -106,6 +138,27 @@ export function providerDescription(providerId: string, category: string) {
   if (providerId === "elevenlabs") return "Voz premium com API Key, idioma padrão e seleção de vozes.";
   if (providerId === "sora") return "Provider de mídia com autenticação pela plataforma OpenAI.";
   if (providerId === "ollama") return "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.";
+  if (providerId === "perplexity") {
+    return "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.";
+  }
+  if (providerId === "mistral") {
+    return "Família Mistral (Large, Medium, Small, Codestral, Pixtral) via La Plateforme. Visão via Pixtral, código via Codestral.";
+  }
+  if (providerId === "qwen") {
+    return "Família Qwen via Alibaba DashScope International. Inclui Qwen3-Coder, Qwen-VL e contexto longo de até 1M tokens.";
+  }
+  if (providerId === "kimi") {
+    return "Modelos Kimi K2 e Moonshot v1 com janela de contexto até 128K tokens. Visão via kimi-vision.";
+  }
+  if (providerId === "groq") {
+    return "Inferência ultra-rápida via LPU para Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill e Qwen 2.5.";
+  }
+  if (providerId === "deepseek") {
+    return "DeepSeek V3 (chat) e R1 (reasoner) com prompt caching automático e custo significativamente menor.";
+  }
+  if (providerId === "xai") {
+    return "Grok 4, Grok 3 e variantes mini/fast da xAI. Visão via grok-2-vision.";
+  }
   if (category === "voice") return "Provider multimodal focado em voz e áudio.";
   if (category === "media") return "Provider multimídia disponível para fluxos especializados.";
   return "Provider disponível no catálogo global do sistema.";
@@ -117,6 +170,27 @@ export function providerLoginCopy(providerId: string) {
   }
   if (providerId === "codex") {
     return "Use o login oficial do Codex com sua conta OpenAI/ChatGPT. A cobrança da API continua separada da assinatura.";
+  }
+  if (providerId === "perplexity") {
+    return "Cole sua API key obtida em perplexity.ai/settings/api. Acesso pago via créditos ou assinatura Pro.";
+  }
+  if (providerId === "mistral") {
+    return "Cole sua API key obtida em console.mistral.ai/api-keys.";
+  }
+  if (providerId === "qwen") {
+    return "Cole sua API key obtida em dashscope.console.aliyun.com (versão internacional).";
+  }
+  if (providerId === "kimi") {
+    return "Cole sua API key obtida em platform.moonshot.ai/console/api-keys.";
+  }
+  if (providerId === "groq") {
+    return "Cole sua API key obtida em console.groq.com/keys.";
+  }
+  if (providerId === "deepseek") {
+    return "Cole sua API key obtida em platform.deepseek.com/api_keys.";
+  }
+  if (providerId === "xai") {
+    return "Cole sua API key obtida em console.x.ai.";
   }
   return "Use o login oficial do Gemini CLI com sua conta Google.";
 }

@@ -2,6 +2,7 @@
 
 import asyncio
 import ipaddress
+import os
 import re
 import socket
 from dataclasses import dataclass
@@ -46,9 +47,10 @@ class _SessionHolder:
         if self._session is None or self._session.closed:
             async with self._lock:
                 if self._session is None or self._session.closed:
+                    pool_limit = max(1, int(os.environ.get("HTTP_POOL_LIMIT", "20") or "20"))
                     self._session = aiohttp.ClientSession(
                         timeout=_REQUEST_TIMEOUT,
-                        connector=aiohttp.TCPConnector(limit=20, ttl_dns_cache=300),
+                        connector=aiohttp.TCPConnector(limit=pool_limit, ttl_dns_cache=300),
                     )
         return self._session
 

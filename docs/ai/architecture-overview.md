@@ -29,6 +29,7 @@ For the canonical machine-readable file, flow, and test index, start with [`repo
 - [`../../koda/services/llm_runner.py`](../../koda/services/llm_runner.py) is the provider-neutral execution facade used by the orchestration layer.
 - [`../../koda/services/claude_runner.py`](../../koda/services/claude_runner.py) wraps the `claude` CLI process.
 - [`../../koda/services/codex_runner.py`](../../koda/services/codex_runner.py) wraps the `codex` CLI process.
+- [`../../koda/services/openai_compatible_runner.py`](../../koda/services/openai_compatible_runner.py) is the shared HTTP adapter used by Perplexity, Mistral, Qwen, Kimi, Groq, DeepSeek and xAI Grok runners. Each per-provider file declares a [`ProviderHttpProfile`](../../koda/services/provider_http_profile.py) so the same dataclass drives runtime execution and credential verification.
 - The runner layer handles command construction, streaming and non-streaming execution, retryable errors, native event parsing, usage and cost capture, and provider-native session resume data.
 
 ### Runtime Tool Layer

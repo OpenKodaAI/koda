@@ -138,3 +138,66 @@ def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch)
             project_id="",
             base_env={"PATH": "/nonexistent"},
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7-provider HTTP runtime sentinels
+# ─────────────────────────────────────────────────────────────────────────────
+
+_HTTP_OPENAI_COMPATIBLE_PROVIDERS = (
+    "perplexity",
+    "mistral",
+    "qwen",
+    "kimi",
+    "groq",
+    "deepseek",
+    "xai",
+)
+
+
+@pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
+def test_managed_provider_includes_new_http_provider(provider_id):
+    assert provider_id in provider_auth.MANAGED_PROVIDER_IDS
+
+
+@pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
+def test_provider_api_key_env_key_registered(provider_id):
+    assert provider_id in provider_auth.PROVIDER_API_KEY_ENV_KEYS
+    assert provider_auth.PROVIDER_API_KEY_ENV_KEYS[provider_id].endswith("_API_KEY")
+
+
+@pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
+def test_provider_base_url_env_key_registered(provider_id):
+    """All 7 new HTTP providers support env override of their base URL."""
+    assert provider_id in provider_auth.PROVIDER_BASE_URL_ENV_KEYS
+
+
+@pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
+def test_new_providers_do_not_advertise_subscription_login(provider_id):
+    """None of the 7 new providers expose OAuth subscription login for API access."""
+    assert not provider_auth.provider_supports_subscription_login(provider_id)
+
+
+@pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
+def test_http_verify_profile_registered(provider_id):
+    assert provider_id in provider_auth._HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES
+    profile = provider_auth._HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES[provider_id]
+    assert "default_base_url" in profile
+    assert profile["default_base_url"].startswith("https://")
+
+
+def test_perplexity_uses_health_probe_not_models_endpoint():
+    """Perplexity has no /v1/models — verify falls back to health probe to avoid burning quota."""
+    profile = provider_auth._HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES["perplexity"]
+    assert profile["probe"] == "health"
+
+
+def test_http_provider_keys_threaded_through_provider_env():
+    """Sentinel: provider_env._provider_allowed_keys must include the new API key for HTTP providers."""
+    from koda.services.provider_env import _provider_allowed_keys
+
+    source = {"PERPLEXITY_AUTH_MODE": "api_key"}
+    allowed = _provider_allowed_keys("perplexity", source)
+    assert "PERPLEXITY_API_KEY" in allowed
+    assert "PERPLEXITY_AUTH_MODE" in allowed
+    assert "PERPLEXITY_API_BASE_URL" in allowed

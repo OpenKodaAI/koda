@@ -5,6 +5,7 @@ The `services` package holds orchestration logic and most cross-cutting runtime 
 ## High-Value Modules
 
 - [`queue_manager.py`](queue_manager.py): request queuing, context preparation, provider execution, tool loops, retries, and response delivery
+- [`openai_compatible_runner.py`](openai_compatible_runner.py): shared HTTP adapter for OpenAI-compatible LLM providers (Perplexity, Mistral, Qwen, Kimi, Groq, DeepSeek, xAI). Each provider supplies a [`provider_http_profile.py`](provider_http_profile.py) `ProviderHttpProfile` declaring base URL, endpoints, vision models and capability probe — runtime + verify reuse the same profile.
 - [`claude_runner.py`](claude_runner.py): Claude CLI process execution, streaming, retry classification, and JSON parsing
 - [`tool_dispatcher.py`](tool_dispatcher.py): `<agent_cmd>` parsing, tool execution, read/write classification, and resume payload formatting
 - [`tool_prompt.py`](tool_prompt.py): system-prompt exposure of runtime agent tools
