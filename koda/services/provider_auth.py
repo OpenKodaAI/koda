@@ -26,16 +26,49 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 from uuid import uuid4
 
-ProviderId = Literal["claude", "codex", "gemini", "elevenlabs", "ollama"]
+ProviderId = Literal[
+    "claude",
+    "codex",
+    "gemini",
+    "elevenlabs",
+    "ollama",
+    "perplexity",
+    "mistral",
+    "qwen",
+    "kimi",
+    "groq",
+    "deepseek",
+    "xai",
+]
 ProviderAuthMode = Literal["api_key", "subscription_login", "local"]
 
-MANAGED_PROVIDER_IDS: tuple[ProviderId, ...] = ("claude", "codex", "gemini", "elevenlabs", "ollama")
+MANAGED_PROVIDER_IDS: tuple[ProviderId, ...] = (
+    "claude",
+    "codex",
+    "gemini",
+    "elevenlabs",
+    "ollama",
+    "perplexity",
+    "mistral",
+    "qwen",
+    "kimi",
+    "groq",
+    "deepseek",
+    "xai",
+)
 PROVIDER_API_KEY_ENV_KEYS: dict[ProviderId, str] = {
     "claude": "ANTHROPIC_API_KEY",
     "codex": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "ollama": "OLLAMA_API_KEY",
+    "perplexity": "PERPLEXITY_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "qwen": "QWEN_API_KEY",
+    "kimi": "KIMI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "xai": "XAI_API_KEY",
 }
 PROVIDER_AUTH_TOKEN_ENV_KEYS: dict[str, str] = {
     "claude": "ANTHROPIC_AUTH_TOKEN",
@@ -46,6 +79,13 @@ PROVIDER_AUTH_MODE_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_AUTH_MODE",
     "elevenlabs": "ELEVENLABS_AUTH_MODE",
     "ollama": "OLLAMA_AUTH_MODE",
+    "perplexity": "PERPLEXITY_AUTH_MODE",
+    "mistral": "MISTRAL_AUTH_MODE",
+    "qwen": "QWEN_AUTH_MODE",
+    "kimi": "KIMI_AUTH_MODE",
+    "groq": "GROQ_AUTH_MODE",
+    "deepseek": "DEEPSEEK_AUTH_MODE",
+    "xai": "XAI_AUTH_MODE",
 }
 PROVIDER_VERIFIED_ENV_KEYS: dict[ProviderId, str] = {
     "claude": "CLAUDE_CONNECTION_VERIFIED",
@@ -53,12 +93,26 @@ PROVIDER_VERIFIED_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_CONNECTION_VERIFIED",
     "elevenlabs": "ELEVENLABS_CONNECTION_VERIFIED",
     "ollama": "OLLAMA_CONNECTION_VERIFIED",
+    "perplexity": "PERPLEXITY_CONNECTION_VERIFIED",
+    "mistral": "MISTRAL_CONNECTION_VERIFIED",
+    "qwen": "QWEN_CONNECTION_VERIFIED",
+    "kimi": "KIMI_CONNECTION_VERIFIED",
+    "groq": "GROQ_CONNECTION_VERIFIED",
+    "deepseek": "DEEPSEEK_CONNECTION_VERIFIED",
+    "xai": "XAI_CONNECTION_VERIFIED",
 }
 PROVIDER_PROJECT_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GOOGLE_CLOUD_PROJECT",
 }
 PROVIDER_BASE_URL_ENV_KEYS: dict[ProviderId, str] = {
     "ollama": "OLLAMA_BASE_URL",
+    "perplexity": "PERPLEXITY_API_BASE_URL",
+    "mistral": "MISTRAL_API_BASE_URL",
+    "qwen": "QWEN_API_BASE_URL",
+    "kimi": "KIMI_API_BASE_URL",
+    "groq": "GROQ_API_BASE_URL",
+    "deepseek": "DEEPSEEK_API_BASE_URL",
+    "xai": "XAI_API_BASE_URL",
 }
 PROVIDER_TITLES: dict[ProviderId, str] = {
     "claude": "Anthropic",
@@ -66,6 +120,13 @@ PROVIDER_TITLES: dict[ProviderId, str] = {
     "gemini": "Google",
     "elevenlabs": "ElevenLabs",
     "ollama": "Ollama",
+    "perplexity": "Perplexity",
+    "mistral": "Mistral AI",
+    "qwen": "Qwen (Alibaba)",
+    "kimi": "Kimi (Moonshot AI)",
+    "groq": "Groq",
+    "deepseek": "DeepSeek",
+    "xai": "xAI Grok",
 }
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -721,6 +782,123 @@ def run_provider_logout(
     return proc.returncode == 0, output
 
 
+_HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
+    "perplexity": {
+        "default_base_url": "https://api.perplexity.ai",
+        "probe": "health",
+        "health_path": "/",
+        "account_label": "Perplexity API",
+        "plan_label": "API key",
+    },
+    "mistral": {
+        "default_base_url": "https://api.mistral.ai",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "Mistral La Plateforme",
+        "plan_label": "API key",
+    },
+    "qwen": {
+        "default_base_url": "https://dashscope-intl.aliyuncs.com",
+        "probe": "models",
+        "models_path": "/compatible-mode/v1/models",
+        "account_label": "Alibaba DashScope",
+        "plan_label": "API key",
+    },
+    "kimi": {
+        "default_base_url": "https://api.moonshot.ai",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "Moonshot AI",
+        "plan_label": "API key",
+    },
+    "groq": {
+        "default_base_url": "https://api.groq.com/openai",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "Groq",
+        "plan_label": "API key",
+    },
+    "deepseek": {
+        "default_base_url": "https://api.deepseek.com",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "DeepSeek Platform",
+        "plan_label": "API key",
+    },
+    "xai": {
+        "default_base_url": "https://api.x.ai",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "xAI Console",
+        "plan_label": "API key",
+    },
+}
+
+
+def _verify_openai_compatible_api_key(
+    provider_id: str,
+    api_key: str,
+    *,
+    base_url: str = "",
+) -> ProviderVerificationResult:
+    profile = _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES.get(provider_id)
+    if profile is None:
+        return ProviderVerificationResult(
+            provider_id=cast(ProviderId, provider_id),
+            auth_mode="api_key",
+            verified=False,
+            last_error=f"Provider {provider_id} não suporta verificação OpenAI-compatible.",
+            checked_via="api_key",
+            details={},
+        )
+    effective_base = base_url.strip() or str(profile.get("default_base_url") or "").strip()
+    if not effective_base:
+        return ProviderVerificationResult(
+            provider_id=cast(ProviderId, provider_id),
+            auth_mode="api_key",
+            verified=False,
+            last_error="Base URL ausente.",
+            checked_via="api_key",
+            details={},
+        )
+    if profile.get("probe") == "models" and profile.get("models_path"):
+        verify_url = effective_base.rstrip("/") + str(profile["models_path"])
+        method = "GET"
+    else:
+        verify_url = effective_base.rstrip("/") + str(profile.get("health_path", "/"))
+        method = "GET"
+    request = urllib_request.Request(
+        verify_url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "koda/control-plane",
+        },
+        method=method,
+    )
+    with urllib_request.urlopen(request, timeout=10) as response:
+        status = response.status
+        body = response.read().decode("utf-8", "replace")
+    verified = status < 400
+    if profile.get("probe") == "health":
+        verified = status < 500
+    payload: dict[str, Any] = {}
+    if body:
+        with suppress(json.JSONDecodeError):
+            decoded = json.loads(body)
+            if isinstance(decoded, dict):
+                payload = decoded
+    return ProviderVerificationResult(
+        provider_id=cast(ProviderId, provider_id),
+        auth_mode="api_key",
+        verified=bool(verified),
+        account_label=str(profile.get("account_label") or provider_id.capitalize()),
+        plan_label=str(profile.get("plan_label") or "API key"),
+        checked_via="api_key",
+        details={"http_status": status, "models_payload": bool(payload)},
+    )
+
+
 def verify_provider_api_key(
     provider_id: ProviderId,
     api_key: str,
@@ -740,6 +918,9 @@ def verify_provider_api_key(
         )
 
     try:
+        if provider_id in _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES:
+            return _verify_openai_compatible_api_key(provider_id, secret, base_url=base_url)
+
         if provider_id == "claude":
             # Support both API key (x-api-key) and OAuth token (Bearer).
             is_oauth_token = secret.startswith("sk-ant-oat")

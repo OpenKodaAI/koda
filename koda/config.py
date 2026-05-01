@@ -241,6 +241,131 @@ SORA_AVAILABLE_MODELS: list[str] = [
 ]
 SORA_DEFAULT_MODEL: str = _env("SORA_DEFAULT_MODEL", "sora-v1") or ""
 
+# --- Perplexity (HTTP, OpenAI-compatible) ---
+PERPLEXITY_ENABLED: bool = _env("PERPLEXITY_ENABLED", "false").lower() == "true"
+PERPLEXITY_AVAILABLE_MODELS: list[str] = _env_csv(
+    "PERPLEXITY_AVAILABLE_MODELS",
+    "sonar,sonar-pro,sonar-reasoning,sonar-reasoning-pro,sonar-deep-research",
+)
+PERPLEXITY_TIER_MODELS: dict[str, str] = {
+    "small": _env("PERPLEXITY_MODEL_SMALL", "sonar"),
+    "medium": _env("PERPLEXITY_MODEL_MEDIUM", "sonar-pro"),
+    "large": _env("PERPLEXITY_MODEL_LARGE", "sonar-reasoning-pro"),
+}
+PERPLEXITY_DEFAULT_MODEL: str = _env("PERPLEXITY_DEFAULT_MODEL", PERPLEXITY_TIER_MODELS["medium"])
+PERPLEXITY_TIMEOUT: int = int(_env("PERPLEXITY_TIMEOUT", "180"))
+PERPLEXITY_FIRST_CHUNK_TIMEOUT: int = int(_env("PERPLEXITY_FIRST_CHUNK_TIMEOUT", "60"))
+
+# --- Mistral La Plateforme (HTTP, OpenAI-compatible) ---
+MISTRAL_ENABLED: bool = _env("MISTRAL_ENABLED", "false").lower() == "true"
+MISTRAL_AVAILABLE_MODELS: list[str] = _env_csv(
+    "MISTRAL_AVAILABLE_MODELS",
+    (
+        "mistral-large-latest,mistral-medium-latest,mistral-small-latest,"
+        "codestral-latest,pixtral-large-latest,magistral-medium-latest,"
+        "ministral-8b-latest,ministral-3b-latest"
+    ),
+)
+MISTRAL_TIER_MODELS: dict[str, str] = {
+    "small": _env("MISTRAL_MODEL_SMALL", "mistral-small-latest"),
+    "medium": _env("MISTRAL_MODEL_MEDIUM", "mistral-medium-latest"),
+    "large": _env("MISTRAL_MODEL_LARGE", "mistral-large-latest"),
+}
+MISTRAL_DEFAULT_MODEL: str = _env("MISTRAL_DEFAULT_MODEL", MISTRAL_TIER_MODELS["large"])
+MISTRAL_TIMEOUT: int = int(_env("MISTRAL_TIMEOUT", "120"))
+MISTRAL_FIRST_CHUNK_TIMEOUT: int = int(_env("MISTRAL_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
+# --- Qwen (Alibaba DashScope International, OpenAI-compatible) ---
+QWEN_ENABLED: bool = _env("QWEN_ENABLED", "false").lower() == "true"
+QWEN_AVAILABLE_MODELS: list[str] = _env_csv(
+    "QWEN_AVAILABLE_MODELS",
+    (
+        "qwen-max,qwen-plus,qwen-turbo,qwen-long,"
+        "qwen3-coder-plus,qwen3-coder-flash,"
+        "qwen2.5-72b-instruct,qwen2.5-coder-32b-instruct,"
+        "qwen-vl-max,qwen-vl-plus,qwq-32b"
+    ),
+)
+QWEN_TIER_MODELS: dict[str, str] = {
+    "small": _env("QWEN_MODEL_SMALL", "qwen-turbo"),
+    "medium": _env("QWEN_MODEL_MEDIUM", "qwen-plus"),
+    "large": _env("QWEN_MODEL_LARGE", "qwen-max"),
+}
+QWEN_DEFAULT_MODEL: str = _env("QWEN_DEFAULT_MODEL", QWEN_TIER_MODELS["medium"])
+QWEN_TIMEOUT: int = int(_env("QWEN_TIMEOUT", "120"))
+QWEN_FIRST_CHUNK_TIMEOUT: int = int(_env("QWEN_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
+# --- Kimi (Moonshot AI, OpenAI-compatible) ---
+KIMI_ENABLED: bool = _env("KIMI_ENABLED", "false").lower() == "true"
+KIMI_AVAILABLE_MODELS: list[str] = _env_csv(
+    "KIMI_AVAILABLE_MODELS",
+    (
+        "kimi-k2-0905-preview,kimi-k2-0711-preview,kimi-latest,"
+        "moonshot-v1-128k,moonshot-v1-32k,moonshot-v1-8k,moonshot-v1-auto,"
+        "kimi-thinking-preview,kimi-vision-2024-12-09"
+    ),
+)
+KIMI_TIER_MODELS: dict[str, str] = {
+    "small": _env("KIMI_MODEL_SMALL", "moonshot-v1-8k"),
+    "medium": _env("KIMI_MODEL_MEDIUM", "moonshot-v1-32k"),
+    "large": _env("KIMI_MODEL_LARGE", "kimi-k2-0905-preview"),
+}
+KIMI_DEFAULT_MODEL: str = _env("KIMI_DEFAULT_MODEL", KIMI_TIER_MODELS["large"])
+KIMI_TIMEOUT: int = int(_env("KIMI_TIMEOUT", "120"))
+KIMI_FIRST_CHUNK_TIMEOUT: int = int(_env("KIMI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
+# --- Groq (LPU inference, OpenAI-compatible) ---
+GROQ_ENABLED: bool = _env("GROQ_ENABLED", "false").lower() == "true"
+GROQ_AVAILABLE_MODELS: list[str] = _env_csv(
+    "GROQ_AVAILABLE_MODELS",
+    (
+        "llama-3.3-70b-versatile,llama-3.1-8b-instant,"
+        "llama-3.2-1b-preview,llama-3.2-3b-preview,"
+        "llama-3.2-11b-vision-preview,llama-3.2-90b-vision-preview,"
+        "mixtral-8x7b-32768,gemma2-9b-it,"
+        "qwen-2.5-32b,qwen-2.5-coder-32b,"
+        "deepseek-r1-distill-llama-70b"
+    ),
+)
+GROQ_TIER_MODELS: dict[str, str] = {
+    "small": _env("GROQ_MODEL_SMALL", "llama-3.1-8b-instant"),
+    "medium": _env("GROQ_MODEL_MEDIUM", "llama-3.3-70b-versatile"),
+    "large": _env("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile"),
+}
+GROQ_DEFAULT_MODEL: str = _env("GROQ_DEFAULT_MODEL", GROQ_TIER_MODELS["medium"])
+GROQ_TIMEOUT: int = int(_env("GROQ_TIMEOUT", "60"))
+GROQ_FIRST_CHUNK_TIMEOUT: int = int(_env("GROQ_FIRST_CHUNK_TIMEOUT", "15"))
+
+# --- DeepSeek (V3 chat + R1 reasoner, OpenAI-compatible) ---
+DEEPSEEK_ENABLED: bool = _env("DEEPSEEK_ENABLED", "false").lower() == "true"
+DEEPSEEK_AVAILABLE_MODELS: list[str] = _env_csv(
+    "DEEPSEEK_AVAILABLE_MODELS",
+    "deepseek-chat,deepseek-reasoner",
+)
+DEEPSEEK_TIER_MODELS: dict[str, str] = {
+    "small": _env("DEEPSEEK_MODEL_SMALL", "deepseek-chat"),
+    "medium": _env("DEEPSEEK_MODEL_MEDIUM", "deepseek-chat"),
+    "large": _env("DEEPSEEK_MODEL_LARGE", "deepseek-reasoner"),
+}
+DEEPSEEK_DEFAULT_MODEL: str = _env("DEEPSEEK_DEFAULT_MODEL", DEEPSEEK_TIER_MODELS["medium"])
+DEEPSEEK_TIMEOUT: int = int(_env("DEEPSEEK_TIMEOUT", "120"))
+DEEPSEEK_FIRST_CHUNK_TIMEOUT: int = int(_env("DEEPSEEK_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
+# --- xAI Grok (OpenAI-compatible) ---
+XAI_ENABLED: bool = _env("XAI_ENABLED", "false").lower() == "true"
+XAI_AVAILABLE_MODELS: list[str] = _env_csv(
+    "XAI_AVAILABLE_MODELS",
+    ("grok-4-0709,grok-3,grok-3-mini,grok-3-fast,grok-3-mini-fast,grok-2-vision-1212,grok-2-1212"),
+)
+XAI_TIER_MODELS: dict[str, str] = {
+    "small": _env("XAI_MODEL_SMALL", "grok-3-mini"),
+    "medium": _env("XAI_MODEL_MEDIUM", "grok-3"),
+    "large": _env("XAI_MODEL_LARGE", "grok-4-0709"),
+}
+XAI_DEFAULT_MODEL: str = _env("XAI_DEFAULT_MODEL", XAI_TIER_MODELS["medium"])
+XAI_TIMEOUT: int = int(_env("XAI_TIMEOUT", "120"))
+XAI_FIRST_CHUNK_TIMEOUT: int = int(_env("XAI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
 # --- Provider selection / fallback ---
 FUNCTIONAL_MODEL_DEFAULTS: dict = _env_json_object("MODEL_FUNCTION_DEFAULTS_JSON")
 AVAILABLE_PROVIDERS: list[str] = [
@@ -250,6 +375,13 @@ AVAILABLE_PROVIDERS: list[str] = [
         ("codex", CODEX_ENABLED),
         ("gemini", GEMINI_ENABLED),
         ("ollama", OLLAMA_ENABLED),
+        ("perplexity", PERPLEXITY_ENABLED),
+        ("mistral", MISTRAL_ENABLED),
+        ("qwen", QWEN_ENABLED),
+        ("kimi", KIMI_ENABLED),
+        ("groq", GROQ_ENABLED),
+        ("deepseek", DEEPSEEK_ENABLED),
+        ("xai", XAI_ENABLED),
     )
     if enabled
 ]
@@ -261,18 +393,39 @@ PROVIDER_MODELS: dict[str, list[str]] = {
     "codex": CODEX_AVAILABLE_MODELS,
     "gemini": GEMINI_AVAILABLE_MODELS,
     "ollama": OLLAMA_AVAILABLE_MODELS,
+    "perplexity": PERPLEXITY_AVAILABLE_MODELS,
+    "mistral": MISTRAL_AVAILABLE_MODELS,
+    "qwen": QWEN_AVAILABLE_MODELS,
+    "kimi": KIMI_AVAILABLE_MODELS,
+    "groq": GROQ_AVAILABLE_MODELS,
+    "deepseek": DEEPSEEK_AVAILABLE_MODELS,
+    "xai": XAI_AVAILABLE_MODELS,
 }
 PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "claude": CLAUDE_DEFAULT_MODEL,
     "codex": CODEX_DEFAULT_MODEL,
     "gemini": GEMINI_DEFAULT_MODEL,
     "ollama": OLLAMA_DEFAULT_MODEL,
+    "perplexity": PERPLEXITY_DEFAULT_MODEL,
+    "mistral": MISTRAL_DEFAULT_MODEL,
+    "qwen": QWEN_DEFAULT_MODEL,
+    "kimi": KIMI_DEFAULT_MODEL,
+    "groq": GROQ_DEFAULT_MODEL,
+    "deepseek": DEEPSEEK_DEFAULT_MODEL,
+    "xai": XAI_DEFAULT_MODEL,
 }
 PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
     "claude": CLAUDE_TIER_MODELS,
     "codex": CODEX_TIER_MODELS,
     "gemini": GEMINI_TIER_MODELS,
     "ollama": OLLAMA_TIER_MODELS,
+    "perplexity": PERPLEXITY_TIER_MODELS,
+    "mistral": MISTRAL_TIER_MODELS,
+    "qwen": QWEN_TIER_MODELS,
+    "kimi": KIMI_TIER_MODELS,
+    "groq": GROQ_TIER_MODELS,
+    "deepseek": DEEPSEEK_TIER_MODELS,
+    "xai": XAI_TIER_MODELS,
 }
 DEFAULT_MODEL: str = PROVIDER_DEFAULT_MODELS.get(DEFAULT_PROVIDER, CLAUDE_DEFAULT_MODEL)
 AVAILABLE_MODELS: list[str] = [model for models in PROVIDER_MODELS.values() for model in models]

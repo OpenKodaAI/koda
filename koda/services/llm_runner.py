@@ -13,12 +13,19 @@ from koda.config import (
     AGENT_ID,
     AVAILABLE_PROVIDERS,
     CODEX_FIRST_CHUNK_TIMEOUT,
+    DEEPSEEK_FIRST_CHUNK_TIMEOUT,
     FIRST_CHUNK_TIMEOUT,
     GEMINI_FIRST_CHUNK_TIMEOUT,
+    GROQ_FIRST_CHUNK_TIMEOUT,
+    KIMI_FIRST_CHUNK_TIMEOUT,
+    MISTRAL_FIRST_CHUNK_TIMEOUT,
+    PERPLEXITY_FIRST_CHUNK_TIMEOUT,
     PROVIDER_DEFAULT_MODELS,
     PROVIDER_FALLBACK_ORDER,
     PROVIDER_MODELS,
+    QWEN_FIRST_CHUNK_TIMEOUT,
     TRANSCRIPT_REPLAY_LIMIT,
+    XAI_FIRST_CHUNK_TIMEOUT,
 )
 from koda.services.claude_runner import (
     get_claude_capabilities,
@@ -30,10 +37,30 @@ from koda.services.codex_runner import (
     run_codex,
     run_codex_streaming,
 )
+from koda.services.deepseek_runner import (
+    get_deepseek_capabilities,
+    run_deepseek,
+    run_deepseek_streaming,
+)
 from koda.services.gemini_runner import (
     get_gemini_capabilities,
     run_gemini,
     run_gemini_streaming,
+)
+from koda.services.groq_runner import (
+    get_groq_capabilities,
+    run_groq,
+    run_groq_streaming,
+)
+from koda.services.kimi_runner import (
+    get_kimi_capabilities,
+    run_kimi,
+    run_kimi_streaming,
+)
+from koda.services.mistral_runner import (
+    get_mistral_capabilities,
+    run_mistral,
+    run_mistral_streaming,
 )
 from koda.services.model_router import estimate_model
 from koda.services.ollama_runner import (
@@ -41,30 +68,40 @@ from koda.services.ollama_runner import (
     run_ollama,
     run_ollama_streaming,
 )
+from koda.services.perplexity_runner import (
+    get_perplexity_capabilities,
+    run_perplexity,
+    run_perplexity_streaming,
+)
 from koda.services.provider_runtime import (
     ProviderCapabilities,
     TurnMode,
     infer_turn_mode,
     summarize_provider_health,
 )
+from koda.services.qwen_runner import (
+    get_qwen_capabilities,
+    run_qwen,
+    run_qwen_streaming,
+)
+from koda.services.xai_runner import (
+    get_xai_capabilities,
+    run_xai,
+    run_xai_streaming,
+)
 from koda.state.history_store import get_recent_session_transcript
 from koda.utils.command_helpers import normalize_provider
 
 _agent_id_label = AGENT_ID or "default"
 
+_COMMON_RETRY_PATTERN = re.compile(
+    r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
+    re.IGNORECASE,
+)
 _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
-    "claude": re.compile(
-        r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
-        re.IGNORECASE,
-    ),
-    "codex": re.compile(
-        r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
-        re.IGNORECASE,
-    ),
-    "gemini": re.compile(
-        r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
-        re.IGNORECASE,
-    ),
+    "claude": _COMMON_RETRY_PATTERN,
+    "codex": _COMMON_RETRY_PATTERN,
+    "gemini": _COMMON_RETRY_PATTERN,
     "ollama": re.compile(
         (
             r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529|"
@@ -72,6 +109,58 @@ _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
         ),
         re.IGNORECASE,
     ),
+    "perplexity": _COMMON_RETRY_PATTERN,
+    "mistral": _COMMON_RETRY_PATTERN,
+    "qwen": _COMMON_RETRY_PATTERN,
+    "kimi": _COMMON_RETRY_PATTERN,
+    "groq": _COMMON_RETRY_PATTERN,
+    "deepseek": _COMMON_RETRY_PATTERN,
+    "xai": _COMMON_RETRY_PATTERN,
+}
+
+_HTTP_PROVIDER_RUNNERS: dict[str, dict[str, Any]] = {
+    "perplexity": {
+        "run": run_perplexity,
+        "stream": run_perplexity_streaming,
+        "capabilities": get_perplexity_capabilities,
+        "first_chunk_timeout": float(PERPLEXITY_FIRST_CHUNK_TIMEOUT),
+    },
+    "mistral": {
+        "run": run_mistral,
+        "stream": run_mistral_streaming,
+        "capabilities": get_mistral_capabilities,
+        "first_chunk_timeout": float(MISTRAL_FIRST_CHUNK_TIMEOUT),
+    },
+    "qwen": {
+        "run": run_qwen,
+        "stream": run_qwen_streaming,
+        "capabilities": get_qwen_capabilities,
+        "first_chunk_timeout": float(QWEN_FIRST_CHUNK_TIMEOUT),
+    },
+    "kimi": {
+        "run": run_kimi,
+        "stream": run_kimi_streaming,
+        "capabilities": get_kimi_capabilities,
+        "first_chunk_timeout": float(KIMI_FIRST_CHUNK_TIMEOUT),
+    },
+    "groq": {
+        "run": run_groq,
+        "stream": run_groq_streaming,
+        "capabilities": get_groq_capabilities,
+        "first_chunk_timeout": float(GROQ_FIRST_CHUNK_TIMEOUT),
+    },
+    "deepseek": {
+        "run": run_deepseek,
+        "stream": run_deepseek_streaming,
+        "capabilities": get_deepseek_capabilities,
+        "first_chunk_timeout": float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
+    },
+    "xai": {
+        "run": run_xai,
+        "stream": run_xai_streaming,
+        "capabilities": get_xai_capabilities,
+        "first_chunk_timeout": float(XAI_FIRST_CHUNK_TIMEOUT),
+    },
 }
 
 
@@ -151,6 +240,10 @@ def is_retryable_provider_error(provider: str, error_message: str | None) -> boo
 async def get_provider_capabilities(provider: str, turn_mode: TurnMode) -> ProviderCapabilities:
     """Return runtime compatibility for one provider and turn mode."""
     normalized = normalize_provider(provider)
+    http_runner = _HTTP_PROVIDER_RUNNERS.get(normalized)
+    if http_runner is not None:
+        capabilities: ProviderCapabilities = await http_runner["capabilities"](turn_mode)
+        return capabilities
     if normalized == "ollama":
         return await get_ollama_capabilities(turn_mode)
     if normalized == "gemini":
@@ -276,7 +369,26 @@ async def run_llm(
             "retryable": False,
             "warnings": list(capabilities.warnings),
         }
-    if normalized == "ollama":
+    http_runner = _HTTP_PROVIDER_RUNNERS.get(normalized)
+    if http_runner is not None:
+        result_obj: dict[str, Any] = await http_runner["run"](
+            query=query,
+            work_dir=work_dir,
+            model=model,
+            session_id=provider_session_id,
+            max_budget=max_budget,
+            process_holder=process_holder,
+            system_prompt=system_prompt,
+            image_paths=image_paths,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            turn_mode=resolved_turn_mode,
+            capabilities=capabilities,
+            dry_run=dry_run,
+            runtime_task_id=runtime_task_id,
+        )
+        result = result_obj
+    elif normalized == "ollama":
         result = await run_ollama(
             query=query,
             work_dir=work_dir,
@@ -396,6 +508,31 @@ async def run_llm_streaming(
             metadata_collector["retryable"] = False
         return
 
+    http_runner = _HTTP_PROVIDER_RUNNERS.get(normalized)
+    if http_runner is not None:
+        effective_first_chunk = (
+            first_chunk_timeout if first_chunk_timeout is not None else float(http_runner["first_chunk_timeout"])
+        )
+        async for chunk in http_runner["stream"](
+            query=query,
+            work_dir=work_dir,
+            model=model,
+            session_id=provider_session_id,
+            max_budget=max_budget,
+            process_holder=process_holder,
+            system_prompt=system_prompt,
+            image_paths=image_paths,
+            first_chunk_timeout=effective_first_chunk,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            metadata_collector=metadata_collector,
+            turn_mode=resolved_turn_mode,
+            capabilities=capabilities,
+            dry_run=dry_run,
+            runtime_task_id=runtime_task_id,
+        ):
+            yield chunk
+        return
     if normalized == "ollama":
         async for chunk in run_ollama_streaming(
             query=query,

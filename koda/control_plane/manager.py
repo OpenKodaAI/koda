@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
+    CORE_PROVIDER_CATALOG,
     PROMOTION_MODES,
     normalize_string_list,
     resolve_allowed_tool_ids,
@@ -590,6 +591,17 @@ _SYSTEM_SETTINGS_KNOWN_ENV_KEYS: frozenset[str] = frozenset(
         *PROVIDER_VERIFIED_ENV_KEYS.values(),
         *(value for value in PROVIDER_BASE_URL_ENV_KEYS.values() if value),
         *(value for value in PROVIDER_PROJECT_ENV_KEYS.values() if value),
+        # Policy-derived env keys (`AGENT_AUTONOMY_POLICY_JSON`,
+        # `MEMORY_RECENCY_HALF_LIFE_DAYS`, `KNOWLEDGE_GRAPH_ENABLED`, …) are
+        # written by `_apply_*_policy_to_section` whenever the operator changes
+        # a related toggle. They are stored in DB sections and serialized to
+        # env to feed runtime workers, but they are not user-defined variables
+        # — must not surface in the dashboard's "Variables" list.
+        *_MODEL_POLICY_ENV_KEYS,
+        *_TOOL_POLICY_ENV_KEYS,
+        *_AUTONOMY_POLICY_ENV_KEYS,
+        *_MEMORY_POLICY_ENV_KEYS,
+        *_KNOWLEDGE_POLICY_ENV_KEYS,
     }
 )
 _CORE_PROVIDER_ENABLED_DEFAULTS: dict[str, bool] = {
@@ -1550,15 +1562,36 @@ class ControlPlaneManager:
             },
             "tools": {"default_agent_mode": "chat"},
             "integrations": {},
+            # `policy` + `env` is the source of truth for memory and knowledge
+            # toggles. Top-level fields like `enabled`, `proactive_enabled`,
+            # `promotion_mode`, `require_freshness_provenance` were set here in
+            # earlier seeds and ended up shadowing the policy values, so the
+            # `_apply_*_policy_to_section` cleanup would silently drop them on
+            # the next save. Seed the canonical shape directly to avoid round-trip
+            # churn.
             "memory": {
-                "enabled": False,
-                "proactive_enabled": False,
-                "procedural_enabled": False,
+                "policy": {
+                    "enabled": False,
+                    "proactive_enabled": False,
+                    "procedural_enabled": False,
+                },
+                "env": {
+                    "MEMORY_ENABLED": "false",
+                    "MEMORY_PROACTIVE_ENABLED": "false",
+                    "MEMORY_PROCEDURAL_ENABLED": "false",
+                },
             },
             "knowledge": {
-                "enabled": False,
-                "promotion_mode": "read_only",
-                "require_freshness_provenance": True,
+                "policy": {
+                    "enabled": False,
+                    "promotion_mode": "read_only",
+                    "require_freshness_provenance": True,
+                },
+                "env": {
+                    "KNOWLEDGE_ENABLED": "false",
+                    "KNOWLEDGE_PROMOTION_MODE": "read_only",
+                    "KNOWLEDGE_REQUIRE_FRESHNESS_PROVENANCE": "true",
+                },
             },
             "scheduler": {
                 "scheduler_enabled": True,
@@ -2266,7 +2299,12 @@ class ControlPlaneManager:
                         .get("project_id")
                     )
                 )
-            auth_mode = "api_key" if provider_id == "elevenlabs" or secret_present else "subscription_login"
+            catalog_def = CORE_PROVIDER_CATALOG.get(provider_id)
+            supported_auth_modes = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
+            if "subscription_login" in supported_auth_modes and not secret_present:
+                auth_mode = "subscription_login"
+            else:
+                auth_mode = "api_key"
             configured = 1 if secret_present else 0
             if provider_id == "ollama":
                 auth_mode = "local"
@@ -2499,9 +2537,10 @@ class ControlPlaneManager:
         env = self._merged_global_env_base()
         provider_catalog = _safe_json_object(self._provider_catalog_from_env(env).get("providers"))
         catalog = _safe_json_object(provider_catalog.get(provider_id))
-        auth_mode = _trimmed_text(row["auth_mode"]) or (
-            "api_key" if provider_id == "elevenlabs" else "subscription_login"
-        )
+        catalog_def = CORE_PROVIDER_CATALOG.get(provider_id)
+        supported_auth_modes_default = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
+        default_auth_mode = "subscription_login" if "subscription_login" in supported_auth_modes_default else "api_key"
+        auth_mode = _trimmed_text(row["auth_mode"]) or default_auth_mode
         provider_api_key_env = PROVIDER_API_KEY_ENV_KEYS.get(cast(Any, provider_id))
         if provider_api_key_env:
             api_key_present, _api_key_preview = self._global_secret_preview_state(provider_api_key_env)
@@ -3003,6 +3042,26 @@ class ControlPlaneManager:
 
     def _apply_memory_policy_to_section(self, payload: dict[str, Any], memory_policy: dict[str, Any]) -> None:
         self._clear_env_keys(payload, _MEMORY_POLICY_ENV_KEYS)
+        # Drop top-level shadows of policy fields that historic seeds wrote at
+        # the section root. They duplicate `policy.*` and the env map, so any
+        # divergence between them is a bug surface — source of truth must be
+        # `policy` + `env` only.
+        for legacy_field in (
+            "enabled",
+            "proactive_enabled",
+            "procedural_enabled",
+            "maintenance_enabled",
+            "digest_enabled",
+            "max_recall",
+            "max_per_user",
+            "recall_threshold",
+            "max_context_tokens",
+            "max_extraction_items",
+            "procedural_max_recall",
+            "recall_timeout",
+            "similarity_dedup_threshold",
+        ):
+            payload.pop(legacy_field, None)
         if not memory_policy:
             payload.pop("policy", None)
             return
@@ -3047,6 +3106,23 @@ class ControlPlaneManager:
 
     def _apply_knowledge_policy_to_section(self, payload: dict[str, Any], knowledge_policy: dict[str, Any]) -> None:
         self._clear_env_keys(payload, _KNOWLEDGE_POLICY_ENV_KEYS)
+        # Same legacy-shadow cleanup as the memory branch — keep `policy` + `env`
+        # as the only sources of truth; drop top-level duplicates left by older
+        # seeds.
+        for legacy_field in (
+            "enabled",
+            "max_results",
+            "recall_threshold",
+            "context_max_tokens",
+            "workspace_max_files",
+            "max_observed_patterns",
+            "max_source_age_days",
+            "promotion_mode",
+            "require_owner_provenance",
+            "require_freshness_provenance",
+            "allowed_layers",
+        ):
+            payload.pop(legacy_field, None)
         if not knowledge_policy:
             payload.pop("policy", None)
             return
@@ -9182,6 +9258,16 @@ class ControlPlaneManager:
             effective_knowledge_policy = normalize_knowledge_policy(
                 _deep_merge_json_objects(effective_knowledge_policy, knowledge_policy_input)
             )
+        # Re-apply overlay so the operator's `provenance_policy` choice (translated
+        # into `current_knowledge.require_*_provenance` above) wins over a stale
+        # `knowledge_policy` echoed back by the dashboard.
+        effective_knowledge_policy = normalize_knowledge_policy(
+            _overlay_known_policy_fields(
+                effective_knowledge_policy,
+                current_knowledge,
+                _GENERAL_KNOWLEDGE_POLICY_FIELD_NAMES,
+            )
+        )
         general_ui["provenance_policy"] = (
             "strict"
             if bool(effective_knowledge_policy.get("require_owner_provenance"))
@@ -9212,6 +9298,14 @@ class ControlPlaneManager:
             entry = _safe_json_object(item)
             key = _normalize_env_entry_key(entry.get("key"))
             if not key:
+                continue
+            # Defense-in-depth: never let the dashboard re-introduce a
+            # system-managed env key (policy JSON, provider auth flags, field
+            # spec keys) into the user-defined variables list. These are
+            # produced by `_apply_*_policy_to_section` and serialized for
+            # workers; the operator should configure them through the
+            # dedicated section toggles, not as free-form variables.
+            if key in _SYSTEM_SETTINGS_KNOWN_ENV_KEYS:
                 continue
             value_type = _normalize_general_value_type(entry.get("type"))
             usage_scope = _normalize_general_usage_scope(entry.get("scope"), default="system_only")
@@ -9282,6 +9376,17 @@ class ControlPlaneManager:
             effective_memory_policy = normalize_memory_policy(
                 _deep_merge_json_objects(effective_memory_policy, memory_policy_input)
             )
+        # Re-apply overlay so toggle/profile changes from `current_memory` win over
+        # any stale fields the dashboard sent inside `memory_policy` (e.g. it
+        # only updates `memory_enabled` but echoes back the previous
+        # `memory_policy.enabled` from the GET payload).
+        effective_memory_policy = normalize_memory_policy(
+            _overlay_known_policy_fields(
+                effective_memory_policy,
+                current_memory,
+                _GENERAL_MEMORY_POLICY_FIELD_NAMES,
+            )
+        )
 
         effective_knowledge_policy = normalize_knowledge_policy(
             _overlay_known_policy_fields(
@@ -9296,6 +9401,14 @@ class ControlPlaneManager:
             effective_knowledge_policy = normalize_knowledge_policy(
                 _deep_merge_json_objects(effective_knowledge_policy, knowledge_policy_input)
             )
+        # Same final-overlay rationale as the memory branch above.
+        effective_knowledge_policy = normalize_knowledge_policy(
+            _overlay_known_policy_fields(
+                effective_knowledge_policy,
+                current_knowledge,
+                _GENERAL_KNOWLEDGE_POLICY_FIELD_NAMES,
+            )
+        )
 
         effective_autonomy_policy = normalize_autonomy_policy(
             _safe_json_object(_safe_json_object(sections.get("runtime")).get("autonomy_policy"))
