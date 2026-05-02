@@ -544,7 +544,26 @@ export function TabIntegracoes() {
                   </button>
                 </div>
 
-                {integrationEntries.length === 0 && !integrationsLoading ? (
+                {integrationsLoading && integrationEntries.length === 0 ? (
+                  // Skeleton mirrors the real grouped layout (category eyebrow
+                  // + 2-col card grid) so there's no jarring jump when data
+                  // arrives. Card height matches the integration-card height.
+                  <div className="flex flex-col gap-5" aria-hidden>
+                    {Array.from({ length: 3 }).map((_, groupIdx) => (
+                      <div key={groupIdx}>
+                        <span className="mb-2 block h-[10px] w-24 rounded bg-[var(--surface-panel-soft)]" />
+                        <div className="grid grid-cols-2 gap-2">
+                          {Array.from({ length: 6 }).map((__, idx) => (
+                            <div
+                              key={idx}
+                              className="h-[60px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] animate-pulse"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : integrationEntries.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
                     {tl("Nenhuma integracao adicional disponivel.")}
                   </div>

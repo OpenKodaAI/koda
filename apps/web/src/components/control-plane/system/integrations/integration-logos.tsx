@@ -258,20 +258,32 @@ const BRAND_IMAGE_LOGOS = {
   atlassian: createRemoteLogo("https://cdn.simpleicons.org/atlassian/0052CC"),
   aws: createRemoteLogo("https://www.vectorlogo.zone/logos/amazon_aws/amazon_aws-icon.svg"),
   bitbucket: createRemoteLogo("https://cdn.simpleicons.org/bitbucket/2684FF"),
+  box: createRemoteLogo("https://cdn.simpleicons.org/box/0061D5"),
   brave: createRemoteLogo("https://cdn.simpleicons.org/brave/FB542B"),
+  canva: createRemoteLogo("https://cdn.simpleicons.org/canva/00C4CC"),
+  clickup: createRemoteLogo("https://cdn.simpleicons.org/clickup/7B68EE"),
   cloudflare: createRemoteLogo("https://www.vectorlogo.zone/logos/cloudflare/cloudflare-icon.svg"),
+  discord: createRemoteLogo("https://cdn.simpleicons.org/discord/5865F2"),
   docker: createRemoteLogo("https://www.vectorlogo.zone/logos/docker/docker-icon.svg"),
   excalidraw: createRemoteLogo("https://cdn.simpleicons.org/excalidraw/6965DB"),
   figma: createRemoteLogo("https://www.vectorlogo.zone/logos/figma/figma-icon.svg"),
+  firecrawl: createRemoteLogo("https://www.firecrawl.dev/favicon.ico"),
   gmail: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg"),
   google_calendar: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg"),
   google_drive: createRemoteLogo("https://www.vectorlogo.zone/logos/google_drive/google_drive-icon.svg"),
   google_maps: createRemoteLogo("https://www.vectorlogo.zone/logos/google_maps/google_maps-icon.svg"),
+  grafana: createRemoteLogo("https://www.vectorlogo.zone/logos/grafana/grafana-icon.svg"),
+  huggingface: createRemoteLogo("https://www.vectorlogo.zone/logos/huggingface/huggingface-icon.svg"),
   hubspot: createRemoteLogo("https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg"),
   linear: createRemoteLogo("https://cdn.simpleicons.org/linear/FFFFFF"),
+  microsoft_365: createRemoteLogo("https://cdn.simpleicons.org/microsoft365/D83B01"),
   mongodb: createRemoteLogo("https://www.vectorlogo.zone/logos/mongodb/mongodb-icon.svg"),
+  n8n: createRemoteLogo("https://cdn.simpleicons.org/n8n/EA4B71"),
+  netlify: createRemoteLogo("https://www.vectorlogo.zone/logos/netlify/netlify-icon.svg"),
   obsidian: createRemoteLogo("https://cdn.simpleicons.org/obsidian/7C3AED"),
   postgresql: createRemoteLogo("https://www.vectorlogo.zone/logos/postgresql/postgresql-icon.svg"),
+  posthog: createRemoteLogo("https://cdn.simpleicons.org/posthog/F9BD2B"),
+  postman: createRemoteLogo("https://cdn.simpleicons.org/postman/FF6C37"),
   puppeteer: createRemoteLogo("https://cdn.simpleicons.org/puppeteer/40B5A4"),
   sentry: createRemoteLogo("https://cdn.simpleicons.org/sentry/FFFFFF"),
   slack: createRemoteLogo("https://www.vectorlogo.zone/logos/slack/slack-icon.svg"),
@@ -279,20 +291,26 @@ const BRAND_IMAGE_LOGOS = {
   supabase: createRemoteLogo("https://www.vectorlogo.zone/logos/supabase/supabase-icon.svg"),
   todoist: createRemoteLogo("https://cdn.simpleicons.org/todoist/E44332"),
   twilio: createRemoteLogo("https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg"),
+  zapier: createRemoteLogo("https://cdn.simpleicons.org/zapier/FF4F00"),
 } as const;
 
 const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   atlassian: BRAND_IMAGE_LOGOS.atlassian,
   aws: BRAND_IMAGE_LOGOS.aws,
   bitbucket: BRAND_IMAGE_LOGOS.bitbucket,
+  box: BRAND_IMAGE_LOGOS.box,
   brave: BRAND_IMAGE_LOGOS.brave,
   browser: BrowserLogo,
+  canva: BRAND_IMAGE_LOGOS.canva,
+  clickup: BRAND_IMAGE_LOGOS.clickup,
   cloudflare: BRAND_IMAGE_LOGOS.cloudflare,
   confluence: ConfluenceLogo,
+  discord: BRAND_IMAGE_LOGOS.discord,
   docker: BRAND_IMAGE_LOGOS.docker,
   excalidraw: BRAND_IMAGE_LOGOS.excalidraw,
   figma: BRAND_IMAGE_LOGOS.figma,
   filesystem: FilesystemLogo,
+  firecrawl: BRAND_IMAGE_LOGOS.firecrawl,
   github: GitHubLogo,
   gitlab: GitLabLogo,
   gmail: BRAND_IMAGE_LOGOS.gmail,
@@ -300,16 +318,23 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   google_calendar: BRAND_IMAGE_LOGOS.google_calendar,
   google_drive: BRAND_IMAGE_LOGOS.google_drive,
   google_maps: BRAND_IMAGE_LOGOS.google_maps,
+  grafana: BRAND_IMAGE_LOGOS.grafana,
   granola: GranolaLogo,
+  huggingface: BRAND_IMAGE_LOGOS.huggingface,
   hubspot: BRAND_IMAGE_LOGOS.hubspot,
   jira: JiraLogo,
   linear: BRAND_IMAGE_LOGOS.linear,
   mcp: McpLogo,
   memory: MemoryLogo,
+  microsoft_365: BRAND_IMAGE_LOGOS.microsoft_365,
   mongodb: BRAND_IMAGE_LOGOS.mongodb,
+  n8n: BRAND_IMAGE_LOGOS.n8n,
+  netlify: BRAND_IMAGE_LOGOS.netlify,
   notion: NotionLogo,
   obsidian: BRAND_IMAGE_LOGOS.obsidian,
   postgresql: BRAND_IMAGE_LOGOS.postgresql,
+  posthog: BRAND_IMAGE_LOGOS.posthog,
+  postman: BRAND_IMAGE_LOGOS.postman,
   puppeteer: BRAND_IMAGE_LOGOS.puppeteer,
   sentry: BRAND_IMAGE_LOGOS.sentry,
   slack: BRAND_IMAGE_LOGOS.slack,
@@ -318,20 +343,27 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   todoist: BRAND_IMAGE_LOGOS.todoist,
   twilio: BRAND_IMAGE_LOGOS.twilio,
   vercel: VercelLogo,
+  zapier: BRAND_IMAGE_LOGOS.zapier,
 };
 
 export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   atlassian: { from: "#2684FF", to: "#0052CC" },
   aws: { from: "#FF9900", to: "#232F3E" },
+  aws_api: { from: "#FF9900", to: "#232F3E" },
   bitbucket: { from: "#2684FF", to: "#0052CC" },
+  box: { from: "#0061D5", to: "#003D82" },
   brave: { from: "#FB542B", to: "#FF8A4C" },
   browser: { from: "#7C9CFF", to: "#3656D4" },
+  canva: { from: "#00C4CC", to: "#7D2AE7" },
+  clickup: { from: "#7B68EE", to: "#FD71AF" },
   cloudflare: { from: "#F38020", to: "#F9AE40" },
   confluence: { from: "#1868DB", to: "#0747A6" },
+  discord: { from: "#5865F2", to: "#404EED" },
   docker: { from: "#2496ED", to: "#0B76C5" },
   excalidraw: { from: "#6965DB", to: "#E95A4B" },
   figma: { from: "#A259FF", to: "#0ACF83" },
   filesystem: { from: "#C48E35", to: "#7F5C2E" },
+  firecrawl: { from: "#F37020", to: "#FF8A4C" },
   github: { from: "#6E5494", to: "#24292E" },
   gitlab: { from: "#FC6D26", to: "#292961" },
   gmail: { from: "#EA4335", to: "#C5221F" },
@@ -339,16 +371,23 @@ export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   google_calendar: { from: "#4285F4", to: "#0F9D58" },
   google_drive: { from: "#0F9D58", to: "#FFCC00" },
   google_maps: { from: "#4285F4", to: "#34A853" },
+  grafana: { from: "#F46800", to: "#F2495C" },
   granola: { from: "#B2C248", to: "#1E1E1E" },
+  huggingface: { from: "#FFD21E", to: "#FF9D00" },
   hubspot: { from: "#FF7A59", to: "#FFB381" },
   jira: { from: "#2684FF", to: "#0052CC" },
   linear: { from: "#FFFFFF", to: "#8E8E93" },
   mcp: { from: "#7C9CFF", to: "#5168D9" },
   memory: { from: "#8D74FF", to: "#5A44C5" },
+  microsoft_365: { from: "#D83B01", to: "#0078D4" },
   mongodb: { from: "#13AA52", to: "#00684A" },
+  n8n: { from: "#EA4B71", to: "#FF6D9C" },
+  netlify: { from: "#00C7B7", to: "#0E1E25" },
   notion: { from: "#F5F5F5", to: "#8C8C8C" },
   obsidian: { from: "#7C3AED", to: "#4C1D95" },
   postgresql: { from: "#336791", to: "#1B4F72" },
+  posthog: { from: "#F9BD2B", to: "#1D4AFF" },
+  postman: { from: "#FF6C37", to: "#FF8A4C" },
   puppeteer: { from: "#40B5A4", to: "#248277" },
   sentry: { from: "#A284FF", to: "#5B43AA" },
   slack: { from: "#36C5F0", to: "#E01E5A" },
@@ -357,6 +396,7 @@ export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   todoist: { from: "#E44332", to: "#C22D1C" },
   twilio: { from: "#F22F46", to: "#AA1630" },
   vercel: { from: "#F5F5F5", to: "#8C8C8C" },
+  zapier: { from: "#FF4F00", to: "#FF8A4C" },
 };
 
 export function getIntegrationAccent(key: string | null | undefined): BrandAccent {
@@ -369,10 +409,24 @@ export function getIntegrationLogo(
   return LOGO_MAP[key || "mcp"] || LOGO_MAP.mcp;
 }
 
+/**
+ * Brand marks shipped as a single white shape. They render fine on dark
+ * surfaces (the project default) but disappear on light backgrounds. We tag
+ * them with a class that the CSS layer flips to black via `filter: invert`
+ * only when the active theme is light.
+ */
+const MONO_WHITE_LOGO_KEYS = new Set(["linear", "notion", "sentry", "vercel"]);
+
 export function renderIntegrationLogo(
   key: string | null | undefined,
   className?: string,
 ): ReactNode {
   const LogoComponent = getIntegrationLogo(key);
-  return LogoComponent ? <LogoComponent className={className} /> : null;
+  if (!LogoComponent) return null;
+  const normalizedKey = (key ?? "").trim().toLowerCase();
+  const monoClass = MONO_WHITE_LOGO_KEYS.has(normalizedKey)
+    ? "integration-logo--mono-light"
+    : "";
+  const composed = [className, monoClass].filter(Boolean).join(" ") || undefined;
+  return <LogoComponent className={composed} />;
 }

@@ -12,7 +12,7 @@ const buttonVariants = cva(
         primary:
           "border-[color:var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] hover:border-[color:var(--button-primary-hover)] hover:bg-[var(--button-primary-hover)] data-[state=open]:border-[color:var(--button-primary-hover)] data-[state=open]:bg-[var(--button-primary-hover)]",
         accent:
-          "border-[color:var(--accent)] bg-[var(--accent)] text-white hover:border-[color:var(--accent-hover)] hover:bg-[var(--accent-hover)] data-[state=open]:border-[color:var(--accent-hover)] data-[state=open]:bg-[var(--accent-hover)]",
+          "border-[color:var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:border-[color:var(--accent-hover)] hover:bg-[var(--accent-hover)] data-[state=open]:border-[color:var(--accent-hover)] data-[state=open]:bg-[var(--accent-hover)]",
         mono:
           "border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         destructive:

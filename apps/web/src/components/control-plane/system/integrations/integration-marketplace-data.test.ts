@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
-import { MCP_SUGGESTED_SERVERS } from "@/components/control-plane/system/mcp/mcp-catalog-data";
+import type { McpSuggestedServer } from "@/components/control-plane/system/mcp/mcp-catalog-utils";
 import {
   buildUnifiedIntegrationEntries,
   filterUnifiedIntegrationEntries,
@@ -11,6 +11,56 @@ type CoreDefaultConnection = {
   kind: "core";
   integration_key: string;
   status: string;
+};
+
+const SLACK_SUGGESTED: McpSuggestedServer = {
+  server_key: "slack",
+  display_name: "Slack",
+  tagline: "Mensagens, canais e workflows",
+  description:
+    "Curated Slack MCP fixture used to validate that suggestion data overrides persisted catalog rows.",
+  transport_type: "stdio",
+  command_template: ["npx", "-y", "@modelcontextprotocol/server-slack"],
+  env_fields: [{ key: "SLACK_BOT_TOKEN", label: "Bot Token", required: true }],
+  category: "productivity",
+  documentation_url: "https://api.slack.com/",
+  logo_key: "slack",
+  expected_tools: [
+    { name: "list_channels", description: "Listar canais", read_only_hint: true },
+  ],
+  oauth_supported: false,
+};
+
+const NOTION_SUGGESTED: McpSuggestedServer = {
+  server_key: "notion",
+  display_name: "Notion",
+  tagline: "Páginas, databases e blocks",
+  description: "Curated Notion MCP fixture.",
+  transport_type: "stdio",
+  command_template: ["npx", "-y", "@modelcontextprotocol/server-notion"],
+  env_fields: [],
+  category: "productivity",
+  documentation_url: "https://developers.notion.com/",
+  logo_key: "notion",
+  expected_tools: [
+    { name: "list_pages", description: "Listar páginas", read_only_hint: true },
+  ],
+};
+
+const POSTGRES_SUGGESTED: McpSuggestedServer = {
+  server_key: "postgres_mcp",
+  display_name: "PostgreSQL",
+  tagline: "Banco relacional por connection string",
+  description: "Curated PostgreSQL MCP fixture.",
+  transport_type: "stdio",
+  command_template: ["npx", "-y", "@henkey/postgres-mcp-server"],
+  env_fields: [{ key: "DATABASE_URL", label: "Database URL", required: true }],
+  category: "data",
+  documentation_url: "https://www.npmjs.com/package/@henkey/postgres-mcp-server",
+  logo_key: "postgresql",
+  expected_tools: [
+    { name: "query", description: "Run SQL", read_only_hint: false },
+  ],
 };
 
 function makeCatalogServer(
@@ -38,10 +88,12 @@ function buildEntries({
   integrations = {},
   coreDefaults = [],
   mcpCatalog = [],
+  suggestedMcpServers = [],
 }: {
   integrations?: Record<string, boolean>;
   coreDefaults?: CoreDefaultConnection[];
   mcpCatalog?: McpServerCatalogEntry[];
+  suggestedMcpServers?: McpSuggestedServer[];
 }) {
   const legacyConnectionMap = Object.fromEntries(
     coreDefaults.map((connection) => [
@@ -54,18 +106,15 @@ function buildEntries({
     integrations,
     mcpCatalog,
     integrationConnections: legacyConnectionMap,
+    suggestedMcpServers,
   } as Parameters<typeof buildUnifiedIntegrationEntries>[0]);
 }
 
 describe("integration marketplace data", () => {
   it("merges curated MCP definitions with persisted catalog state and keeps custom servers generic", () => {
-    const slackSuggested = MCP_SUGGESTED_SERVERS.find(
-      (server) => server.server_key === "slack",
-    );
-    expect(slackSuggested).toBeTruthy();
-
     const entries = buildEntries({
       integrations: { browser_enabled: true },
+      suggestedMcpServers: [SLACK_SUGGESTED, NOTION_SUGGESTED],
       mcpCatalog: [
         makeCatalogServer({
           server_key: "slack",
@@ -96,12 +145,12 @@ describe("integration marketplace data", () => {
 
     expect(slack).toMatchObject({
       kind: "mcp",
-      label: slackSuggested?.display_name,
-      tagline: slackSuggested?.tagline,
-      logoKey: slackSuggested?.logo_key,
+      label: SLACK_SUGGESTED.display_name,
+      tagline: SLACK_SUGGESTED.tagline,
+      logoKey: SLACK_SUGGESTED.logo_key,
       status: "pending",
       metadata: {
-        documentationUrl: slackSuggested?.documentation_url,
+        documentationUrl: SLACK_SUGGESTED.documentation_url,
         origin: "curated",
         type: "MCP",
       },
@@ -145,6 +194,7 @@ describe("integration marketplace data", () => {
   it("filters reserved MCP server keys and keeps postgres only as curated MCP", () => {
     const entries = buildEntries({
       integrations: {},
+      suggestedMcpServers: [POSTGRES_SUGGESTED],
       mcpCatalog: [
         makeCatalogServer({
           server_key: "filesystem",
@@ -153,7 +203,7 @@ describe("integration marketplace data", () => {
         }),
         makeCatalogServer({
           server_key: "postgres_mcp",
-          display_name: "PostgreSQL (MCP)",
+          display_name: "PostgreSQL",
           enabled: false,
         }),
         makeCatalogServer({

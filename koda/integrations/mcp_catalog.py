@@ -1216,6 +1216,634 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         ),
         tier="recommended",
     ),
+    # ------------------------------------------------------------ Wave 3 (10/2026)
+    McpServerSpec(
+        server_key="microsoft_365",
+        display_name="Microsoft 365",
+        tagline="Outlook, Teams, OneDrive via Microsoft Graph",
+        description=(
+            "Servidor MCP comunitário (Lokka) que conecta ao Microsoft Graph: "
+            "Outlook (mail/calendar), Teams (channels/chat), OneDrive (files). "
+            "Auth via OAuth 2.1 do Microsoft Identity Platform."
+        ),
+        category="productivity",
+        documentation_url="https://github.com/merill/lokka",
+        logo_key="microsoft_365",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@merill/lokka@0.3.0"),
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="microsoft",
+            oauth_scopes=(
+                "Mail.ReadWrite",
+                "Calendars.ReadWrite",
+                "Files.ReadWrite",
+                "Team.ReadBasic.All",
+                "Chat.ReadWrite",
+            ),
+            fields=(
+                ConnectionField(
+                    key="TENANT_ID",
+                    label="Tenant ID (fallback)",
+                    required=False,
+                    input_type="text",
+                    help="Apenas para deployments com client credentials.",
+                ),
+                ConnectionField(
+                    key="CLIENT_ID",
+                    label="Client ID (fallback)",
+                    required=False,
+                    input_type="text",
+                ),
+                ConnectionField(
+                    key="CLIENT_SECRET",
+                    label="Client Secret (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_messages", "Listar emails (Outlook)"),
+            _w("send_message", "Enviar email"),
+            _r("get_message", "Detalhes de email"),
+            _r("list_calendars", "Listar calendários"),
+            _r("list_events", "Listar eventos"),
+            _w("create_event", "Criar evento"),
+            _w("update_event", "Atualizar evento"),
+            _d("delete_event", "Excluir evento"),
+            _r("list_files", "Listar arquivos (OneDrive)"),
+            _r("read_file", "Ler conteúdo do arquivo"),
+            _w("upload_file", "Upload de arquivo"),
+            _r("list_teams_channels", "Listar canais Teams"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="firecrawl",
+        display_name="Firecrawl",
+        tagline="Web scraping e crawling para pesquisa",
+        description=(
+            "Servidor MCP oficial da Firecrawl: scrape de URLs únicas, crawl "
+            "de sites inteiros, busca web e extração estruturada via LLM. "
+            "Complementa Brave Search para fluxos de research."
+        ),
+        category="general",
+        documentation_url="https://docs.firecrawl.dev/mcp",
+        logo_key="firecrawl",
+        transport_type="stdio",
+        command_template=("npx", "-y", "firecrawl-mcp@3.14.1"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="FIRECRAWL_API_KEY",
+                    label="API Key",
+                    required=True,
+                    input_type="password",
+                    help="Crie em firecrawl.dev/app/api-keys.",
+                ),
+            ),
+        ),
+        runtime_constraints=("allowed_domains", "allow_private_network"),
+        tools=(
+            _r("scrape_url", "Scrape de uma URL"),
+            _r("crawl_site", "Crawl recursivo de site"),
+            _r("search", "Busca web com Firecrawl"),
+            _r("extract", "Extração estruturada via LLM"),
+            _r("map_site", "Mapear URLs de um site"),
+            _r("batch_scrape", "Scrape de múltiplas URLs"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="posthog",
+        display_name="PostHog",
+        tagline="Product analytics, eventos e feature flags",
+        description=(
+            "Servidor MCP remoto oficial em mcp.posthog.com. Consulta eventos, "
+            "funnels, dashboards, feature flags e personas. Complementa Sentry "
+            "(que cobre erros) com analytics de produto."
+        ),
+        category="data",
+        documentation_url="https://posthog.com/docs/model-context-protocol",
+        logo_key="posthog",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.posthog.com/mcp"),
+        remote_url="https://mcp.posthog.com/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="POSTHOG_API_KEY",
+                    label="Personal API Key",
+                    required=True,
+                    input_type="password",
+                    help="Crie em app.posthog.com/settings/user-api-keys.",
+                ),
+                ConnectionField(
+                    key="POSTHOG_HOST",
+                    label="Host (opcional, self-hosted)",
+                    required=False,
+                    input_type="text",
+                    help="Padrão: https://app.posthog.com. Use sua URL self-hosted se aplicável.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("query_events", "Consultar eventos"),
+            _r("query_funnel", "Consultar funnel"),
+            _r("get_insight", "Detalhes de insight"),
+            _r("list_dashboards", "Listar dashboards"),
+            _r("get_feature_flag", "Detalhes de feature flag"),
+            _w("update_feature_flag", "Atualizar feature flag"),
+            _r("list_persons", "Listar personas/users"),
+            _r("query_hogql", "Executar query HogQL"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="discord",
+        display_name="Discord",
+        tagline="Mensagens, canais, threads e moderação",
+        description=(
+            "Servidor MCP comunitário para Discord. Lê e envia mensagens, "
+            "gerencia threads, lista membros, aplica reações. Auth via Bot Token."
+        ),
+        category="productivity",
+        documentation_url="https://www.npmjs.com/package/discord-mcp",
+        logo_key="discord",
+        transport_type="stdio",
+        command_template=("npx", "-y", "discord-mcp@2.4.0"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="DISCORD_BOT_TOKEN",
+                    label="Bot Token",
+                    required=True,
+                    input_type="password",
+                    help=(
+                        "Crie em discord.com/developers/applications → New Application → "
+                        "Bot → Reset Token. Necessita escopos messages, threads, members."
+                    ),
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_guilds", "Listar servidores"),
+            _r("list_channels", "Listar canais"),
+            _r("read_messages", "Ler mensagens de canal"),
+            _w("send_message", "Enviar mensagem"),
+            _w("create_thread", "Criar thread"),
+            _w("add_reaction", "Adicionar reação"),
+            _r("list_members", "Listar membros"),
+            _r("get_user", "Detalhes de usuário"),
+            _d("delete_message", "Excluir mensagem"),
+            _w("set_status", "Definir status do bot"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="grafana",
+        display_name="Grafana",
+        tagline="Dashboards, alertas e queries Prometheus/Loki",
+        description=(
+            "Servidor MCP oficial da Grafana Labs (Python via uvx). Lista e "
+            "consulta dashboards, executa queries Prometheus/Loki, gerencia "
+            "alertas. Auth via Service Account Token."
+        ),
+        category="cloud",
+        documentation_url="https://github.com/grafana/mcp-grafana",
+        logo_key="grafana",
+        transport_type="stdio",
+        command_template=("uvx", "mcp-grafana==0.13.1"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="GRAFANA_URL",
+                    label="Grafana URL",
+                    required=True,
+                    input_type="text",
+                    help="Ex.: https://yourorg.grafana.net ou https://grafana.empresa.com.",
+                ),
+                ConnectionField(
+                    key="GRAFANA_API_KEY",
+                    label="Service Account Token",
+                    required=True,
+                    input_type="password",
+                    help="Crie em Administration → Service accounts → Add token.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_dashboards", "Listar dashboards"),
+            _r("get_dashboard", "Detalhes de dashboard"),
+            _r("query_prometheus", "Query PromQL"),
+            _r("query_loki", "Query LogQL"),
+            _r("list_datasources", "Listar datasources"),
+            _r("list_alerts", "Listar alertas"),
+            _w("silence_alert", "Silenciar alerta"),
+            _r("get_panel_data", "Dados de painel"),
+            _r("search_dashboards", "Buscar dashboards"),
+            _r("list_folders", "Listar folders"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="canva",
+        display_name="Canva",
+        tagline="Designs, brand templates e exports",
+        description=(
+            "Servidor MCP remoto oficial em mcp.canva.com via OAuth. Lista e "
+            "cria designs, aplica brand templates, exporta como PDF/PNG, faz "
+            "upload de assets."
+        ),
+        category="productivity",
+        documentation_url="https://www.canva.dev/docs/connect/mcp/",
+        logo_key="canva",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.canva.com/mcp"),
+        remote_url="https://mcp.canva.com/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="oauth_only",
+            oauth_provider="canva",
+            oauth_scopes=("design:read", "design:write", "asset:read", "asset:write"),
+        ),
+        tools=(
+            _r("list_designs", "Listar designs"),
+            _r("get_design", "Detalhes de design"),
+            _w("create_design", "Criar design"),
+            _r("export_design", "Exportar design (PDF/PNG)"),
+            _r("list_brand_templates", "Listar brand templates"),
+            _w("apply_brand_template", "Aplicar brand template"),
+            _w("upload_asset", "Upload de asset"),
+            _r("list_folders", "Listar folders"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="box",
+        display_name="Box",
+        tagline="Storage corporativo, files e sharing",
+        description=(
+            "Servidor MCP comunitário para Box Cloud. Lista, baixa e faz upload "
+            "de arquivos, cria folders, compartilha links. Auth via OAuth 2.0 "
+            "do Box (preferencial) ou Developer Token."
+        ),
+        category="productivity",
+        documentation_url="https://www.npmjs.com/package/box-mcp-server",
+        logo_key="box",
+        transport_type="stdio",
+        command_template=("npx", "-y", "box-mcp-server@0.3.1"),
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="box",
+            oauth_scopes=("root_readwrite",),
+            fields=(
+                ConnectionField(
+                    key="BOX_DEVELOPER_TOKEN",
+                    label="Developer Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help="Use preferencialmente OAuth. Token disponível em developer.box.com.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_files", "Listar arquivos"),
+            _r("get_file", "Detalhes de arquivo"),
+            _r("download_file", "Baixar arquivo"),
+            _w("upload_file", "Upload de arquivo"),
+            _w("create_folder", "Criar folder"),
+            _r("list_folders", "Listar folders"),
+            _r("search", "Buscar arquivos"),
+            _w("share_file", "Compartilhar arquivo"),
+            _w("move_file", "Mover arquivo"),
+            _d("delete_file", "Excluir arquivo"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="n8n",
+        display_name="n8n",
+        tagline="Workflow automation, executions e credentials",
+        description=(
+            "Servidor MCP comunitário para n8n (cloud ou self-hosted). Lista "
+            "e executa workflows, consulta histórico de executions, gerencia "
+            "metadata de credentials."
+        ),
+        category="general",
+        documentation_url="https://www.npmjs.com/package/n8n-mcp",
+        logo_key="n8n",
+        transport_type="stdio",
+        command_template=("npx", "-y", "n8n-mcp@2.50.0"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="N8N_API_KEY",
+                    label="n8n API Key",
+                    required=True,
+                    input_type="password",
+                    help="Crie em Settings → n8n API → Create API Key.",
+                ),
+                ConnectionField(
+                    key="N8N_BASE_URL",
+                    label="Base URL",
+                    required=True,
+                    input_type="text",
+                    help="Padrão cloud: https://app.n8n.cloud. Use sua URL self-hosted se aplicável.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_workflows", "Listar workflows"),
+            _r("get_workflow", "Detalhes de workflow"),
+            _w("execute_workflow", "Executar workflow"),
+            _w("activate_workflow", "Ativar workflow"),
+            _w("deactivate_workflow", "Desativar workflow"),
+            _r("list_executions", "Listar executions"),
+            _r("get_execution", "Detalhes de execution"),
+            _r("list_credentials", "Listar credentials (metadata)"),
+            _w("create_workflow", "Criar workflow"),
+            _w("update_workflow", "Atualizar workflow"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="aws_api",
+        display_name="AWS API",
+        tagline="Execução real de tools AWS (S3, EC2, Lambda, IAM)",
+        description=(
+            "Servidor MCP oficial AWS Labs (Python via uvx) para execução real "
+            "de operações AWS via API. Cobre S3, EC2, Lambda, IAM, CloudWatch, "
+            "DynamoDB. Complementa aws_knowledge (read-only docs) com execução "
+            "real. Default: always_ask em todas as tools — operador pode habilitar "
+            "read_only_mode no grant."
+        ),
+        category="cloud",
+        documentation_url="https://github.com/awslabs/mcp/tree/main/src/aws-api-mcp-server",
+        logo_key="aws",
+        transport_type="stdio",
+        command_template=("uvx", "awslabs.aws-api-mcp-server==1.3.33"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="AWS_ACCESS_KEY_ID",
+                    label="Access Key ID",
+                    required=True,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="AWS_SECRET_ACCESS_KEY",
+                    label="Secret Access Key",
+                    required=True,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="AWS_REGION",
+                    label="Default Region",
+                    required=True,
+                    input_type="text",
+                    help="Ex.: us-east-1, sa-east-1.",
+                ),
+                ConnectionField(
+                    key="AWS_SESSION_TOKEN",
+                    label="Session Token (credenciais temporárias)",
+                    required=False,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="AWS_PROFILE",
+                    label="AWS Profile (~/.aws/credentials)",
+                    required=False,
+                    input_type="text",
+                ),
+            ),
+        ),
+        runtime_constraints=("read_only_mode", "allow_private_network"),
+        tools=(
+            _r("s3_list_buckets", "Listar buckets S3"),
+            _r("s3_get_object", "Ler objeto S3"),
+            _d("s3_put_object", "Upload de objeto S3"),
+            _r("ec2_describe_instances", "Listar instâncias EC2"),
+            _d("ec2_start_instances", "Iniciar instâncias EC2"),
+            _d("ec2_stop_instances", "Parar instâncias EC2"),
+            _r("lambda_list_functions", "Listar funções Lambda"),
+            _w("lambda_invoke", "Invocar função Lambda"),
+            _r("iam_list_users", "Listar usuários IAM"),
+            _r("cloudwatch_get_metric_data", "Consultar métricas CloudWatch"),
+            _r("dynamodb_query", "Query DynamoDB"),
+            _d("dynamodb_put_item", "Inserir item DynamoDB"),
+        ),
+        tier="recommended",
+    ),
+    # ------------------------------------------------------------ Wave 4 (10/2026)
+    McpServerSpec(
+        server_key="postman",
+        display_name="Postman",
+        tagline="Workspaces, collections e mock servers",
+        description=(
+            "Servidor MCP para Postman API: gerenciar workspaces, collections, "
+            "requests, environments, folders e mock servers. Auth via API Key."
+        ),
+        category="development",
+        documentation_url="https://www.npmjs.com/package/postman-mcp-server",
+        logo_key="postman",
+        transport_type="stdio",
+        command_template=("npx", "-y", "postman-mcp-server@1.2.0"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="POSTMAN_API_KEY",
+                    label="API Key",
+                    required=True,
+                    input_type="password",
+                    help="Crie em postman.com → Profile → Settings → API Keys.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_workspaces", "Listar workspaces"),
+            _r("get_workspace", "Detalhes de workspace"),
+            _r("list_collections", "Listar collections"),
+            _r("get_collection", "Detalhes de collection"),
+            _w("create_collection", "Criar collection"),
+            _w("update_collection", "Atualizar collection"),
+            _r("list_environments", "Listar environments"),
+            _w("create_environment", "Criar environment"),
+            _r("list_mocks", "Listar mock servers"),
+            _w("create_mock", "Criar mock server"),
+            _r("get_request", "Detalhes de request"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="zapier",
+        display_name="Zapier",
+        tagline="6.000+ apps via Zaps automatizados",
+        description=(
+            "Servidor MCP remoto oficial da Zapier. Execute Zaps e acesse as "
+            "ações de qualquer app conectado na sua conta Zapier. URL única "
+            "por usuário (com token embutido) — gere em mcp.zapier.com."
+        ),
+        category="general",
+        documentation_url="https://zapier.com/mcp",
+        logo_key="zapier",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.zapier.com/api/mcp/sse"),
+        remote_url="https://mcp.zapier.com/api/mcp/sse",
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="ZAPIER_MCP_URL",
+                    label="MCP URL (with embedded token)",
+                    required=True,
+                    input_type="password",
+                    help=(
+                        "Gere a URL personalizada em mcp.zapier.com — formato: "
+                        "https://mcp.zapier.com/api/mcp/<token>/sse"
+                    ),
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_actions", "Listar ações disponíveis"),
+            _w("execute_action", "Executar Zap/ação"),
+            _r("search_apps", "Buscar apps conectados"),
+            _r("get_action_schema", "Schema de uma ação"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="netlify",
+        display_name="Netlify",
+        tagline="Deploys, sites e edge functions",
+        description=(
+            "Servidor MCP oficial da Netlify. Gerencie sites, deploys, "
+            "environment variables, edge functions, formulários e domínios."
+        ),
+        category="development",
+        documentation_url="https://docs.netlify.com/welcome/build-with-ai/netlify-mcp-server/",
+        logo_key="netlify",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@netlify/mcp@1.15.1"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="NETLIFY_PERSONAL_ACCESS_TOKEN",
+                    label="Personal Access Token",
+                    required=True,
+                    input_type="password",
+                    help="Crie em app.netlify.com → User settings → Applications → Personal access tokens.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_sites", "Listar sites"),
+            _r("get_site", "Detalhes de site"),
+            _w("deploy_site", "Disparar deploy"),
+            _r("list_deploys", "Listar deploys"),
+            _r("get_deploy", "Detalhes de deploy"),
+            _r("list_env_vars", "Listar variáveis de ambiente"),
+            _w("set_env_var", "Definir variável de ambiente"),
+            _d("delete_env_var", "Remover variável de ambiente"),
+            _r("list_forms", "Listar formulários"),
+            _r("list_functions", "Listar edge functions"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="huggingface",
+        display_name="Hugging Face",
+        tagline="Models, datasets, Spaces e inference",
+        description=(
+            "Servidor MCP remoto oficial em huggingface.co/mcp. Acesso a "
+            "models, datasets, Spaces e inference API. Auth via Hugging Face "
+            "User Access Token."
+        ),
+        category="data",
+        documentation_url="https://huggingface.co/docs/hub/mcp",
+        logo_key="huggingface",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://huggingface.co/mcp"),
+        remote_url="https://huggingface.co/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="HF_TOKEN",
+                    label="User Access Token",
+                    required=True,
+                    input_type="password",
+                    help="Crie em huggingface.co/settings/tokens com escopo read.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("search_models", "Buscar models"),
+            _r("get_model", "Detalhes de model"),
+            _r("search_datasets", "Buscar datasets"),
+            _r("get_dataset", "Detalhes de dataset"),
+            _r("search_spaces", "Buscar Spaces"),
+            _w("run_inference", "Executar inference"),
+            _r("list_organizations", "Listar organizações"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="clickup",
+        display_name="ClickUp",
+        tagline="Tasks, lists, spaces e time tracking",
+        description=(
+            "Servidor MCP comunitário (oficial-aligned) para ClickUp. Tasks, "
+            "lists, folders, spaces, comments, time tracking. Auth via API Key."
+        ),
+        category="productivity",
+        documentation_url="https://www.npmjs.com/package/clickup-mcp-server",
+        logo_key="clickup",
+        transport_type="stdio",
+        command_template=("npx", "-y", "clickup-mcp-server@1.12.0"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="CLICKUP_API_KEY",
+                    label="API Key",
+                    required=True,
+                    input_type="password",
+                    help="Crie em ClickUp → Settings → Apps → API Token.",
+                ),
+                ConnectionField(
+                    key="CLICKUP_TEAM_ID",
+                    label="Team ID",
+                    required=True,
+                    input_type="text",
+                    help="Disponível na URL do workspace (ex.: app.clickup.com/<TEAM_ID>/...).",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_spaces", "Listar spaces"),
+            _r("list_folders", "Listar folders"),
+            _r("list_lists", "Listar lists"),
+            _r("list_tasks", "Listar tasks"),
+            _r("get_task", "Detalhes de task"),
+            _w("create_task", "Criar task"),
+            _w("update_task", "Atualizar task"),
+            _d("delete_task", "Excluir task"),
+            _w("add_comment", "Adicionar comentário"),
+            _r("list_members", "Listar membros do team"),
+            _w("start_time_tracking", "Iniciar tracking de tempo"),
+        ),
+        tier="recommended",
+    ),
 )
 
 

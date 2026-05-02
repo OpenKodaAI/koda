@@ -74,8 +74,8 @@ export function SectionGeneral() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <FieldWithBadge badgeKey="account.scheduler_default_timezone" sourceBadges={sourceBadges}>
             <FieldShell
-              label="Timezone"
-              description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
+              label={tl("Timezone")}
+              description={tl("Fuso horário aplicado aos agendamentos e à operação global do sistema.")}
               error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
             >
               <TimezonePicker
@@ -83,19 +83,19 @@ export function SectionGeneral() {
                 onValueChange={(v) => update({ scheduler_default_timezone: v })}
                 disabled={isEnvSourced("account.scheduler_default_timezone")}
                 title={
-                  isEnvSourced("account.scheduler_default_timezone") ? "Set via environment variable" : undefined
+                  isEnvSourced("account.scheduler_default_timezone") ? tl("Set via environment variable") : undefined
                 }
-                placeholder="Selecionar fuso horário…"
-                searchPlaceholder="Buscar fuso horário"
-                emptyLabel="Nenhum fuso encontrado"
+                placeholder={tl("Selecionar fuso horário…")}
+                searchPlaceholder={tl("Buscar fuso horário")}
+                emptyLabel={tl("Nenhum fuso encontrado")}
               />
             </FieldShell>
           </FieldWithBadge>
 
           <FieldWithBadge badgeKey="account.time_format" sourceBadges={sourceBadges}>
             <FieldShell
-              label="Formato de hora"
-              description="Define como os horários são exibidos na interface e nos relatórios."
+              label={tl("Formato de hora")}
+              description={tl("Define como os horários são exibidos na interface e nos relatórios.")}
               error={findFieldError(errors, "account.time_format")?.message}
             >
               <Select
@@ -104,13 +104,13 @@ export function SectionGeneral() {
                 disabled={isEnvSourced("account.time_format")}
               >
                 <SelectTrigger
-                  title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
+                  title={isEnvSourced("account.time_format") ? tl("Set via environment variable") : undefined}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="24h">24 horas (14:30)</SelectItem>
-                  <SelectItem value="12h">12 horas (2:30 PM)</SelectItem>
+                  <SelectItem value="24h">{tl("24 horas (14:30)")}</SelectItem>
+                  <SelectItem value="12h">{tl("12 horas (2:30 PM)")}</SelectItem>
                 </SelectContent>
               </Select>
             </FieldShell>

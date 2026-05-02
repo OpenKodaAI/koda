@@ -1,9 +1,64 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { RoutineEditor } from "@/components/routines/routine-editor";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import type { CronJob } from "@/lib/types";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  usePathname: () => "/routines/schedules",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/components/layout/agent-switcher", () => ({
+  AgentSwitcher: ({
+    activeBotId,
+    onAgentChange,
+    disabled,
+  }: {
+    activeBotId?: string;
+    onAgentChange?: (id: string | undefined) => void;
+    disabled?: boolean;
+  }) => (
+    <select
+      aria-label="Agent"
+      data-testid="agent-switcher-mock"
+      value={activeBotId ?? ""}
+      disabled={disabled}
+      onChange={(event) => onAgentChange?.(event.target.value || undefined)}
+    >
+      <option value="alpha">Alpha</option>
+      <option value="beta">Beta</option>
+    </select>
+  ),
+}));
+
+beforeAll(() => {
+  if (typeof window !== "undefined" && !window.matchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+  }
+});
 
 const AGENTS: AgentDisplay[] = [
   { id: "alpha", label: "Alpha", color: "#D97757", colorRgb: "217, 119, 87" },
@@ -26,7 +81,9 @@ function renderEditor(
 
   const utils = render(
     <I18nProvider initialLanguage="en-US">
-      <RoutineEditor {...defaults} {...overrides} />
+      <AgentCatalogProvider initialAgents={AGENTS}>
+        <RoutineEditor {...defaults} {...overrides} />
+      </AgentCatalogProvider>
     </I18nProvider>,
   );
 
@@ -34,29 +91,32 @@ function renderEditor(
 }
 
 describe("RoutineEditor", () => {
-  it("renders the create form with empty fields", async () => {
+  it("opens at the Basics step with empty fields", async () => {
     renderEditor();
 
     expect(await screen.findByText(/new routine/i)).toBeInTheDocument();
+    expect(screen.getByText(/basics/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue("");
     expect(
       screen.getByPlaceholderText(/Describe what the agent should do/i),
     ).toHaveValue("");
   });
 
-  it("blocks submit until name and instructions are filled", async () => {
-    const { onSubmit } = renderEditor();
+  it("blocks Next until name and instructions are filled", async () => {
+    renderEditor();
 
-    const submit = await screen.findByRole("button", { name: /create routine/i });
-    fireEvent.click(submit);
+    const next = await screen.findByRole("button", { name: /next/i });
+    fireEvent.click(next);
 
-    expect(onSubmit).not.toHaveBeenCalled();
     expect(await screen.findByText(/name is required/i)).toBeInTheDocument();
+    // Still on Basics step.
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toBeInTheDocument();
   });
 
-  it("emits a normalized payload when create form is filled", async () => {
+  it("walks through all three steps and submits a normalized payload", async () => {
     const { onSubmit } = renderEditor();
 
+    // Step 1: Basics
     fireEvent.change(screen.getByPlaceholderText(/Daily code review/i), {
       target: { value: "Daily review" },
     });
@@ -64,8 +124,15 @@ describe("RoutineEditor", () => {
       screen.getByPlaceholderText(/Describe what the agent should do/i),
       { target: { value: "Look for regressions in main." } },
     );
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /create routine/i }));
+    // Step 2: Schedule (defaults: recurring + daily 09:00)
+    expect(await screen.findByText(/schedule/i)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+    // Step 3: Refine — submit with default behavior/permissions.
+    expect(await screen.findByRole("button", { name: /create routine/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create routine/i }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
 
@@ -73,7 +140,6 @@ describe("RoutineEditor", () => {
     expect(payload.name).toBe("Daily review");
     expect(payload.instructions).toBe("Look for regressions in main.");
     expect(payload.agentId).toBe("alpha");
-    expect(payload.triggerKind).toBe("schedule");
     expect(payload.scheduleMode).toBe("recurring");
     expect(payload.triggerType).toBe("cron");
     expect(payload.scheduleExpr).toMatch(/^0 9 \* \* \*$/);
@@ -82,7 +148,7 @@ describe("RoutineEditor", () => {
     expect(payload.verificationMode).toBe("post_write_if_any");
   });
 
-  it("prefills fields in edit mode from an existing job", async () => {
+  it("prefills Basics step in edit mode from an existing job", async () => {
     const job: CronJob = {
       id: 42,
       bot_id: "beta",
@@ -115,8 +181,23 @@ describe("RoutineEditor", () => {
     expect(
       screen.getByPlaceholderText(/Describe what the agent should do/i),
     ).toHaveValue("Generate weekly status report");
-    expect(
-      screen.getByRole("button", { name: /save changes/i }),
-    ).toBeInTheDocument();
+  });
+
+  it("uses defaultTimezone when provided", async () => {
+    const { onSubmit } = renderEditor({ defaultTimezone: "America/Sao_Paulo" });
+
+    fireEvent.change(screen.getByPlaceholderText(/Daily code review/i), {
+      target: { value: "Tz check" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(/Describe what the agent should do/i),
+      { target: { value: "Verify timezone wiring" } },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /create routine/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].timezone).toBe("America/Sao_Paulo");
   });
 });

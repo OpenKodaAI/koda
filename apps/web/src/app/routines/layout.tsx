@@ -1,36 +1,23 @@
-"use client";
-
 import type { ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { PageSectionHeader } from "@/components/ui/page-primitives";
-import { SoftTabs } from "@/components/ui/soft-tabs";
-import { useAppI18n } from "@/hooks/use-app-i18n";
+import { RoutinesContextProvider } from "@/components/routines/routines-context";
+import { RoutinesShell } from "@/components/routines/routines-shell";
+import { ControlPlaneRequestError, getGeneralSystemSettings } from "@/lib/control-plane";
 
-export default function RoutinesLayout({ children }: { children: ReactNode }) {
-  const { t } = useAppI18n();
-  const pathname = usePathname();
-  const router = useRouter();
-  const value = pathname.startsWith("/routines/dlq") ? "dlq" : "schedules";
+export default async function RoutinesLayout({ children }: { children: ReactNode }) {
+  let defaultTimezone = "UTC";
+  try {
+    const settings = await getGeneralSystemSettings();
+    defaultTimezone = settings.values.account.scheduler_default_timezone || "UTC";
+  } catch (error) {
+    // Fall back to UTC; the editor still lets the user pick another zone.
+    if (!(error instanceof ControlPlaneRequestError)) {
+      throw error;
+    }
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <PageSectionHeader
-          compact
-          title={t("routines.title")}
-          description={t("routines.description")}
-        />
-        <SoftTabs
-          items={[
-            { id: "schedules", label: t("routines.tabs.schedules") },
-            { id: "dlq", label: t("routines.tabs.dlq") },
-          ]}
-          value={value}
-          onChange={(id) => router.push(`/routines/${id}`)}
-          ariaLabel={t("routines.tabs.ariaLabel")}
-        />
-      </div>
-      {children}
-    </div>
+    <RoutinesContextProvider defaultTimezone={defaultTimezone}>
+      <RoutinesShell>{children}</RoutinesShell>
+    </RoutinesContextProvider>
   );
 }

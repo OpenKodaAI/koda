@@ -1699,7 +1699,7 @@ class ControlPlaneManager:
                 # Only link to the default squad if we also just created it, avoiding
                 # accidental coupling to a legacy squad the operator may not expect.
                 starter_squad = "sq_default" if seed_squad else None
-                appearance = {"label": "Koda", "color": "#D97757", "color_rgb": "217, 119, 87"}
+                appearance = {"label": "Koda", "color": "#FFFFFF", "color_rgb": "255, 255, 255"}
                 execute(
                     """
                     INSERT INTO cp_agent_definitions (
@@ -11869,15 +11869,19 @@ class ControlPlaneManager:
 
         expected_tools: list[dict[str, Any]] = []
         if spec is not None:
+            # McpTool stores a `classification` enum string; the public hint
+            # shape expects boolean flags. Map read→read_only_hint,
+            # destructive→destructive_hint; write tools land as neither
+            # (interactive).
             for tool in spec.tools:
+                read_only_hint = tool.classification == "read"
+                destructive_hint = tool.classification == "destructive"
                 expected_tools.append(
                     {
                         "name": tool.name,
                         "description": tool.description,
-                        "read_only_hint": bool(tool.read_only_hint) if tool.read_only_hint is not None else None,
-                        "destructive_hint": (
-                            bool(tool.destructive_hint) if tool.destructive_hint is not None else None
-                        ),
+                        "read_only_hint": read_only_hint or None,
+                        "destructive_hint": destructive_hint or None,
                     }
                 )
 

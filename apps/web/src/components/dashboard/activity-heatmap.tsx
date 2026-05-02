@@ -4,6 +4,7 @@ import { memo, type ReactNode } from "react";
 import type { DailyActivityResult } from "@/hooks/use-daily-activity";
 import { SoftTabs, type SoftTabItem } from "@/components/ui/soft-tabs";
 import { cn } from "@/lib/utils";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export interface ActivityHeatmapStat {
   label: string;
@@ -57,14 +58,15 @@ function ActivityHeatmapComponent({
   scopeSlot,
   legend,
 }: ActivityHeatmapProps) {
+  const { tl } = useAppI18n();
   const { weeks } = data;
   const weeksLength = weeks.length;
-  const resolvedLegend = legend ?? { less: "less", more: "more" };
+  const resolvedLegend = legend ?? { less: tl("less"), more: tl("more") };
   const gridTemplate = `repeat(${weeksLength}, minmax(0, 28px))`;
 
   return (
     <section
-      aria-label={title ?? "Agent activity"}
+      aria-label={title ?? tl("Agent activity")}
       className={cn(
         "relative flex w-full flex-col gap-5",
         className,
@@ -107,7 +109,7 @@ function ActivityHeatmapComponent({
         <div
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
           role="group"
-          aria-label="Activity summary"
+          aria-label={tl("Activity summary")}
         >
           {stats.map((stat) => (
             <div

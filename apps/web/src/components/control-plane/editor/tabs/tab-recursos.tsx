@@ -522,7 +522,7 @@ export function TabRecursos() {
                     enabledProviders={generalProviders}
                     functionalCatalog={functionalModelCatalog}
                     functionId={fnId}
-                    emptyLabel="Herdar do modelo principal"
+                    emptyLabel={tl("Herdar do modelo principal")}
                   />
                 );
               })}

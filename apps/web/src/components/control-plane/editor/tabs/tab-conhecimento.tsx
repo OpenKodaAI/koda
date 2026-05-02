@@ -131,7 +131,7 @@ export function TabConhecimento() {
           onChange={handleExtractionModelChange}
           providers={providerEntries}
           enabledProviders={enabledProviders}
-          emptyLabel="Herdar do modelo principal"
+          emptyLabel={tl("Herdar do modelo principal")}
         />
 
         <MarkdownEditorField

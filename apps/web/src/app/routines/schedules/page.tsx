@@ -17,6 +17,7 @@ import {
   RoutineEditor,
   type RoutineFormPayload,
 } from "@/components/routines/routine-editor";
+import { useRoutinesContext } from "@/components/routines/routines-context";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import type { CronJob, ScheduleDetail } from "@/lib/types";
@@ -123,6 +124,7 @@ export default function SchedulesPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const { defaultTimezone } = useRoutinesContext();
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
@@ -488,6 +490,7 @@ export default function SchedulesPage() {
         detail={editorMode === "edit" ? selectedDetail : null}
         agents={agents}
         defaultAgentId={visibleBotIds[0] ?? agents[0]?.id}
+        defaultTimezone={defaultTimezone}
         busy={busyJobId !== null}
         errorMessage={editorError}
         onSubmit={applySchedulePayload}

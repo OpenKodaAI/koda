@@ -160,6 +160,7 @@ function ModelDetailCard({
     size_bytes?: number;
   };
 }) {
+  const { tl } = useAppI18n();
   const isOllama = providerLabel === "Ollama";
   const hasCost = meta?.inputCostPer1M != null && meta.inputCostPer1M > 0;
 
@@ -178,66 +179,66 @@ function ModelDetailCard({
 
       {meta && (
         <div className="flex flex-col gap-2">
-          <MetricBar label="Velocidade" value={meta.speed} icon={Zap} />
-          <MetricBar label="Inteligencia" value={meta.intelligence} icon={Brain} />
+          <MetricBar label={tl("Velocidade")} value={meta.speed} icon={Zap} />
+          <MetricBar label={tl("Inteligência")} value={meta.intelligence} icon={Brain} />
         </div>
       )}
 
       <div className="flex flex-col gap-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">Provider</span>
+          <span className="text-[var(--text-quaternary)]">{tl("Provider")}</span>
           <span className="text-[var(--text-secondary)]">{providerLabel}</span>
         </div>
         {ollamaMeta?.family && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Familia</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Família")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.family}</span>
           </div>
         )}
         {ollamaMeta?.parameter_size && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Parametros</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Parâmetros")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.parameter_size}</span>
           </div>
         )}
         {ollamaMeta?.quantization_level && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Quantizacao</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Quantização")}</span>
             <span className="font-mono text-[var(--text-secondary)]">{ollamaMeta.quantization_level}</span>
           </div>
         )}
         {ollamaMeta?.size_bytes != null && ollamaMeta.size_bytes > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Disco</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Disco")}</span>
             <span className="text-[var(--text-secondary)]">{formatSizeBytes(ollamaMeta.size_bytes)}</span>
           </div>
         )}
         {meta?.contextWindow != null && meta.contextWindow > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Contexto</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Contexto")}</span>
             <span className="text-[var(--text-secondary)]">{formatContextWindow(meta.contextWindow)}</span>
           </div>
         )}
         {hasCost && (
           <>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">Custo input</span>
+              <span className="text-[var(--text-quaternary)]">{tl("Custo input")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.inputCostPer1M!)} / 1M</span>
             </div>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">Custo output</span>
+              <span className="text-[var(--text-quaternary)]">{tl("Custo output")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.outputCostPer1M!)} / 1M</span>
             </div>
           </>
         )}
         {isOllama && !hasCost && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Custo</span>
-            <span className="text-[var(--text-secondary)]">Gratuito (local)</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Custo")}</span>
+            <span className="text-[var(--text-secondary)]">{tl("Gratuito (local)")}</span>
           </div>
         )}
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">Model ID</span>
+          <span className="text-[var(--text-quaternary)]">{tl("Model ID")}</span>
           <span className="font-mono text-[var(--text-quaternary)]">{modelId}</span>
         </div>
       </div>

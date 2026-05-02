@@ -216,8 +216,8 @@ export function TabInstrucoes() {
                 }
                 options={[
                   { value: "pt-BR", label: tl("Portugues (Brasil)") },
-                  { value: "en-US", label: "English (US)" },
-                  { value: "es-ES", label: "Español" },
+                  { value: "en-US", label: tl("English (US)") },
+                  { value: "es-ES", label: tl("Espanhol") },
                 ]}
               />
               <FormSelect
@@ -227,7 +227,7 @@ export function TabInstrucoes() {
                   updateResponsePolicy({ format: event.target.value })
                 }
                 options={[
-                  { value: "markdown", label: "Markdown" },
+                  { value: "markdown", label: tl("Markdown") },
                   { value: "plain_text", label: tl("Texto simples") },
                   { value: "structured", label: tl("Estruturado") },
                 ]}

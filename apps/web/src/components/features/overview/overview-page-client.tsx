@@ -1,9 +1,8 @@
 "use client";
 
 
-import dynamic from "next/dynamic";
 import { Suspense, useCallback, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   BookOpen,
   CalendarPlus,
@@ -29,14 +28,6 @@ import { useAgentStats } from "@/hooks/use-agent-stats";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { cn } from "@/lib/utils";
 import type { AgentStats } from "@/lib/types";
-
-const AgentDetailModal = dynamic(
-  () =>
-    import("@/components/agents/agent-detail-modal").then((module) => ({
-      default: module.AgentDetailModal,
-    })),
-  { loading: () => null },
-);
 
 function OverviewSkeleton() {
   return (
@@ -94,9 +85,8 @@ function OverviewPageFallback() {
 
 function OverviewPageContent() {
   const { t } = useAppI18n();
-  const { agents, agentDisplayMap } = useAgentCatalog();
+  const { agents } = useAgentCatalog();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const {
     stats: allStats,
@@ -104,10 +94,12 @@ function OverviewPageContent() {
   } = useAgentStats();
   const { snapshot: setupChecklistSnapshot } = useSetupChecklist();
 
-  const modalBotId = useMemo(() => {
-    const agent = searchParams.get("agent");
-    return agent && agentDisplayMap[agent] ? agent : null;
-  }, [agentDisplayMap, searchParams]);
+  const openAgentDetail = useCallback(
+    (agentId: string) => {
+      router.push(`/control-plane/agents/${encodeURIComponent(agentId)}`);
+    },
+    [router]
+  );
 
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
@@ -343,32 +335,6 @@ function OverviewPageContent() {
     [t],
   );
 
-  const buildAgentUrl = useCallback(
-    (agentId: string | null) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (agentId) {
-        params.set("agent", agentId);
-      } else {
-        params.delete("agent");
-      }
-
-      const query = params.toString();
-      return query ? `/?${query}` : "/";
-    },
-    [searchParams]
-  );
-
-  const closeAgentModal = useCallback(() => {
-    router.push(buildAgentUrl(null), { scroll: false });
-  }, [buildAgentUrl, router]);
-
-  const changeModalAgent = useCallback(
-    (agentId: string) => {
-      router.push(buildAgentUrl(agentId), { scroll: false });
-    },
-    [buildAgentUrl, router]
-  );
-
   const tourVariant =
     loading && !allStats ? "loading" : visibleEntries.length === 0 ? "empty" : "default";
 
@@ -499,9 +465,9 @@ function OverviewPageContent() {
       stats: allStats,
       router: { push: (href: string) => router.push(href) },
       t,
-      openAgentDetail: (agentId: string) => router.push(buildAgentUrl(agentId), { scroll: false }),
+      openAgentDetail,
     }),
-    [allStats, agents, buildAgentUrl, router, t],
+    [allStats, agents, openAgentDetail, router, t],
   );
 
   const heatmapTooltipTemplate = useCallback(
@@ -612,21 +578,13 @@ function OverviewPageContent() {
               entries={rosterEntries}
               strings={historyStrings}
               limit={10}
-              onSelectAgent={(agentId) => router.push(buildAgentUrl(agentId), { scroll: false })}
+              onSelectAgent={openAgentDetail}
             />
           </section>
         </div>
 
       </div>
 
-      {modalBotId ? (
-        <AgentDetailModal
-          agentId={modalBotId}
-          isOpen={Boolean(modalBotId)}
-          onClose={closeAgentModal}
-          onAgentChange={changeModalAgent}
-        />
-      ) : null}
     </>
   );
 }

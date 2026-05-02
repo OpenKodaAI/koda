@@ -940,6 +940,508 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
             },
         },
     },
+    # ------------------------------------------------------------ Wave 3 (10/2026)
+    {
+        "server_key": "microsoft_365",
+        "display_name": "Microsoft 365",
+        "description": (
+            "Servidor MCP comunitario (Lokka) que conecta ao Microsoft Graph. "
+            "Cobre Outlook, Teams e OneDrive. OAuth 2.1 do Microsoft Identity Platform."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@merill/lokka@0.3.0"),
+        "env_schema": (
+            _env_field("TENANT_ID", "Tenant ID (fallback)", required=False, input_type="text"),
+            _env_field("CLIENT_ID", "Client ID (fallback)", required=False, input_type="text"),
+            _env_field("CLIENT_SECRET", "Client Secret (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/merill/lokka",
+        "logo_key": "microsoft_365",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "community_manual",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual integration via Lokka. OAuth via Microsoft.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Outlook, Teams, OneDrive via Microsoft Graph",
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "firecrawl",
+        "display_name": "Firecrawl",
+        "description": (
+            "Servidor MCP oficial da Firecrawl: scrape, crawl, busca web e extracao "
+            "estruturada via LLM. Auth via API Key."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "firecrawl-mcp@3.14.1"),
+        "env_schema": (_env_field("FIRECRAWL_API_KEY", "API Key", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://docs.firecrawl.dev/mcp",
+        "logo_key": "firecrawl",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor oficial. Single-key auth.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Web scraping e crawling para pesquisa",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "posthog",
+        "display_name": "PostHog",
+        "description": (
+            "Servidor MCP remoto oficial em mcp.posthog.com. Eventos, funnels, "
+            "dashboards, feature flags e personas. Auth via Personal API Key."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.posthog.com/mcp",
+        "url": "https://mcp.posthog.com/mcp",
+        "env_schema": (
+            _env_field("POSTHOG_API_KEY", "Personal API Key", required=True),
+            _env_field("POSTHOG_HOST", "Host (self-hosted)", required=False, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://posthog.com/docs/model-context-protocol",
+        "logo_key": "posthog",
+        "category": "data",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor remoto oficial. Token via Authorization: Bearer.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Product analytics, eventos e feature flags",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {POSTHOG_API_KEY}",
+            },
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "discord",
+        "display_name": "Discord",
+        "description": (
+            "Servidor MCP comunitario para Discord. Mensagens, threads, membros, "
+            "moderacao. Auth via Bot Token (Discord Developer Portal)."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "discord-mcp@2.4.0"),
+        "env_schema": (_env_field("DISCORD_BOT_TOKEN", "Bot Token", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/discord-mcp",
+        "logo_key": "discord",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. Crie bot em discord.com/developers/applications.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Mensagens, canais, threads e moderacao",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "grafana",
+        "display_name": "Grafana",
+        "description": (
+            "Servidor MCP oficial da Grafana Labs (Python via uvx). Dashboards, "
+            "queries Prometheus/Loki, alertas. Auth via Service Account Token."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("uvx", "mcp-grafana==0.13.1"),
+        "env_schema": (
+            _env_field("GRAFANA_URL", "Grafana URL", required=True, input_type="text"),
+            _env_field("GRAFANA_API_KEY", "Service Account Token", required=True),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/grafana/mcp-grafana",
+        "logo_key": "grafana",
+        "category": "cloud",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Requer uv (uvx) instalado. Service account token estavel.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Dashboards, alertas e queries Prometheus/Loki",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "canva",
+        "display_name": "Canva",
+        "description": (
+            "Servidor MCP remoto oficial em mcp.canva.com via OAuth. Designs, brand templates, exports e assets."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.canva.com/mcp",
+        "url": "https://mcp.canva.com/mcp",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://www.canva.dev/docs/connect/mcp/",
+        "logo_key": "canva",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Canva Connect. Sem fallback manual.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Designs, brand templates e exports",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "box",
+        "display_name": "Box",
+        "description": (
+            "Servidor MCP comunitario para Box Cloud. Files, folders, sharing. "
+            "OAuth 2.0 do Box (preferencial) ou Developer Token."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "box-mcp-server@0.3.1"),
+        "env_schema": (_env_field("BOX_DEVELOPER_TOKEN", "Developer Token (fallback)", required=False),),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/box-mcp-server",
+        "logo_key": "box",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "community_manual",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. OAuth via Box (preferencial); developer token apenas para dev local.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Storage corporativo, files e sharing",
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "n8n",
+        "display_name": "n8n",
+        "description": (
+            "Servidor MCP comunitario para n8n (cloud ou self-hosted). Workflows, "
+            "executions, credentials metadata. Auth via API Key."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "n8n-mcp@2.50.0"),
+        "env_schema": (
+            _env_field("N8N_API_KEY", "n8n API Key", required=True),
+            _env_field("N8N_BASE_URL", "Base URL", required=True, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/n8n-mcp",
+        "logo_key": "n8n",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. Suporta cloud e self-hosted via N8N_BASE_URL.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Workflow automation, executions e credentials",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "aws_api",
+        "display_name": "AWS API",
+        "description": (
+            "Servidor MCP oficial AWS Labs (Python via uvx) para execucao real "
+            "de operacoes AWS via API. S3, EC2, Lambda, IAM, CloudWatch, DynamoDB. "
+            "Default always_ask em todas as tools; operador pode habilitar read_only_mode."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("uvx", "awslabs.aws-api-mcp-server==1.3.33"),
+        "env_schema": (
+            _env_field("AWS_ACCESS_KEY_ID", "Access Key ID", required=True),
+            _env_field("AWS_SECRET_ACCESS_KEY", "Secret Access Key", required=True),
+            _env_field("AWS_REGION", "Default Region", required=True, input_type="text"),
+            _env_field("AWS_SESSION_TOKEN", "Session Token (temporary)", required=False),
+            _env_field("AWS_PROFILE", "AWS Profile (~/.aws/credentials)", required=False, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/awslabs/mcp/tree/main/src/aws-api-mcp-server",
+        "logo_key": "aws",
+        "category": "cloud",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "Servidor oficial AWS Labs. Requer uv (uvx) instalado. "
+            "Tools destructive nativas: setar always_ask em todas e usar read_only_mode."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Execucao real de tools AWS (S3, EC2, Lambda, IAM)",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    # ------------------------------------------------------------ Wave 4 (10/2026)
+    {
+        "server_key": "postman",
+        "display_name": "Postman",
+        "description": (
+            "Servidor MCP para Postman API: workspaces, collections, requests, "
+            "environments, mock servers. Auth via API Key."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "postman-mcp-server@1.2.0"),
+        "env_schema": (_env_field("POSTMAN_API_KEY", "API Key", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/postman-mcp-server",
+        "logo_key": "postman",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor community alinhado com a Postman API. Single-key auth.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Workspaces, collections e mock servers",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "zapier",
+        "display_name": "Zapier",
+        "description": (
+            "Servidor MCP remoto oficial Zapier: 6.000+ apps via Zaps. URL "
+            "personalizada por usuario com token embutido."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.zapier.com/api/mcp/sse",
+        "url": "https://mcp.zapier.com/api/mcp/sse",
+        "env_schema": (_env_field("ZAPIER_MCP_URL", "MCP URL (with embedded token)", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://zapier.com/mcp",
+        "logo_key": "zapier",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": ("Servidor remoto oficial. Token embutido na URL personalizada gerada em mcp.zapier.com."),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "6.000+ apps via Zaps automatizados",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "netlify",
+        "display_name": "Netlify",
+        "description": (
+            "Servidor MCP oficial Netlify. Sites, deploys, env vars, edge "
+            "functions, formularios e dominios. Auth via Personal Access Token."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@netlify/mcp@1.15.1"),
+        "env_schema": (_env_field("NETLIFY_PERSONAL_ACCESS_TOKEN", "Personal Access Token", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://docs.netlify.com/welcome/build-with-ai/netlify-mcp-server/",
+        "logo_key": "netlify",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor oficial Netlify. PAT estavel.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Deploys, sites e edge functions",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "huggingface",
+        "display_name": "Hugging Face",
+        "description": (
+            "Servidor MCP remoto oficial em huggingface.co/mcp. Models, "
+            "datasets, Spaces e inference. Auth via User Access Token."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://huggingface.co/mcp",
+        "url": "https://huggingface.co/mcp",
+        "env_schema": (_env_field("HF_TOKEN", "User Access Token", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://huggingface.co/docs/hub/mcp",
+        "logo_key": "huggingface",
+        "category": "data",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor remoto oficial. Token via Authorization: Bearer.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Models, datasets, Spaces e inference",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {HF_TOKEN}",
+            },
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "clickup",
+        "display_name": "ClickUp",
+        "description": (
+            "Servidor MCP comunitario para ClickUp. Tasks, lists, folders, "
+            "spaces, comments, time tracking. Auth via API Key + Team ID."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "clickup-mcp-server@1.12.0"),
+        "env_schema": (
+            _env_field("CLICKUP_API_KEY", "API Key", required=True),
+            _env_field("CLICKUP_TEAM_ID", "Team ID", required=True, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/clickup-mcp-server",
+        "logo_key": "clickup",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. API key + Team ID disponivel na URL do workspace.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Tasks, lists, spaces e time tracking",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
 )
 
 

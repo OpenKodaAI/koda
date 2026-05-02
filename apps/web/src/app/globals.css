@@ -30,7 +30,7 @@
   --icon-primary: #101010;
   --icon-secondary: #45403b;
   --icon-tertiary: #615b54;
-  --focus-ring: #2466d0;
+  --focus-ring: #000000;
   --selection-bg: #eceae3;
   --table-header-bg: #f5f3eb;
   --table-row-hover: #eceae3;
@@ -47,7 +47,7 @@
   --shadow-soft: none;
   --shadow-panel: none;
   --shadow-floating: none;
-  --shadow-glow-accent: 0 0 0 1px rgba(36, 102, 208, 0.35);
+  --shadow-glow-accent: 0 0 0 1px rgba(0, 0, 0, 0.35);
   --radius-shell: 14px;
   --radius-panel: 12px;
   --radius-panel-sm: 10px;
@@ -57,11 +57,12 @@
   --shell-topbar-height: 56px;
   --shell-sidebar-width: 0px;
 
-  --accent: #2466d0;
-  --accent-rgb: 36, 102, 208;
-  --accent-hover: #3b77dc;
-  --accent-muted: rgba(36, 102, 208, 0.12);
-  --accent-soft: rgba(36, 102, 208, 0.08);
+  --accent: #000000;
+  --accent-rgb: 0, 0, 0;
+  --accent-hover: #1A1A1A;
+  --accent-muted: rgba(0, 0, 0, 0.12);
+  --accent-soft: rgba(0, 0, 0, 0.08);
+  --accent-text: #fffefb;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -155,6 +156,7 @@
   --button-primary-hover: #111111;
   --button-primary-text: #fffefb;
   --button-primary-rgb: 0, 0, 0;
+  --button-primary-highlight: #FFFFFF;
   --button-surface: #fffdf9;
   --button-surface-strong: #f0ebe2;
   --button-border: #c5c0b1;
@@ -248,29 +250,30 @@
     --icon-primary: #F5F5F5;
     --icon-secondary: #B8B8B8;
     --icon-tertiary: #9A9A9A;
-    --focus-ring: #2466D0;
-    --selection-bg: rgba(36, 102, 208, 0.22);
+    --focus-ring: #FFFFFF;
+    --selection-bg: rgba(255, 255, 255, 0.22);
     --table-header-bg: #141414;
     --table-row-hover: #1A1A1A;
     --table-row-selected: #1F1F1F;
     --field-bg: #141414;
-    --interactive-active-top: #1F1F1F;
-    --interactive-active-bottom: #1F1F1F;
-    --interactive-active-border: #2A2A2A;
+    --interactive-active-top: #FFFFFF;
+    --interactive-active-bottom: #FFFFFF;
+    --interactive-active-border: #E5E5E5;
     --interactive-active-text: #FFFFFF;
-    --interactive-active-rgb: 31, 31, 31;
+    --interactive-active-rgb: 255, 255, 255;
     --shadow-none: none;
     --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.25);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-panel: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.22);
     --shadow-floating: 0 8px 28px rgba(0, 0, 0, 0.45);
-    --shadow-glow-accent: 0 0 0 1px rgba(36, 102, 208, 0.35), 0 0 24px rgba(36, 102, 208, 0.12);
-    --accent: #2466D0;
-    --accent-rgb: 36, 102, 208;
-    --accent-hover: #3B77DC;
-    --accent-muted: rgba(36, 102, 208, 0.12);
-    --accent-soft: rgba(36, 102, 208, 0.08);
+    --shadow-glow-accent: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 24px rgba(255, 255, 255, 0.12);
+    --accent: #FFFFFF;
+    --accent-rgb: 255, 255, 255;
+    --accent-hover: #F0F0F0;
+    --accent-muted: rgba(255, 255, 255, 0.12);
+    --accent-soft: rgba(255, 255, 255, 0.08);
+    --accent-text: #000000;
     --tone-neutral-bg: #3e434b;
     --tone-neutral-bg-strong: #525963;
     --tone-neutral-border: #636b77;
@@ -307,12 +310,13 @@
     --tone-retry-text: #f7f2ff;
     --tone-retry-muted: #d8c8f5;
     --tone-retry-dot: #aa8ff0;
-    --button-primary-top: #1F1F1F;
-    --button-primary-bottom: #1F1F1F;
-    --button-primary-bg: #1F1F1F;
-    --button-primary-hover: #262626;
-    --button-primary-text: #F5F5F5;
-    --button-primary-rgb: 31, 31, 31;
+    --button-primary-top: #FFFFFF;
+    --button-primary-bottom: #FFFFFF;
+    --button-primary-bg: #FFFFFF;
+    --button-primary-hover: #F0F0F0;
+    --button-primary-text: #000000;
+    --button-primary-rgb: 255, 255, 255;
+    --button-primary-highlight: #000000;
     --button-surface: #161616;
     --button-surface-strong: #1F1F1F;
     --button-border: #2A2A2A;
@@ -392,29 +396,30 @@ html.dark {
   --icon-primary: #F5F5F5;
   --icon-secondary: #B8B8B8;
   --icon-tertiary: #9A9A9A;
-  --focus-ring: #2466D0;
-  --selection-bg: rgba(36, 102, 208, 0.22);
+  --focus-ring: #FFFFFF;
+  --selection-bg: rgba(255, 255, 255, 0.22);
   --table-header-bg: #141414;
   --table-row-hover: #1A1A1A;
   --table-row-selected: #1F1F1F;
   --field-bg: #141414;
-  --interactive-active-top: #1F1F1F;
-  --interactive-active-bottom: #1F1F1F;
-  --interactive-active-border: #2A2A2A;
+  --interactive-active-top: #FFFFFF;
+  --interactive-active-bottom: #FFFFFF;
+  --interactive-active-border: #E5E5E5;
   --interactive-active-text: #FFFFFF;
-  --interactive-active-rgb: 31, 31, 31;
+  --interactive-active-rgb: 255, 255, 255;
   --shadow-none: none;
   --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.25);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-panel: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.22);
   --shadow-floating: 0 8px 28px rgba(0, 0, 0, 0.45);
-  --shadow-glow-accent: 0 0 0 1px rgba(36, 102, 208, 0.35), 0 0 24px rgba(36, 102, 208, 0.12);
-  --accent: #2466D0;
-  --accent-rgb: 36, 102, 208;
-  --accent-hover: #3B77DC;
-  --accent-muted: rgba(36, 102, 208, 0.12);
-  --accent-soft: rgba(36, 102, 208, 0.08);
+  --shadow-glow-accent: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 24px rgba(255, 255, 255, 0.12);
+  --accent: #FFFFFF;
+  --accent-rgb: 255, 255, 255;
+  --accent-hover: #F0F0F0;
+  --accent-muted: rgba(255, 255, 255, 0.12);
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --accent-text: #000000;
   --tone-neutral-bg: #3e434b;
   --tone-neutral-bg-strong: #525963;
   --tone-neutral-border: #636b77;
@@ -451,12 +456,13 @@ html.dark {
   --tone-retry-text: #f7f2ff;
   --tone-retry-muted: #d8c8f5;
   --tone-retry-dot: #aa8ff0;
-  --button-primary-top: #1F1F1F;
-  --button-primary-bottom: #1F1F1F;
-  --button-primary-bg: #1F1F1F;
-  --button-primary-hover: #262626;
-  --button-primary-text: #F5F5F5;
-  --button-primary-rgb: 31, 31, 31;
+  --button-primary-top: #FFFFFF;
+  --button-primary-bottom: #FFFFFF;
+  --button-primary-bg: #FFFFFF;
+  --button-primary-hover: #F0F0F0;
+  --button-primary-text: #000000;
+  --button-primary-rgb: 255, 255, 255;
+  --button-primary-highlight: #000000;
   --button-surface: #161616;
   --button-surface-strong: #1F1F1F;
   --button-border: #2A2A2A;
@@ -2585,7 +2591,7 @@ button[aria-label="Open Next Dev Tools"] {
     var(--button-primary-top),
     var(--button-primary-bottom)
   );
-  color: var(--interactive-active-text) !important;
+  color: var(--button-primary-text) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 10px 26px rgba(0, 0, 0, 0.22);
@@ -2595,7 +2601,7 @@ button[aria-label="Open Next Dev Tools"] {
 .button-shell--primary::before {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--button-primary-top) 82%, white 18%),
+    color-mix(in srgb, var(--button-primary-top) 82%, var(--button-primary-highlight) 18%),
     var(--button-primary-bottom)
   );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -2604,7 +2610,7 @@ button[aria-label="Open Next Dev Tools"] {
 .button-shell--primary::after {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.16) 0%,
+    color-mix(in srgb, var(--button-primary-highlight) 16%, transparent) 0%,
     transparent 50%
   );
 }
@@ -2612,7 +2618,7 @@ button[aria-label="Open Next Dev Tools"] {
 @media (hover: hover) and (pointer: fine) {
   .button-shell--primary:not(:disabled):hover {
     border-color: var(--button-border-hover);
-    color: var(--interactive-active-text) !important;
+    color: var(--button-primary-text) !important;
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.12),
       0 12px 32px rgba(0, 0, 0, 0.24);
@@ -2621,26 +2627,26 @@ button[aria-label="Open Next Dev Tools"] {
   .button-shell--primary:not(:disabled):hover::before {
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--button-primary-top) 72%, white 28%),
+      color-mix(in srgb, var(--button-primary-top) 72%, var(--button-primary-highlight) 28%),
       var(--button-primary-bottom)
     );
   }
 }
 
 .button-shell--primary:not(:disabled):active {
-  color: var(--interactive-active-text) !important;
+  color: var(--button-primary-text) !important;
 }
 
 .button-shell--primary:not(:disabled):active::before {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--button-primary-top) 58%, white 42%),
+    color-mix(in srgb, var(--button-primary-top) 58%, var(--button-primary-highlight) 42%),
     var(--button-primary-bottom)
   );
 }
 
 .button-shell--primary:focus-visible {
-  color: var(--interactive-active-text) !important;
+  color: var(--button-primary-text) !important;
 }
 
 .button-shell--primary > *,
@@ -8057,6 +8063,13 @@ html body [contenteditable="true"]:focus-visible {
   -webkit-backdrop-filter: none;
 }
 
+/* Logos shipped as a single white shape (Linear, Notion, Sentry, Vercel)
+ * disappear on light backgrounds. Flip them to black only when the active
+ * theme is light. Dark mode keeps the original white. */
+:where(html[data-theme="light"]) .integration-logo--mono-light {
+  filter: invert(1);
+}
+
 :where(html[data-theme="light"]) .agent-switcher__menu .app-search,
 :where(html[data-theme="light"]) .language-switcher__menu .app-search,
 :where(html[data-theme="light"]) .workspace-topbar__panel .app-search {
@@ -8798,13 +8811,13 @@ html body [contenteditable="true"]:focus-visible {
   letter-spacing: 0.08em;
 }
 
-/* Accent CTA — dark text against warm accent for better contrast and personality. */
+/* Accent CTA — text contrasts the brand accent (white in dark, black in light). */
 .auth-submit.auth-submit {
   height: 3rem;
   font-size: 0.9375rem;
   font-weight: 500;
   letter-spacing: -0.005em;
-  color: #111111;
+  color: var(--accent-text);
   border-radius: var(--radius-input);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 6px 18px rgba(var(--accent-rgb), 0.18);
   transition:
@@ -8824,7 +8837,7 @@ html body [contenteditable="true"]:focus-visible {
 }
 
 .auth-submit.auth-submit:disabled {
-  color: rgba(17, 17, 17, 0.6);
+  color: color-mix(in srgb, var(--accent-text) 60%, transparent);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
 }
 

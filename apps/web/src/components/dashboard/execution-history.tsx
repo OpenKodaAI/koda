@@ -6,6 +6,7 @@ import type { AgentDisplay } from "@/lib/agent-constants";
 import type { AgentStats, Task } from "@/lib/types";
 import { truncateText } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export type ExecutionHistoryStatus =
   | "completed"
@@ -101,6 +102,7 @@ function ExecutionHistoryComponent({
   onSelectAgent,
   className,
 }: ExecutionHistoryProps) {
+  const { tl } = useAppI18n();
   const rows = useMemo<Row[]>(() => {
     const all: Row[] = [];
     for (const entry of entries) {
@@ -133,7 +135,7 @@ function ExecutionHistoryComponent({
     <ul
       className={cn("flex w-full flex-col", className)}
       role="list"
-      aria-label="Execution history"
+      aria-label={tl("Execution history")}
     >
       {rows.map(({ agent, task, status }, index) => {
         const query = truncateText(task.query_text?.trim() || strings.noMessage, 96);

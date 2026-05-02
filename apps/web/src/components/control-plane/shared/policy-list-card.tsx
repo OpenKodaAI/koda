@@ -119,7 +119,7 @@ export function PolicyListCard({
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border transition-colors",
               draft.trim()
-                ? "border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+                ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
                 : "border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)]",
             )}
           >

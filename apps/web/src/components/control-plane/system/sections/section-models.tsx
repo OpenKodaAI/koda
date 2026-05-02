@@ -851,8 +851,8 @@ export function ProviderAuthPanel({
 
         <div className="grid gap-3 md:grid-cols-2">
           <FieldShell
-            label="Idioma"
-            description="Define o idioma padrão e filtra a lista de vozes."
+            label={tl("Idioma")}
+            description={tl("Define o idioma padrão e filtra a lista de vozes.")}
           >
             <Select
               value={kokoroLanguage}
@@ -1186,8 +1186,8 @@ export function ProviderAuthPanel({
               {provider.id === "elevenlabs" ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <FieldShell
-                    label="Idioma padrão"
-                    description="Filtra a biblioteca de vozes e define o idioma padrão dos agents."
+                    label={tl("Idioma padrão")}
+                    description={tl("Filtra a biblioteca de vozes e define o idioma padrão dos agentes.")}
                   >
                     <Select
                       value={elevenlabsLanguage === "" ? SELECT_ALL_VALUE : elevenlabsLanguage}
@@ -1217,11 +1217,11 @@ export function ProviderAuthPanel({
                   </FieldShell>
 
                   <FieldShell
-                    label="Voz padrão"
+                    label={tl("Voz padrão")}
                     description={
                       elevenlabsVoicesLoading
-                        ? "Carregando vozes disponíveis..."
-                        : "Usada como voz default dos agents quando TTS estiver ativo."
+                        ? tl("Carregando vozes disponíveis…")
+                        : tl("Usada como voz default dos agentes quando TTS estiver ativo.")
                     }
                   >
                     <Select
@@ -1631,8 +1631,8 @@ export function SectionModels() {
       <SettingsFieldGroup title={tl("Routing")}>
         <div className="grid gap-4 xl:grid-cols-2">
           <FieldShell
-            label="Provider padrão"
-            description="Primeira escolha global entre os providers já verificados."
+            label={tl("Provider padrão")}
+            description={tl("Primeira escolha global entre os providers já verificados.")}
             error={findFieldError(modelsErrors, "models.default_provider")?.message}
           >
             <Select
@@ -1680,8 +1680,8 @@ export function SectionModels() {
           </FieldShell>
 
           <FieldShell
-            label="Perfil de uso"
-            description="Controla a preferência global entre custo e qualidade."
+            label={tl("Perfil de uso")}
+            description={tl("Controla a preferência global entre custo e qualidade.")}
           >
             <Select
               value={draft.values.models.usage_profile}
@@ -1708,8 +1708,8 @@ export function SectionModels() {
 
         {enabledGeneralProviders.length > 1 ? (
           <FieldShell
-            label="Ordem de fallback"
-            description="Só entram aqui providers já verificados e prontos para uso."
+            label={tl("Ordem de fallback")}
+            description={tl("Só entram aqui providers já verificados e prontos para uso.")}
           >
             <div className="space-y-2">
               {draft.values.models.fallback_order
@@ -1768,8 +1768,8 @@ export function SectionModels() {
       <SettingsFieldGroup title={tl("Budgets")}>
         <div className="grid gap-4 xl:grid-cols-2">
           <FieldShell
-            label="Budget por tarefa"
-            description="Limite global por execução individual."
+            label={tl("Budget por tarefa")}
+            description={tl("Limite global por execução individual.")}
             error={findFieldError(modelsErrors, "models.max_budget_usd")?.message}
           >
             <input
@@ -1789,8 +1789,8 @@ export function SectionModels() {
           </FieldShell>
 
           <FieldShell
-            label="Budget acumulado"
-            description="Teto global para o uso consolidado."
+            label={tl("Budget acumulado")}
+            description={tl("Teto global para o uso consolidado.")}
             error={findFieldError(modelsErrors, "models.max_total_budget_usd")?.message}
           >
             <input

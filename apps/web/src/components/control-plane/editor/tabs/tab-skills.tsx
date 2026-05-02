@@ -303,7 +303,7 @@ export function TabSkills() {
                               })
                             }
                             onBlur={() => markTouched(skill.id, "name")}
-                            placeholder="e.g. deploy-review, sales-playbook"
+                            placeholder={tl("e.g. deploy-review, sales-playbook")}
                             error={
                               nameError
                                 ? tl("Name is required")
@@ -323,7 +323,7 @@ export function TabSkills() {
                                 instruction: e.target.value,
                               })
                             }
-                            placeholder="Diretiva imperativa descrevendo QUANDO e COMO o agente deve usar esta skill"
+                            placeholder={tl("Diretiva imperativa descrevendo QUANDO e COMO o agente deve usar esta skill")}
                             rows={3}
                           />
 
@@ -337,7 +337,7 @@ export function TabSkills() {
                               updateSkill(skill.id, { content: value })
                             }
                             minHeight="200px"
-                            placeholder="Metodologia completa em Markdown. Inclua ## Abordagem, ## Formato de Saida, ## Principios Chave"
+                            placeholder={tl("Metodologia completa em Markdown. Inclua ## Abordagem, ## Formato de Saída, ## Princípios Chave")}
                           />
 
                           {/* ── Advanced fields (collapsible) ── */}
@@ -377,7 +377,7 @@ export function TabSkills() {
                                       aliases: items,
                                     })
                                   }
-                                  placeholder="e.g. dr, deploy"
+                                  placeholder={tl("e.g. dr, deploy")}
                                 />
                                 <ListEditorField
                                   label={tl("Tags")}
@@ -388,7 +388,7 @@ export function TabSkills() {
                                   onChange={(items) =>
                                     updateSkill(skill.id, { tags: items })
                                   }
-                                  placeholder="e.g. security, devops"
+                                  placeholder={tl("e.g. security, devops")}
                                 />
                               </div>
 
@@ -404,7 +404,7 @@ export function TabSkills() {
                                       e.target.value || undefined,
                                   })
                                 }
-                                placeholder="e.g. **Risks** as [Severity] description → mitigation. **Summary** with 3 action items."
+                                placeholder={tl("e.g. **Risks** as [Severity] description → mitigation. **Summary** with 3 action items.")}
                                 rows={2}
                               />
                             </div>

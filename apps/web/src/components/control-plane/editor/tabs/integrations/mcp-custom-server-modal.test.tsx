@@ -44,7 +44,7 @@ describe("McpCustomServerModal", () => {
     fireEvent.change(screen.getByPlaceholderText("meu-servidor"), {
       target: { value: "demo" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Meu Servidor MCP"), {
+    fireEvent.change(screen.getByPlaceholderText("My MCP Server"), {
       target: { value: "Demo Server" },
     });
     // Add args (command stays as default 'npx')
@@ -75,9 +75,7 @@ describe("McpCustomServerModal", () => {
     }`;
     fireEvent.change(screen.getByRole("textbox"), { target: { value: sample } });
 
-    // The button text now uses "Importar (n)" form (i18n keeps PT-BR for
-    // strings without dedicated EN keys).
-    const importButton = await screen.findByRole("button", { name: /Importar \(1\)/i });
+    const importButton = await screen.findByRole("button", { name: /Import \(1\)/i });
     fireEvent.click(importButton);
 
     await waitFor(() => {
@@ -92,7 +90,7 @@ describe("McpCustomServerModal", () => {
     renderModal();
     fireEvent.click(screen.getByRole("button", { name: /^Add$/i }));
     expect(
-      await screen.findByText(/Identificador e nome de exibi/i),
+      await screen.findByText(/Identifier and display name are required/i),
     ).toBeInTheDocument();
     expect(onSubmitForm).not.toHaveBeenCalled();
   });
@@ -101,7 +99,7 @@ describe("McpCustomServerModal", () => {
     renderModal({ defaultMode: "json" });
     const textbox = screen.getByRole("textbox");
     fireEvent.change(textbox, { target: { value: "{ not json" } });
-    const button = screen.getByRole("button", { name: /^Importar$/i });
+    const button = screen.getByRole("button", { name: /^Import$/i });
     expect(button).toBeDisabled();
     // JsonEditor surfaces invalidity through aria-invalid on the textarea.
     expect(textbox).toHaveAttribute("aria-invalid", "true");

@@ -108,7 +108,7 @@ export function ChatComposer({
               "transition-[background-color,color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel-soft)]",
               canSubmit
-                ? "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] active:scale-[0.96]"
+                ? "bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)] active:scale-[0.96]"
                 : "bg-[var(--panel-strong)] text-[var(--text-quaternary)]",
             )}
           >

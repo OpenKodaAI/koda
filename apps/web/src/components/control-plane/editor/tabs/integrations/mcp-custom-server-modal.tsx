@@ -470,7 +470,7 @@ function FormBody(props: FormBodyProps) {
             sizeVariant="sm"
             value={props.displayName}
             onChange={(e) => props.setDisplayName(e.target.value)}
-            placeholder="Meu Servidor MCP"
+            placeholder={tl("Meu Servidor MCP")}
           />
         </Field>
       </div>
@@ -492,8 +492,8 @@ function FormBody(props: FormBodyProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="stdio">stdio</SelectItem>
-            <SelectItem value="http_sse">HTTP / SSE</SelectItem>
+            <SelectItem value="stdio">{tl("stdio")}</SelectItem>
+            <SelectItem value="http_sse">{tl("HTTP / SSE")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>

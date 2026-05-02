@@ -152,3 +152,35 @@ export function defaultRecurrenceFields(): RecurrenceFields {
     day: 1,
   };
 }
+
+export type CronCellKey = "minute" | "hour" | "day" | "month" | "weekday";
+
+export interface CronValidationError {
+  cell: CronCellKey;
+  code: "invalidChar" | "dayOutOfRange" | "monthOutOfRange" | "weekdayOutOfRange";
+}
+
+const CELL_ORDER: CronCellKey[] = ["minute", "hour", "day", "month", "weekday"];
+
+export function validateCron(cron: string): CronValidationError | null {
+  const segments = (cron ?? "").trim().split(/\s+/);
+  for (let i = 0; i < CELL_ORDER.length; i += 1) {
+    const cell = CELL_ORDER[i];
+    const value = segments[i] ?? "*";
+    if (value === "*") continue;
+    if (!/^\d+$/.test(value)) {
+      return { cell, code: "invalidChar" };
+    }
+    const n = Number(value);
+    if (cell === "day" && n < 1) {
+      return { cell, code: "dayOutOfRange" };
+    }
+    if (cell === "month" && n < 1) {
+      return { cell, code: "monthOutOfRange" };
+    }
+    if (cell === "weekday" && n > 6) {
+      return { cell, code: "weekdayOutOfRange" };
+    }
+  }
+  return null;
+}

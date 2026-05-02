@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { requestJson } from "@/lib/http-client";
 import {
   INTEGRATION_CATALOG,
@@ -523,7 +523,24 @@ export function useAgentIntegrationPermissions({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDiscovering, setIsDiscovering] = useState(false);
 
-  /* ---- Build entries on mount / when dependencies change ---------- */
+  /* ---- Build entries on mount / when dependencies change ----------
+   *
+   * Callers commonly pass `coreIntegrations`/`integrationGrants` as new
+   * references on every render (e.g. `core.integrations?.items ?? []`,
+   * `policy.integration_grants ?? {}`). If those went into the useCallback
+   * deps the fetch effect would re-fire on every parent render, calling
+   * setLoading(true) → re-render → repeat — visible to the user as the
+   * MCP screen "flickering". We mirror them into refs that are read at
+   * fetch time, and gate the effect on `agentId` only.
+   */
+  const coreIntegrationsRef = useRef(coreIntegrations);
+  const integrationGrantsRef = useRef(integrationGrants);
+  useEffect(() => {
+    coreIntegrationsRef.current = coreIntegrations;
+  }, [coreIntegrations]);
+  useEffect(() => {
+    integrationGrantsRef.current = integrationGrants;
+  }, [integrationGrants]);
 
   const fetchMcpData = useCallback(async () => {
     setLoading(true);
@@ -545,8 +562,8 @@ export function useAgentIntegrationPermissions({
 
       setCustomServers(customResp.servers ?? []);
       const coreEntries = buildCoreEntries(
-        coreIntegrations,
-        integrationGrants,
+        coreIntegrationsRef.current,
+        integrationGrantsRef.current,
         connections.items ?? [],
         defaults.items ?? [],
       );
@@ -560,8 +577,8 @@ export function useAgentIntegrationPermissions({
     } catch {
       // On error, still show core entries
       const coreEntries = buildCoreEntries(
-        coreIntegrations,
-        integrationGrants,
+        coreIntegrationsRef.current,
+        integrationGrantsRef.current,
         [],
         [],
       );
@@ -569,7 +586,7 @@ export function useAgentIntegrationPermissions({
     } finally {
       setLoading(false);
     }
-  }, [agentId, coreIntegrations, integrationGrants]);
+  }, [agentId]);
 
   useEffect(() => {
     fetchMcpData();

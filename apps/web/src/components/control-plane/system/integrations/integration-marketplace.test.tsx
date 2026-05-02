@@ -42,6 +42,42 @@ vi.mock("@/components/control-plane/system/integrations/integration-logos", () =
   getIntegrationAccent: () => ({ from: "#7C9CFF", to: "#5168D9" }),
 }));
 
+vi.mock("@/hooks/use-mcp-catalog-suggestions", () => ({
+  useMcpCatalogSuggestions: () => ({
+    servers: [
+      {
+        server_key: "slack",
+        display_name: "Slack",
+        tagline: "Mensagens, canais e workflows",
+        description: "Slack MCP fixture.",
+        transport_type: "stdio",
+        command_template: ["npx", "-y", "@modelcontextprotocol/server-slack"],
+        env_fields: [],
+        category: "productivity",
+        documentation_url: "https://api.slack.com/",
+        logo_key: "slack",
+        expected_tools: [],
+      },
+      {
+        server_key: "notion",
+        display_name: "Notion",
+        tagline: "Páginas, databases e blocks",
+        description: "Notion fixture.",
+        transport_type: "stdio",
+        command_template: ["npx", "-y", "@modelcontextprotocol/server-notion"],
+        env_fields: [],
+        category: "productivity",
+        documentation_url: "https://developers.notion.com/",
+        logo_key: "notion",
+        expected_tools: [],
+      },
+    ],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 function makeCatalogServer(overrides: Record<string, unknown>) {
   return {
     server_key: "custom-docs",

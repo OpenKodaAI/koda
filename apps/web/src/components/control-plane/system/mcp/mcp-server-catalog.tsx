@@ -10,13 +10,14 @@ import type { McpServerCatalogEntry } from "@/lib/control-plane";
 import { McpServerCard } from "./mcp-server-card";
 import { McpServerEditorModal } from "./mcp-server-editor-modal";
 import {
+  MCP_CATEGORY_KEYS,
   MCP_CATEGORY_LABELS,
-  MCP_SUGGESTED_SERVERS,
   filterAllowedMcpCatalogEntries,
   isReservedMcpServerKey,
   buildSuggestedMcpCatalogEntry,
   type McpCategory,
-} from "./mcp-catalog-data";
+} from "./mcp-catalog-utils";
+import { useMcpCatalogSuggestions } from "@/hooks/use-mcp-catalog-suggestions";
 
 /* ------------------------------------------------------------------ */
 /*  Category filter chip                                               */
@@ -87,7 +88,9 @@ function SuggestedChip({
 /* ------------------------------------------------------------------ */
 
 export function McpServerCatalog() {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
+  const { servers: suggestedServers, isLoading: suggestedLoading } =
+    useMcpCatalogSuggestions();
 
   // Server list state
   const [servers, setServers] = useState<McpServerCatalogEntry[]>([]);
@@ -192,7 +195,7 @@ export function McpServerCatalog() {
 
   const handleAddSuggested = (serverKey: string) => {
     if (isReservedMcpServerKey(serverKey)) return;
-    const suggested = MCP_SUGGESTED_SERVERS.find((s) => s.server_key === serverKey);
+    const suggested = suggestedServers.find((s) => s.server_key === serverKey);
     if (!suggested) return;
     setEditorMode("create");
     setLockServerKey(true);
@@ -242,7 +245,9 @@ export function McpServerCatalog() {
               {categories.map((cat) => (
                 <CategoryChip
                   key={cat}
-                  label={tl(MCP_CATEGORY_LABELS[cat])}
+                  label={t(MCP_CATEGORY_KEYS[cat], {
+                    defaultValue: MCP_CATEGORY_LABELS[cat],
+                  })}
                   active={activeCategory === cat}
                   onClick={() => setActiveCategory(cat)}
                 />
@@ -276,24 +281,44 @@ export function McpServerCatalog() {
           <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
             {tl("Sugeridos")}
           </span>
-          <div className="flex flex-wrap gap-2">
-            {MCP_SUGGESTED_SERVERS.map((s) => (
-              <SuggestedChip
-                key={s.server_key}
-                name={s.display_name}
-                exists={existingKeys.has(s.server_key)}
-                onClick={() => handleAddSuggested(s.server_key)}
-              />
-            ))}
-          </div>
+          {suggestedLoading ? (
+            <div className="flex flex-wrap gap-2" aria-hidden>
+              {Array.from({ length: 8 }).map((_, idx) => (
+                <span
+                  key={idx}
+                  className="inline-block h-7 w-24 animate-pulse rounded-lg bg-[var(--surface-panel-soft)]"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {suggestedServers.map((s) => (
+                <SuggestedChip
+                  key={s.server_key}
+                  name={
+                    s.i18n_keys?.display_name
+                      ? t(s.i18n_keys.display_name, { defaultValue: s.display_name })
+                      : s.display_name
+                  }
+                  exists={existingKeys.has(s.server_key)}
+                  onClick={() => handleAddSuggested(s.server_key)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {/* Server grid */}
       <div className="mt-4">
         {loading ? (
-          <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
-            {tl("Carregando servidores...")}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" aria-hidden>
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="h-[5.5rem] animate-pulse rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]"
+              />
+            ))}
           </div>
         ) : error ? (
           <div className="py-12 text-center text-sm text-[var(--tone-danger-text)]">

@@ -16,10 +16,11 @@ import {
 } from "@/components/ui/select";
 import type { McpServerCatalogEntry, McpEnvSchemaField } from "@/lib/control-plane";
 import {
+  MCP_CATEGORY_KEYS,
   MCP_CATEGORY_LABELS,
   isReservedMcpServerKey,
   type McpCategory,
-} from "./mcp-catalog-data";
+} from "./mcp-catalog-utils";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -212,7 +213,7 @@ export function McpServerEditorModal({
   onSave: (serverKey: string, payload: Partial<McpServerCatalogEntry>) => Promise<void>;
   saving?: boolean;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const isEditing = mode ? mode === "edit" : server !== null;
   const [form, setForm] = useState<EditorFormState>(
     server ? formStateFromServer(server) : emptyFormState(),
@@ -343,7 +344,7 @@ export function McpServerEditorModal({
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
             <div className="space-y-4">
               <FieldShell
-                label="Identificador (slug)"
+                label={tl("Identificador (slug)")}
                 description={
                   isReservedServerKey
                     ? tl("Este identificador e reservado e nao pode ser usado.")
@@ -359,15 +360,15 @@ export function McpServerEditorModal({
                 />
               </FieldShell>
 
-              <FieldShell label="Nome de exibicao">
+              <FieldShell label={tl("Nome de exibição")}>
                 <Input
                   value={form.display_name}
                   onChange={(e) => patch({ display_name: e.target.value })}
-                  placeholder="Meu Servidor MCP"
+                  placeholder={tl("Meu Servidor MCP")}
                 />
               </FieldShell>
 
-              <FieldShell label="Descricao">
+              <FieldShell label={tl("Descrição")}>
                 <Textarea
                   rows={3}
                   className="min-h-[60px]"
@@ -377,7 +378,7 @@ export function McpServerEditorModal({
                 />
               </FieldShell>
 
-              <FieldShell label="Tipo de transporte">
+              <FieldShell label={tl("Tipo de transporte")}>
                 <Select
                   value={form.transport_type}
                   onValueChange={(v) => patch({ transport_type: v as "stdio" | "http_sse" })}
@@ -386,14 +387,14 @@ export function McpServerEditorModal({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="stdio">stdio (comando local)</SelectItem>
-                    <SelectItem value="http_sse">HTTP / SSE (URL remota)</SelectItem>
+                    <SelectItem value="stdio">{tl("stdio (comando local)")}</SelectItem>
+                    <SelectItem value="http_sse">{tl("HTTP / SSE (URL remota)")}</SelectItem>
                   </SelectContent>
                 </Select>
               </FieldShell>
 
               {form.transport_type === "stdio" ? (
-                <FieldShell label="Comando" description="Comando para iniciar o servidor">
+                <FieldShell label={tl("Comando")} description={tl("Comando para iniciar o servidor")}>
                   <Input
                     className="font-mono"
                     value={form.command}
@@ -402,7 +403,7 @@ export function McpServerEditorModal({
                   />
                 </FieldShell>
               ) : (
-                <FieldShell label="URL" description="Endpoint HTTP/SSE do servidor">
+                <FieldShell label={tl("URL")} description={tl("Endpoint HTTP/SSE do servidor")}>
                   <Input
                     value={form.url}
                     onChange={(e) => patch({ url: e.target.value })}
@@ -411,7 +412,7 @@ export function McpServerEditorModal({
                 </FieldShell>
               )}
 
-              <FieldShell label="Categoria">
+              <FieldShell label={tl("Categoria")}>
                 <Select
                   value={form.category}
                   onValueChange={(v) => patch({ category: v as McpCategory })}
@@ -423,7 +424,7 @@ export function McpServerEditorModal({
                     {(Object.entries(MCP_CATEGORY_LABELS) as [McpCategory, string][]).map(
                       ([value, label]) => (
                         <SelectItem key={value} value={value}>
-                          {label}
+                          {t(MCP_CATEGORY_KEYS[value], { defaultValue: label })}
                         </SelectItem>
                       ),
                     )}
@@ -431,7 +432,7 @@ export function McpServerEditorModal({
                 </Select>
               </FieldShell>
 
-              <FieldShell label="URL de documentacao" description="Opcional">
+              <FieldShell label={tl("URL de documentação")} description={tl("Opcional")}>
                 <Input
                   value={form.documentation_url}
                   onChange={(e) => patch({ documentation_url: e.target.value })}

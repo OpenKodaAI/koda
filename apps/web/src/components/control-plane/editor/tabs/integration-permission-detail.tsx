@@ -560,7 +560,7 @@ export function IntegrationPermissionDetail({
             <div className="flex flex-col gap-2">
               {mcpGroups.readOnly.length > 0 && (
                 <ToolGroupSection
-                  label="Ferramentas somente leitura"
+                  label={tl("Ferramentas somente leitura")}
                   count={mcpGroups.readOnly.length}
                   tools={mcpGroups.readOnly}
                   groupPolicy={computeGroupPolicy(mcpGroups.readOnly)}
@@ -573,7 +573,7 @@ export function IntegrationPermissionDetail({
               )}
               {mcpGroups.interactive.length > 0 && (
                 <ToolGroupSection
-                  label="Ferramentas interativas"
+                  label={tl("Ferramentas interativas")}
                   count={mcpGroups.interactive.length}
                   tools={mcpGroups.interactive}
                   groupPolicy={computeGroupPolicy(mcpGroups.interactive)}
@@ -586,7 +586,7 @@ export function IntegrationPermissionDetail({
               )}
               {mcpGroups.destructive.length > 0 && (
                 <ToolGroupSection
-                  label="Ferramentas destrutivas"
+                  label={tl("Ferramentas destrutivas")}
                   count={mcpGroups.destructive.length}
                   tools={mcpGroups.destructive}
                   groupPolicy={computeGroupPolicy(mcpGroups.destructive)}

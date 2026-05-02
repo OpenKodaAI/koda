@@ -100,12 +100,13 @@ export function SquadSpecIndicator({
 }: {
   hasPrompt: boolean;
 }) {
+  const { tl } = useAppI18n();
   if (!hasPrompt) return null;
 
   return (
     <span
       className="agent-board-lane__prompt-indicator"
-      title="System prompt do time configurado"
+      title={tl("System prompt do time configurado")}
     >
       <FileText size={10} />
     </span>
