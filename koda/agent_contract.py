@@ -717,25 +717,6 @@ _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
         login_flow_kind=None,
     ),
     CoreProviderDefinition(
-        id="sora",
-        title="Sora",
-        vendor="OpenAI",
-        runtime_adapter="sora_runner",
-        description="Image and video generation via OpenAI.",
-        category="media",
-        supports_streaming=False,
-        supports_native_resume=False,
-        supports_tool_loop=False,
-        supports_long_context=False,
-        supports_images=True,
-        supports_structured_output=False,
-        supports_fallback_bootstrap=False,
-        binary=None,
-        supported_auth_modes=("api_key",),
-        login_flow_kind=None,
-        show_in_settings=False,
-    ),
-    CoreProviderDefinition(
         id="perplexity",
         title="Perplexity",
         vendor="Perplexity AI",
@@ -1750,6 +1731,39 @@ def resolve_gws_action(args: str | None) -> GwsActionResolution:
     )
 
 
+def _serialize_connection_field(field: ConnectionField) -> dict[str, Any]:
+    return {
+        "key": field.key,
+        "label": field.label,
+        "required": field.required,
+        "input_type": field.input_type,
+        "help": field.help,
+    }
+
+
+def serialize_connection_profile(profile: ConnectionProfile | None) -> dict[str, Any] | None:
+    """Convert a ConnectionProfile dataclass into a JSON-friendly dict so the
+    UI can drive its sub-forms from the same declarative source the runtime
+    uses. Returns ``None`` for integrations without a profile."""
+    if profile is None:
+        return None
+    return {
+        "strategy": profile.strategy,
+        "oauth_provider": profile.oauth_provider,
+        "oauth_scopes": list(profile.oauth_scopes),
+        "fields": [_serialize_connection_field(field) for field in profile.fields],
+        "scope_fields": [_serialize_connection_field(field) for field in profile.scope_fields],
+        "read_only_toggle": (
+            _serialize_connection_field(profile.read_only_toggle) if profile.read_only_toggle is not None else None
+        ),
+        "path_argument": (
+            _serialize_connection_field(profile.path_argument) if profile.path_argument is not None else None
+        ),
+        "local_app_name": profile.local_app_name,
+        "local_app_detection_hint": profile.local_app_detection_hint,
+    }
+
+
 def resolve_core_integration_catalog() -> list[dict[str, Any]]:
     """Return the integration catalog in a UI/API-friendly format."""
     return [
@@ -1766,6 +1780,8 @@ def resolve_core_integration_catalog() -> list[dict[str, Any]]:
             "timeout": definition.timeout,
             "health_probe": definition.health_probe,
             "supports_persistence": definition.supports_persistence,
+            "connection_profile": serialize_connection_profile(definition.connection_profile),
+            "runtime_constraints": list(definition.runtime_constraints),
         }
         for definition in _CORE_INTEGRATION_DEFINITIONS
     ]

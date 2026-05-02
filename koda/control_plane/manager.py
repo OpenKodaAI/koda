@@ -31,6 +31,7 @@ from koda.agent_contract import (
     resolve_core_integration_catalog,
     resolve_core_provider_catalog,
     resolve_feature_filtered_tools,
+    serialize_connection_profile,
 )
 from koda.config import SHARED_PLATFORM_PROMPT, STATE_BACKEND
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
@@ -48,12 +49,35 @@ from koda.provider_models import (
     resolve_model_function_catalog,
     resolve_provider_function_model_catalog,
 )
+from koda.services.embedding_catalog import (
+    CATALOG as _EMBEDDING_CATALOG,
+)
+from koda.services.embedding_catalog import (
+    DEFAULT_MODEL_ID as _DEFAULT_EMBEDDING_MODEL_ID,
+)
+from koda.services.embedding_catalog import (
+    catalog_payload as _embedding_catalog_payload,
+)
+from koda.services.embedding_catalog import (
+    delete_model as _delete_embedding_model,
+)
+from koda.services.embedding_catalog import (
+    is_model_installed as _embedding_model_installed,
+)
+from koda.services.embedding_catalog import (
+    model_disk_bytes as _embedding_model_disk_bytes,
+)
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
+    delete_kokoro_model,
+    delete_kokoro_voice,
+    ensure_kokoro_model,
     ensure_kokoro_voice_downloaded,
     kokoro_catalog_payload,
     kokoro_managed_voices_storage_path,
+    kokoro_model_path,
+    kokoro_model_status,
     kokoro_voice_file_path,
     kokoro_voice_metadata,
 )
@@ -80,6 +104,14 @@ from koda.services.provider_auth import (
     verify_provider_subscription_login,
 )
 from koda.services.tool_prompt import build_agent_tools_prompt
+from koda.services.whisper_manager import (
+    KNOWN_WHISPER_VARIANTS,
+    WHISPER_DEFAULT_VARIANT,
+    delete_whisper_model,
+    ensure_whisper_model_downloaded,
+    whisper_catalog_payload,
+    whisper_model_path,
+)
 
 from .agent_spec import (
     _normalize_markdown_block,
@@ -143,6 +175,11 @@ from .settings import (
 )
 
 log = get_logger(__name__)
+
+
+def _embedding_catalog_keys() -> set[str]:
+    return set(_EMBEDDING_CATALOG.keys())
+
 
 _AGENT_PREFIX_RE = re.compile(r"^([A-Z0-9_]+)_(.+)$")
 _TELEGRAM_AGENT_TOKEN_RE = re.compile(r"^([A-Z0-9_]+)_AGENT_TOKEN$")
@@ -435,6 +472,10 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "fallback_order": ("PROVIDER_FALLBACK_ORDER", "csv"),
         "max_budget_usd": ("MAX_BUDGET_USD", "float"),
         "max_total_budget_usd": ("MAX_TOTAL_BUDGET_USD", "float"),
+        # Apple Silicon Metal acceleration toggle. Drives the
+        # ``is_metal_path_active`` runtime gate; only takes effect on
+        # Apple Silicon hardware (no-op on Linux/x86 macOS).
+        "metal_enabled": ("METAL_ENABLED", "bool"),
         "elevenlabs_default_language": ("ELEVENLABS_DEFAULT_LANGUAGE", "string"),
         "elevenlabs_default_voice": ("TTS_DEFAULT_VOICE", "string"),
         "kokoro_default_language": ("KOKORO_DEFAULT_LANGUAGE", "string"),
@@ -612,7 +653,6 @@ _CORE_PROVIDER_ENABLED_DEFAULTS: dict[str, bool] = {
     "elevenlabs": False,
     "kokoro": True,
     "whispercpp": True,
-    "sora": False,
 }
 _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
     "AGENT_",
@@ -701,6 +741,7 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "models.kokoro_default_language": "KOKORO_DEFAULT_LANGUAGE",
     "models.kokoro_default_voice": "KOKORO_DEFAULT_VOICE",
     "models.elevenlabs_model": "ELEVENLABS_MODEL",
+    "models.metal_enabled": "METAL_ENABLED",
     "memory.memory_enabled": "MEMORY_ENABLED",
     "memory.procedural_enabled": "MEMORY_PROCEDURAL_ENABLED",
     "memory.proactive_enabled": "MEMORY_PROACTIVE_ENABLED",
@@ -2349,6 +2390,14 @@ class ControlPlaneManager:
         env: dict[str, str] | None = None,
         sections: dict[str, dict[str, Any]] | None = None,
     ) -> str:
+        # API key mode targets Ollama Cloud, which is a fixed endpoint. We
+        # ignore every override source (per-env arg, persisted meta, OS env)
+        # because they can carry local URLs from a previous local-mode setup
+        # or from a stray OLLAMA_BASE_URL=http://localhost:... in the host
+        # environment, both of which would make the cloud verify hit the
+        # local daemon and fail with `Connection refused`.
+        if auth_mode == "api_key":
+            return provider_default_base_url("ollama", "api_key")
         source_env = env or {}
         meta = self._access_meta_map("provider_connection_meta", sections=sections).get("OLLAMA", {})
         configured = (
@@ -3656,6 +3705,12 @@ class ControlPlaneManager:
                 "supports_persistence": bool(definition.get("supports_persistence")),
                 "health_probe": str(definition.get("health_probe") or ""),
             },
+            # Pass through the declarative connection profile and runtime
+            # constraints so the UI can render the right form (URL+email+
+            # token for Atlassian, OAuth-only for hosted servers, etc.)
+            # rather than falling back to a meaningless "Activate" button.
+            "connection_profile": definition.get("connection_profile"),
+            "runtime_constraints": list(definition.get("runtime_constraints") or []),
         }
 
     def _serialize_core_connection_payload(self, integration_id: str) -> dict[str, Any]:
@@ -6202,9 +6257,604 @@ class ControlPlaneManager:
             raise RuntimeError("failed to persist kokoro download job")
         return self._provider_download_job_payload(row)
 
+    # ------------------------------------------------------------------
+    # Kokoro base model download — independent of voice downloads. The
+    # base ONNX file is required before any voice can be loaded; the UI
+    # exposes this as a separate first-time download so operators see
+    # exactly what's happening rather than triggering an opaque
+    # synchronous fetch the first time they pick a voice.
+    # ------------------------------------------------------------------
+
+    def get_kokoro_model_status(self) -> dict[str, Any]:
+        status = kokoro_model_status()
+        active = self._active_provider_download_job("kokoro", "model")
+        return {**status, "active_job": active}
+
+    def _run_kokoro_model_download(self, job_id: str) -> None:
+        base_details = {
+            "asset": "model",
+            "filename": kokoro_model_path().name,
+        }
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="kokoro",
+            asset_id="model",
+            status="running",
+            details={**base_details, "message": "Baixando modelo base do Kokoro."},
+        )
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando modelo base do Kokoro."},
+            )
+
+        try:
+            ensure_kokoro_model(progress_callback=_on_progress)
+            bytes_on_disk = int(kokoro_model_path().stat().st_size)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": str(kokoro_model_path()),
+                    "message": "Modelo Kokoro pronto.",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._provider_download_threads.pop(job_id, None)
+
+    def start_kokoro_model_download(self) -> dict[str, Any]:
+        active = self._active_provider_download_job("kokoro", "model")
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        target = kokoro_model_path()
+        if target.exists() and target.stat().st_size > 0:
+            bytes_on_disk = int(target.stat().st_size)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "asset": "model",
+                    "filename": target.name,
+                    "local_path": str(target),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist kokoro model download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="kokoro",
+            asset_id="model",
+            status="pending",
+            details={
+                "asset": "model",
+                "filename": target.name,
+                "message": "Preparando download do modelo base do Kokoro.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_kokoro_model_download,
+            args=(job_id,),
+            name="kokoro-model-download",
+            daemon=True,
+        )
+        self._provider_download_threads[job_id] = thread
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist kokoro model download job")
+        return self._provider_download_job_payload(row)
+
+    # ------------------------------------------------------------------
+    # Embedding model catalog & background download. Mirrors the Kokoro
+    # provider download pattern (cp_provider_download_jobs row + threading)
+    # but talks to the Hugging Face Hub via ``huggingface_hub.snapshot_download``
+    # because embedding models are multi-file repos (config + tokenizer +
+    # weights + sentence-transformers metadata).
+    # ------------------------------------------------------------------
+
+    def _selected_embedding_model_id(self) -> str:
+        sections = self._system_settings_sections()
+        memory_section = _safe_json_object(sections.get("memory"))
+        candidate = _nonempty_text(memory_section.get("embedding_model"))
+        if candidate and candidate in _EMBEDDING_CATALOG:
+            return candidate
+        env_repo = _nonempty_text(os.environ.get("MEMORY_EMBEDDING_MODEL"))
+        if env_repo:
+            for model_id, definition in _EMBEDDING_CATALOG.items():
+                if definition.repo_id == env_repo:
+                    return model_id
+        return _DEFAULT_EMBEDDING_MODEL_ID
+
+    def get_embedding_model_catalog(self) -> dict[str, Any]:
+        active = self._selected_embedding_model_id()
+        payload = _embedding_catalog_payload(active_model_id=active)
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            model_id = str(item.get("id") or "")
+            item["active_job"] = self._active_provider_download_job("embedding", model_id)
+            items.append(item)
+        return {**payload, "items": items}
+
+    def _run_embedding_model_download(self, job_id: str, model_id: str) -> None:
+        definition = _EMBEDDING_CATALOG.get(model_id)
+        if definition is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=model_id,
+                status="error",
+                details={"last_error": f"unknown embedding model: {model_id}"},
+            )
+            return
+
+        base_details = {
+            "model_id": definition.id,
+            "repo_id": definition.repo_id,
+            "title": definition.title,
+            "expected_size_mb": definition.size_mb,
+        }
+        expected_total = int(definition.size_mb) * 1024 * 1024
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="running",
+            total_bytes=expected_total,
+            details={**base_details, "message": "Baixando modelo de embedding do Hugging Face."},
+        )
+
+        # huggingface_hub.snapshot_download exposes no progress callback,
+        # so we poll the cache dir from this thread while a sibling worker
+        # downloads. Errors are propagated through a holder dict.
+        download_error: dict[str, Any] = {}
+
+        def _download() -> None:
+            try:
+                from huggingface_hub import snapshot_download  # noqa: PLC0415
+
+                snapshot_download(
+                    repo_id=definition.repo_id,
+                    allow_patterns=[
+                        "*.json",
+                        "*.txt",
+                        "*.md",
+                        "*.safetensors",
+                        "*.bin",
+                        "tokenizer*",
+                        "sentencepiece*",
+                        "1_Pooling/*",
+                        "modules.json",
+                        "config_sentence_transformers.json",
+                    ],
+                )
+            except Exception as exc:  # noqa: BLE001
+                download_error["exc"] = exc
+
+        worker = threading.Thread(
+            target=_download,
+            name=f"embedding-download-{definition.id}",
+            daemon=True,
+        )
+        worker.start()
+
+        last_persist = 0.0
+        while worker.is_alive():
+            downloaded = _embedding_model_disk_bytes(definition.id)
+            now = time.monotonic()
+            if now - last_persist >= 0.75:
+                self._persist_provider_download_job(
+                    job_id,
+                    provider_id="embedding",
+                    asset_id=definition.id,
+                    status="running",
+                    downloaded_bytes=downloaded,
+                    total_bytes=expected_total,
+                    details={**base_details, "message": "Baixando modelo de embedding."},
+                )
+                last_persist = now
+            time.sleep(0.5)
+        worker.join()
+
+        if download_error:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="error",
+                details={**base_details, "last_error": str(download_error.get("exc"))},
+            )
+            self._provider_download_threads.pop(job_id, None)
+            return
+
+        final_bytes = _embedding_model_disk_bytes(definition.id)
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="completed",
+            downloaded_bytes=final_bytes,
+            total_bytes=final_bytes,
+            details={**base_details, "message": "Modelo baixado com sucesso."},
+        )
+        # Drop any stale "this model failed to load" entries the runtime
+        # cached before the user explicitly downloaded the weights — without
+        # this, embed_text() keeps returning the hash-fallback even though
+        # the model is now on disk.
+        from koda.utils.embeddings import reset_embedding_load_cache  # noqa: PLC0415
+
+        reset_embedding_load_cache(definition.repo_id)
+        bare_name = definition.repo_id.split("/", 1)[-1]
+        if bare_name != definition.repo_id:
+            reset_embedding_load_cache(bare_name)
+        self._provider_download_threads.pop(job_id, None)
+
+    def start_embedding_model_download(self, model_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+
+        active = self._active_provider_download_job("embedding", definition.id)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        if _embedding_model_installed(definition.id):
+            bytes_on_disk = _embedding_model_disk_bytes(definition.id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "model_id": definition.id,
+                    "repo_id": definition.repo_id,
+                    "title": definition.title,
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist embedding download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="pending",
+            details={
+                "model_id": definition.id,
+                "repo_id": definition.repo_id,
+                "title": definition.title,
+                "expected_size_mb": definition.size_mb,
+                "message": "Preparando download do modelo de embedding.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_embedding_model_download,
+            args=(job_id, definition.id),
+            name=f"embedding-download-{definition.id}",
+            daemon=True,
+        )
+        self._provider_download_threads[job_id] = thread
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist embedding download job")
+        return self._provider_download_job_payload(row)
+
+    def select_embedding_model(self, model_id: str) -> dict[str, Any]:
+        """Persist the operator's choice in ``cp_global_sections.memory.embedding_model``.
+
+        Refuses selection of a model that hasn't been downloaded yet so the
+        runtime never points at a missing weights file. Returns the refreshed
+        catalog payload so the UI updates state in one round-trip.
+        """
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+        if not _embedding_model_installed(definition.id):
+            raise ValueError(f"embedding model not installed: {model_id}")
+        sections = self._system_settings_sections()
+        memory_section = dict(_safe_json_object(sections.get("memory")))
+        memory_section["embedding_model"] = definition.id
+        execute(
+            """
+            INSERT INTO cp_global_sections (section, data_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+            """,
+            ("memory", json_dump(memory_section), now_iso()),
+        )
+        return self.get_embedding_model_catalog()
+
+    def delete_embedding_model_asset(self, model_id: str) -> dict[str, Any]:
+        """Wipe the cache directory for a downloaded embedding model.
+
+        Refuses to delete:
+          - an unknown model_id;
+          - a model with an in-flight download (cancel/wait first).
+
+        The currently-active model *can* be deleted. If it is, we auto-pick
+        another installed model as the new active to keep retrieval going;
+        if no other model is on disk we clear the operator selection so the
+        resolver falls back to env/default (and the runtime falls back to
+        the hash-based vector until the operator downloads again).
+
+        Returns the refreshed catalog payload so the UI re-renders without an
+        extra round trip.
+        """
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+        active = self._active_provider_download_job("embedding", definition.id)
+        if active is not None:
+            raise ValueError("embedding model download in progress; cancel or wait before deleting")
+
+        was_active = self._selected_embedding_model_id() == definition.id
+        _delete_embedding_model(definition.id)
+
+        if was_active:
+            replacement: str | None = None
+            for other_id in _EMBEDDING_CATALOG:
+                if other_id == definition.id:
+                    continue
+                if _embedding_model_installed(other_id):
+                    replacement = other_id
+                    break
+            sections = self._system_settings_sections()
+            memory_section = dict(_safe_json_object(sections.get("memory")))
+            if replacement is not None:
+                memory_section["embedding_model"] = replacement
+            else:
+                memory_section.pop("embedding_model", None)
+            execute(
+                """
+                INSERT INTO cp_global_sections (section, data_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+                """,
+                ("memory", json_dump(memory_section), now_iso()),
+            )
+
+        # Drop runtime caches so a future ``embed_text`` call doesn't keep
+        # using a SentenceTransformer instance backed by files we just wiped.
+        from koda.utils.embeddings import reset_embedding_load_cache  # noqa: PLC0415
+
+        reset_embedding_load_cache(definition.repo_id)
+        bare_name = definition.repo_id.split("/", 1)[-1]
+        if bare_name != definition.repo_id:
+            reset_embedding_load_cache(bare_name)
+
+        return self.get_embedding_model_catalog()
+
+    # ------------------------------------------------------------------
+    # Whisper.cpp GGML model download. Mirrors the Kokoro pattern: a
+    # single-shot job that streams the file to disk with a throttled
+    # progress callback. The variant id is the asset_id so the same
+    # job table row tracks one specific GGML variant at a time.
+    # ------------------------------------------------------------------
+
+    def get_whisper_catalog(self) -> dict[str, Any]:
+        payload = whisper_catalog_payload()
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            variant_id = str(item.get("variant_id") or "")
+            active = self._active_provider_download_job("whispercpp", variant_id)
+            items.append({**item, "active_job": active})
+        return {**payload, "items": items}
+
+    def _run_whisper_model_download(self, job_id: str, variant_id: str) -> None:
+        descriptor = KNOWN_WHISPER_VARIANTS.get(variant_id)
+        if descriptor is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="error",
+                details={"variant_id": variant_id, "last_error": f"unknown whisper variant: {variant_id}"},
+            )
+            return
+
+        base_details = {
+            "variant_id": variant_id,
+            "filename": str(descriptor["filename"]),
+            "label": str(descriptor["label"]),
+        }
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="whispercpp",
+            asset_id=variant_id,
+            status="running",
+            details={**base_details, "message": "Baixando modelo Whisper."},
+        )
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando modelo Whisper."},
+            )
+
+        try:
+            result = ensure_whisper_model_downloaded(variant_id, progress_callback=_on_progress)
+            bytes_on_disk = int(result.get("bytes") or 0)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": str(result.get("local_path") or ""),
+                    "message": "Modelo Whisper pronto.",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._provider_download_threads.pop(job_id, None)
+
+    def start_whisper_model_download(self, variant_id: str = WHISPER_DEFAULT_VARIANT) -> dict[str, Any]:
+        normalized = _nonempty_text(variant_id)
+        if normalized not in KNOWN_WHISPER_VARIANTS:
+            raise ValueError(f"unknown whisper variant: {variant_id}")
+
+        active = self._active_provider_download_job("whispercpp", normalized)
+        if active is not None:
+            return active
+
+        descriptor = KNOWN_WHISPER_VARIANTS[normalized]
+        target = whisper_model_path(normalized)
+        job_id = str(uuid4())
+        if target.exists() and target.stat().st_size > 0:
+            bytes_on_disk = int(target.stat().st_size)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=normalized,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "variant_id": normalized,
+                    "filename": str(descriptor["filename"]),
+                    "label": str(descriptor["label"]),
+                    "local_path": str(target),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist whisper download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="whispercpp",
+            asset_id=normalized,
+            status="pending",
+            details={
+                "variant_id": normalized,
+                "filename": str(descriptor["filename"]),
+                "label": str(descriptor["label"]),
+                "message": "Preparando download do modelo Whisper.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_whisper_model_download,
+            args=(job_id, normalized),
+            name=f"whisper-download-{normalized}",
+            daemon=True,
+        )
+        self._provider_download_threads[job_id] = thread
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist whisper download job")
+        return self._provider_download_job_payload(row)
+
+    # ------------------------------------------------------------------
+    # Asset removal — counterpart to the download flows. Each helper is
+    # idempotent (already-missing == success) so the UI can call it twice
+    # without surfacing a confusing error to the operator.
+    # ------------------------------------------------------------------
+
+    def delete_kokoro_model_asset(self) -> dict[str, Any]:
+        # Refuse while a download for the same asset is in flight — otherwise
+        # we'd race the download thread's atomic .tmp → replace.
+        active = self._active_provider_download_job("kokoro", "model")
+        if active is not None:
+            raise ValueError("kokoro model download in progress; cancel or wait before deleting")
+        result = delete_kokoro_model()
+        return {**result, **kokoro_model_status()}
+
+    def delete_kokoro_voice_asset(self, voice_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(voice_id).lower()
+        if not normalized:
+            raise ValueError("voice_id is required")
+        active = self._active_provider_download_job("kokoro", normalized)
+        if active is not None:
+            raise ValueError("voice download in progress; cancel or wait before deleting")
+        return delete_kokoro_voice(normalized)
+
+    def delete_whisper_model_asset(self, variant_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(variant_id)
+        if normalized not in KNOWN_WHISPER_VARIANTS:
+            raise ValueError(f"unknown whisper variant: {variant_id}")
+        active = self._active_provider_download_job("whispercpp", normalized)
+        if active is not None:
+            raise ValueError("whisper download in progress; cancel or wait before deleting")
+        return delete_whisper_model(normalized)
+
+    def list_active_provider_downloads(self) -> list[dict[str, Any]]:
+        """Return jobs in pending/running state across all known providers.
+
+        Used by the frontend to rebind sticky toasts on page load — without
+        this, a hard refresh during a long Whisper download would lose the
+        progress UI even though the backend job is still running.
+        """
+        self._cleanup_provider_download_jobs()
+        rows = fetch_all(
+            """
+            SELECT * FROM cp_provider_download_jobs
+            WHERE status IN ('pending', 'running')
+            ORDER BY created_at DESC
+            """
+        )
+        return [self._provider_download_job_payload(row) for row in rows]
+
     def get_provider_download_job(self, provider_id: str, job_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
-        if normalized != "kokoro":
+        if normalized not in {"kokoro", "whispercpp"}:
             raise ValueError(f"unsupported provider download: {provider_id}")
         self._cleanup_provider_download_jobs()
         row = fetch_one(
@@ -6225,17 +6875,12 @@ class ControlPlaneManager:
         api_key = _trimmed_text(payload.get("api_key"))
         clear_api_key = bool(payload.get("clear_api_key"))
         existing_row = self._provider_connection_row(normalized)
-        project_id = _trimmed_text(payload.get("project_id")) or _trimmed_text(existing_row["project_id"])
+        project_id = _trimmed_text(existing_row["project_id"])
         verify_after_save = bool(payload.get("verify_after_save", False))
-        base_url = ""
-        if normalized == "ollama":
-            base_url = self._resolve_ollama_base_url(
-                auth_mode="api_key",
-                env={"OLLAMA_BASE_URL": _trimmed_text(payload.get("base_url"))},
-            )
-            self._persist_provider_connection_meta(normalized, base_url=base_url)
-        if normalized == "gemini" and project_id:
-            self._persist_provider_connection_meta(normalized, project_id=project_id)
+        # Ollama in api_key mode targets the cloud endpoint (https://ollama.com).
+        # The base URL is resolved at verify-time from the auth_mode default,
+        # so we don't persist it into meta here — meta is reserved for the
+        # operator-configured local endpoint.
         if api_key:
             self.upsert_global_secret_asset(
                 PROVIDER_API_KEY_ENV_KEYS[cast(Any, normalized)],
@@ -6307,11 +6952,9 @@ class ControlPlaneManager:
         if normalized == "ollama":
             title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
             raise ValueError(f"{title} uses API key or local connection in this interface.")
-        payload = payload or {}
-        project_id = _trimmed_text(payload.get("project_id"))
+        del payload
         existing_row = self._provider_connection_row(normalized)
-        if not project_id:
-            project_id = _trimmed_text(existing_row["project_id"])
+        project_id = _trimmed_text(existing_row["project_id"])
 
         # Kill any lingering login subprocess for this provider so we never
         # leak a PTY when the operator restarts the wizard.
@@ -7787,10 +8430,97 @@ class ControlPlaneManager:
         return cloned
 
     def activate_agent(self, agent_id: str) -> dict[str, Any]:
-        return self.update_agent(agent_id, {"status": "active"})
+        result = self.update_agent(agent_id, {"status": "active"})
+        # Wake the supervisor immediately so the worker spawns without
+        # waiting for the next poll cycle. Items previously rolled back to
+        # 'queued' by ``pause_agent`` will be picked up by the fresh runtime.
+        from koda.control_plane.lifecycle_events import notify_lifecycle_change
+
+        notify_lifecycle_change(reason=f"activate:{agent_id}")
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type="control_plane.agent_activated",
+            details={"agent_id": str(agent_id), "to_status": "active"},
+        )
+        return result
 
     def pause_agent(self, agent_id: str) -> dict[str, Any]:
-        return self.update_agent(agent_id, {"status": "paused"})
+        result = self.update_agent(agent_id, {"status": "paused"})
+        # Rollback every in-flight queue item to ``queued`` so the operator
+        # can resume from a clean slate. The runtime worker is killed by
+        # the supervisor (no idle wait); without this rollback the killed
+        # runtime would leave items orphaned in ``running`` forever.
+        rolled_back = self._rollback_in_flight_queue_items_for_pause(agent_id)
+        from koda.control_plane.lifecycle_events import notify_lifecycle_change
+
+        notify_lifecycle_change(reason=f"pause:{agent_id}")
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type="control_plane.agent_paused",
+            details={
+                "agent_id": str(agent_id),
+                "to_status": "paused",
+                "rolled_back_queue_items": int(rolled_back),
+            },
+        )
+        return result
+
+    def _rollback_in_flight_queue_items_for_pause(self, agent_id: str) -> int:
+        """Mark every running/retrying queue item back to ``queued``.
+
+        Returns the number of rows rolled back so callers can record it on
+        the structured pause audit event.
+
+        Called from ``pause_agent``. The combination of:
+          1. supervisor force-stopping the worker process, and
+          2. this rollback marking in-flight items back to 'queued'
+
+        gives the operator the guarantee they asked for: pause interrupts
+        in the exact moment, and the next activate picks up the queue
+        cleanly without leaving zombie 'running' rows or losing pending
+        user messages.
+        """
+        normalized = str(agent_id or "").strip()
+        if not normalized:
+            return 0
+        try:
+            return int(
+                execute(
+                    """
+                    UPDATE runtime_queue_items
+                    SET status = 'queued',
+                        last_error = COALESCE(last_error, '') ||
+                                     CASE WHEN COALESCE(last_error, '') = '' THEN ''
+                                          ELSE ' | ' END ||
+                                     'paused_by_operator',
+                        updated_at = ?
+                    WHERE agent_id = ? AND status IN ('running', 'retrying')
+                    """,
+                    (now_iso(), normalized),
+                )
+                or 0
+            )
+        except Exception:
+            log.exception("control_plane_pause_queue_rollback_failed", agent_id=normalized)
+            return 0
+
+    def _emit_lifecycle_audit_event(
+        self,
+        agent_id: str,
+        *,
+        event_type: str,
+        details: dict[str, Any],
+    ) -> None:
+        """Append a structured row to ``audit_events`` for lifecycle changes.
+
+        Thin wrapper kept on the manager so existing callers and tests
+        keep their entry point. Implementation lives in
+        :mod:`koda.control_plane.audit` so the supervisor (crash-loop
+        detection) and any future caller emits exactly the same shape.
+        """
+        from koda.control_plane.audit import record_audit_event
+
+        record_audit_event(agent_id, event_type=event_type, details=details)
 
     def get_global_defaults(self) -> dict[str, Any]:
         self.ensure_seeded()
@@ -8122,11 +8852,6 @@ class ControlPlaneManager:
         provider_connections: dict[str, dict[str, Any]],
     ) -> bool:
         normalized = provider_id.strip().lower()
-        if normalized == "sora":
-            # Sora is exposed through OpenAI/Codex model ids for the actual supported path.
-            # Avoid advertising a redundant standalone provider until there is a dedicated
-            # runtime adapter and connection flow for it.
-            return False
         if normalized in MANAGED_PROVIDER_IDS:
             connection = _safe_json_object(provider_connections.get(normalized))
             if normalized == "codex" and function_id == "transcription":
@@ -8430,6 +9155,12 @@ class ControlPlaneManager:
                 providers_section=providers_section,
                 provider_catalog=provider_catalog,
             ),
+            # Apple Silicon Metal acceleration switch. Defaults to ``True``
+            # so the Metal path stays opt-out rather than opt-in for Apple
+            # users. Non-Apple hosts ignore the flag at runtime.
+            "metal_enabled": (
+                bool(providers_section["metal_enabled"]) if "metal_enabled" in providers_section else True
+            ),
         }
         resource_values = {
             "global_tools": [
@@ -8468,6 +9199,11 @@ class ControlPlaneManager:
             ),
             "procedural_enabled": bool(memory_section.get("procedural_enabled")),
             "proactive_enabled": bool(memory_section.get("proactive_enabled")),
+            "embedding_model": (
+                _nonempty_text(memory_section.get("embedding_model"))
+                or _nonempty_text(os.environ.get("MEMORY_EMBEDDING_MODEL"))
+                or _DEFAULT_EMBEDDING_MODEL_ID
+            ),
             "knowledge_enabled": bool(knowledge_section.get("enabled")),
             "knowledge_profile": self._infer_profile_from_presets(
                 knowledge_section,
@@ -9068,6 +9804,13 @@ class ControlPlaneManager:
                 general_ui["kokoro_default_voice_label"] = voice_label
             else:
                 general_ui.pop("kokoro_default_voice_label", None)
+        # Apple Silicon Metal acceleration toggle. Persisted in
+        # ``providers.metal_enabled`` and projected to the ``METAL_ENABLED``
+        # env var by ``_apply_system_settings_to_sections`` so the runtime
+        # gate in ``runtime_capabilities.is_metal_path_active`` picks it up
+        # without a worker restart.
+        if "metal_enabled" in models:
+            current_providers["metal_enabled"] = bool(models.get("metal_enabled"))
         normalized_kokoro_voice = _nonempty_text(current_providers.get("kokoro_default_voice")).lower()
         if normalized_kokoro_voice:
             voice_metadata = kokoro_voice_metadata(normalized_kokoro_voice)
@@ -9223,6 +9966,10 @@ class ControlPlaneManager:
             current_memory["procedural_enabled"] = bool(memory_and_knowledge.get("procedural_enabled"))
         if "proactive_enabled" in memory_and_knowledge:
             current_memory["proactive_enabled"] = bool(memory_and_knowledge.get("proactive_enabled"))
+        if "embedding_model" in memory_and_knowledge:
+            requested_model = _nonempty_text(memory_and_knowledge.get("embedding_model"))
+            if requested_model and requested_model in _embedding_catalog_keys():
+                current_memory["embedding_model"] = requested_model
         if "knowledge_enabled" in memory_and_knowledge:
             current_knowledge["enabled"] = bool(memory_and_knowledge.get("knowledge_enabled"))
 
@@ -11101,18 +11848,70 @@ class ControlPlaneManager:
         }
 
     def _serialize_unified_mcp_catalog_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+        # Merge runtime catalog spec when available so the API exposes the
+        # same surface the TS frontend used to ship as a literal: connection
+        # profile, curated tool hints, runtime constraints, command template
+        # and oauth-supported flag. Runtime spec is the source of truth for
+        # those fields; persisted DB row remains authoritative for the rest.
+        server_key = str(row.get("server_key") or "")
+        spec: Any = None
+        try:
+            from koda.integrations.mcp_catalog import MCP_CATALOG_BY_KEY
+
+            spec = MCP_CATALOG_BY_KEY.get(server_key)
+        except ImportError:
+            spec = None
+
+        metadata = _safe_json_object(row.get("metadata"))
+        tagline = str(metadata.get("tagline") or (spec.tagline if spec is not None else ""))
+        auth_capabilities = _safe_json_object(row.get("auth_capabilities"))
+        oauth_supported = bool(auth_capabilities.get("oauth_enabled"))
+
+        expected_tools: list[dict[str, Any]] = []
+        if spec is not None:
+            for tool in spec.tools:
+                expected_tools.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "read_only_hint": bool(tool.read_only_hint) if tool.read_only_hint is not None else None,
+                        "destructive_hint": (
+                            bool(tool.destructive_hint) if tool.destructive_hint is not None else None
+                        ),
+                    }
+                )
+
+        connection_profile = serialize_connection_profile(spec.connection_profile) if spec is not None else None
+        runtime_constraints = list(spec.runtime_constraints) if spec is not None else []
+        command_template = list(spec.command_template) if spec is not None else []
+        transport_type = str(row.get("transport_type") or (spec.transport_type if spec is not None else "stdio"))
+
+        # i18n keys — frontend looks them up with t(key, { defaultValue: literal }).
+        # Convention: mcp.<server_key>.<field>. If the bundle has no entry the
+        # literal still renders, so this is a zero-impact additive change.
+        i18n_keys = {
+            "display_name": f"mcp.{server_key}.display_name" if server_key else None,
+            "tagline": f"mcp.{server_key}.tagline" if server_key else None,
+            "description": f"mcp.{server_key}.description" if server_key else None,
+            "vendor_notes": f"mcp.{server_key}.vendor_notes" if server_key else None,
+        }
+
         return {
-            "connection_key": _mcp_connection_key(row.get("server_key")),
+            "connection_key": _mcp_connection_key(server_key),
             "kind": "mcp",
-            "integration_key": str(row.get("server_key") or ""),
-            "display_name": str(row.get("display_name") or row.get("server_key") or ""),
+            "integration_key": server_key,
+            "display_name": str(row.get("display_name") or server_key),
             "description": str(row.get("description") or ""),
+            "tagline": tagline,
             "category": str(row.get("category") or "general"),
             "transport_kind": str(row.get("transport_kind") or "local"),
-            "auth_capabilities": _safe_json_object(row.get("auth_capabilities")),
+            "transport_type": transport_type,
+            "command_template": command_template,
+            "auth_capabilities": auth_capabilities,
             "auth_strategy_default": str(row.get("auth_strategy") or "no_auth"),
             "official_support_level": str(row.get("official_support_level") or "community_manual"),
             "oauth_mode": str(row.get("oauth_mode") or "none"),
+            "oauth_supported": oauth_supported,
             "remote_url": row.get("remote_url") or row.get("url") or None,
             "vendor_notes": str(row.get("vendor_notes") or ""),
             "default_policy": str(row.get("default_policy") or "always_ask"),
@@ -11120,8 +11919,12 @@ class ControlPlaneManager:
             "headers_schema": row.get("headers_schema") or [],
             "documentation_url": row.get("documentation_url") or None,
             "logo_key": row.get("logo_key") or None,
-            "metadata": _safe_json_object(row.get("metadata")),
+            "metadata": metadata,
             "enabled": bool(row.get("enabled", True)),
+            "connection_profile": connection_profile,
+            "runtime_constraints": runtime_constraints,
+            "expected_tools": expected_tools,
+            "i18n_keys": i18n_keys,
         }
 
     # ------------------------------------------------------------------ #
@@ -11914,6 +12717,400 @@ class ControlPlaneManager:
         """Return server keys that have OAuth enabled in the catalog."""
         rows = fetch_all("SELECT server_key FROM cp_mcp_server_catalog WHERE oauth_enabled = 1 ORDER BY server_key")
         return [str(row["server_key"]) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    #  MCP Capabilities (Tools + Resources + Prompts)                    #
+    # ------------------------------------------------------------------ #
+
+    def discover_mcp_capabilities(
+        self,
+        agent_id: str,
+        server_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Live discovery of tools + resources + prompts for an MCP server."""
+        from koda.services.mcp_capability_service import verify_capabilities
+
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = verify_capabilities(normalized, server_key, force_refresh=force_refresh)
+        payload = snapshot.to_payload()
+        payload["policies"] = self.list_mcp_capability_policies(normalized, server_key)
+        return payload
+
+    def get_mcp_capability_snapshot(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Return cached snapshot for an agent+server pair, or trigger discovery."""
+        from koda.services.mcp_capability_service import get_capability_snapshot
+
+        normalized = _normalize_agent_id(agent_id)
+        cached = get_capability_snapshot(normalized, server_key)
+        if cached is None:
+            return self.discover_mcp_capabilities(normalized, server_key, force_refresh=True)
+        payload = cached.to_payload()
+        payload["policies"] = self.list_mcp_capability_policies(normalized, server_key)
+        return payload
+
+    def list_mcp_resources(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_discovered_resources WHERE agent_id = ? AND server_key = ? ORDER BY uri",
+            (normalized, server_key),
+        )
+        return [self._serialize_mcp_resource_row(row) for row in rows]
+
+    def list_mcp_prompts(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_discovered_prompts WHERE agent_id = ? AND server_key = ? ORDER BY prompt_name",
+            (normalized, server_key),
+        )
+        return [self._serialize_mcp_prompt_row(row) for row in rows]
+
+    def read_mcp_resource(self, agent_id: str, server_key: str, uri: str) -> dict[str, Any]:
+        """Live-read a resource via the MCP server. Honors blocked policy."""
+        from koda.services.mcp_capability_service import _uri_hash
+
+        normalized = _normalize_agent_id(agent_id)
+        policy = self._get_mcp_capability_policy(normalized, server_key, "resource", _uri_hash(uri))
+        if policy == "blocked":
+            return {"success": False, "error": "resource_blocked", "uri": uri}
+        from koda.services.mcp_manager import McpServerInstance
+
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "error": "connection_not_found", "uri": uri}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            session = instance.session
+            if session is None:
+                raise RuntimeError("session not started")
+            content = run_coro_sync(session.read_resource(uri))
+            return {"success": True, "uri": uri, "contents": content.contents}
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "uri": uri}
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    def render_mcp_prompt(
+        self,
+        agent_id: str,
+        server_key: str,
+        prompt_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Live-render a prompt template via the MCP server. Honors blocked policy."""
+        normalized = _normalize_agent_id(agent_id)
+        policy = self._get_mcp_capability_policy(normalized, server_key, "prompt", prompt_name)
+        if policy == "blocked":
+            return {"success": False, "error": "prompt_blocked", "prompt": prompt_name}
+        from koda.services.mcp_manager import McpServerInstance
+
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "error": "connection_not_found", "prompt": prompt_name}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            session = instance.session
+            if session is None:
+                raise RuntimeError("session not started")
+            result = run_coro_sync(session.get_prompt(prompt_name, arguments))
+            return {
+                "success": True,
+                "prompt": prompt_name,
+                "description": result.description,
+                "messages": result.messages,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "prompt": prompt_name}
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    # ------------------------------------------------------------------ #
+    #  MCP Capability Policies (unified tool/resource/prompt)            #
+    # ------------------------------------------------------------------ #
+
+    def list_mcp_capability_policies(self, agent_id: str, server_key: str) -> dict[str, list[dict[str, Any]]]:
+        """Return policies grouped by capability_kind."""
+        if _is_reserved_mcp_server_key(server_key):
+            return {"tools": [], "resources": [], "prompts": []}
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            (
+                "SELECT * FROM cp_mcp_capability_policies "
+                "WHERE agent_id = ? AND server_key = ? "
+                "ORDER BY capability_kind, capability_name"
+            ),
+            (normalized, server_key),
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {"tools": [], "resources": [], "prompts": []}
+        kind_to_bucket = {"tool": "tools", "resource": "resources", "prompt": "prompts"}
+        for row in rows:
+            kind = str(row.get("capability_kind") or "")
+            bucket = kind_to_bucket.get(kind)
+            if bucket is None:
+                continue
+            grouped[bucket].append(self._serialize_mcp_capability_policy_row(row))
+        return grouped
+
+    def upsert_mcp_capability_policy(
+        self,
+        agent_id: str,
+        server_key: str,
+        capability_kind: str,
+        capability_name: str,
+        policy: str,
+        *,
+        exposure_mode: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
+        if capability_kind not in {"tool", "resource", "prompt"}:
+            raise ValueError(f"invalid capability_kind: {capability_kind!r}")
+        if policy not in {"auto", "always_allow", "always_ask", "blocked"}:
+            raise ValueError(f"invalid MCP capability policy: {policy!r}")
+        if exposure_mode is not None and exposure_mode not in {"context", "tool", "auto"}:
+            raise ValueError(f"invalid exposure_mode: {exposure_mode!r}")
+        normalized = _normalize_agent_id(agent_id)
+        now = now_iso()
+        execute(
+            """
+            INSERT INTO cp_mcp_capability_policies
+                (agent_id, server_key, capability_kind, capability_name,
+                 policy, exposure_mode, metadata_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (agent_id, server_key, capability_kind, capability_name) DO UPDATE SET
+                policy = EXCLUDED.policy,
+                exposure_mode = EXCLUDED.exposure_mode,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (
+                normalized,
+                server_key,
+                capability_kind,
+                capability_name,
+                policy,
+                exposure_mode,
+                json_dump(metadata or {}),
+                now,
+            ),
+        )
+        # Mirror tool policies into the legacy table during transition window
+        # so dispatcher reads stay consistent until phase 3 wiring lands.
+        if capability_kind == "tool":
+            execute(
+                """
+                INSERT INTO cp_mcp_tool_policies (agent_id, server_key, tool_name, policy, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (agent_id, server_key, tool_name) DO UPDATE SET
+                    policy = EXCLUDED.policy,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (normalized, server_key, capability_name, policy, now),
+            )
+        row = fetch_one(
+            """
+            SELECT * FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (normalized, server_key, capability_kind, capability_name),
+        )
+        return self._serialize_mcp_capability_policy_row(row) if row else {}
+
+    def delete_mcp_capability_policy(
+        self,
+        agent_id: str,
+        server_key: str,
+        capability_kind: str,
+        capability_name: str,
+    ) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            return {"deleted": False}
+        normalized = _normalize_agent_id(agent_id)
+        count = execute(
+            """
+            DELETE FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (normalized, server_key, capability_kind, capability_name),
+        )
+        if capability_kind == "tool":
+            execute(
+                "DELETE FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ? AND tool_name = ?",
+                (normalized, server_key, capability_name),
+            )
+        return {"deleted": bool(count)}
+
+    def _get_mcp_capability_policy(self, agent_id: str, server_key: str, kind: str, name: str) -> str:
+        row = fetch_one(
+            """
+            SELECT policy FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (agent_id, server_key, kind, name),
+        )
+        if row is None:
+            return "auto"
+        return str(row.get("policy") or "auto")
+
+    def _serialize_mcp_capability_policy_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "capability_kind": str(row.get("capability_kind") or ""),
+            "capability_name": str(row.get("capability_name") or ""),
+            "policy": str(row.get("policy") or "auto"),
+            "exposure_mode": row.get("exposure_mode"),
+            "metadata": json_load(str(row.get("metadata_json") or "{}"), {}),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+
+    def _serialize_mcp_resource_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "uri_hash": str(row.get("uri_hash") or ""),
+            "uri": str(row.get("uri") or ""),
+            "name": row.get("name"),
+            "description": row.get("description"),
+            "mime_type": row.get("mime_type"),
+            "is_template": bool(row.get("is_template")),
+            "annotations": json_load(str(row.get("annotations_json") or "{}"), {}),
+            "discovered_at": str(row.get("discovered_at") or ""),
+        }
+
+    def _serialize_mcp_prompt_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "name": str(row.get("prompt_name") or ""),
+            "description": row.get("description"),
+            "arguments": json_load(str(row.get("arguments_json") or "[]"), []),
+            "discovered_at": str(row.get("discovered_at") or ""),
+        }
+
+    # ------------------------------------------------------------------ #
+    #  Custom MCP Servers (system-wide + per-agent)                      #
+    # ------------------------------------------------------------------ #
+
+    def list_custom_mcp_servers(self, *, agent_id: str | None = None) -> list[dict[str, Any]]:
+        from koda.integrations.custom_mcp_registry import list_custom_servers
+
+        normalized = _normalize_agent_id(agent_id) if agent_id else None
+        return list_custom_servers(agent_id=normalized)
+
+    def get_custom_mcp_server(self, server_key: str, *, agent_id: str | None = None) -> dict[str, Any] | None:
+        from koda.integrations.custom_mcp_registry import get_custom_server
+
+        normalized = _normalize_agent_id(agent_id) if agent_id else None
+        return get_custom_server(server_key, agent_id=normalized)
+
+    def register_custom_mcp_server(
+        self,
+        payload: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        from koda.control_plane.crypto import get_signing_key
+        from koda.integrations.custom_mcp_registry import (
+            CustomServerPayload,
+            normalize_server_key,
+            upsert_custom_server,
+        )
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        try:
+            secret_key = get_signing_key()
+        except Exception:
+            secret_key = None
+
+        # Detect Claude Desktop import shape and route accordingly.
+        if isinstance(payload, dict) and "mcpServers" in payload:
+            return {
+                "import_result": self.import_claude_desktop_mcp(
+                    payload,
+                    agent_id=normalized_agent,
+                    owner_user_id=owner_user_id,
+                )
+            }
+
+        normalized_payload = CustomServerPayload(
+            server_key=normalize_server_key(str(payload.get("server_key") or "")),
+            display_name=str(payload.get("display_name") or ""),
+            description=str(payload.get("description") or ""),
+            transport_type=str(payload.get("transport_type") or "stdio"),
+            command=list(payload.get("command") or []),
+            args=list(payload.get("args") or []),
+            url=payload.get("url"),
+            headers_schema=list(payload.get("headers_schema") or []),
+            env_schema=list(payload.get("env_schema") or []),
+            auth_strategy=str(payload.get("auth_strategy") or "no_auth"),
+            oauth_config=dict(payload.get("oauth_config") or {}),
+            isolation_profile=str(payload.get("isolation_profile") or "auto"),
+            isolation_constraints=dict(payload.get("isolation_constraints") or {}),
+            runtime_constraints=list(payload.get("runtime_constraints") or []),
+            metadata=dict(payload.get("metadata") or {}),
+            source=str(payload.get("source") or "manual"),
+        )
+        return upsert_custom_server(
+            normalized_payload,
+            agent_id=normalized_agent,
+            owner_user_id=owner_user_id,
+            secret_key=secret_key,
+        )
+
+    def import_claude_desktop_mcp(
+        self,
+        raw: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        from koda.control_plane.crypto import get_signing_key
+        from koda.integrations.custom_mcp_registry import import_claude_desktop_json
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        try:
+            secret_key = get_signing_key()
+        except Exception:
+            secret_key = None
+        result = import_claude_desktop_json(
+            raw,
+            agent_id=normalized_agent,
+            owner_user_id=owner_user_id,
+            secret_key=secret_key,
+        )
+        return {
+            "created": list(result.created),
+            "updated": list(result.updated),
+            "errors": [{"name": err.name, "message": err.message} for err in result.errors],
+        }
+
+    def delete_custom_mcp_server(self, server_key: str, *, agent_id: str | None = None) -> dict[str, Any]:
+        from koda.integrations.custom_mcp_registry import delete_custom_server
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        deleted = delete_custom_server(server_key, agent_id=normalized_agent)
+        return {"deleted": deleted}
 
 
 _MANAGER: ControlPlaneManager | None = None

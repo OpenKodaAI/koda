@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Gerencie tarefas, projetos, seções e labels no Todoist. Crie, complete, reabra e organize tarefas.
+Manage tasks, projects, sections, and labels on Todoist. Create, complete, reopen, and organize tasks.
 
 ## Connection profile
 
@@ -33,16 +33,16 @@ Nenhuma restrição de runtime aplicável a esta integração.
 |---|---|---|
 | `listTasks` | read | Listar tarefas com filtros |
 | `createTask` | write | Criar nova tarefa |
-| `updateTask` | write | Atualizar propriedades da tarefa |
-| `completeTask` | write | Marcar tarefa como concluída |
-| `reopenTask` | write | Reabrir tarefa concluída |
-| `deleteTask` | destructive | Remover tarefa permanentemente |
+| `updateTask` | write | Update task properties |
+| `completeTask` | write | Mark task as completed |
+| `reopenTask` | write | Reopen completed task |
+| `deleteTask` | destructive | Remove task permanently |
 | `listProjects` | read | Listar projetos |
-| `createProject` | write | Criar novo projeto |
-| `listSections` | read | Listar seções de um projeto |
-| `createSection` | write | Criar seção em projeto |
-| `createLabel` | write | Criar nova label |
-| `addComment` | write | Adicionar comentário a tarefa |
+| `createProject` | write | Create new project |
+| `listSections` | read | List sections of a project |
+| `createSection` | write | Create section in project |
+| `createLabel` | write | Create new label |
+| `addComment` | write | Add comment a tarefa |
 
 ## Como o agente usa bem
 

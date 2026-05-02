@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package koda.bot_gateway.v1;
+
+import "common/v1/metadata.proto";
+
+// koda-bot-gateway — Telegram fan-in service (P2-6 of production roadmap).
+//
+// Today every agent worker holds its own long-poll TCP connection to
+// api.telegram.org. At 5k agents that is 5k persistent sockets and 5k
+// processes each carrying the python-telegram-bot library in memory.
+// This service consolidates polling into a single Rust process: one
+// connection budget, one observability surface, and a server-streaming
+// dispatcher that sends each Update to the correct worker via gRPC.
+//
+// The contract below is intentionally minimal — start with the streams
+// the supervisor + workers need, expand only when a downstream consumer
+// asks. Adding fields is backward-compatible; renaming or removing a
+// field requires a 2-deploy rollout.
+
+service BotGatewayService {
+  // Long-running stream the worker subscribes to once at startup. On
+  // every connect the gateway first replays any unacknowledged Updates
+  // already persisted in ``cp_telegram_pending_updates`` for the agent
+  // (so a worker crash never loses messages), then keeps the stream
+  // open for live updates. Each Update carries its update_id so the
+  // worker can call AcknowledgeUpdate after processing.
+  rpc SubscribeUpdates(SubscribeUpdatesRequest) returns (stream Update);
+
+  // Worker calls this after a message is fully processed. The gateway
+  // deletes the corresponding row from ``cp_telegram_pending_updates``
+  // so it is not replayed on the next reconnect. Idempotent — calling
+  // ack twice for the same update_id returns acknowledged=true, false.
+  rpc AcknowledgeUpdate(AcknowledgeUpdateRequest) returns (AcknowledgeUpdateResponse);
+
+  // Operator hook for registering / rotating bot tokens without a
+  // gateway restart. Persisting the token mapping is the gateway's
+  // responsibility (same DB as the supervisor).
+  rpc RegisterBot(RegisterBotRequest) returns (RegisterBotResponse);
+  rpc UnregisterBot(UnregisterBotRequest) returns (UnregisterBotResponse);
+
+  // Diagnostic: how many active subscribers, last update_id seen per
+  // bot, error rate. Used by the supervisor /health probe.
+  rpc GetGatewayStatus(GetGatewayStatusRequest) returns (GetGatewayStatusResponse);
+}
+
+message SubscribeUpdatesRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+}
+
+message AcknowledgeUpdateRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  int64 update_id = 3;
+}
+
+message AcknowledgeUpdateResponse {
+  bool acknowledged = 1;
+}
+
+message Update {
+  // Verbatim JSON the Telegram Bot API returned for this update. The
+  // worker decodes it with python-telegram-bot's Update.de_json so the
+  // gateway never needs to model Telegram's evolving payload schema.
+  string update_json = 1;
+  int64 update_id = 2;
+}
+
+message RegisterBotRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string bot_token = 3;
+}
+
+message RegisterBotResponse {
+  bool registered = 1;
+}
+
+message UnregisterBotRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+}
+
+message UnregisterBotResponse {
+  bool removed = 1;
+}
+
+message GetGatewayStatusRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+}
+
+message BotStatus {
+  string agent_id = 1;
+  int64 last_update_id = 2;
+  string last_poll_at = 3;
+  int64 errors_recent = 4;
+}
+
+message GetGatewayStatusResponse {
+  int32 active_subscribers = 1;
+  repeated BotStatus bots = 2;
+}

@@ -56,11 +56,11 @@ const ROUTE_META: Array<{
     key: "costs",
   },
   {
-    match: (pathname) => pathname.startsWith("/schedules"),
+    match: (pathname) => pathname.startsWith("/routines/schedules"),
     key: "schedules",
   },
   {
-    match: (pathname) => pathname.startsWith("/dlq"),
+    match: (pathname) => pathname.startsWith("/routines/dlq"),
     key: "dlq",
   },
 ];

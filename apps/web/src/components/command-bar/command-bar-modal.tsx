@@ -74,7 +74,7 @@ export function CommandBarModal() {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            "fixed inset-0 z-[80] bg-[rgba(0,0,0,0.55)] backdrop-blur-[6px]",
+            "app-overlay-backdrop fixed inset-0 z-[80]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
           )}

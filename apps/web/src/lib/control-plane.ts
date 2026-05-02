@@ -43,7 +43,7 @@ export type ControlPlaneWorkspaceSquad = {
   workspace_id: string;
   name: string;
   description: string;
-  bot_count: number;
+  agent_count: number;
   spec?: SquadSpec;
   documents?: ScopePromptDocuments;
   created_at: string;
@@ -54,7 +54,7 @@ export type ControlPlaneWorkspace = {
   id: string;
   name: string;
   description: string;
-  bot_count: number;
+  agent_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;
   squads: ControlPlaneWorkspaceSquad[];
@@ -62,7 +62,7 @@ export type ControlPlaneWorkspace = {
     no_squad: {
       id: null;
       label: string;
-      bot_count: number;
+      agent_count: number;
     };
   };
   created_at: string;
@@ -75,10 +75,10 @@ export type ControlPlaneWorkspaceTree = {
     no_workspace: {
       id: null;
       label: string;
-      bot_count: number;
+      agent_count: number;
     };
   };
-  total_bot_count: number;
+  total_agent_count: number;
 };
 
 export type ControlPlaneAgentSummary = {
@@ -229,6 +229,8 @@ export type KokoroVoiceOption = {
   sha256_prefix: string;
   downloaded: boolean;
   local_path: string;
+  /** On-disk file size in bytes when downloaded; 0 otherwise. */
+  bytes?: number;
 };
 
 export type KokoroVoiceCatalog = {
@@ -397,6 +399,13 @@ export type GeneralSystemSettings = {
       kokoro_default_language: string;
       kokoro_default_voice: string;
       kokoro_default_voice_label: string;
+      /**
+       * Apple Silicon Metal acceleration toggle. When false, the
+       * Metal-capable runtimes (llama.cpp, MLX) are gated off at the
+       * runtime layer regardless of any other flag. No-op on non-Apple
+       * Silicon hosts.
+       */
+      metal_enabled: boolean;
       functional_defaults: Record<
         string,
         {
@@ -671,7 +680,9 @@ export type ConnectionStrategy =
   | "local_path"
   | "local_app"
   | "oauth_only"
-  | "oauth_preferred";
+  | "oauth_preferred"
+  | "custom_stdio"
+  | "custom_http";
 
 export type RuntimeConstraintKey =
   | "allowed_domains"
@@ -846,6 +857,147 @@ export type ControlPlaneConnectionTools = {
     removed: string[];
     changed: string[];
   };
+};
+
+/* -------------------------------------------------------------------------- */
+/*  MCP capabilities — Tools + Resources + Prompts                            */
+/* -------------------------------------------------------------------------- */
+
+export type McpDiscoveredResource = {
+  uri: string;
+  uri_hash?: string;
+  name?: string | null;
+  description?: string | null;
+  mime_type?: string | null;
+  is_template?: boolean;
+  annotations?: Record<string, unknown>;
+};
+
+export type McpResourceTemplate = {
+  uri_template: string;
+  name?: string | null;
+  description?: string | null;
+  mime_type?: string | null;
+};
+
+export type McpPromptArgument = {
+  name: string;
+  description?: string | null;
+  required?: boolean;
+};
+
+export type McpDiscoveredPrompt = {
+  name: string;
+  description?: string | null;
+  arguments?: McpPromptArgument[];
+};
+
+export type McpServerInfo = {
+  name?: string;
+  version?: string;
+  protocol_version?: string;
+  [key: string]: unknown;
+};
+
+export type McpCapabilityKind = "tool" | "resource" | "prompt";
+
+export type McpCapabilityPolicy = "auto" | "always_allow" | "always_ask" | "blocked";
+
+export type McpResourceExposureMode = "context" | "tool" | "auto";
+
+export type McpCapabilityPolicyEntry = {
+  capability_kind: McpCapabilityKind;
+  capability_name: string;
+  policy: McpCapabilityPolicy;
+  exposure_mode?: McpResourceExposureMode | null;
+  metadata?: Record<string, unknown>;
+  updated_at?: string;
+};
+
+export type McpCapabilityPolicies = {
+  tools: McpCapabilityPolicyEntry[];
+  resources: McpCapabilityPolicyEntry[];
+  prompts: McpCapabilityPolicyEntry[];
+};
+
+export type ControlPlaneConnectionCapabilities = {
+  agent_id: string;
+  server_key: string;
+  server_info: McpServerInfo;
+  server_capabilities: Record<string, unknown>;
+  protocol_version?: string | null;
+  tools: McpDiscoveredTool[];
+  resources: McpDiscoveredResource[];
+  resource_templates: McpResourceTemplate[];
+  prompts: McpDiscoveredPrompt[];
+  captured_at: string;
+  ttl_seconds: number;
+  error?: string | null;
+  policies?: McpCapabilityPolicies;
+  summary: {
+    tool_count: number;
+    resource_count: number;
+    resource_template_count: number;
+    prompt_count: number;
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Custom MCP servers — system-wide + per-agent                              */
+/* -------------------------------------------------------------------------- */
+
+export type McpCustomServerScope = "system" | "agent";
+
+export type McpCustomServerHeader = { key: string; label?: string };
+
+export type McpCustomServerOAuthConfig = {
+  oauth_metadata_url?: string;
+  authorize_url?: string;
+  token_url?: string;
+  client_id?: string;
+  scopes?: string[];
+  oauth_provider?: string;
+};
+
+export type McpCustomServerIsolationConstraints = {
+  cpu_quota?: number;
+  memory_limit_bytes?: number;
+  network_mode?: "none" | "egress_allowlist" | "any";
+  egress_domains?: string[];
+  mounts?: Array<{ host: string; container: string; read_only?: boolean }>;
+  timeout_seconds?: number;
+};
+
+export type McpCustomServerEntry = {
+  server_key: string;
+  scope: McpCustomServerScope;
+  agent_id?: string;
+  display_name: string;
+  description: string;
+  transport_type: "stdio" | "http_sse";
+  command: string[];
+  args?: string[];
+  url?: string | null;
+  env_schema: McpEnvSchemaField[];
+  headers_schema: McpCustomServerHeader[];
+  auth_strategy: "no_auth" | "api_key" | "oauth" | "connection_string" | "dual_token";
+  oauth_config?: McpCustomServerOAuthConfig | null;
+  isolation_profile: "auto" | "native" | "bwrap" | "sandbox-exec" | "docker";
+  isolation_constraints?: McpCustomServerIsolationConstraints;
+  runtime_constraints?: RuntimeConstraintKey[];
+  is_custom: true;
+  source: "manual" | "claude_desktop_json";
+  owner_user_id?: string | null;
+  metadata?: Record<string, unknown>;
+  validation_signature?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type McpClaudeDesktopImportResult = {
+  created: string[];
+  updated: string[];
+  errors: Array<{ name: string; message: string }>;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1501,6 +1653,11 @@ export async function getControlPlaneCoreIntegrations() {
             : "",
         supports_persistence: Boolean(connection?.metadata?.supports_persistence ?? true),
         connection: toCoreIntegrationConnection(item, connection),
+        // Pass the declarative connection profile through so the UI can
+        // render the credential form (e.g. Confluence/Jira: URL + email +
+        // API token) instead of an empty "Activate" stub.
+        connection_profile: item.connection_profile ?? null,
+        runtime_constraints: item.runtime_constraints,
       } satisfies ControlPlaneCoreIntegration;
     });
 

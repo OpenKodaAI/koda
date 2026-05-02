@@ -14,13 +14,14 @@ Gerencie zonas DNS, deploy de Workers, configure regras de firewall e monitore a
 
 ## Connection profile
 
-**Strategy**: `api_key`
+**Strategy**: `oauth_preferred`
+- OAuth provider: `cloudflare` · scopes: `zone:read dns:edit worker:edit`
 
 ### Campos principais
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | sim | password | Cloudflare API Token |
+| `CLOUDFLARE_API_TOKEN` | não | password | Cloudflare API Token (fallback) — Use preferencialmente OAuth; o token fica como fallback. |
 
 
 ## Runtime constraints
@@ -31,8 +32,8 @@ Nenhuma restrição de runtime aplicável a esta integração.
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `list_zones` | read | Listar domínios/zonas |
-| `get_zone_details` | read | Detalhes de configuração da zona |
+| `list_zones` | read | List domains/zones |
+| `get_zone_details` | read | Zone configuration details |
 | `list_dns_records` | read | Listar registros DNS |
 | `create_dns_record` | write | Criar registro DNS |
 | `update_dns_record` | write | Atualizar registro DNS |

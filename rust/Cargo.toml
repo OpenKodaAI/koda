@@ -1,14 +1,23 @@
 [workspace]
 members = [
   "koda-artifact-engine",
+  "koda-bot-gateway",
   "koda-memory-engine",
   "koda-observability",
+  "koda-policy-engine",
   "koda-proto",
   "koda-retrieval-engine",
+  "koda-rpc-gateway",
   "koda-runtime-kernel",
   "koda-security-core",
   "koda-security-service",
 ]
+# koda-command-guard ships a PyO3 cdylib built by maturin and links against a
+# specific Python interpreter at build time. Including it in the workspace
+# would break ``cargo test --workspace`` (the CI gate for sidecars) because
+# pyo3 needs PYTHON_SYS_EXECUTABLE wired up. Build it explicitly with
+# ``scripts/dev/build_command_guard.sh`` instead.
+exclude = ["koda-command-guard"]
 resolver = "2"
 
 [workspace.package]
@@ -30,3 +39,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+thiserror = "2.0"
+async-stream = "0.3"
+futures = "0.3"

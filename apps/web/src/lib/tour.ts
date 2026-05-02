@@ -57,8 +57,8 @@ export type TourRoutePattern =
   | "/executions"
   | "/memory"
   | "/costs"
-  | "/schedules"
-  | "/dlq"
+  | "/routines/schedules"
+  | "/routines/dlq"
   | "/control-plane/system";
 
 export type TourRouteKey =
@@ -473,7 +473,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.schedules.primary",
     chapterId: "schedules",
-    routePattern: "/schedules",
+    routePattern: "/routines/schedules",
     routeKey: "schedules",
     kind: "anchored",
     anchor: "schedules.primary",
@@ -490,7 +490,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.dlq.primary",
     chapterId: "dlq",
-    routePattern: "/dlq",
+    routePattern: "/routines/dlq",
     routeKey: "dlq",
     kind: "anchored",
     anchor: "dlq.primary",
@@ -664,10 +664,10 @@ export function getTourChapterForPathname(pathname: string): TourChapterId | nul
   if (normalizedPathname.startsWith("/costs")) {
     return "costs";
   }
-  if (normalizedPathname.startsWith("/schedules")) {
+  if (normalizedPathname.startsWith("/routines/schedules")) {
     return "schedules";
   }
-  if (normalizedPathname.startsWith("/dlq")) {
+  if (normalizedPathname.startsWith("/routines/dlq")) {
     return "dlq";
   }
   if (normalizedPathname === "/") {

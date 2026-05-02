@@ -201,7 +201,9 @@ async def _dispatch_shell_command(application: Any, run: dict[str, Any]) -> None
     job = run["job"]
     payload = job["payload"]
     command = str(payload.get("command") or "")
-    if jobs.GIT_META_CHARS.search(command) or jobs.BLOCKED_SHELL_PATTERN.search(command):
+    from koda.services.blocked_patterns import is_blocked_shell
+
+    if jobs.GIT_META_CHARS.search(command) or is_blocked_shell(command):
         await handle_run_failure(
             run_id=int(run["id"]),
             task_id=None,

@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Consulte a documentação do Google Maps Platform e gere código integrado com Maps, Places, Directions e Geocoding.
+Consult Google Maps Platform documentation and generate integrated code com Maps, Places, Directions e Geocoding.
 
 ## Connection profile
 
@@ -31,8 +31,8 @@ Nenhuma restrição de runtime aplicável a esta integração.
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `retrieve-google-maps-platform-docs` | read | Consultar documentação oficial |
-| `retrieve-instructions` | read | Guia de instruções para o agente |
+| `retrieve-google-maps-platform-docs` | read | Consult official documentation |
+| `retrieve-instructions` | read | Instruction guide for the agent |
 
 ## Como o agente usa bem
 

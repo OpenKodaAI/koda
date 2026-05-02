@@ -28,6 +28,11 @@ import {
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useCreateAgent } from "@/hooks/use-create-agent";
+import {
+  useAnimatedPresence,
+  useBodyScrollLock,
+  useEscapeToClose,
+} from "@/hooks/use-animated-presence";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type {
@@ -498,7 +503,7 @@ function applyCountDelta(
   delta: number,
 ) {
   if (!organization.workspace_id) {
-    tree.virtual_buckets.no_workspace.bot_count += delta;
+    tree.virtual_buckets.no_workspace.agent_count += delta;
     return;
   }
 
@@ -510,19 +515,19 @@ function applyCountDelta(
     return;
   }
 
-  workspace.bot_count += delta;
+  workspace.agent_count += delta;
 
   if (organization.squad_id) {
     const squad = workspace.squads.find(
       (item) => item.id === organization.squad_id,
     );
     if (squad) {
-      squad.bot_count += delta;
+      squad.agent_count += delta;
     }
     return;
   }
 
-  workspace.virtual_buckets.no_squad.bot_count += delta;
+  workspace.virtual_buckets.no_squad.agent_count += delta;
 }
 
 function applyBatchMoveToWorkspaceTree(
@@ -626,6 +631,16 @@ export function AgentCatalog({
   const [duplicatingBotId, setDuplicatingBotId] = useState<string | null>(null);
   const [organizationForm, setOrganizationForm] =
     useState<OrganizationFormState | null>(null);
+  const organizationFormPresence = useAnimatedPresence(
+    organizationForm !== null,
+    organizationForm,
+    { duration: 220 },
+  );
+  const renderedOrganizationForm = organizationFormPresence.renderedValue;
+  useBodyScrollLock(organizationFormPresence.shouldRender);
+  useEscapeToClose(organizationFormPresence.shouldRender, () =>
+    setOrganizationForm(null),
+  );
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [organizationBusy, setOrganizationBusy] = useState(false);
   const [catalogAgents, setCatalogAgents] = useState(agents);
@@ -778,7 +793,7 @@ export function AgentCatalog({
         description:
           tl("Bots livres, ainda fora de um workspace. Arraste para organizar."),
         color: "#707A8C",
-        totalAgents: workspaceTree.virtual_buckets.no_workspace.bot_count,
+        totalAgents: workspaceTree.virtual_buckets.no_workspace.agent_count,
         visibleAgents: noWorkspaceAgents.length,
         workspace: null,
         isVirtual: true,
@@ -791,7 +806,7 @@ export function AgentCatalog({
             workspaceId: null,
             squadId: null,
             color: "#707A8C",
-            totalAgents: workspaceTree.virtual_buckets.no_workspace.bot_count,
+            totalAgents: workspaceTree.virtual_buckets.no_workspace.agent_count,
             agents: noWorkspaceAgents,
             squad: null,
           },
@@ -818,7 +833,7 @@ export function AgentCatalog({
               tl("Ponto de entrada do workspace para bots sem time definido."),
             workspaceId: workspace.id,
             squadId: null,
-            totalAgents: workspace.virtual_buckets.no_squad.bot_count,
+            totalAgents: workspace.virtual_buckets.no_squad.agent_count,
             agents: noSquadAgents,
             squad: null,
           }
@@ -842,7 +857,7 @@ export function AgentCatalog({
             squad.description || tl("Time dedicado dentro deste workspace."),
           workspaceId: workspace.id,
           squadId: squad.id,
-          totalAgents: squad.bot_count,
+          totalAgents: squad.agent_count,
           agents: squadAgents,
           squad,
         });
@@ -902,7 +917,7 @@ export function AgentCatalog({
           description:
             workspace.description ||
             tl("Organize squads e distribua os agentes deste workspace."),
-          totalAgents: workspace.bot_count,
+          totalAgents: workspace.agent_count,
           visibleAgents,
           workspace,
           isVirtual: false,
@@ -1935,108 +1950,115 @@ export function AgentCatalog({
         </div>
       )}
 
-      {organizationForm ? (
-        <>
-          <div
-            className="app-overlay-backdrop z-[70]"
-            onClick={() => setOrganizationForm(null)}
-            aria-hidden="true"
-          />
-          <div className="app-modal-frame z-[80] flex items-center justify-center overflow-auto px-4 py-8">
-          <div
-            className="app-modal-panel agent-board-dialog w-full max-w-lg p-5 sm:p-6"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <p className="eyebrow">
-                  {organizationForm.kind === "workspace"
-                    ? tl("Workspace")
-                    : tl("Squad")}
-                </p>
-                <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                  {organizationForm.mode === "create"
-                    ? organizationForm.kind === "workspace"
-                      ? tl("Criar novo workspace")
-                      : tl("Criar squad em {{workspace}}", { workspace: organizationForm.workspaceName })
-                    : organizationForm.kind === "workspace"
-                      ? tl("Editar workspace")
-                      : tl("Editar squad")}
-                </h3>
-                <p className="text-sm text-[var(--text-tertiary)]">
-                  {tl("Defina nome, descricao curta e a cor de apoio visual desta organizacao.")}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="agent-board-inline-action"
-                aria-label={tl("Fechar formulario")}
+      {organizationFormPresence.shouldRender && renderedOrganizationForm && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className="app-overlay-backdrop app-overlay-anim z-[70]"
+                data-visible={organizationFormPresence.isVisible}
                 onClick={() => setOrganizationForm(null)}
-                disabled={organizationBusy}
-              >
-                {tl("Fechar")}
-              </button>
-            </div>
-
-            <div className="mt-6 space-y-4">
-              <FormInput
-                label={
-                  organizationForm.kind === "workspace"
-                    ? tl("Nome do workspace")
-                    : tl("Nome da squad")
-                }
-                value={organizationForm.name}
-                onChange={(event) =>
-                  setOrganizationForm((current) =>
-                    current
-                      ? { ...current, name: event.target.value }
-                      : current,
-                  )
-                }
-                placeholder={
-                  organizationForm.kind === "workspace"
-                    ? tl("Ex.: Produto")
-                    : tl("Ex.: Plataforma")
-                }
+                aria-hidden="true"
               />
-              <FormInput
-                label={tl("Descricao")}
-                value={organizationForm.description}
-                onChange={(event) =>
-                  setOrganizationForm((current) =>
-                    current
-                      ? { ...current, description: event.target.value }
-                      : current,
-                  )
-                }
-                placeholder={tl("Descricao curta opcional")}
-              />
-            </div>
-
-              <div className="mt-6 flex items-center justify-end gap-2">
-                <ActionButton
-                  type="button"
-                  onClick={() => setOrganizationForm(null)}
-                  disabled={organizationBusy}
+              <div className="app-modal-frame z-[80] flex items-center justify-center overflow-auto px-4 py-8">
+                <div
+                  className="app-modal-panel app-modal-anim agent-board-dialog w-full max-w-lg p-5 sm:p-6"
+                  role="dialog"
+                  aria-modal="true"
+                  data-visible={organizationFormPresence.isVisible}
                 >
-                {tl("Cancelar")}
-              </ActionButton>
-              <ActionButton
-                type="button"
-                loading={organizationBusy}
-                onClick={() => void handleSubmitOrganizationForm()}
-                disabled={organizationBusy}
-              >
-                {organizationBusy
-                  ? tl("Salvando...")
-                  : organizationForm.mode === "create"
-                    ? tl("Criar")
-                    : tl("Salvar")}
-              </ActionButton>
-            </div>
-          </div>
-          </div>
-        </>
-      ) : null}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-2">
+                      <p className="eyebrow">
+                        {renderedOrganizationForm.kind === "workspace"
+                          ? tl("Workspace")
+                          : tl("Squad")}
+                      </p>
+                      <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+                        {renderedOrganizationForm.mode === "create"
+                          ? renderedOrganizationForm.kind === "workspace"
+                            ? tl("Criar novo workspace")
+                            : tl("Criar squad em {{workspace}}", { workspace: renderedOrganizationForm.workspaceName })
+                          : renderedOrganizationForm.kind === "workspace"
+                            ? tl("Editar workspace")
+                            : tl("Editar squad")}
+                      </h3>
+                      <p className="text-sm text-[var(--text-tertiary)]">
+                        {tl("Defina nome, descricao curta e a cor de apoio visual desta organizacao.")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="agent-board-inline-action"
+                      aria-label={tl("Fechar formulario")}
+                      onClick={() => setOrganizationForm(null)}
+                      disabled={organizationBusy}
+                    >
+                      {tl("Fechar")}
+                    </button>
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    <FormInput
+                      label={
+                        renderedOrganizationForm.kind === "workspace"
+                          ? tl("Nome do workspace")
+                          : tl("Nome da squad")
+                      }
+                      value={renderedOrganizationForm.name}
+                      onChange={(event) =>
+                        setOrganizationForm((current) =>
+                          current
+                            ? { ...current, name: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder={
+                        renderedOrganizationForm.kind === "workspace"
+                          ? tl("Ex.: Produto")
+                          : tl("Ex.: Plataforma")
+                      }
+                    />
+                    <FormInput
+                      label={tl("Descricao")}
+                      value={renderedOrganizationForm.description}
+                      onChange={(event) =>
+                        setOrganizationForm((current) =>
+                          current
+                            ? { ...current, description: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder={tl("Descricao curta opcional")}
+                    />
+                  </div>
+
+                  <div className="mt-6 flex items-center justify-end gap-2">
+                    <ActionButton
+                      type="button"
+                      onClick={() => setOrganizationForm(null)}
+                      disabled={organizationBusy}
+                    >
+                      {tl("Cancelar")}
+                    </ActionButton>
+                    <ActionButton
+                      type="button"
+                      loading={organizationBusy}
+                      onClick={() => void handleSubmitOrganizationForm()}
+                      disabled={organizationBusy}
+                    >
+                      {organizationBusy
+                        ? tl("Salvando...")
+                        : renderedOrganizationForm.mode === "create"
+                          ? tl("Criar")
+                          : tl("Salvar")}
+                    </ActionButton>
+                  </div>
+                </div>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
 
       <ConfirmationDialog
         open={deleteTarget !== null}

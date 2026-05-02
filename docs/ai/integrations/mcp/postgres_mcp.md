@@ -1,4 +1,4 @@
-# PostgreSQL (MCP)
+# PostgreSQL
 
 - **Integration key**: `postgres_mcp`
 - **Kind**: mcp
@@ -20,7 +20,7 @@ Conecte a qualquer banco PostgreSQL externo para executar queries e inspecionar 
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `DATABASE_URL` | sim | password | PostgreSQL Connection String — Formato: postgresql://usuário:senha@host:5432/banco |
+| `DATABASE_URL` | sim | password | PostgreSQL Connection String — Format: postgresql://user:password@host:5432/database |
 
 
 ### Toggle de read-only
@@ -40,16 +40,16 @@ Conecte a qualquer banco PostgreSQL externo para executar queries e inspecionar 
 | `queryDatabase` | read | Executar queries SQL |
 | `inspectSchema` | read | Inspecionar schema do banco |
 | `listTables` | read | Listar todas as tabelas |
-| `getTableInfo` | read | Detalhes de colunas e constraints |
-| `list_schemas` | read | Listar schemas disponíveis |
-| `list_objects` | read | Navegar tabelas, views, sequences |
-| `get_object_details` | read | Detalhes de colunas e constraints |
-| `execute_sql` | read | Executar SQL (respeitando modo read-only) |
-| `explain_query` | read | Analisar plano de execução |
-| `get_top_queries` | read | Identificar queries mais lentas |
-| `analyze_workload_indexes` | read | Recomendar índices para a carga |
-| `analyze_query_indexes` | read | Otimizar índices de uma query |
-| `analyze_db_health` | read | Checar health do banco |
+| `getTableInfo` | read | Column and constraint details |
+| `list_schemas` | read | List available schemas |
+| `list_objects` | read | Browse tables, views, sequences |
+| `get_object_details` | read | Column and constraint details |
+| `execute_sql` | read | Execute SQL (respecting read-only mode) |
+| `explain_query` | read | Analyze execution plan |
+| `get_top_queries` | read | Identify slowest queries |
+| `analyze_workload_indexes` | read | Recommend indexes for the workload |
+| `analyze_query_indexes` | read | Optimize indexes for a query |
+| `analyze_db_health` | read | Check database health |
 
 ## Como o agente usa bem
 

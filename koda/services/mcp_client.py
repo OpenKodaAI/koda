@@ -51,6 +51,60 @@ class McpToolCallResult:
     is_error: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class McpResource:
+    """One resource (data source) advertised by the server via resources/list."""
+
+    uri: str
+    name: str | None = None
+    description: str | None = None
+    mime_type: str | None = None
+    annotations: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class McpResourceTemplate:
+    """A URI template for resources (e.g. ``file:///{path}``)."""
+
+    uri_template: str
+    name: str | None = None
+    description: str | None = None
+    mime_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class McpPromptArgument:
+    """One argument schema for an MCP prompt."""
+
+    name: str
+    description: str | None = None
+    required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class McpPrompt:
+    """One prompt template advertised by the server via prompts/list."""
+
+    name: str
+    description: str | None = None
+    arguments: tuple[McpPromptArgument, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
+class McpPromptResult:
+    """Result from prompts/get — rendered prompt messages."""
+
+    description: str | None = None
+    messages: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class McpResourceContent:
+    """Result from resources/read — list of content items (text or blob)."""
+
+    contents: list[dict[str, Any]] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -357,6 +411,9 @@ class McpSession:
     def __init__(self, transport: McpTransport) -> None:
         self._transport = transport
         self._initialized = False
+        self._server_info: dict[str, Any] = {}
+        self._server_capabilities: dict[str, Any] = {}
+        self._protocol_version: str | None = None
 
     async def initialize(self) -> dict[str, Any]:
         """Send initialize request and notifications/initialized notification."""
@@ -370,31 +427,46 @@ class McpSession:
         )
         await self._transport.send_notification("notifications/initialized")
         self._initialized = True
+        info = result.get("serverInfo")
+        if isinstance(info, dict):
+            self._server_info = info
+        caps = result.get("capabilities")
+        if isinstance(caps, dict):
+            self._server_capabilities = caps
+        proto = result.get("protocolVersion")
+        if isinstance(proto, str):
+            self._protocol_version = proto
         return result
 
     async def list_tools(self) -> list[McpToolDefinition]:
-        """Discover tools from the server."""
-        result = await self._transport.send_request("tools/list")
+        """Discover tools from the server. Walks pagination via cursor."""
         tools: list[McpToolDefinition] = []
-        for item in result.get("tools", []):
-            annotations: McpToolAnnotations | None = None
-            raw_annotations = item.get("annotations")
-            if raw_annotations and isinstance(raw_annotations, dict):
-                annotations = McpToolAnnotations(
-                    title=raw_annotations.get("title"),
-                    read_only_hint=raw_annotations.get("readOnlyHint"),
-                    destructive_hint=raw_annotations.get("destructiveHint"),
-                    idempotent_hint=raw_annotations.get("idempotentHint"),
-                    open_world_hint=raw_annotations.get("openWorldHint"),
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+            result = await self._transport.send_request("tools/list", params or None)
+            for item in result.get("tools", []):
+                annotations: McpToolAnnotations | None = None
+                raw_annotations = item.get("annotations")
+                if raw_annotations and isinstance(raw_annotations, dict):
+                    annotations = McpToolAnnotations(
+                        title=raw_annotations.get("title"),
+                        read_only_hint=raw_annotations.get("readOnlyHint"),
+                        destructive_hint=raw_annotations.get("destructiveHint"),
+                        idempotent_hint=raw_annotations.get("idempotentHint"),
+                        open_world_hint=raw_annotations.get("openWorldHint"),
+                    )
+                tools.append(
+                    McpToolDefinition(
+                        name=item["name"],
+                        description=item.get("description"),
+                        input_schema=item.get("inputSchema", {}),
+                        annotations=annotations,
+                    )
                 )
-            tools.append(
-                McpToolDefinition(
-                    name=item["name"],
-                    description=item.get("description"),
-                    input_schema=item.get("inputSchema", {}),
-                    annotations=annotations,
-                )
-            )
+            cursor = result.get("nextCursor") or None
+            if not cursor:
+                break
         return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> McpToolCallResult:
@@ -406,6 +478,120 @@ class McpSession:
         return McpToolCallResult(
             content=result.get("content", []),
             is_error=bool(result.get("isError", False)),
+        )
+
+    async def list_resources(self) -> list[McpResource]:
+        """Discover concrete resources from the server (resources/list)."""
+        if not self._server_capabilities.get("resources"):
+            return []
+        items: list[McpResource] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+            try:
+                result = await self._transport.send_request("resources/list", params or None)
+            except McpError as exc:
+                if exc.code == -32601:  # Method not found
+                    return []
+                raise
+            for item in result.get("resources", []):
+                raw_annotations = item.get("annotations") if isinstance(item.get("annotations"), dict) else {}
+                items.append(
+                    McpResource(
+                        uri=str(item.get("uri") or ""),
+                        name=item.get("name"),
+                        description=item.get("description"),
+                        mime_type=item.get("mimeType"),
+                        annotations=raw_annotations or {},
+                    )
+                )
+            cursor = result.get("nextCursor") or None
+            if not cursor:
+                break
+        return items
+
+    async def list_resource_templates(self) -> list[McpResourceTemplate]:
+        """Discover resource URI templates from the server (resources/templates/list)."""
+        if not self._server_capabilities.get("resources"):
+            return []
+        items: list[McpResourceTemplate] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+            try:
+                result = await self._transport.send_request("resources/templates/list", params or None)
+            except McpError as exc:
+                if exc.code == -32601:
+                    return []
+                raise
+            for item in result.get("resourceTemplates", []):
+                items.append(
+                    McpResourceTemplate(
+                        uri_template=str(item.get("uriTemplate") or ""),
+                        name=item.get("name"),
+                        description=item.get("description"),
+                        mime_type=item.get("mimeType"),
+                    )
+                )
+            cursor = result.get("nextCursor") or None
+            if not cursor:
+                break
+        return items
+
+    async def read_resource(self, uri: str) -> McpResourceContent:
+        """Read a resource by URI (resources/read)."""
+        result = await self._transport.send_request("resources/read", {"uri": uri})
+        return McpResourceContent(contents=list(result.get("contents") or []))
+
+    async def list_prompts(self) -> list[McpPrompt]:
+        """Discover prompt templates from the server (prompts/list)."""
+        if not self._server_capabilities.get("prompts"):
+            return []
+        items: list[McpPrompt] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+            try:
+                result = await self._transport.send_request("prompts/list", params or None)
+            except McpError as exc:
+                if exc.code == -32601:
+                    return []
+                raise
+            for item in result.get("prompts", []):
+                args_raw = item.get("arguments") or []
+                args: list[McpPromptArgument] = []
+                if isinstance(args_raw, list):
+                    for arg in args_raw:
+                        if not isinstance(arg, dict):
+                            continue
+                        args.append(
+                            McpPromptArgument(
+                                name=str(arg.get("name") or ""),
+                                description=arg.get("description"),
+                                required=bool(arg.get("required", False)),
+                            )
+                        )
+                items.append(
+                    McpPrompt(
+                        name=str(item.get("name") or ""),
+                        description=item.get("description"),
+                        arguments=tuple(args),
+                    )
+                )
+            cursor = result.get("nextCursor") or None
+            if not cursor:
+                break
+        return items
+
+    async def get_prompt(self, name: str, arguments: dict[str, Any] | None = None) -> McpPromptResult:
+        """Render a prompt template (prompts/get)."""
+        params: dict[str, Any] = {"name": name}
+        if arguments:
+            params["arguments"] = arguments
+        result = await self._transport.send_request("prompts/get", params)
+        return McpPromptResult(
+            description=result.get("description"),
+            messages=list(result.get("messages") or []),
         )
 
     async def ping(self) -> bool:
@@ -426,3 +612,17 @@ class McpSession:
     @property
     def initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def server_info(self) -> dict[str, Any]:
+        """Server identity returned from initialize (name/version/...)."""
+        return dict(self._server_info)
+
+    @property
+    def server_capabilities(self) -> dict[str, Any]:
+        """Capabilities reported by the server during initialize."""
+        return dict(self._server_capabilities)
+
+    @property
+    def protocol_version(self) -> str | None:
+        return self._protocol_version

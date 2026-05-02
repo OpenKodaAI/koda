@@ -82,6 +82,7 @@ addopts = "-v --tb=short"
 filterwarnings = []
 markers = [
     "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
+    "postgres: requires a real Postgres instance (testcontainers or POSTGRES_TEST_DSN env)",
 ]
 
 [tool.coverage.report]

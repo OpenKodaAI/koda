@@ -34,13 +34,24 @@ The installer will:
 
 ## What Starts
 
-The local quickstart brings up:
+The local quickstart brings up only what every Koda deployment needs:
 
-- `app`
-- `web`
-- `postgres`
-- `seaweedfs`
-- `seaweedfs-init`
+- `app` — control plane + worker host (Python)
+- `web` — dashboard UI (Next.js)
+- `postgres` — single source of truth for control plane, agents, audit, queue
+- `seaweedfs` + `seaweedfs-init` — bundled S3-compatible object store
+- `security` / `memory` / `artifact` / `retrieval` / `runtime-kernel` — Rust sidecars used on every agent turn
+
+That's it. No observability stack, no Telegram fan-in pool, no quota engine, no
+multi-supervisor cluster. Each of those is an opt-in profile or overlay file you
+turn on when you actually need it (see [`docs/operations/`](../operations/README.md)):
+
+| Feature | How to enable | When it's worth it |
+|---|---|---|
+| Telegram fan-in (`bot-gateway`) | `docker compose --profile bot-gateway up -d` + `BOT_GATEWAY_ENABLED=true` | You run >5 agents on the same host |
+| Workspace quotas (`policy-engine`) | `docker compose --profile policy-engine up -d` + `POLICY_ENGINE_ENABLED=true` | You have multiple internal teams sharing one deployment |
+| Multi-supervisor cluster | `docker compose -f docker-compose.yml -f docker-compose-cluster.yml up -d` | You need >100 agents or zero-downtime deploys |
+| Observability (Prometheus + Grafana + Tempo) | `docker compose -f docker-compose.yml -f docker-compose-observability.yml up -d` | You want metrics dashboards / distributed tracing |
 
 This is the same platform topology used by the default VPS path.
 
@@ -141,3 +152,32 @@ python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --das
 - If `http://127.0.0.1:8090/health` is not reachable, verify that `docker compose ps` shows `app` healthy.
 - If object storage checks fail, verify that `seaweedfs` and `seaweedfs-init` both completed successfully.
 - If bootstrap still fails, rerun the doctor command and inspect the reported failing check name.
+
+### Local-native bring-up: PID-file invariant
+
+The Docker-free path uses `~/.koda-local/scripts/dev-up.sh` (Postgres,
+the object-store backend, the 5 Rust sidecars, control plane, web).
+Each long-running process writes its PID to
+`~/.koda-local/var/run/<service>.pid`. The script's idempotency relies
+on this invariant:
+
+- A PID file present **and** the listed PID still alive means the service
+  is up; the script must skip starting it.
+- A PID file present but the PID is dead means the previous run crashed.
+  The PID file must be removed before starting a fresh process — otherwise
+  the second `dev-up.sh` invocation thinks the service is healthy and
+  refuses to start it, leaving the stack half-up.
+
+Some services (notably the object-store backend) additionally hold an
+on-disk lock under their data directory that survives process death; if
+the service was SIGKILL'd during debugging, the next `dev-up.sh` will
+report `Another instance is already running` and bail.
+
+Use `scripts/dev/dev-restart.sh` (a thin wrapper around `dev-down.sh` →
+`dev-up.sh`) to safely cycle the stack: it removes stale PID files, lets
+data-directory locks release, then re-runs the bring-up.
+
+```bash
+~/.koda-local/scripts/dev-down.sh
+scripts/dev/dev-restart.sh
+```

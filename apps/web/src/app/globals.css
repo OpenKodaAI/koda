@@ -161,19 +161,19 @@
   --button-border-hover: #000000;
   --button-shadow-hover: none;
   --button-shadow-pressed: none;
-  --overlay-backdrop-bg: rgba(94, 87, 78, 0.16);
-  --overlay-backdrop-filter: blur(20px) saturate(136%) brightness(1.02);
+  --overlay-backdrop-bg: rgba(94, 87, 78, 0.20);
+  --overlay-backdrop-filter: blur(14px) saturate(130%) brightness(1.02);
   --overlay-surface-border: #d7d2cc;
-  --overlay-floating-bg: rgba(255, 253, 249, 0.78);
-  --overlay-floating-filter: blur(22px) saturate(142%) brightness(1.03);
+  --overlay-floating-bg: rgba(255, 253, 249, 0.55);
+  --overlay-floating-filter: blur(28px) saturate(148%) brightness(1.04);
   --overlay-floating-shadow: none;
   --overlay-floating-sheen: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.24),
     rgba(255, 255, 255, 0.06)
   );
-  --overlay-modal-bg: rgba(232, 226, 216, 0.88);
-  --overlay-modal-filter: blur(24px) saturate(156%) brightness(1.03);
+  --overlay-modal-bg: rgba(232, 226, 216, 0.58);
+  --overlay-modal-filter: blur(32px) saturate(160%) brightness(1.04);
   --overlay-modal-shadow: none;
   --overlay-modal-sheen: linear-gradient(
     180deg,
@@ -185,6 +185,13 @@
   --terminal-foreground: #101010;
   --terminal-cursor: #000000;
   --terminal-cursor-accent: #fffdf9;
+
+  /* JSON syntax tokens — used by JsonEditor. Light theme defaults below. */
+  --json-key: #1e6fd9;
+  --json-string: #8a6d1f;
+  --json-number: #2f7c4f;
+  --json-literal: #7c3aed;
+  --json-punct: var(--text-quaternary);
   --terminal-selection-background: #eceae3;
   --terminal-selection-foreground: #101010;
   --terminal-black: #101010;
@@ -312,15 +319,15 @@
     --button-border-hover: #3A3A3A;
     --button-shadow-hover: none;
     --button-shadow-pressed: none;
-    --overlay-backdrop-bg: rgba(0, 0, 0, 0.72);
-    --overlay-backdrop-filter: blur(12px);
-    --overlay-surface-border: #2A2A2A;
-    --overlay-floating-bg: rgba(31, 31, 31, 0.78);
-    --overlay-floating-filter: blur(22px) saturate(140%);
+    --overlay-backdrop-bg: rgba(0, 0, 0, 0.32);
+    --overlay-backdrop-filter: blur(8px) saturate(120%);
+    --overlay-surface-border: rgba(255, 255, 255, 0.10);
+    --overlay-floating-bg: rgba(36, 36, 38, 0.55);
+    --overlay-floating-filter: blur(40px) saturate(180%);
     --overlay-floating-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
     --overlay-floating-sheen: transparent;
-    --overlay-modal-bg: rgba(31, 31, 31, 0.82);
-    --overlay-modal-filter: blur(24px) saturate(150%);
+    --overlay-modal-bg: rgba(36, 36, 38, 0.55);
+    --overlay-modal-filter: blur(48px) saturate(200%);
     --overlay-modal-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     --overlay-modal-sheen: transparent;
 
@@ -456,15 +463,15 @@ html.dark {
   --button-border-hover: #3A3A3A;
   --button-shadow-hover: none;
   --button-shadow-pressed: none;
-  --overlay-backdrop-bg: rgba(0, 0, 0, 0.72);
-  --overlay-backdrop-filter: blur(12px);
-  --overlay-surface-border: #2A2A2A;
-  --overlay-floating-bg: rgba(31, 31, 31, 0.78);
-  --overlay-floating-filter: blur(22px) saturate(140%);
+  --overlay-backdrop-bg: rgba(0, 0, 0, 0.32);
+  --overlay-backdrop-filter: blur(8px) saturate(120%);
+  --overlay-surface-border: rgba(255, 255, 255, 0.10);
+  --overlay-floating-bg: rgba(36, 36, 38, 0.55);
+  --overlay-floating-filter: blur(40px) saturate(180%);
   --overlay-floating-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   --overlay-floating-sheen: transparent;
-  --overlay-modal-bg: rgba(31, 31, 31, 0.82);
-  --overlay-modal-filter: blur(24px) saturate(150%);
+  --overlay-modal-bg: rgba(36, 36, 38, 0.55);
+  --overlay-modal-filter: blur(48px) saturate(200%);
   --overlay-modal-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   --overlay-modal-sheen: transparent;
 
@@ -472,6 +479,16 @@ html.dark {
   --terminal-foreground: #d4d4d8;
   --terminal-cursor: #69c48a;
   --terminal-cursor-accent: #0a0a0b;
+
+  /* JSON syntax tokens (dark theme). Soft pastels: blue keys, light-yellow
+     strings, light-green numbers, soft violet literals. Tuned for the
+     Koda dark canvas — bright enough to read, muted enough to coexist
+     with the warm CTA accent. */
+  --json-key: #7da9ff;
+  --json-string: #f4d88a;
+  --json-number: #9fd3a0;
+  --json-literal: #c4b5fd;
+  --json-punct: var(--text-quaternary);
   --terminal-selection-background: #22352b;
   --terminal-selection-foreground: #d4d4d8;
   --terminal-black: #1e1e20;
@@ -1425,17 +1442,16 @@ button[aria-label="Open Next Dev Tools"] {
   contain: layout style;
 }
 
+/* Canonical scrim behind any modal/drawer. Pair with .app-modal-panel
+   or .app-drawer-panel; both must coexist for the proper glass stack. */
 .app-overlay-backdrop {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--overlay-backdrop-bg);
+  -webkit-backdrop-filter: var(--overlay-backdrop-filter) !important;
+  backdrop-filter: var(--overlay-backdrop-filter) !important;
   transition: opacity 160ms ease-out;
-  will-change: opacity;
-  backface-visibility: hidden;
-  contain: paint;
 }
 
 .tour-layer {
@@ -1896,28 +1912,171 @@ button[aria-label="Open Next Dev Tools"] {
   padding-bottom: max(var(--space-6), env(safe-area-inset-bottom));
 }
 
-/* glass-blur floating surfaces */
+/* glass-blur floating surfaces — canonical treatment for any overlay
+   that floats over canvas (popovers, dropdowns, tooltips, command menus,
+   floating menus). DO NOT override `backdrop-filter` on these classes;
+   the !important locks the glass effect against accidental utility
+   shadowing (Tailwind backdrop-* composition vars, downstream theme
+   resets, etc.). New floating surfaces MUST use one of these classes
+   instead of inventing their own bg/blur stack. See apps/web/CLAUDE.md. */
 .app-floating-panel,
 .app-floating-surface {
   position: relative;
   border: 1px solid var(--overlay-surface-border);
   border-radius: var(--radius-panel);
   background: var(--overlay-floating-bg);
-  backdrop-filter: var(--overlay-floating-filter);
+  -webkit-backdrop-filter: var(--overlay-floating-filter) !important;
+  backdrop-filter: var(--overlay-floating-filter) !important;
   box-shadow: var(--overlay-floating-shadow);
-  isolation: isolate;
 }
 
+/* Modal/drawer panels — same contract as floating, stronger blur so
+   the surface reads as a primary "stage" over the canvas. `overflow:
+   hidden` keeps long content (lists, scrollers) inside the rounded
+   border instead of bleeding past it. Inner scrollers must declare
+   their own `min-h-0 flex-1 overflow-y-auto`. */
 .app-modal-panel,
 .app-drawer-panel {
   position: relative;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--overlay-surface-border);
   border-radius: var(--radius-shell);
   background: var(--overlay-modal-bg);
-  backdrop-filter: var(--overlay-modal-filter);
+  -webkit-backdrop-filter: var(--overlay-modal-filter) !important;
+  backdrop-filter: var(--overlay-modal-filter) !important;
   box-shadow: var(--shadow-floating);
-  isolation: isolate;
   overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Canonical overlay enter/exit animations                             */
+/* ------------------------------------------------------------------ */
+/*  Pair with `useAnimatedPresence` from @/hooks/use-animated-presence
+    and toggle the `data-visible` attribute (true | false) on the
+    element. The presence helper keeps the node mounted long enough
+    for the exit transition to finish before unmounting.
+
+    Use cases:
+      .app-overlay-anim          → backdrop scrim (fade)
+      .app-modal-anim            → centered modal panel (fade + lift + scale)
+      .app-drawer-anim-right     → right-side drawer (fade + slide-in-from-right)
+      .app-drawer-anim-left      → left-side drawer (fade + slide-in-from-left)
+
+    Enter and exit use the same easing/duration so close mirrors open.
+    See apps/web/CLAUDE.md › Overlay animation contract. */
+
+/* Keyframe-based to GUARANTEE the enter animation fires when the element
+   mounts. The previous transition-based approach silently no-op'ed when
+   React batched the presence helper's "false → true" flip into a single
+   paint frame: the browser saw only the final state, with nothing to
+   transition from. With @keyframes the animation runs unconditionally
+   the moment the element is inserted in the DOM — no first-frame
+   state-flip required. */
+
+@keyframes app-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes app-overlay-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.app-overlay-anim {
+  animation: app-overlay-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.app-overlay-anim[data-visible="false"] {
+  animation: app-overlay-exit 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes app-modal-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes app-modal-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+.app-modal-anim {
+  transform-origin: center;
+  animation: app-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.app-modal-anim[data-visible="false"] {
+  animation: app-modal-exit 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes app-drawer-right-enter {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes app-drawer-right-exit {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(16px); }
+}
+.app-drawer-anim-right {
+  animation: app-drawer-right-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.app-drawer-anim-right[data-visible="false"] {
+  animation: app-drawer-right-exit 200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes app-drawer-left-enter {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes app-drawer-left-exit {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-16px); }
+}
+.app-drawer-anim-left {
+  animation: app-drawer-left-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.app-drawer-anim-left[data-visible="false"] {
+  animation: app-drawer-left-exit 200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+/* Floating dropdowns, popovers, color-picker panels, command menus.
+   Same easing/duration as modals but a tiny lift (4px) instead of 8 so
+   the panel feels "tethered" to its trigger. */
+@keyframes app-floating-enter {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes app-floating-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(2px) scale(0.985); }
+}
+
+/* Indeterminate progress shimmer used by sticky download toasts when the
+   server didn't send a Content-Length. The bar slides across the track. */
+@keyframes toast-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.app-floating-anim {
+  transform-origin: top center;
+  animation: app-floating-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.app-floating-anim[data-visible="false"] {
+  animation: app-floating-exit 140ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-overlay-anim,
+  .app-overlay-anim[data-visible="false"],
+  .app-modal-anim,
+  .app-modal-anim[data-visible="false"],
+  .app-drawer-anim-right,
+  .app-drawer-anim-right[data-visible="false"],
+  .app-drawer-anim-left,
+  .app-drawer-anim-left[data-visible="false"],
+  .app-floating-anim,
+  .app-floating-anim[data-visible="false"] {
+    animation: none;
+  }
 }
 
 @keyframes overlay-fade-in {
@@ -2635,10 +2794,14 @@ button[aria-label="Open Next Dev Tools"] {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  overflow: visible;
+  overflow: hidden;
   border-radius: 999px;
   border: none;
-  background: transparent;
+  /* Theme-adaptive surface behind the WebGL canvas. The shader's "gap"
+     extreme is locked to this color via the uCanvasBg uniform, so empty
+     regions of the orb blend seamlessly with the wrapper bg in either
+     theme — no pie-slice wedges, no hard edges between canvas and panel. */
+  background: var(--canvas);
   box-shadow: none;
   isolation: isolate;
 }
@@ -2762,6 +2925,15 @@ button[aria-label="Open Next Dev Tools"] {
 
 .agent-orb--active .agent-orb__grain {
   opacity: 0.3;
+}
+
+/* WebGL shader orb (Three.js) — see components/ui/orb.tsx */
+.agent-orb__canvas {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .agent-swatch {
@@ -8595,9 +8767,9 @@ html body [contenteditable="true"]:focus-visible {
   background: var(--panel-soft);
   border-radius: var(--radius-input);
   transition:
-    border-color var(--transition-base) var(--ease-out-quart),
-    background-color var(--transition-base) var(--ease-out-quart),
-    box-shadow var(--transition-base) var(--ease-out-quart);
+    border-color var(--transition-base),
+    background-color var(--transition-base),
+    box-shadow var(--transition-base);
 }
 
 .auth-input.auth-input::placeholder {
@@ -8636,9 +8808,9 @@ html body [contenteditable="true"]:focus-visible {
   border-radius: var(--radius-input);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 6px 18px rgba(var(--accent-rgb), 0.18);
   transition:
-    background-color var(--transition-base) var(--ease-out-quart),
-    transform var(--transition-base) var(--ease-out-quart),
-    box-shadow var(--transition-base) var(--ease-out-quart);
+    background-color var(--transition-base),
+    transform var(--transition-base),
+    box-shadow var(--transition-base);
 }
 
 .auth-submit.auth-submit:hover:not(:disabled) {
@@ -8701,9 +8873,9 @@ html body [contenteditable="true"]:focus-visible {
   text-transform: uppercase;
   caret-color: var(--accent);
   transition:
-    border-color var(--transition-base) var(--ease-out-quart),
-    background-color var(--transition-base) var(--ease-out-quart),
-    box-shadow var(--transition-base) var(--ease-out-quart);
+    border-color var(--transition-base),
+    background-color var(--transition-base),
+    box-shadow var(--transition-base);
 }
 
 .bootstrap-code-input__cell::placeholder {

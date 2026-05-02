@@ -29,9 +29,6 @@ from koda.config import (
     AGENT_RESOURCE_ACCESS_POLICY,
     ALLOWED_DOCKER_CMDS,
     ALLOWED_GIT_CMDS,
-    BLOCKED_GWS_PATTERN,
-    BLOCKED_NPM_PATTERN,
-    BLOCKED_PIP_PATTERN,
     GIT_META_CHARS,
 )
 from koda.logging_config import get_logger
@@ -638,8 +635,8 @@ def _resolve_operational_command(
             deny_message=f"Shell meta-characters are not allowed in {command} commands.",
         )
 
-    pip_blocked_pattern = _blocked_pattern_for_command("pip")
-    if command == "pip" and pip_blocked_pattern and pip_blocked_pattern.search(args):
+    pip_guard = _blocked_pattern_for_command("pip")
+    if command == "pip" and pip_guard is not None and pip_guard.is_blocked(args):
         return _OperationalActionResolution(
             integration_id="pip",
             action_id="pip.blocked",
@@ -648,8 +645,8 @@ def _resolve_operational_command(
             deny_message="Blocked: this pip command is not allowed for safety reasons.",
         )
 
-    npm_blocked_pattern = _blocked_pattern_for_command("npm")
-    if command == "npm" and npm_blocked_pattern and npm_blocked_pattern.search(args):
+    npm_guard = _blocked_pattern_for_command("npm")
+    if command == "npm" and npm_guard is not None and npm_guard.is_blocked(args):
         return _OperationalActionResolution(
             integration_id="npm",
             action_id="npm.blocked",
@@ -658,8 +655,8 @@ def _resolve_operational_command(
             deny_message="Blocked: this npm command is not allowed for safety reasons.",
         )
 
-    gws_blocked_pattern = _blocked_pattern_for_command("gws")
-    if command == "gws" and gws_blocked_pattern and gws_blocked_pattern.search(args):
+    gws_guard = _blocked_pattern_for_command("gws")
+    if command == "gws" and gws_guard is not None and gws_guard.is_blocked(args):
         return _OperationalActionResolution(
             integration_id="gws",
             action_id="gws.blocked",
@@ -795,8 +792,8 @@ def _resolve_operational_command(
         return _operational_resolution_from_contract("gws", raw_args=args)
 
     if command == "jira":
-        jira_blocked_pattern = _blocked_pattern_for_command("jira")
-        if jira_blocked_pattern and jira_blocked_pattern.search(args):
+        jira_guard = _blocked_pattern_for_command("jira")
+        if jira_guard is not None and jira_guard.is_blocked(args):
             return _OperationalActionResolution(
                 integration_id="jira",
                 action_id="jira.blocked",
@@ -807,8 +804,8 @@ def _resolve_operational_command(
         return _operational_resolution_from_contract("jira", raw_args=args)
 
     if command == "confluence":
-        confluence_blocked_pattern = _blocked_pattern_for_command("confluence")
-        if confluence_blocked_pattern and confluence_blocked_pattern.search(args):
+        confluence_guard = _blocked_pattern_for_command("confluence")
+        if confluence_guard is not None and confluence_guard.is_blocked(args):
             return _OperationalActionResolution(
                 integration_id="confluence",
                 action_id="confluence.blocked",
@@ -861,36 +858,26 @@ def _canonical_operational_request(command_name: str, raw_args: str) -> tuple[st
 
 
 def _blocked_pattern_for_command(command_name: str) -> Any | None:
+    """Return a guard exposing ``is_blocked(text)`` for the given
+    command, or ``None`` when the command has no blocked pattern.
+
+    Phase A.6 — guards are sourced from the central
+    :mod:`koda.services.blocked_patterns` registry so the approval
+    flow uses the same DFA as the handlers and the dispatcher. The
+    legacy "import from handler module" path was removed because
+    handlers now import the helper functions and no longer expose the
+    raw ``BLOCKED_*_PATTERN`` attribute.
+    """
     normalized_command = str(command_name or "").strip().lower()
-    if normalized_command == "pip":
-        with contextlib.suppress(Exception):
-            from koda.handlers.packages import BLOCKED_PIP_PATTERN as handler_pattern
+    from koda.services import blocked_patterns
 
-            return handler_pattern
-        return BLOCKED_PIP_PATTERN
-    if normalized_command == "npm":
-        with contextlib.suppress(Exception):
-            from koda.handlers.packages import BLOCKED_NPM_PATTERN as handler_pattern
-
-            return handler_pattern
-        return BLOCKED_NPM_PATTERN
-    if normalized_command == "gws":
-        with contextlib.suppress(Exception):
-            from koda.handlers.google_workspace import BLOCKED_GWS_PATTERN as handler_pattern
-
-            return handler_pattern
-        return BLOCKED_GWS_PATTERN
-    if normalized_command == "jira":
-        with contextlib.suppress(Exception):
-            from koda.handlers.atlassian import BLOCKED_JIRA_PATTERN as handler_pattern
-
-            return handler_pattern
-    if normalized_command == "confluence":
-        with contextlib.suppress(Exception):
-            from koda.handlers.atlassian import BLOCKED_CONFLUENCE_PATTERN as handler_pattern
-
-            return handler_pattern
-    return None
+    return {
+        "pip": blocked_patterns.PIP_GUARD,
+        "npm": blocked_patterns.NPM_GUARD,
+        "gws": blocked_patterns.GWS_GUARD,
+        "jira": blocked_patterns.JIRA_GUARD,
+        "confluence": blocked_patterns.CONFLUENCE_GUARD,
+    }.get(normalized_command)
 
 
 def _should_bypass_manual_validation(
@@ -941,9 +928,9 @@ def _should_bypass_manual_validation(
         if not command:
             return True
         with contextlib.suppress(Exception):
-            from koda.config import BLOCKED_SHELL_PATTERN
+            from koda.services.blocked_patterns import is_blocked_shell
 
-            if GIT_META_CHARS.search(command) or BLOCKED_SHELL_PATTERN.search(command):
+            if GIT_META_CHARS.search(command) or is_blocked_shell(command):
                 return True
         return False
 
@@ -1896,19 +1883,23 @@ _approval_cleanup_task: asyncio.Task | None = None
 
 
 async def start_approval_cleanup() -> None:
-    """Spawn a background task that periodically cleans stale pending operations."""
-    global _approval_cleanup_task
+    """Periodically clean stale pending operations.
 
-    async def _loop() -> None:
-        while True:
-            await asyncio.sleep(60)
-            _cleanup_stale_ops()
-            _cleanup_stale_agent_cmd_ops()
-            _cleanup_stale_approval_grants()
-            await cleanup_expired_ops()
-            await cleanup_expired_approval_grants()
-
-    _approval_cleanup_task = asyncio.create_task(_loop())
+    Runs forever as the awaited body of a managed background loop. The
+    ``BackgroundLoopSupervisor`` treats *any* runner that returns as
+    "loop_returned" and restarts it after the configured delay, so this
+    coroutine must await the actual cleanup loop directly instead of
+    spawning a detached task and returning — otherwise the supervisor
+    relaunches us every ``restart_delay_seconds`` and floods the log with
+    ``background_loop_returned`` warnings.
+    """
+    while True:
+        await asyncio.sleep(60)
+        _cleanup_stale_ops()
+        _cleanup_stale_agent_cmd_ops()
+        _cleanup_stale_approval_grants()
+        await cleanup_expired_ops()
+        await cleanup_expired_approval_grants()
 
 
 async def request_agent_cmd_approval(

@@ -85,20 +85,8 @@ export function buildAgentMetadataPayload(input: {
   squadId: string;
   color: string;
   colorRgb: string;
-  healthPort: string;
-  healthUrl: string;
-  runtimeBaseUrl: string;
-  appearanceJson: string;
-  runtimeEndpointJson: string;
-  metadataJson: string;
+  existingAppearance?: Record<string, unknown> | null;
 }) {
-  const appearance = parseJsonObject("Appearance JSON", input.appearanceJson);
-  const runtimeEndpoint = parseJsonObject(
-    "Runtime endpoint JSON",
-    input.runtimeEndpointJson,
-  );
-  const metadata = parseJsonObject("Metadata JSON", input.metadataJson);
-
   const displayName = input.displayName.trim();
   const storageNamespace = input.storageNamespace.trim();
   if (!displayName) {
@@ -108,6 +96,7 @@ export function buildAgentMetadataPayload(input: {
     throw new Error(translateLiteral("Storage namespace e obrigatorio."));
   }
 
+  const appearance: Record<string, unknown> = { ...(input.existingAppearance ?? {}) };
   appearance.label = displayName;
   if (input.color.trim()) {
     appearance.color = input.color.trim();
@@ -120,25 +109,11 @@ export function buildAgentMetadataPayload(input: {
     delete appearance.color_rgb;
   }
 
-  runtimeEndpoint.health_port = parseHealthPort(input.healthPort);
-  if (input.healthUrl.trim()) {
-    runtimeEndpoint.health_url = input.healthUrl.trim();
-  } else {
-    delete runtimeEndpoint.health_url;
-  }
-  if (input.runtimeBaseUrl.trim()) {
-    runtimeEndpoint.runtime_base_url = input.runtimeBaseUrl.trim();
-  } else {
-    delete runtimeEndpoint.runtime_base_url;
-  }
-
   return {
     display_name: displayName,
     status: input.status,
     storage_namespace: storageNamespace,
     appearance,
-    runtime_endpoint: runtimeEndpoint,
-    metadata,
     organization: {
       workspace_id: input.workspaceId.trim() || null,
       squad_id: input.workspaceId.trim()

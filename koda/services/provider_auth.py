@@ -32,6 +32,8 @@ ProviderId = Literal[
     "gemini",
     "elevenlabs",
     "ollama",
+    "llamacpp",
+    "mlx",
     "perplexity",
     "mistral",
     "qwen",
@@ -48,6 +50,8 @@ MANAGED_PROVIDER_IDS: tuple[ProviderId, ...] = (
     "gemini",
     "elevenlabs",
     "ollama",
+    "llamacpp",
+    "mlx",
     "perplexity",
     "mistral",
     "qwen",
@@ -62,6 +66,8 @@ PROVIDER_API_KEY_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "ollama": "OLLAMA_API_KEY",
+    "llamacpp": "LLAMACPP_API_KEY",
+    "mlx": "MLX_API_KEY",
     "perplexity": "PERPLEXITY_API_KEY",
     "mistral": "MISTRAL_API_KEY",
     "qwen": "QWEN_API_KEY",
@@ -79,6 +85,8 @@ PROVIDER_AUTH_MODE_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_AUTH_MODE",
     "elevenlabs": "ELEVENLABS_AUTH_MODE",
     "ollama": "OLLAMA_AUTH_MODE",
+    "llamacpp": "LLAMACPP_AUTH_MODE",
+    "mlx": "MLX_AUTH_MODE",
     "perplexity": "PERPLEXITY_AUTH_MODE",
     "mistral": "MISTRAL_AUTH_MODE",
     "qwen": "QWEN_AUTH_MODE",
@@ -93,6 +101,8 @@ PROVIDER_VERIFIED_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GEMINI_CONNECTION_VERIFIED",
     "elevenlabs": "ELEVENLABS_CONNECTION_VERIFIED",
     "ollama": "OLLAMA_CONNECTION_VERIFIED",
+    "llamacpp": "LLAMACPP_CONNECTION_VERIFIED",
+    "mlx": "MLX_CONNECTION_VERIFIED",
     "perplexity": "PERPLEXITY_CONNECTION_VERIFIED",
     "mistral": "MISTRAL_CONNECTION_VERIFIED",
     "qwen": "QWEN_CONNECTION_VERIFIED",
@@ -106,6 +116,8 @@ PROVIDER_PROJECT_ENV_KEYS: dict[ProviderId, str] = {
 }
 PROVIDER_BASE_URL_ENV_KEYS: dict[ProviderId, str] = {
     "ollama": "OLLAMA_BASE_URL",
+    "llamacpp": "LLAMACPP_API_BASE_URL",
+    "mlx": "MLX_API_BASE_URL",
     "perplexity": "PERPLEXITY_API_BASE_URL",
     "mistral": "MISTRAL_API_BASE_URL",
     "qwen": "QWEN_API_BASE_URL",
@@ -120,6 +132,8 @@ PROVIDER_TITLES: dict[ProviderId, str] = {
     "gemini": "Google",
     "elevenlabs": "ElevenLabs",
     "ollama": "Ollama",
+    "llamacpp": "llama.cpp (Metal)",
+    "mlx": "MLX (Apple Silicon)",
     "perplexity": "Perplexity",
     "mistral": "Mistral AI",
     "qwen": "Qwen (Alibaba)",
@@ -314,8 +328,10 @@ def provider_supports_subscription_login(provider_id: str) -> bool:
 def provider_supports_local_connection(provider_id: str) -> bool:
     # Ollama runs as a self-hosted endpoint. Claude keeps a ``local`` fallback
     # for operators who already authenticated the CLI on the host (mounted
-    # CLAUDE_CONFIG_DIR) and just want Koda to detect it.
-    return provider_id.strip().lower() in {"ollama", "claude"}
+    # CLAUDE_CONFIG_DIR) and just want Koda to detect it. ``llamacpp`` and
+    # ``mlx`` are local-only by design — they speak OpenAI-compatible HTTP
+    # against ``llama-server`` and ``mlx-openai-server`` respectively.
+    return provider_id.strip().lower() in {"ollama", "claude", "llamacpp", "mlx"}
 
 
 def provider_requires_project_id(provider_id: str) -> bool:
@@ -502,9 +518,16 @@ def build_provider_process_env(
         if configured_bin:
             env["GEMINI_BIN"] = configured_bin
     if provider_id == "ollama":
-        resolved_base_url = base_url.strip() or str(source.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or "").strip()
-        if not resolved_base_url:
-            resolved_base_url = provider_default_base_url("ollama", auth_mode)
+        # In api_key mode, Ollama targets the cloud endpoint regardless of any
+        # caller-supplied or env-inherited base URL — those values are
+        # local-mode-only (e.g. host.docker.internal:11434, localhost:11434)
+        # and would crash the subprocess with `Connection refused`.
+        if auth_mode == "api_key":
+            resolved_base_url = provider_default_base_url("ollama", "api_key")
+        else:
+            resolved_base_url = base_url.strip() or str(source.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or "").strip()
+            if not resolved_base_url:
+                resolved_base_url = provider_default_base_url("ollama", auth_mode)
         env[PROVIDER_BASE_URL_ENV_KEYS["ollama"]] = resolved_base_url
     env[PROVIDER_AUTH_MODE_ENV_KEYS[provider_id]] = auth_mode
 
@@ -832,6 +855,22 @@ _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
         "account_label": "xAI Console",
         "plan_label": "API key",
     },
+    "llamacpp": {
+        "default_base_url": "http://127.0.0.1:8080",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "llama.cpp local server",
+        "plan_label": "Local Metal runtime",
+        "auth_optional": True,
+    },
+    "mlx": {
+        "default_base_url": "http://127.0.0.1:8000",
+        "probe": "models",
+        "models_path": "/v1/models",
+        "account_label": "mlx-openai-server",
+        "plan_label": "Local Apple Silicon runtime",
+        "auth_optional": True,
+    },
 }
 
 
@@ -867,15 +906,13 @@ def _verify_openai_compatible_api_key(
     else:
         verify_url = effective_base.rstrip("/") + str(profile.get("health_path", "/"))
         method = "GET"
-    request = urllib_request.Request(
-        verify_url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-            "User-Agent": "koda/control-plane",
-        },
-        method=method,
-    )
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "User-Agent": "koda/control-plane",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib_request.Request(verify_url, headers=headers, method=method)
     with urllib_request.urlopen(request, timeout=10) as response:
         status = response.status
         body = response.read().decode("utf-8", "replace")
@@ -907,7 +944,9 @@ def verify_provider_api_key(
     base_url: str = "",
 ) -> ProviderVerificationResult:
     secret = api_key.strip()
-    if not secret:
+    profile = _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES.get(str(provider_id))
+    auth_optional = bool(profile and profile.get("auth_optional"))
+    if not secret and not auth_optional:
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="api_key",
@@ -986,8 +1025,17 @@ def verify_provider_api_key(
             )
 
         if provider_id == "ollama":
+            # API key mode targets Ollama Cloud, which is a fixed endpoint
+            # (`https://ollama.com`). We ignore any caller-supplied `base_url`
+            # because some upstream code paths (notably the runtime
+            # capability probe in `ollama_runner._probe_ollama_auth_status`)
+            # default the base URL to `http://localhost:11434` when
+            # `OLLAMA_BASE_URL` isn't exported into the host process. Letting
+            # that localhost URL through would make the cloud verify hit the
+            # local daemon and fail with `Connection refused (Errno 61)`.
+            cloud_base_url = provider_default_base_url("ollama", "api_key")
             request = urllib_request.Request(
-                ollama_api_url(base_url, "tags", auth_mode="api_key"),
+                ollama_api_url(cloud_base_url, "tags", auth_mode="api_key"),
                 headers={
                     "Authorization": f"Bearer {secret}",
                     "User-Agent": "koda/control-plane",
@@ -1005,24 +1053,31 @@ def verify_provider_api_key(
                 details={"provider": "ollama"},
             )
 
-        query = urllib_parse.urlencode({"key": secret})
+        # Gemini API key auth: pass the credential via the `x-goog-api-key`
+        # header instead of a `?key=...` query string. Google explicitly
+        # recommends the header form because query strings end up in proxy
+        # access logs, browser history and Referer headers — leaking the key.
+        # See https://ai.google.dev/gemini-api/docs/api-key.
         request = urllib_request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models?{query}",
-            headers={"User-Agent": "koda/control-plane"},
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={
+                "x-goog-api-key": secret,
+                "User-Agent": "koda/control-plane",
+            },
         )
         with urllib_request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        account_label = "Google AI Studio"
-        if project_id.strip():
-            account_label = f"{account_label} · {project_id.strip()}"
+        # Gemini API key auth does not require a GCP project — that's only
+        # needed for Vertex AI. Keep the label provider-neutral.
+        del project_id
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="api_key",
             verified=bool(payload),
-            account_label=account_label,
+            account_label="Google AI Studio",
             plan_label="Gemini API key",
             checked_via="api_key",
-            details={"project_id": project_id},
+            details={},
         )
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
@@ -1104,6 +1159,97 @@ def _verify_claude_local_cli(
         )
 
 
+def _verify_openai_compatible_local_connection(
+    provider_id: ProviderId,
+    *,
+    base_url: str = "",
+) -> ProviderVerificationResult:
+    """Probe a local OpenAI-compatible server (``llama-server`` / ``mlx-openai-server``).
+
+    Hits ``/v1/models`` without an Authorization header — the same path the
+    runner uses at request time, keeping verify and runtime aligned.
+    """
+    profile = _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES.get(str(provider_id))
+    if profile is None:
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="local",
+            verified=False,
+            last_error=f"Provider {provider_id} não suporta verificação OpenAI-compatible local.",
+            checked_via="local_probe",
+            details={},
+        )
+    effective_base = base_url.strip() or str(profile.get("default_base_url") or "").strip()
+    if not effective_base:
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="local",
+            verified=False,
+            last_error="Base URL ausente.",
+            checked_via="local_probe",
+            details={},
+        )
+    verify_url = effective_base.rstrip("/") + str(profile.get("models_path") or "/v1/models")
+    request = urllib_request.Request(
+        verify_url,
+        headers={"Accept": "application/json", "User-Agent": "koda/control-plane"},
+        method="GET",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=10) as response:
+            status = response.status
+            body = response.read().decode("utf-8", "replace")
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="local",
+            verified=False,
+            last_error=_short_http_error(exc.code, body),
+            checked_via="local_probe",
+            details={"http_status": exc.code, "base_url": effective_base},
+        )
+    except Exception as exc:
+        raw_error = str(exc)
+        lowered = raw_error.lower()
+        hints: list[str] = []
+        if any(marker in lowered for marker in ("connection refused", "timed out", "[errno 111]")):
+            if provider_id == "llamacpp":
+                hints.append(
+                    "Start llama-server first: brew install llama.cpp && "
+                    "llama-server -m <model.gguf> -ngl 99 --host 127.0.0.1 --port 8080"
+                )
+            else:
+                hints.append(
+                    "Start mlx-openai-server first: pip install mlx-lm && "
+                    "python -m mlx_lm.server --model <model> --host 127.0.0.1 --port 8000"
+                )
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="local",
+            verified=False,
+            last_error=" ".join([raw_error, *hints]) if hints else raw_error,
+            checked_via="local_probe",
+            details={"base_url": effective_base, "raw_error": raw_error},
+        )
+
+    payload: dict[str, Any] = {}
+    if body:
+        with suppress(json.JSONDecodeError):
+            decoded = json.loads(body)
+            if isinstance(decoded, dict):
+                payload = decoded
+    return ProviderVerificationResult(
+        provider_id=provider_id,
+        auth_mode="local",
+        verified=status < 400,
+        account_label=str(profile.get("account_label") or provider_id),
+        plan_label=str(profile.get("plan_label") or "Local Metal runtime"),
+        checked_via="local_probe",
+        details={"http_status": status, "base_url": effective_base, "models_payload": bool(payload)},
+    )
+
+
 def verify_provider_local_connection(
     provider_id: ProviderId,
     *,
@@ -1113,6 +1259,8 @@ def verify_provider_local_connection(
 ) -> ProviderVerificationResult:
     if provider_id == "claude":
         return _verify_claude_local_cli(base_env=base_env, work_dir=work_dir)
+    if provider_id in ("llamacpp", "mlx"):
+        return _verify_openai_compatible_local_connection(provider_id, base_url=base_url)
     if provider_id != "ollama":
         return ProviderVerificationResult(
             provider_id=provider_id,

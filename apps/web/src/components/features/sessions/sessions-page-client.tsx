@@ -718,7 +718,7 @@ function SessionsPageContent() {
             aria-label={t("chat.rail.close", { defaultValue: "Close" })}
             onClick={() => setMobileRailOpen(false)}
             className={cn(
-              "fixed inset-0 z-[48] cursor-default border-0 bg-[color:var(--overlay-backdrop-bg)] backdrop-blur-[6px] transition-opacity md:hidden",
+              "app-overlay-backdrop !z-[48] cursor-default border-0 md:hidden",
               mobileRailPresence.isVisible ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           />

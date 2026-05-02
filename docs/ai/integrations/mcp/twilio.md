@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Envie SMS, faça chamadas de voz e gerencie recursos de comunicação do Twilio incluindo messaging, chat e funções serverless.
+Send SMS, make voice calls, and manage Twilio communication resources including messaging, chat, and serverless functions.
 
 ## Connection profile
 
@@ -20,8 +20,9 @@ Envie SMS, faça chamadas de voz e gerencie recursos de comunicação do Twilio 
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `TWILIO_ACCOUNT_SID` | sim | text | Account SID |
-| `TWILIO_AUTH_TOKEN` | sim | password | Auth Token |
+| `TWILIO_ACCOUNT_SID` | sim | text | Account SID — Encontre no painel Twilio (formato AC...). |
+| `TWILIO_API_KEY` | sim | text | API Key SID — Crie em Console → Account → API keys & tokens (formato SK...). |
+| `TWILIO_API_SECRET` | sim | password | API Secret — Mostrado apenas uma vez ao criar a API Key. |
 
 
 ## Runtime constraints
@@ -34,10 +35,10 @@ Nenhuma restrição de runtime aplicável a esta integração.
 |---|---|---|
 | `sendSms` | write | Enviar mensagem SMS |
 | `makeCall` | write | Iniciar chamada de voz |
-| `listMessages` | read | Listar mensagens enviadas/recebidas |
-| `getAccount` | read | Informações da conta Twilio |
-| `listPhoneNumbers` | read | Listar números de telefone |
-| `createMessagingService` | write | Criar serviço de messaging |
+| `listMessages` | read | List sent/received messages |
+| `getAccount` | read | Twilio account information |
+| `listPhoneNumbers` | read | List phone numbers |
+| `createMessagingService` | write | Create messaging service |
 
 ## Como o agente usa bem
 

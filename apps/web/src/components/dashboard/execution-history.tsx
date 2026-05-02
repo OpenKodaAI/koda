@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import type { AgentStats, Task } from "@/lib/types";
 import { truncateText } from "@/lib/utils";
@@ -157,12 +157,11 @@ function ExecutionHistoryComponent({
             >
               {/* Column 1: agent identity */}
               <div className="flex min-w-0 items-center gap-3">
-                <AgentGlyph
+                <AgentSigil
                   agentId={agent.id}
+                  label={agent.label}
                   color={agent.color}
-                  variant="list"
-                  shape="swatch"
-                  className="h-6 w-6 shrink-0"
+                  size="xs"
                 />
                 <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
                   {agent.label}

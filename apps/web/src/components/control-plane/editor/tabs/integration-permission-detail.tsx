@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2, RefreshCw, Settings } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowLeft, Check, Loader2, RefreshCw } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { ConnectIntegrationModal } from "./integrations/connect-integration-modal";
 import {
-  renderIntegrationLogo,
   getIntegrationAccent,
+  renderIntegrationLogo,
 } from "@/components/control-plane/system/integrations/integration-logos";
 import {
   ToolGroupSection,
@@ -23,46 +23,13 @@ import type {
   AgentIntegrationEntry,
   IntegrationGrantValue,
 } from "@/hooks/use-agent-integration-permissions";
-import type { McpOAuthStatus } from "@/lib/control-plane";
+import type {
+  McpCapabilityKind,
+  McpCapabilityPolicy,
+  McpOAuthStatus,
+} from "@/lib/control-plane";
 import { INTEGRATION_CATALOG } from "@/components/control-plane/system/integrations/integration-catalog-data";
 import { cn } from "@/lib/utils";
-
-/* ------------------------------------------------------------------ */
-/*  GrantSwitch (compact animated toggle)                              */
-/* ------------------------------------------------------------------ */
-
-function GrantSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      className="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
-      style={{
-        backgroundColor: checked
-          ? "var(--tone-success-bg-strong)"
-          : "var(--field-bg)",
-      }}
-    >
-      <motion.span
-        className="inline-block h-5 w-5 rounded-full bg-[var(--text-primary)] shadow-sm"
-        style={{ marginTop: 2 }}
-        animate={{ x: checked ? 22 : 2 }}
-        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-      />
-    </button>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -71,7 +38,6 @@ function GrantSwitch({
 export type IntegrationPermissionDetailProps = {
   entry: AgentIntegrationEntry;
   onBack: () => void;
-  onToggleEnabled: (enabled: boolean) => void;
   onGrantConfigChange?: (patch: Partial<IntegrationGrantValue>) => void;
   onConnectCore?: () => void;
   onImportDefault?: () => void;
@@ -79,12 +45,21 @@ export type IntegrationPermissionDetailProps = {
   canImportDefault?: boolean;
   onConnectOAuth?: () => void;
   onConnectManual?: () => void;
+  onConnectInline?: (envValues: Record<string, string>) => Promise<void>;
+  onConnectViaJson?: (rawJson: string) => Promise<void>;
   oauthSupported?: boolean;
   oauthStatus?: McpOAuthStatus;
   isOAuthLoading?: boolean;
   onDisconnect?: () => void;
   onToolPolicyChange: (toolId: string, policy: ToolPolicy) => void;
   onGroupPolicyChange: (group: string, policy: ToolPolicy) => void;
+  onCapabilityPolicyChange?: (
+    kind: McpCapabilityKind,
+    name: string,
+    policy: McpCapabilityPolicy,
+    options?: { exposureMode?: "context" | "tool" | "auto" },
+  ) => void;
+  onRemoveCustomServer?: () => void;
   onDiscoverTools?: () => void;
   isDiscovering?: boolean;
   sharedEnvOptions?: CompactGrantOption[];
@@ -97,12 +72,13 @@ export type IntegrationPermissionDetailProps = {
 
 function buildMcpToolItems(
   entry: AgentIntegrationEntry,
-): { readOnly: ToolItem[]; interactive: ToolItem[] } {
+): { readOnly: ToolItem[]; interactive: ToolItem[]; destructive: ToolItem[] } {
   const tools = entry.mcpTools ?? [];
   const policies = entry.mcpPolicies ?? {};
 
   const readOnly: ToolItem[] = [];
   const interactive: ToolItem[] = [];
+  const destructive: ToolItem[] = [];
 
   for (const tool of tools) {
     const item: ToolItem = {
@@ -112,14 +88,43 @@ function buildMcpToolItems(
       policy: (policies[tool.name] as ToolPolicy) || "always_ask",
     };
 
-    if (tool.annotations?.read_only_hint === true) {
+    if (tool.annotations?.destructive_hint === true) {
+      destructive.push(item);
+    } else if (tool.annotations?.read_only_hint === true) {
       readOnly.push(item);
     } else {
       interactive.push(item);
     }
   }
 
-  return { readOnly, interactive };
+  return { readOnly, interactive, destructive };
+}
+
+function buildMcpResourceItems(entry: AgentIntegrationEntry): ToolItem[] {
+  const resources = entry.mcpResources ?? [];
+  const policies = entry.mcpResourcePolicies ?? {};
+  return resources.map((resource) => ({
+    id: resource.uri,
+    label: resource.name || resource.uri,
+    description: [resource.description, resource.mime_type].filter(Boolean).join(" · ") || resource.uri,
+    policy: (policies[resource.uri] as ToolPolicy) || "always_ask",
+  }));
+}
+
+function buildMcpPromptItems(entry: AgentIntegrationEntry): ToolItem[] {
+  const prompts = entry.mcpPrompts ?? [];
+  const policies = entry.mcpPromptPolicies ?? {};
+  return prompts.map((prompt) => {
+    const argsLabel = prompt.arguments?.length
+      ? ` · ${prompt.arguments.length} argumento(s)`
+      : "";
+    return {
+      id: prompt.name,
+      label: prompt.name,
+      description: (prompt.description || "") + argsLabel,
+      policy: (policies[prompt.name] as ToolPolicy) || "always_ask",
+    };
+  });
 }
 
 function buildCoreToolItems(entry: AgentIntegrationEntry): ToolItem[] {
@@ -162,16 +167,6 @@ function computeGroupPolicy(tools: ToolItem[]): GroupPolicy {
 }
 
 
-function describeCoreSourceOrigin(
-  value: string | null | undefined,
-  tl: (text: string, vars?: Record<string, string | number>) => string,
-) {
-  if (value === "imported_default") return tl("Padrão importado do sistema");
-  if (value === "local_session") return tl("Sessão local desta máquina");
-  if (value === "system_default") return tl("Padrão do sistema");
-  return tl("Binding próprio do agente");
-}
-
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -179,29 +174,31 @@ function describeCoreSourceOrigin(
 export function IntegrationPermissionDetail({
   entry,
   onBack,
-  onToggleEnabled,
   onGrantConfigChange,
   onConnectCore,
   onImportDefault,
   onDisconnectCore,
   canImportDefault = false,
   onConnectOAuth,
-  onConnectManual,
+  onConnectInline,
+  onConnectViaJson,
   oauthSupported,
   oauthStatus,
   isOAuthLoading,
   onDisconnect,
   onToolPolicyChange,
   onGroupPolicyChange,
+  onCapabilityPolicyChange,
+  onRemoveCustomServer,
   onDiscoverTools,
   isDiscovering = false,
   sharedEnvOptions = [],
   secretOptions = [],
 }: IntegrationPermissionDetailProps) {
   const { tl } = useAppI18n();
-  const accent = getIntegrationAccent(entry.logoKey);
   const [evaluatedAt, setEvaluatedAt] = useState(() => Date.now());
   const coreGrant = entry.kind === "core" ? entry.coreGrant ?? {} : null;
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -267,11 +264,26 @@ export function IntegrationPermissionDetail({
 
       {/* 2. Header */}
       <div className="flex items-center gap-4">
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-xl"
-          style={{ backgroundColor: `${accent.from}18` }}
-        >
-          {renderIntegrationLogo(entry.logoKey, "h-6 w-6")}
+        <div className="relative">
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-xl"
+            style={{
+              backgroundColor: `${getIntegrationAccent(entry.logoKey).from}1F`,
+            }}
+          >
+            {renderIntegrationLogo(entry.logoKey, "h-6 w-6")}
+          </div>
+          {/* Connected check — mirrors the listing card's success indicator
+              and sits in the bottom-right of the logo block. */}
+          {(entry.kind === "mcp" && entry.mcpConnection) ||
+          (entry.kind === "core" && entry.coreConnection?.connected) ? (
+            <span
+              aria-label={tl("Conectado")}
+              className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)] shadow-[0_0_0_2px_var(--canvas)]"
+            >
+              <Check size={12} strokeWidth={2.5} />
+            </span>
+          ) : null}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -285,21 +297,67 @@ export function IntegrationPermissionDetail({
           </div>
         </div>
 
-        {/* Toggle / Disconnect */}
-        {entry.kind === "core" ? (
-          <GrantSwitch
-            checked={entry.coreGrant?.enabled === true}
-            onChange={onToggleEnabled}
-          />
-        ) : entry.mcpConnection ? (
+        {/* Single primary action: Conectar (OAuth or form-submit) / Desconectar */}
+        {entry.kind === "mcp" ? (
+          entry.mcpConnection ? (
+            <button
+              type="button"
+              onClick={onDisconnect}
+              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
+            >
+              {tl("Desconectar")}
+            </button>
+          ) : oauthSupported && onConnectOAuth ? (
+            <button
+              type="button"
+              onClick={onConnectOAuth}
+              disabled={isOAuthLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all disabled:opacity-60"
+              style={{
+                background:
+                  "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
+                border: "1px solid var(--interactive-active-border)",
+              }}
+            >
+              {isOAuthLoading ? <Loader2 size={11} className="animate-spin" /> : null}
+              {tl("Conectar")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConnectModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
+              style={{
+                background:
+                  "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
+                border: "1px solid var(--interactive-active-border)",
+              }}
+            >
+              {tl("Conectar")}
+            </button>
+          )
+        ) : entry.coreConnection?.connected ? (
           <button
             type="button"
-            onClick={onDisconnect}
-            className="rounded-xl border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors"
+            onClick={onDisconnectCore}
+            className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
             {tl("Desconectar")}
           </button>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConnectModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
+            style={{
+              background:
+                "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
+              border: "1px solid var(--interactive-active-border)",
+            }}
+          >
+            {tl("Conectar")}
+          </button>
+        )}
       </div>
 
       {/* 3. Description */}
@@ -338,109 +396,86 @@ export function IntegrationPermissionDetail({
       )}
 
       {entry.kind === "mcp" && entry.mcpConnection && (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3">
+        <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
             <span>
-              {tl("Tools")}: {entry.mcpSummary?.total ?? entry.mcpTools?.length ?? 0}
+              {entry.mcpCapabilitySummary?.tool_count ?? entry.mcpSummary?.total ?? entry.mcpTools?.length ?? 0} tools
             </span>
-            {entry.mcpLastDiscoveredAt && (
-              <span>
-                {tl("Ultima discovery")}: {new Date(entry.mcpLastDiscoveredAt).toLocaleString()}
-              </span>
-            )}
-            {entry.mcpDiff && (
-              <span>
-                {tl("Diff")}: +{entry.mcpDiff.added.length} / ~{entry.mcpDiff.changed.length} / -{entry.mcpDiff.removed.length}
-              </span>
-            )}
+            <span>
+              {entry.mcpCapabilitySummary?.resource_count ?? entry.mcpResources?.length ?? 0} resources
+            </span>
+            <span>
+              {entry.mcpCapabilitySummary?.prompt_count ?? entry.mcpPrompts?.length ?? 0} prompts
+            </span>
+            {onDiscoverTools ? (
+              <button
+                type="button"
+                onClick={onDiscoverTools}
+                disabled={isDiscovering}
+                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
+              >
+                <RefreshCw size={11} className={isDiscovering ? "animate-spin" : ""} />
+                {tl("Re-descobrir")}
+              </button>
+            ) : null}
+            {entry.isCustom && onRemoveCustomServer ? (
+              <button
+                type="button"
+                onClick={onRemoveCustomServer}
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[11px] text-[var(--tone-danger-text)] transition-colors hover:bg-[var(--tone-danger-bg-strong)]"
+              >
+                {tl("Remover")}
+              </button>
+            ) : null}
           </div>
+          {entry.mcpDiscoveryError ? (
+            <p className="text-[11px] font-medium text-[var(--tone-danger-dot)]">{entry.mcpDiscoveryError}</p>
+          ) : null}
         </div>
       )}
 
       {entry.kind === "core" && (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
-                {tl("Conexão do agente")}
+        <div className="flex flex-col gap-2">
+          {coreConnection?.connected ? (
+            <>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
+                {coreConnection?.auth_method ? <span>{coreConnection.auth_method}</span> : null}
+                {coreConnection?.account_label ? <span>{coreConnection.account_label}</span> : null}
+                {coreConnection?.last_verified_at ? (
+                  <span>{new Date(coreConnection.last_verified_at).toLocaleString()}</span>
+                ) : null}
+                {canImportDefault ? (
+                  <button
+                    type="button"
+                    onClick={onImportDefault}
+                    className="ml-auto rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                  >
+                    {tl("Importar padrão")}
+                  </button>
+                ) : null}
+                {onConnectCore ? (
+                  <button
+                    type="button"
+                    onClick={onConnectCore}
+                    className="rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                  >
+                    {tl("Editar")}
+                  </button>
+                ) : null}
               </div>
-              <div className="text-sm text-[var(--text-secondary)]">
-                {coreConnection?.connected
-                  ? tl("Este agente já possui um binding próprio para essa integração.")
-                  : tl("Sem binding ativo. O agente não usa credenciais implícitas do host.")}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {canImportDefault ? (
-                <button
-                  type="button"
-                  onClick={onImportDefault}
-                  className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
-                >
-                  {tl("Importar padrão")}
-                </button>
-              ) : null}
-              {onConnectCore ? (
-                <button
-                  type="button"
-                  onClick={onConnectCore}
-                  className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
-                >
-                  {coreConnection?.connected ? tl("Editar conexão") : tl("Conectar")}
-                </button>
-              ) : null}
-              {coreConnection?.connected && onDisconnectCore ? (
-                <button
-                  type="button"
-                  onClick={onDisconnectCore}
-                  className="rounded-lg border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-1.5 text-xs font-medium text-[var(--tone-danger-text)] transition-colors hover:bg-[var(--tone-danger-bg-strong)]"
-                >
-                  {tl("Desconectar")}
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
-            <span>
-              {tl("Origem")}: {coreConnection?.connected ? describeCoreSourceOrigin(coreConnection?.source_origin, tl) : tl("Sem binding ativo")}
-            </span>
-            {coreConnection?.auth_method ? (
-              <span>
-                {tl("Auth")}: {coreConnection.auth_method}
-              </span>
-            ) : null}
-            {coreConnection?.account_label ? (
-              <span>
-                {tl("Conta")}: {coreConnection.account_label}
-              </span>
-            ) : null}
-            {coreConnection?.last_verified_at ? (
-              <span>
-                {tl("Última verificação")}: {new Date(coreConnection.last_verified_at).toLocaleString()}
-              </span>
-            ) : null}
-            {coreConnection?.expires_at ? (
-              <span>
-                {tl("Expira em")}: {new Date(coreConnection.expires_at).toLocaleString()}
-              </span>
-            ) : null}
-          </div>
+            </>
+          ) : null}
 
           {!coreConnection?.connected && coreDefaultConnection?.connected ? (
-            <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-              {tl("Existe um padrão do sistema disponível para importar com auth {{auth}}.", {
-                auth: coreDefaultConnection.auth_method || tl("manual"),
-              })}
-            </div>
+            <p className="text-xs text-[var(--text-tertiary)]">
+              {tl("Há um padrão do sistema disponível para importar.")}
+            </p>
           ) : null}
 
           {coreConnection?.last_error ? (
-            <div className="mt-3 rounded-lg border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-xs text-[var(--tone-warning-text)]">
-              {coreConnection.last_error}
-            </div>
+            <p className="text-xs text-[var(--tone-warning-text)]">{coreConnection.last_error}</p>
           ) : null}
+
         </div>
       )}
 
@@ -520,71 +555,6 @@ export function IntegrationPermissionDetail({
             </div>
           )}
 
-          {/* Not connected — show connect options */}
-          {!isDiscovering && !entry.mcpConnection && (
-            <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-6 flex flex-col items-center gap-3">
-              <p className="text-sm text-[var(--text-quaternary)]">
-                {tl("Conecte para descobrir e gerenciar ferramentas.")}
-              </p>
-              <div className="flex items-center gap-2">
-                {/* Primary: OAuth button (if supported) */}
-                {oauthSupported && onConnectOAuth && (
-                  <button
-                    type="button"
-                    onClick={onConnectOAuth}
-                    disabled={isOAuthLoading}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-xl",
-                      "bg-[var(--surface-elevated)] border border-[var(--border-strong)]",
-                      "px-4 py-2 text-sm font-medium text-[var(--text-primary)]",
-                      "transition-all hover:bg-[var(--surface-hover-strong)]",
-                      isOAuthLoading && "opacity-60 cursor-wait",
-                    )}
-                  >
-                    {isOAuthLoading ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : null}
-                    {tl("Conectar com {{provider}}", { provider: entry.label })}
-                  </button>
-                )}
-
-                {/* Secondary: Manual config (gear icon or text button) */}
-                {onConnectManual && (
-                  oauthSupported ? (
-                    /* Gear icon when OAuth is primary */
-                    <button
-                      type="button"
-                      onClick={onConnectManual}
-                      title={tl("Configuracao manual")}
-                      className={cn(
-                        "inline-flex items-center justify-center rounded-xl",
-                        "border border-[var(--border-subtle)] bg-transparent",
-                        "h-9 w-9 text-[var(--text-tertiary)]",
-                        "transition-all hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]",
-                      )}
-                    >
-                      <Settings size={16} />
-                    </button>
-                  ) : (
-                    /* Full button when no OAuth available */
-                    <button
-                      type="button"
-                      onClick={onConnectManual}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-xl",
-                        "border border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)]",
-                        "px-4 py-2 text-sm font-medium text-[var(--text-primary)]",
-                        "transition-all hover:border-[var(--border-strong)]",
-                      )}
-                    >
-                      {tl("Configurar conexao")}
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Tool groups rendered */}
           {!isDiscovering && hasMcpTools && mcpGroups && (
             <div className="flex flex-col gap-2">
@@ -614,7 +584,58 @@ export function IntegrationPermissionDetail({
                   defaultExpanded
                 />
               )}
+              {mcpGroups.destructive.length > 0 && (
+                <ToolGroupSection
+                  label="Ferramentas destrutivas"
+                  count={mcpGroups.destructive.length}
+                  tools={mcpGroups.destructive}
+                  groupPolicy={computeGroupPolicy(mcpGroups.destructive)}
+                  onGroupPolicyChange={(policy) =>
+                    onGroupPolicyChange("destructive", policy)
+                  }
+                  onToolPolicyChange={onToolPolicyChange}
+                  defaultExpanded
+                />
+              )}
             </div>
+          )}
+
+          {/* Resources */}
+          {!isDiscovering && (entry.mcpResources?.length ?? 0) > 0 && (
+            <ToolGroupSection
+              label="Resources"
+              count={entry.mcpResources?.length ?? 0}
+              tools={buildMcpResourceItems(entry)}
+              groupPolicy={computeGroupPolicy(buildMcpResourceItems(entry))}
+              onGroupPolicyChange={(policy) =>
+                (entry.mcpResources ?? []).forEach((r) =>
+                  onCapabilityPolicyChange?.("resource", r.uri, policy as McpCapabilityPolicy),
+                )
+              }
+              onToolPolicyChange={(uri, policy) =>
+                onCapabilityPolicyChange?.("resource", uri, policy as McpCapabilityPolicy)
+              }
+              defaultExpanded={false}
+            />
+          )}
+
+          {/* Prompts */}
+          {!isDiscovering && (entry.mcpPrompts?.length ?? 0) > 0 && (
+            <ToolGroupSection
+              label="Prompts"
+              count={entry.mcpPrompts?.length ?? 0}
+              tools={buildMcpPromptItems(entry)}
+              groupPolicy={computeGroupPolicy(buildMcpPromptItems(entry))}
+              onGroupPolicyChange={(policy) =>
+                (entry.mcpPrompts ?? []).forEach((p) =>
+                  onCapabilityPolicyChange?.("prompt", p.name, policy as McpCapabilityPolicy),
+                )
+              }
+              onToolPolicyChange={(name, policy) =>
+                onCapabilityPolicyChange?.("prompt", name, policy as McpCapabilityPolicy)
+              }
+              defaultExpanded={false}
+            />
           )}
         </>
       )}
@@ -645,6 +666,19 @@ export function IntegrationPermissionDetail({
           )}
         </>
       )}
+
+      {/* Connect modal — opened by the "Conectar" header button when the
+          integration is not yet connected and OAuth is not the path. */}
+      {onConnectInline ? (
+        <ConnectIntegrationModal
+          open={connectModalOpen}
+          entry={entry}
+          oauthStatus={oauthStatus}
+          onSubmitForm={onConnectInline}
+          onSubmitJson={onConnectViaJson}
+          onClose={() => setConnectModalOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

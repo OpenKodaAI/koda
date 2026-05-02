@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ActivityHeatmap } from "@/components/dashboard/activity-heatmap";
+import { SetupChecklistCard } from "@/components/dashboard/setup-checklist-card";
 import { CommandBar } from "@/components/command-bar/command-bar";
 import type { CommandBarContext } from "@/components/command-bar/command-registry";
 import {
@@ -22,6 +23,7 @@ import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDailyActivity } from "@/hooks/use-daily-activity";
+import { useSetupChecklist } from "@/hooks/use-setup-checklist";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAgentStats } from "@/hooks/use-agent-stats";
 import { resolveAgentSelection } from "@/lib/agent-selection";
@@ -100,6 +102,7 @@ function OverviewPageContent() {
     stats: allStats,
     loading,
   } = useAgentStats();
+  const { snapshot: setupChecklistSnapshot } = useSetupChecklist();
 
   const modalBotId = useMemo(() => {
     const agent = searchParams.get("agent");
@@ -472,7 +475,7 @@ function OverviewPageContent() {
         id: "new-schedule",
         label: t("overview.composer.actions.newSchedule"),
         icon: CalendarPlus,
-        onSelect: () => router.push("/schedules"),
+        onSelect: () => router.push("/routines/schedules"),
       },
       {
         id: "new-agent",
@@ -572,6 +575,7 @@ function OverviewPageContent() {
         </section>
 
         <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-6 pt-6">
+          <SetupChecklistCard snapshot={setupChecklistSnapshot} />
           <div className="w-full" {...tourAnchor("overview.activity")}>
             <ActivityHeatmap
               data={dailyActivity}

@@ -7,6 +7,7 @@ import { SettingsSectionShell } from "@/components/control-plane/system/settings
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { ToggleField } from "@/components/control-plane/shared/toggle-field";
+import { EmbeddingModelPicker } from "@/components/control-plane/system/sections/embedding-model-picker";
 import {
   Select,
   SelectContent,
@@ -148,6 +149,16 @@ export function SectionIntelligence() {
           checked={mk.proactive_enabled}
           onChange={(next) => update({ proactive_enabled: next })}
         />
+
+        <FieldShell
+          label={tl("Modelo de embedding")}
+          description={tl(
+            "O modelo usado para indexar memórias, knowledge base e cache semântico. " +
+              "Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.",
+          )}
+        >
+          <EmbeddingModelPicker memoryEnabled={mk.memory_enabled} />
+        </FieldShell>
       </SettingsFieldGroup>
 
       {/* ── Knowledge ───────────────────────────────────────────────────── */}

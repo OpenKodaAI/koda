@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Realize buscas na web, notícias, imagens e vídeos usando a API do Brave Search com foco em privacidade.
+Search the web, news, images, and videos using the Brave Search API with a privacy-first focus.
 
 ## Connection profile
 
@@ -31,12 +31,12 @@ Nenhuma restrição de runtime aplicável a esta integração.
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `brave_web_search` | read | Busca geral na web |
-| `brave_local_search` | read | Busca de negócios locais |
-| `brave_news_search` | read | Notícias recentes |
-| `brave_image_search` | read | Busca de imagens |
-| `brave_video_search` | read | Busca de vídeos |
-| `brave_summarizer` | read | Resumo de resultados gerado por IA |
+| `brave_web_search` | read | General web search |
+| `brave_local_search` | read | Local business search |
+| `brave_news_search` | read | Recent news |
+| `brave_image_search` | read | Image search |
+| `brave_video_search` | read | Video search |
+| `brave_summarizer` | read | AI-generated results summary |
 
 ## Como o agente usa bem
 

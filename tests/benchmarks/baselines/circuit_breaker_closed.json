@@ -1,0 +1,6 @@
+{
+  "operation": "CircuitBreaker.run wrapping a no-op coroutine while the breaker is closed",
+  "measured_ns_authoring": 859,
+  "max_ns": 5000,
+  "rationale": "Async passthrough through the breaker (lock acquire + dict lookup + await fn). Measured 859ns. Baseline 5000ns catches accidental locking changes that would 5x the cost."
+}

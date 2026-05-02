@@ -749,7 +749,7 @@ class TestBudgetThreeLevelMerge:
         planner = PromptBudgetPlanner(context_window=200_000)
         result = planner.compile(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             segments=segments,
         )
 
@@ -799,7 +799,7 @@ class TestBudgetThreeLevelMerge:
         planner = PromptBudgetPlanner(context_window=8_000)
         result = planner.compile(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             segments=segments,
         )
 

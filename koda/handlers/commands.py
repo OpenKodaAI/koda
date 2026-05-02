@@ -19,7 +19,6 @@ from koda.config import (
     AVAILABLE_AGENT_MODES,
     AVAILABLE_MODELS,
     AVAILABLE_PROVIDERS,
-    BLOCKED_SHELL_PATTERN,
     GIT_META_CHARS,
     KNOWLEDGE_ADMIN_USER_IDS,
     MAX_BUDGET_USD,
@@ -963,7 +962,9 @@ async def cmd_shell(update: Update, context: BotContext) -> None:
         await update.message.reply_text("Usage: /shell <command>")
         return
 
-    if BLOCKED_SHELL_PATTERN.search(command):
+    from koda.services.blocked_patterns import is_blocked_shell
+
+    if is_blocked_shell(command):
         await update.message.reply_text("Blocked: this command is not allowed for safety reasons.")
         return
 

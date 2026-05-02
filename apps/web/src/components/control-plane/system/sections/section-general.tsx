@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TimezonePicker } from "@/components/ui/timezone-picker";
 import { sourceBadgeLabel, sourceBadgeTone } from "@/lib/system-settings-model";
 import { findFieldError } from "@/lib/system-settings-schema";
 import type { GeneralSystemSettingsValueSource } from "@/lib/control-plane";
@@ -70,47 +71,51 @@ export function SectionGeneral() {
       description="settings.sections.general.description"
     >
       <SettingsFieldGroup title={tl("Regional")}>
-        <FieldWithBadge badgeKey="account.scheduler_default_timezone" sourceBadges={sourceBadges}>
-          <FieldShell
-            label="Timezone"
-            description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
-            error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
-          >
-            <input
-              className="field-shell text-[var(--text-primary)]"
-              value={account.scheduler_default_timezone}
-              onChange={(e) => update({ scheduler_default_timezone: e.target.value })}
-              placeholder="Ex.: America/Sao_Paulo"
-              readOnly={isEnvSourced("account.scheduler_default_timezone")}
-              title={isEnvSourced("account.scheduler_default_timezone") ? "Set via environment variable" : undefined}
-            />
-          </FieldShell>
-        </FieldWithBadge>
-
-        <FieldWithBadge badgeKey="account.time_format" sourceBadges={sourceBadges}>
-          <FieldShell
-            label="Formato de hora"
-            description="Define como os horários são exibidos na interface e nos relatórios."
-            error={findFieldError(errors, "account.time_format")?.message}
-          >
-            <Select
-              value={(account as Record<string, unknown>).time_format as string ?? "24h"}
-              onValueChange={(v) => update({ time_format: v } as Partial<typeof account>)}
-              disabled={isEnvSourced("account.time_format")}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FieldWithBadge badgeKey="account.scheduler_default_timezone" sourceBadges={sourceBadges}>
+            <FieldShell
+              label="Timezone"
+              description="Fuso horário aplicado aos agendamentos e à operação global do sistema."
+              error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
             >
-              <SelectTrigger
+              <TimezonePicker
+                value={account.scheduler_default_timezone}
+                onValueChange={(v) => update({ scheduler_default_timezone: v })}
+                disabled={isEnvSourced("account.scheduler_default_timezone")}
+                title={
+                  isEnvSourced("account.scheduler_default_timezone") ? "Set via environment variable" : undefined
+                }
+                placeholder="Selecionar fuso horário…"
+                searchPlaceholder="Buscar fuso horário"
+                emptyLabel="Nenhum fuso encontrado"
+              />
+            </FieldShell>
+          </FieldWithBadge>
 
-                title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
+          <FieldWithBadge badgeKey="account.time_format" sourceBadges={sourceBadges}>
+            <FieldShell
+              label="Formato de hora"
+              description="Define como os horários são exibidos na interface e nos relatórios."
+              error={findFieldError(errors, "account.time_format")?.message}
+            >
+              <Select
+                value={((account as Record<string, unknown>).time_format as string) ?? "24h"}
+                onValueChange={(v) => update({ time_format: v } as Partial<typeof account>)}
+                disabled={isEnvSourced("account.time_format")}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="24h">24 horas (14:30)</SelectItem>
-                <SelectItem value="12h">12 horas (2:30 PM)</SelectItem>
-              </SelectContent>
-            </Select>
-          </FieldShell>
-        </FieldWithBadge>
+                <SelectTrigger
+                  title={isEnvSourced("account.time_format") ? "Set via environment variable" : undefined}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="24h">24 horas (14:30)</SelectItem>
+                  <SelectItem value="12h">12 horas (2:30 PM)</SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldShell>
+          </FieldWithBadge>
+        </div>
       </SettingsFieldGroup>
     </SettingsSectionShell>
   );

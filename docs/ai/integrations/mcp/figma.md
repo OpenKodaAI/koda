@@ -36,9 +36,9 @@ Nenhuma restrição de runtime aplicável a esta integração.
 | `getComponentInfo` | read | Detalhes e propriedades de componentes |
 | `downloadImages` | read | Exportar assets de design |
 | `getVariables` | read | Extrair design tokens |
-| `getStyles` | read | Recuperar estilos do design system |
-| `analyzeComponents` | read | Análise de componentes para code generation |
-| `extractAssets` | read | Exportar todos os assets do arquivo |
+| `getStyles` | read | Retrieve design system styles |
+| `analyzeComponents` | read | Component analysis for code generation |
+| `extractAssets` | read | Export all assets from the file |
 
 ## Como o agente usa bem
 

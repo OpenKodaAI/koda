@@ -247,6 +247,28 @@ class ScriptManager:
                 )
             )
         matches.sort(key=lambda item: (-item.similarity, -item.quality_score, -item.use_count, item.title.lower()))
+        # Cross-encoder reranker refines top-K ordering when enabled. Quality
+        # and use_count tie-breakers are preserved for the tail; the reranker
+        # only re-orders the top candidates by genuine query relevance.
+        if len(matches) >= 2:
+            try:
+                from koda.services.reranker import rerank_top_k_indices
+
+                cand_texts = [
+                    self._search_text(
+                        title=m.title,
+                        description=m.description,
+                        language=m.language,
+                    )
+                    for m in matches[:max_results]
+                ]
+                new_order = rerank_top_k_indices(query, cand_texts, top_k=min(8, len(matches)))
+                if new_order is not None:
+                    head = [matches[i] for i in new_order]
+                    tail = matches[len(head) :]
+                    matches = head + tail
+            except Exception:  # noqa: BLE001 — reranker optional
+                pass
         return matches[:max_results]
 
     async def search(

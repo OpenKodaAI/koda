@@ -22,14 +22,21 @@ QWEN_PROFILE = ProviderHttpProfile(
     models_path="/compatible-mode/v1/models",
     first_chunk_timeout_seconds=float(QWEN_FIRST_CHUNK_TIMEOUT),
     request_timeout_seconds=float(QWEN_TIMEOUT),
+    # Vision-capable Qwen models declared in the catalog. The qwen3-vl-*
+    # variants were missing previously, which caused image inputs to be
+    # silently dropped before reaching DashScope.
     vision_models=frozenset(
         {
+            "qwen3-vl-max",
+            "qwen3-vl-plus",
+            "qwen3-vl-flash",
             "qwen-vl-max",
             "qwen-vl-max-latest",
             "qwen-vl-plus",
             "qwen-vl-plus-latest",
             "qwen2-vl-72b-instruct",
             "qwen2.5-vl-72b-instruct",
+            "qvq-72b-preview",
         }
     ),
 )

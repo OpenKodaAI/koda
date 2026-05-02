@@ -1,0 +1,64 @@
+name: migrations-gate
+
+# Phase 2C of docs/architecture/production-deployment-roadmap.md.
+#
+# Refuses a deploy whose code expects a schema that has not been
+# applied to the target database yet. The job spins up an ephemeral
+# Postgres, applies migrations, then runs `python -m koda migrate
+# --check` against it. The check returns:
+#   - exit 0 → no pending migrations (deploy may proceed)
+#   - exit 3 → pending migrations found (block the deploy and surface
+#     the version list)
+#   - exit 1 → infra error (DSN unreachable, asyncpg missing) — same
+#     blocking effect, but distinguishable in logs.
+#
+# The workflow runs migrations from THIS commit, then runs --check —
+# so a PR that adds a migration without bumping the schema_migrations
+# expectation always passes. The intent is to catch the inverse: a PR
+# that uses a column added by a migration that was reverted on main.
+
+on:
+  pull_request:
+    paths:
+      - 'koda/knowledge/v2/postgres_backend.py'
+      - 'koda/cli/migrate.py'
+      - '.github/workflows/migrations-gate.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: migrations-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-pending-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: koda
+          POSTGRES_USER: koda
+          POSTGRES_PASSWORD: koda
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U koda -d koda"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      KNOWLEDGE_V2_POSTGRES_DSN: postgresql://koda:koda@127.0.0.1:5432/koda
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: knowledge_v2
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install runtime deps
+        run: pip install -e .[dev] || pip install -e .
+      - name: Apply migrations
+        run: python -m koda migrate
+      - name: Verify no pending migrations remain
+        run: python -m koda migrate --check

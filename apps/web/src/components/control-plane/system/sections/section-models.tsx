@@ -15,8 +15,33 @@ import {
   Link2,
   RefreshCcw,
   Server,
+  Trash2,
   Unplug,
 } from "lucide-react";
+
+/**
+ * Official Apple logo silhouette (the bitten-apple mark) rendered as a
+ * monochrome glyph that inherits color from the surrounding text via
+ * ``currentColor``. Used as the visual anchor for the Metal/Apple Silicon
+ * acceleration toggle. Path is the canonical Apple Inc. logo silhouette
+ * commonly bundled in icon sets — the lucide ``Apple`` icon is a generic
+ * apple shape (with a stem and leaf) and would not communicate the Apple
+ * brand context this toggle requires.
+ */
+function AppleLogo({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M17.543 12.823c-.027-2.726 2.225-4.034 2.327-4.097-1.27-1.857-3.245-2.111-3.945-2.139-1.68-.17-3.281 .988-4.135 .988-.854 0-2.166-.964-3.564-.937-1.832 .027-3.524 1.066-4.464 2.708-1.904 3.301-.485 8.179 1.366 10.853 .908 1.31 1.985 2.78 3.398 2.726 1.367-.054 1.881-.882 3.535-.882 1.654 0 2.117 .882 3.557 .855 1.469-.027 2.4-1.337 3.298-2.65 1.04-1.526 1.469-3.005 1.495-3.082-.033-.014-2.844-1.092-2.868-4.343zM14.79 4.967c.755-.916 1.265-2.187 1.126-3.456-1.087 .045-2.408 .726-3.19 1.642-.7 .811-1.314 2.106-1.149 3.348 1.213 .094 2.46-.616 3.213-1.534z" />
+    </svg>
+  );
+}
 import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -33,6 +58,7 @@ import {
 } from "@/components/ui/select";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
+import { AnimatedSwitch } from "@/components/control-plane/system/shared/animated-switch";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
@@ -44,6 +70,16 @@ import { cn } from "@/lib/utils";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Format byte counts into human-readable suffixes (B / KB / MB / GB). */
+export function formatAssetBytes(bytes: number | null | undefined): string {
+  const value = Number(bytes ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)} GB`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} MB`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(0)} KB`;
+  return `${Math.round(value)} B`;
+}
 
 export function providerLabel(providerId: string) {
   if (providerId === "claude") return "Anthropic";
@@ -59,68 +95,28 @@ export function providerLabel(providerId: string) {
   return providerId;
 }
 
-export const PROVIDER_LOGOS: Record<string, string> = {
-  claude: "/providers/anthropic.svg",
-  codex: "/providers/openai.svg",
-  gemini: "/providers/google.svg",
-  elevenlabs: "/providers/elevenlabs.svg",
-  ollama: "/providers/ollama.svg",
-  sora: "/providers/sora.png",
-  perplexity: "/providers/perplexity.svg",
-  mistral: "/providers/mistral.svg",
-  qwen: "/providers/qwen.svg",
-  kimi: "/providers/kimi.svg",
-  groq: "/providers/groq.svg",
-  deepseek: "/providers/deepseek.svg",
-  xai: "/providers/xai.svg",
+// Logos / accents / colors are centralized in `../shared/provider-brand`.
+// We import them here for in-file use and re-export so existing consumers
+// (`PROVIDER_ACCENTS`, `PROVIDER_LOGOS`, etc.) keep working without churn.
+import {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_ACCENTS,
+  MASKED_LOGO_PROVIDERS,
+  MONOCHROME_LOGO_PROVIDERS,
+  COLORED_BRAND_LOGO_PROVIDERS,
+  providerGlyphColor,
+} from "../../shared/provider-brand";
+
+export {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_ACCENTS,
+  MASKED_LOGO_PROVIDERS,
+  MONOCHROME_LOGO_PROVIDERS,
+  COLORED_BRAND_LOGO_PROVIDERS,
+  providerGlyphColor,
 };
-
-export const PROVIDER_ICON_COMPONENTS: Record<string, typeof Server> = {
-  kokoro: Server,
-};
-
-export const MASKED_LOGO_PROVIDERS = new Set(["gemini"]);
-
-export const MONOCHROME_LOGO_PROVIDERS = new Set([
-  "codex",
-  "elevenlabs",
-  "ollama",
-  "perplexity",
-  "mistral",
-  "qwen",
-  "kimi",
-  "groq",
-  "deepseek",
-  "xai",
-]);
-
-export const PROVIDER_ACCENTS: Record<string, string> = {
-  claude: "212 120 62",
-  codex: "16 163 127",
-  gemini: "86 138 248",
-  elevenlabs: "250 204 21",
-  ollama: "56 189 248",
-  sora: "236 72 153",
-  kokoro: "129 140 248",
-  perplexity: "32 178 170",
-  mistral: "248 119 6",
-  qwen: "97 84 219",
-  kimi: "0 113 208",
-  groq: "242 87 53",
-  deepseek: "76 99 230",
-  xai: "200 200 200",
-};
-
-export function providerGlyphColor(providerId: string, emphasized = false) {
-  if (MONOCHROME_LOGO_PROVIDERS.has(providerId)) {
-    return "rgb(255 255 255)";
-  }
-  if (!emphasized) {
-    return "rgb(255 255 255)";
-  }
-  const accent = PROVIDER_ACCENTS[providerId] || "255 255 255";
-  return `rgb(${accent})`;
-}
 
 export function providerOrder(category: string) {
   if (category === "general") return 0;
@@ -136,7 +132,6 @@ export function providerDescription(providerId: string, category: string) {
   if (providerId === "codex") return "OpenAI via API Key ou login oficial do Codex.";
   if (providerId === "gemini") return "Google via GEMINI_API_KEY ou login oficial do Gemini CLI.";
   if (providerId === "elevenlabs") return "Voz premium com API Key, idioma padrão e seleção de vozes.";
-  if (providerId === "sora") return "Provider de mídia com autenticação pela plataforma OpenAI.";
   if (providerId === "ollama") return "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.";
   if (providerId === "perplexity") {
     return "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.";
@@ -298,7 +293,14 @@ export function ProviderLogo({
 
   const logo = PROVIDER_LOGOS[providerId];
   if (logo) {
-    const renderAsMask = active || accented || MASKED_LOGO_PROVIDERS.has(providerId);
+    // Colored brand logos opt out of the mask-tint so their original palette
+    // shows through even when the card is active/accented. All other logos
+    // keep the existing behavior (tinted silhouette when active/accented or
+    // when explicitly opted into MASKED_LOGO_PROVIDERS).
+    const preserveBrandColors = COLORED_BRAND_LOGO_PROVIDERS.has(providerId);
+    const renderAsMask =
+      !preserveBrandColors &&
+      (active || accented || MASKED_LOGO_PROVIDERS.has(providerId));
     return (
       <div
         className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] transition-colors"
@@ -359,9 +361,19 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     loadElevenLabsVoices,
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
-    kokoroDownloadJobForVoice,
+    kokoroModelStatus,
+    whisperCatalog,
+    isDownloadingKokoroAsset,
+    isDownloadingWhisperVariant,
     loadKokoroVoices,
+    loadKokoroModelStatus,
+    loadWhisperCatalog,
     downloadKokoroVoice,
+    downloadKokoroModel,
+    downloadWhisperModel,
+    deleteKokoroModelAsset,
+    deleteKokoroVoiceAsset,
+    deleteWhisperVariantAsset,
     ollamaModelCatalog,
     ollamaModelsLoading,
     loadOllamaModels,
@@ -412,7 +424,8 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   const kokoroLanguage = draft.values.models.kokoro_default_language || "pt-br";
   const kokoroDefaultVoice = draft.values.models.kokoro_default_voice || "pf_dora";
   const kokoroDefaultVoiceLabel = draft.values.models.kokoro_default_voice_label || "";
-  const kokoroDownloadJob = kokoroDownloadJobForVoice(kokoroDefaultVoice);
+  const kokoroDownloadActive = isDownloadingKokoroAsset(kokoroDefaultVoice);
+  const kokoroModelDownloading = isDownloadingKokoroAsset("model");
   const kokoroSelectedVoice = kokoroVoiceCatalog.items.find(
     (voice) => voice.voice_id === kokoroDefaultVoice,
   );
@@ -477,11 +490,16 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   };
 
   useEffect(() => {
+    // Kokoro card hosts both Kokoro assets (model + voices) and the related
+    // Whisper.cpp transcription weights — they're all local on-device audio
+    // runtime files and share the same operator workflow.
     if (provider.id !== "kokoro" || !isOpen) {
       return;
     }
     void loadKokoroVoices(kokoroLanguage);
-  }, [isOpen, kokoroLanguage, loadKokoroVoices, provider.id]);
+    void loadKokoroModelStatus();
+    void loadWhisperCatalog();
+  }, [isOpen, kokoroLanguage, loadKokoroVoices, loadKokoroModelStatus, loadWhisperCatalog, provider.id]);
 
   useEffect(() => {
     if (provider.id !== "elevenlabs" || !isOpen || activeMode !== "api_key") {
@@ -543,10 +561,20 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     kokoroDefaultVoiceLabel,
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
-    kokoroDownloadJob,
+    kokoroDownloadActive,
+    kokoroModelDownloading,
+    kokoroModelStatus,
     kokoroSelectedVoice,
     loadKokoroVoices,
     downloadKokoroVoice,
+    downloadKokoroModel,
+    deleteKokoroModelAsset,
+    deleteKokoroVoiceAsset,
+    deleteWhisperVariantAsset,
+    whisperCatalog,
+    isDownloadingWhisperVariant,
+    downloadWhisperModel,
+    loadWhisperCatalog,
     ollamaModelCatalog,
     ollamaModelsLoading,
     shouldShowDisconnect,
@@ -708,10 +736,19 @@ export function ProviderAuthPanel({
     kokoroDefaultVoiceLabel,
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
-    kokoroDownloadJob,
+    kokoroDownloadActive,
+    kokoroModelDownloading,
+    kokoroModelStatus,
     kokoroSelectedVoice,
     loadKokoroVoices,
     downloadKokoroVoice,
+    downloadKokoroModel,
+    deleteKokoroModelAsset,
+    deleteKokoroVoiceAsset,
+    deleteWhisperVariantAsset,
+    whisperCatalog,
+    isDownloadingWhisperVariant,
+    downloadWhisperModel,
     ollamaModelCatalog,
     ollamaModelsLoading,
     submitProviderLoginCode,
@@ -752,6 +789,66 @@ export function ProviderAuthPanel({
       ) : null}
 
       {provider.id === "kokoro" ? (
+        <>
+          {/* Modelo base: precisa estar baixado antes que qualquer voz funcione.
+              O download é independente do download de vozes. Mostra tamanho
+              em disco quando presente e oferece botão de remoção. */}
+          <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
+            <span className="text-[var(--text-secondary)]">
+              {tl("Modelo base do Kokoro")}
+            </span>
+            {kokoroModelStatus?.downloaded ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <Check className="h-3 w-3" strokeWidth={1.75} />
+                  {tl("Disponível")}
+                </span>
+                <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                  {formatAssetBytes(kokoroModelStatus.bytes)}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {tl("Necessário antes de baixar qualquer voz.")}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <AsyncActionButton
+                type="button"
+                variant={kokoroModelStatus?.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={kokoroModelDownloading}
+                loadingLabel={tl("Baixando")}
+                icon={ArrowDown}
+                disabled={Boolean(kokoroModelStatus?.downloaded) || kokoroModelDownloading}
+                onClick={() => {
+                  void downloadKokoroModel();
+                }}
+                className="rounded-full px-3.5"
+              >
+                {kokoroModelStatus?.downloaded
+                  ? tl("Modelo baixado")
+                  : tl("Baixar modelo Kokoro")}
+              </AsyncActionButton>
+              {kokoroModelStatus?.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={kokoroModelDownloading}
+                  onClick={() => {
+                    void deleteKokoroModelAsset();
+                  }}
+                  className="rounded-full px-3.5"
+                  loadingLabel={tl("Removendo")}
+                >
+                  {tl("Remover")}
+                </AsyncActionButton>
+              ) : null}
+            </div>
+          </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <FieldShell
             label="Idioma"
@@ -836,18 +933,9 @@ export function ProviderAuthPanel({
               type="button"
               variant={kokoroSelectedVoice?.downloaded ? "secondary" : "quiet"}
               size="sm"
-              loading={Boolean(
-                kokoroDownloadJob &&
-                  ["pending", "running"].includes(String(kokoroDownloadJob.status)),
-              )}
+              loading={kokoroDownloadActive}
               loadingLabel={tl("Baixando")}
-              status={
-                kokoroDownloadJob?.status === "error"
-                  ? "error"
-                  : kokoroDownloadJob?.status === "completed"
-                    ? "success"
-                    : "idle"
-              }
+              status={kokoroDownloadActive ? "pending" : "idle"}
               icon={ArrowDown}
               disabled={!kokoroDefaultVoice || Boolean(kokoroSelectedVoice?.downloaded)}
               onClick={() => {
@@ -858,28 +946,116 @@ export function ProviderAuthPanel({
             >
               {kokoroSelectedVoice?.downloaded ? tl("Voz baixada") : tl("Baixar voz")}
             </AsyncActionButton>
+            {kokoroSelectedVoice?.downloaded ? (
+              <AsyncActionButton
+                type="button"
+                variant="danger"
+                size="sm"
+                icon={Trash2}
+                disabled={!kokoroDefaultVoice || kokoroDownloadActive}
+                onClick={() => {
+                  if (!kokoroDefaultVoice) return;
+                  void deleteKokoroVoiceAsset(kokoroDefaultVoice);
+                }}
+                loadingLabel={tl("Removendo")}
+                className="rounded-full px-3.5"
+              >
+                {tl("Remover")}
+              </AsyncActionButton>
+            ) : null}
             <span className="text-sm text-[var(--text-secondary)]">
               {kokoroSelectedVoice
-                ? `${tl(kokoroSelectedVoice.language_label)} · ${kokoroSelectedVoice.gender === "female" ? tl("Feminina") : tl("Masculina")}`
+                ? `${tl(kokoroSelectedVoice.language_label)} · ${kokoroSelectedVoice.gender === "female" ? tl("Feminina") : tl("Masculina")}${
+                    kokoroSelectedVoice.downloaded && Number(kokoroSelectedVoice.bytes ?? 0) > 0
+                      ? ` · ${formatAssetBytes(kokoroSelectedVoice.bytes)}`
+                      : ""
+                  }`
                 : tl("Selecione uma voz para baixar sob demanda.")}
             </span>
           </div>
 
-          {kokoroDownloadJob ? (
-            <div className="md:col-span-2 space-y-2 px-1">
-              <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-secondary)]">
-                <span>{kokoroDownloadJob.message || tl("Download da voz em andamento.")}</span>
-                <span>{Math.round(kokoroDownloadJob.progress_percent || 0)}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--text-primary)_8%,transparent)]">
-                <div
-                  className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-300 ease-out"
-                  style={{ width: `${Math.max(6, Math.min(100, kokoroDownloadJob.progress_percent || 0))}%` }}
-                />
-              </div>
-            </div>
-          ) : null}
         </div>
+
+        {/* Whisper.cpp transcription model — same on-device runtime family
+            as Kokoro (audio in/out), so they share this card. The Koda
+            install ships without weights; the operator picks a variant
+            and the download starts in the background with a sticky toast. */}
+        {whisperCatalog ? (
+          <div className="space-y-2 border-t border-[color:var(--divider-hair)] px-1 pt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              {tl("Modelos Whisper.cpp")}
+            </div>
+            <div className="space-y-2">
+              {whisperCatalog.items.map((variant) => {
+                const downloading = isDownloadingWhisperVariant(variant.variant_id);
+                const isDefault = whisperCatalog.default_variant === variant.variant_id;
+                return (
+                  <div
+                    key={variant.variant_id}
+                    className="flex flex-wrap items-center gap-3 text-sm"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="font-medium text-[var(--text-primary)]">
+                        {variant.label}
+                        {isDefault ? (
+                          <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                            {tl("Padrão")}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs text-[var(--text-tertiary)]">
+                        {variant.description}
+                        {variant.downloaded && Number(variant.bytes ?? 0) > 0
+                          ? ` · ${formatAssetBytes(variant.bytes)}`
+                          : variant.approx_size_bytes
+                            ? ` · ~${formatAssetBytes(variant.approx_size_bytes)}`
+                            : ""}
+                      </span>
+                    </div>
+                    {variant.downloaded ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                        <Check className="h-3 w-3" strokeWidth={1.75} />
+                        {tl("Baixado")}
+                      </span>
+                    ) : null}
+                    <AsyncActionButton
+                      type="button"
+                      variant={variant.downloaded ? "secondary" : "quiet"}
+                      size="sm"
+                      loading={downloading}
+                      loadingLabel={tl("Baixando")}
+                      icon={ArrowDown}
+                      disabled={Boolean(variant.downloaded) || downloading}
+                      onClick={() => {
+                        void downloadWhisperModel(variant.variant_id);
+                      }}
+                      className="rounded-full px-3.5"
+                    >
+                      {variant.downloaded ? tl("Disponível") : tl("Baixar")}
+                    </AsyncActionButton>
+                    {variant.downloaded ? (
+                      <AsyncActionButton
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        icon={Trash2}
+                        disabled={downloading}
+                        onClick={() => {
+                          void deleteWhisperVariantAsset(variant.variant_id);
+                        }}
+                        loadingLabel={tl("Removendo")}
+                        className="rounded-full px-3.5"
+                      >
+                        {tl("Remover")}
+                      </AsyncActionButton>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        </>
       ) : supportsAnyAuth ? (
         <>
           <div className="space-y-2 px-1">
@@ -1007,42 +1183,7 @@ export function ProviderAuthPanel({
                 )}
               </div>
 
-              {provider.id === "gemini" ? (
-                <div className="space-y-2 px-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                    {tl("Projeto Google")}
-                  </div>
-                  <input
-                    className="field-shell text-[var(--text-primary)]"
-                    type="text"
-                    placeholder={tl("meu-projeto-google")}
-                    value={connectionDraft?.project_id || ""}
-                    onChange={(event) =>
-                      setProviderConnectionDraft(provider.id, { project_id: event.target.value })
-                    }
-                  />
-                </div>
-              ) : provider.id === "ollama" ? (
-                <div className="space-y-2 px-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                    {tl("Base URL")}
-                  </div>
-                  <input
-                    className="field-shell text-[var(--text-primary)]"
-                    type="text"
-                    placeholder="https://ollama.com"
-                    value={connectionDraft?.base_url || ""}
-                    onChange={(event) =>
-                      setProviderConnectionDraft(provider.id, { base_url: event.target.value })
-                    }
-                  />
-                  <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">
-                    {tl(
-                      "Endpoint remoto da Ollama Cloud (padrão: https://ollama.com). Para uma instância local, use a aba Servidor local.",
-                    )}
-                  </p>
-                </div>
-              ) : provider.id === "elevenlabs" ? (
+              {provider.id === "elevenlabs" ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <FieldShell
                     label="Idioma padrão"
@@ -1160,32 +1301,13 @@ export function ProviderAuthPanel({
               ) : null}
             </div>
           ) : (
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,260px)]">
-              <div className="space-y-2 px-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                  {tl("Login oficial")}
-                </div>
-                <div className="text-sm leading-6 text-[var(--text-secondary)]">
-                  {tl(providerLoginCopy(provider.id))}
-                </div>
+            <div className="space-y-2 px-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                {tl("Login oficial")}
               </div>
-
-              {provider.id === "gemini" ? (
-                <div className="space-y-2 px-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                    {tl("Projeto Google")}
-                  </div>
-                  <input
-                    className="field-shell text-[var(--text-primary)]"
-                    type="text"
-                    placeholder={tl("meu-projeto-google")}
-                    value={connectionDraft?.project_id || ""}
-                    onChange={(event) =>
-                      setProviderConnectionDraft(provider.id, { project_id: event.target.value })
-                    }
-                  />
-                </div>
-              ) : null}
+              <div className="text-sm leading-6 text-[var(--text-secondary)]">
+                {tl(providerLoginCopy(provider.id))}
+              </div>
             </div>
           )}
 
@@ -1765,6 +1887,41 @@ export function SectionModels() {
               </FieldShell>
             );
           })}
+        </div>
+      </SettingsFieldGroup>
+
+      {/* ---- Aceleração de hardware ---- */}
+      <SettingsFieldGroup title={tl("Aceleração de hardware")}>
+        <div className="flex items-center justify-between gap-4 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] text-[var(--text-primary)]"
+              aria-hidden="true"
+            >
+              <AppleLogo size={18} />
+            </span>
+            <div className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {tl("Aceleração Metal (Apple Silicon)")}
+              </span>
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {tl(
+                  "Habilita o caminho Metal/MPS em runtimes locais (llama.cpp, MLX) quando o host é Apple Silicon. " +
+                    "Em hosts Intel ou Linux a configuração não tem efeito.",
+                )}
+              </span>
+            </div>
+          </div>
+          <AnimatedSwitch
+            checked={Boolean(draft.values.models.metal_enabled)}
+            onChange={() =>
+              setField("models", {
+                ...draft.values.models,
+                metal_enabled: !draft.values.models.metal_enabled,
+              })
+            }
+            ariaLabel={tl("Aceleração Metal")}
+          />
         </div>
       </SettingsFieldGroup>
     </SettingsSectionShell>

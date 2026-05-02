@@ -22,7 +22,7 @@ Governed GitHub CLI execution.
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | não | password | Personal Access Token (fallback) — Opcional: use apenas quando `gh auth login` não for viável. |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | não | password | Personal Access Token (fallback) — Optional: only use when `gh auth login` is not viable. |
 
 
 ## Runtime constraints

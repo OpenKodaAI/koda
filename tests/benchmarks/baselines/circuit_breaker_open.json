@@ -1,0 +1,6 @@
+{
+  "operation": "CircuitBreaker.run raising CircuitOpenError immediately while open",
+  "measured_ns_authoring": 907,
+  "max_ns": 5000,
+  "rationale": "Fail-fast path. Measured 907ns vs 1500ms gRPC deadline = ~1.7M× speedup during a cascading-deadlock incident. Baseline 5000ns; a regression to 100us would still be ~15000× faster than the deadline but signals state-machine cost growth."
+}

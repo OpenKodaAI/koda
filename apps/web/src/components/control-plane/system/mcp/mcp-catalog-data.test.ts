@@ -13,7 +13,7 @@ const VALID_CATEGORIES = Object.keys(MCP_CATEGORY_LABELS) as McpCategory[];
 
 describe("MCP catalog data", () => {
   it("contains the full curated MCP catalog", () => {
-    expect(MCP_SUGGESTED_SERVERS).toHaveLength(19);
+    expect(MCP_SUGGESTED_SERVERS).toHaveLength(27);
   });
 
   it("has no duplicate server_key values", () => {

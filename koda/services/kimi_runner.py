@@ -22,10 +22,16 @@ KIMI_PROFILE = ProviderHttpProfile(
     models_path="/v1/models",
     first_chunk_timeout_seconds=float(KIMI_FIRST_CHUNK_TIMEOUT),
     request_timeout_seconds=float(KIMI_TIMEOUT),
+    # Kimi K2 family is natively multimodal (text + image input). Older
+    # `kimi-vision-*` and `moonshot-v1-vision-*` SKUs are kept for
+    # operators still pinned to those snapshots.
     vision_models=frozenset(
         {
-            "kimi-vision-2024-12-09",
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "kimi-latest",
             "kimi-latest-vision",
+            "kimi-vision-2024-12-09",
             "moonshot-v1-vision-preview",
         }
     ),

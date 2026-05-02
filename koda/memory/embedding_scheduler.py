@@ -25,6 +25,22 @@ def _publish_queue_metrics(agent_id: str) -> None:
         log.debug("embedding_repair_metrics_publish_error", exc_info=True)
 
 
+async def _publish_queue_metrics_async(agent_id: str) -> None:
+    """Publish queue metrics without blocking the running event loop.
+
+    ``_publish_queue_metrics`` is sync and reaches Postgres through
+    ``run_coro_sync``, which dispatches to the cross-thread bridge loop and
+    then waits on ``future.result()`` — that wait happens on the *calling*
+    thread. When the caller is itself an asyncio task on the main event
+    loop, the wait deadlocks the loop: the bridge thread can run, but every
+    other asyncio task (including the bot's ``run_polling``) is frozen
+    until the future resolves. Pushing the sync call to the default
+    ``ThreadPoolExecutor`` lets the loop keep ticking.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _publish_queue_metrics, agent_id)
+
+
 async def start_embedding_repair_loop(store: MemoryStore) -> None:
     """Continuously drain persisted embedding repair jobs."""
     log.info(
@@ -33,14 +49,14 @@ async def start_embedding_repair_loop(store: MemoryStore) -> None:
         batch_size=MEMORY_EMBEDDING_REPAIR_BATCH_SIZE,
     )
     try:
-        _publish_queue_metrics(store.agent_id)
+        await _publish_queue_metrics_async(store.agent_id)
         await store.repair_pending_embeddings(limit=MEMORY_EMBEDDING_REPAIR_BATCH_SIZE)
-        _publish_queue_metrics(store.agent_id)
+        await _publish_queue_metrics_async(store.agent_id)
         while True:
             await asyncio.sleep(MEMORY_EMBEDDING_REPAIR_INTERVAL_SECONDS)
             try:
                 await store.repair_pending_embeddings(limit=MEMORY_EMBEDDING_REPAIR_BATCH_SIZE)
-                _publish_queue_metrics(store.agent_id)
+                await _publish_queue_metrics_async(store.agent_id)
             except Exception:
                 log.exception("embedding_repair_loop_error")
     except asyncio.CancelledError:

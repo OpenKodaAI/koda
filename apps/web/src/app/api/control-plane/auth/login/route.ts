@@ -53,6 +53,6 @@ export async function POST(request: NextRequest) {
     setOwnerExistsHintCookie(response, true);
     return response;
   } catch (error) {
-    return jsonErrorResponse(error, "Unable to sign in.");
+    return jsonErrorResponse(error, String((error as { message?: string })?.message || error));
   }
 }

@@ -33,6 +33,7 @@ function makeBaseSystemSettingsMock() {
           kokoro_default_language: "pt-br",
           kokoro_default_voice: "pf_dora",
           kokoro_default_voice_label: "",
+          metal_enabled: true,
         },
       },
     },
@@ -59,9 +60,16 @@ function makeBaseSystemSettingsMock() {
       provider_connected: true,
     },
     kokoroVoicesLoading: false,
-    kokoroDownloadJobForVoice: vi.fn(() => null),
+    kokoroModelStatus: null,
+    whisperCatalog: null,
+    isDownloadingKokoroAsset: vi.fn(() => false),
+    isDownloadingWhisperVariant: vi.fn(() => false),
     loadKokoroVoices: vi.fn(),
+    loadKokoroModelStatus: vi.fn(),
+    loadWhisperCatalog: vi.fn(),
     downloadKokoroVoice: vi.fn(),
+    downloadKokoroModel: vi.fn(),
+    downloadWhisperModel: vi.fn(),
     ollamaModelCatalog: { items: [], cached: false, provider_connected: false, base_url: "", auth_mode: "local" },
     ollamaModelsLoading: false,
     loadOllamaModels: vi.fn(),
@@ -301,16 +309,16 @@ describe("ProviderAccordionItem", () => {
     );
 
     expect(screen.getByTestId("provider-logo-codex")).toHaveStyle({
-      backgroundColor: "rgb(255, 255, 255)",
+      backgroundColor: "var(--text-primary)",
     });
     expect(screen.getByTestId("provider-logo-elevenlabs")).toHaveStyle({
-      backgroundColor: "rgb(255, 255, 255)",
+      backgroundColor: "var(--text-primary)",
     });
     expect(screen.getByTestId("provider-logo-gemini")).toHaveStyle({
       backgroundColor: "rgb(86, 138, 248)",
     });
     expect(screen.getByTestId("provider-logo-ollama")).toHaveStyle({
-      backgroundColor: "rgb(255, 255, 255)",
+      backgroundColor: "var(--text-primary)",
     });
   });
 

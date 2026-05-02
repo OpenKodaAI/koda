@@ -46,10 +46,8 @@ export function AgentDetailModal({
   return createPortal(
     <>
       <div
-        className={cn(
-          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-          presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-        )}
+        className="app-overlay-backdrop app-overlay-anim"
+        data-visible={presence.isVisible}
         onClick={onClose}
       />
       <div className="app-modal-frame z-[70] items-stretch p-3 sm:p-5 lg:p-6 xl:p-7">
@@ -57,11 +55,9 @@ export function AgentDetailModal({
           role="dialog"
           aria-modal="true"
           aria-label={tl("Resumo do agent {{name}}", { name: agentDisplay.label })}
+          data-visible={presence.isVisible}
           className={cn(
-            "app-modal-panel relative flex h-full w-full max-w-[1760px] flex-col overflow-hidden transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            presence.isVisible
-              ? "opacity-100"
-              : "pointer-events-none opacity-0"
+            "app-modal-panel app-modal-anim relative flex h-full w-full max-w-[1760px] flex-col overflow-hidden",
           )}
           style={{
             boxShadow: `0 36px 140px rgba(0,0,0,0.55), inset 0 1px 0 ${agentDisplay.color}12`,

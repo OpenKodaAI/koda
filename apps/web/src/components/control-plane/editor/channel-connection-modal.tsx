@@ -325,14 +325,14 @@ export function ChannelConnectionModal({
   return createPortal(
     <>
       <div
-        className="app-overlay-backdrop z-[70]"
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
         onClick={onClose}
         aria-hidden="true"
       />
 
       <div className="app-modal-frame z-[80] p-4">
         <div
-          className="app-modal-panel relative w-full max-w-lg overflow-hidden border-[var(--border-strong)]"
+          className="app-modal-panel app-modal-anim relative w-full max-w-lg overflow-hidden border-[var(--border-strong)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="channel-modal-title"

@@ -18,7 +18,9 @@ from koda.config import (
     GEMINI_FIRST_CHUNK_TIMEOUT,
     GROQ_FIRST_CHUNK_TIMEOUT,
     KIMI_FIRST_CHUNK_TIMEOUT,
+    LLAMACPP_FIRST_CHUNK_TIMEOUT,
     MISTRAL_FIRST_CHUNK_TIMEOUT,
+    MLX_FIRST_CHUNK_TIMEOUT,
     PERPLEXITY_FIRST_CHUNK_TIMEOUT,
     PROVIDER_DEFAULT_MODELS,
     PROVIDER_FALLBACK_ORDER,
@@ -57,10 +59,20 @@ from koda.services.kimi_runner import (
     run_kimi,
     run_kimi_streaming,
 )
+from koda.services.llamacpp_runner import (
+    get_llamacpp_capabilities,
+    run_llamacpp,
+    run_llamacpp_streaming,
+)
 from koda.services.mistral_runner import (
     get_mistral_capabilities,
     run_mistral,
     run_mistral_streaming,
+)
+from koda.services.mlx_runner import (
+    get_mlx_capabilities,
+    run_mlx,
+    run_mlx_streaming,
 )
 from koda.services.model_router import estimate_model
 from koda.services.ollama_runner import (
@@ -98,6 +110,13 @@ _COMMON_RETRY_PATTERN = re.compile(
     r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
     re.IGNORECASE,
 )
+_LOCAL_RUNTIME_RETRY_PATTERN = re.compile(
+    (
+        r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529|"
+        r"connection refused|cuda|metal|out of memory|loading model|model not loaded"
+    ),
+    re.IGNORECASE,
+)
 _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
     "claude": _COMMON_RETRY_PATTERN,
     "codex": _COMMON_RETRY_PATTERN,
@@ -109,6 +128,8 @@ _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
         ),
         re.IGNORECASE,
     ),
+    "llamacpp": _LOCAL_RUNTIME_RETRY_PATTERN,
+    "mlx": _LOCAL_RUNTIME_RETRY_PATTERN,
     "perplexity": _COMMON_RETRY_PATTERN,
     "mistral": _COMMON_RETRY_PATTERN,
     "qwen": _COMMON_RETRY_PATTERN,
@@ -119,6 +140,18 @@ _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 _HTTP_PROVIDER_RUNNERS: dict[str, dict[str, Any]] = {
+    "llamacpp": {
+        "run": run_llamacpp,
+        "stream": run_llamacpp_streaming,
+        "capabilities": get_llamacpp_capabilities,
+        "first_chunk_timeout": float(LLAMACPP_FIRST_CHUNK_TIMEOUT),
+    },
+    "mlx": {
+        "run": run_mlx,
+        "stream": run_mlx_streaming,
+        "capabilities": get_mlx_capabilities,
+        "first_chunk_timeout": float(MLX_FIRST_CHUNK_TIMEOUT),
+    },
     "perplexity": {
         "run": run_perplexity,
         "stream": run_perplexity_streaming,
@@ -197,8 +230,16 @@ def get_provider_fallback_chain(
     primary_provider: str,
     *,
     eligibility: dict[str, dict[str, Any]] | None = None,
+    query: str = "",
+    has_images: bool = False,
+    prefer_local_below: float | None = None,
 ) -> list[str]:
-    """Return the provider execution order for one task."""
+    """Return the provider execution order for one task.
+
+    When ``query`` is supplied and the cascade-routing policy is enabled
+    (``LOCAL_PREFER_BELOW_COMPLEXITY > 0`` or a per-agent override), the
+    chain is reordered to prefer local runtimes for low-complexity queries.
+    """
     primary = normalize_provider(primary_provider)
     eligibility_map = get_provider_runtime_eligibility(eligibility)
     ordered: list[str] = []
@@ -208,6 +249,19 @@ def get_provider_fallback_chain(
             if provider_eligibility is not None and not bool(provider_eligibility.get("eligible", False)):
                 continue
             ordered.append(provider)
+
+    if query:
+        # Lazy import keeps the policy module out of import-time cycles when
+        # the cascade feature is off (the common case).
+        from koda.services.local_routing_policy import adjust_chain_for_local_preference  # noqa: PLC0415
+
+        ordered = adjust_chain_for_local_preference(
+            ordered,
+            query=query,
+            has_images=has_images,
+            prefer_below=prefer_local_below,
+            eligibility=eligibility_map,
+        )
     return ordered
 
 

@@ -3,6 +3,7 @@
 import asyncio
 import re
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from koda.config import GIT_META_CHARS
@@ -36,12 +37,21 @@ async def run_cli_command_detailed(
     args: str,
     work_dir: str,
     *,
+    is_blocked: Callable[[str], bool] | None = None,
     blocked_pattern: re.Pattern | None = None,
     allowed_cmds: set[str] | None = None,
     timeout: int = 30,
     env: dict[str, str] | None = None,
 ) -> CliCommandResult:
-    """Run a CLI command and return structured execution details."""
+    """Run a CLI command and return structured execution details.
+
+    Block-pattern check accepts either an ``is_blocked`` callable (the
+    Phase A.6 wire-up — caller passes a helper from
+    :mod:`koda.services.blocked_patterns`) or a legacy ``blocked_pattern``
+    ``re.Pattern`` for backward compatibility. The callable form is
+    preferred because it routes through the native DFA from
+    ``koda_command_guard`` when available.
+    """
     if not args.strip():
         return CliCommandResult(binary=binary, args=args, text=f"Usage: /{binary} <args>", blocked=True)
 
@@ -63,8 +73,16 @@ async def run_cli_command_detailed(
             blocked=True,
         )
 
-    if blocked_pattern and blocked_pattern.search(args):
+    if is_blocked is not None and is_blocked(args):
         log.warning("cli_blocked_pattern", binary=binary, args=args[:100])
+        return CliCommandResult(
+            binary=binary,
+            args=args,
+            text="Blocked: this command pattern is not allowed.",
+            blocked=True,
+        )
+    elif blocked_pattern is not None and blocked_pattern.search(args):
+        log.warning("cli_blocked_pattern_legacy", binary=binary, args=args[:100])
         return CliCommandResult(
             binary=binary,
             args=args,
@@ -155,6 +173,7 @@ async def run_cli_command(
     args: str,
     work_dir: str,
     *,
+    is_blocked: Callable[[str], bool] | None = None,
     blocked_pattern: re.Pattern | None = None,
     allowed_cmds: set[str] | None = None,
     timeout: int = 30,
@@ -166,7 +185,12 @@ async def run_cli_command(
         binary: CLI binary name (gh, glab, docker, gws).
         args: Arguments string.
         work_dir: Working directory.
-        blocked_pattern: Optional regex to block specific arg patterns.
+        is_blocked: Optional callable; preferred over ``blocked_pattern``.
+            Pass an ``is_blocked_*`` helper from
+            :mod:`koda.services.blocked_patterns` so the check goes
+            through the native DFA when available.
+        blocked_pattern: Legacy ``re.Pattern`` accepted for backward
+            compatibility; new callers should use ``is_blocked``.
         allowed_cmds: Optional set of allowed subcommands (first token).
         timeout: Execution timeout in seconds.
         env: Optional extra environment variables for the subprocess.
@@ -178,6 +202,7 @@ async def run_cli_command(
         binary,
         args,
         work_dir,
+        is_blocked=is_blocked,
         blocked_pattern=blocked_pattern,
         allowed_cmds=allowed_cmds,
         timeout=timeout,

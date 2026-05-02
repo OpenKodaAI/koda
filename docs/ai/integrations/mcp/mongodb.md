@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Execute queries, gerencie coleções e índices no MongoDB. Suporta MongoDB Atlas para provisionamento de clusters.
+Run queries, manage collections and indexes on MongoDB. Supports MongoDB Atlas para provisionamento de clusters.
 
 ## Connection profile
 
@@ -20,7 +20,7 @@ Execute queries, gerencie coleções e índices no MongoDB. Suporta MongoDB Atla
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `MDB_MCP_CONNECTION_STRING` | sim | password | Connection URI — Formato: mongodb+srv://usuário:senha@host/banco |
+| `MDB_MCP_CONNECTION_STRING` | sim | password | Connection URI — Format: mongodb+srv://user:password@host/database |
 
 
 ### Toggle de read-only
@@ -37,20 +37,20 @@ Execute queries, gerencie coleções e índices no MongoDB. Suporta MongoDB Atla
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `find` | read | Consultar documentos com filtros |
-| `listCollections` | read | Listar coleções disponíveis |
-| `insertOne` | write | Inserir documento |
+| `find` | read | Query documents with filters |
+| `listCollections` | read | List available collections |
+| `insertOne` | write | Insert document |
 | `updateOne` | write | Atualizar documento |
-| `deleteOne` | destructive | Remover documento |
-| `createIndex` | write | Criar índice |
-| `dropIndex` | destructive | Remover índice |
-| `indexes` | read | Listar índices existentes |
-| `atlas-list-clusters` | read | Listar clusters Atlas |
+| `deleteOne` | destructive | Remove document |
+| `createIndex` | write | Create index |
+| `dropIndex` | destructive | Remove index |
+| `indexes` | read | List existing indexes |
+| `atlas-list-clusters` | read | List Atlas clusters |
 | `atlas-list-projects` | read | Listar projetos Atlas |
 | `atlas-inspect-cluster` | read | Detalhes do cluster |
-| `atlas-create-free-cluster` | destructive | Provisionar cluster gratuito |
-| `atlas-list-db-users` | read | Listar usuários do banco |
-| `atlas-create-db-user` | write | Criar usuário do banco |
+| `atlas-create-free-cluster` | destructive | Provision free cluster |
+| `atlas-list-db-users` | read | List database users |
+| `atlas-create-db-user` | write | Create database user |
 
 ## Como o agente usa bem
 

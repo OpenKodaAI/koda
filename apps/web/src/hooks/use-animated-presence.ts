@@ -6,64 +6,58 @@ interface UseAnimatedPresenceOptions {
   duration?: number;
 }
 
+/**
+ * Keeps a portal-rendered overlay (modal, drawer, popover) mounted long
+ * enough for its CSS exit animation to finish before unmounting.
+ *
+ * Pair the returned `dataState` with the canonical CSS classes in
+ * `apps/web/src/app/globals.css`:
+ *
+ *   `.app-overlay-anim`, `.app-modal-anim`, `.app-drawer-anim-right`,
+ *   `.app-drawer-anim-left`
+ *
+ * Each class declares a `@keyframes` enter animation that fires on
+ * mount, and an exit animation gated by `[data-state="closed"]`. The
+ * `duration` here MUST equal the longest exit keyframe duration in CSS,
+ * otherwise the element either unmounts mid-animation or sticks around
+ * after fade-out completes.
+ *
+ * `isVisible` is kept for legacy call sites that bind `data-visible` and
+ * is just an alias for `isOpen`.
+ */
 export function useAnimatedPresence<T>(
   isOpen: boolean,
   value: T,
-  options: UseAnimatedPresenceOptions = {}
+  options: UseAnimatedPresenceOptions = {},
 ) {
-  const { duration = 180 } = options;
+  const { duration = 200 } = options;
   const [shouldRender, setShouldRender] = useState(isOpen);
-  const [isVisible, setIsVisible] = useState(isOpen);
   const [renderedValue, setRenderedValue] = useState(value);
 
+  // The lint rule discourages calling setState in an effect body, but
+  // this hook is mirroring an external prop (`isOpen`) into local
+  // mount/unmount state with a delayed exit timer. That's the textbook
+  // legitimate use of effect-driven setState: the external system here
+  // is "should this overlay still occupy the DOM tree?".
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const frameId = window.requestAnimationFrame(() => {
-      setRenderedValue(value);
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [isOpen, value]);
-
-  useEffect(() => {
-    let frameId: number | undefined;
-    let timeoutId: number | undefined;
-
     if (isOpen) {
-      if (!shouldRender) {
-        frameId = window.requestAnimationFrame(() => {
-          setShouldRender(true);
-        });
-      } else {
-        frameId = window.requestAnimationFrame(() => {
-          setIsVisible(true);
-        });
-      }
-    } else if (shouldRender) {
-      frameId = window.requestAnimationFrame(() => {
-        setIsVisible(false);
-      });
-      timeoutId = window.setTimeout(() => {
-        setShouldRender(false);
-      }, duration);
+      setShouldRender(true);
+      setRenderedValue(value);
+      return;
     }
-
-    return () => {
-      if (frameId != null) {
-        window.cancelAnimationFrame(frameId);
-      }
-      if (timeoutId != null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [duration, isOpen, shouldRender]);
+    if (!shouldRender) return;
+    const timer = window.setTimeout(() => {
+      setShouldRender(false);
+    }, duration);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, value, shouldRender, duration]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return {
     shouldRender,
-    isVisible,
+    isVisible: isOpen,
+    dataState: (isOpen ? "open" : "closed") as "open" | "closed",
     renderedValue,
   };
 }

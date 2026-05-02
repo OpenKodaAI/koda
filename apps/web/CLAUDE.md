@@ -33,7 +33,75 @@ Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
 
 - Spacing scale multiples of 4 (tokens `--space-1`…`--space-24`).
 - Radius tokens: `--radius-chip: 8` · `--radius-panel-sm: 10` · `--radius-panel: 12` · `--radius-shell: 14` · `--radius-input: 14` · `--radius-pill: 999`.
-- Shadows barely-there: `--shadow-xs: 0 1px 0 rgba(0,0,0,0.25)`, `--shadow-floating: 0 8px 28px rgba(0,0,0,0.45)`. No stacked `inset + outer` shadows, no glassmorphism sheen (removed intentionally).
+- Shadows barely-there: `--shadow-xs: 0 1px 0 rgba(0,0,0,0.25)`, `--shadow-floating: 0 8px 28px rgba(0,0,0,0.45)`. No stacked `inset + outer` shadows.
+
+### Glass-blur (mandatory for every overlay)
+
+Every floating surface that overlays another surface MUST get glass-blur. There are exactly four canonical classes — the only correct way to ship an overlay is to apply one of them. The `backdrop-filter` rule on each is `!important` and must stay that way; do not introduce new bg/blur stacks.
+
+| Class | Use for | Tokens |
+| --- | --- | --- |
+| `app-overlay-backdrop` | Dimmed scrim behind any modal/drawer (the layer that sits on top of the canvas). Pair with one of the panel classes below. | `--overlay-backdrop-bg` + `--overlay-backdrop-filter` |
+| `app-modal-panel` | Centered modal/dialog panels (Command Bar, ConfirmationDialog, ConnectionModalRouter, agent/execution detail modals). | `--overlay-modal-bg` + `--overlay-modal-filter` |
+| `app-drawer-panel` | Side drawers (Drawer primitive, audit/dlq/execution detail drawers). | `--overlay-modal-bg` + `--overlay-modal-filter` |
+| `app-floating-panel` | Popovers, dropdowns, tooltips, select content, command menus, color picker panel, model selector — any portal-rendered floating menu. The `Popover`, `Tooltip`, and `Select` primitives compose this class. | `--overlay-floating-bg` + `--overlay-floating-filter` |
+
+Rules:
+- Never write a new floating surface with hand-rolled `bg-[...]` + `backdrop-blur-*` Tailwind utilities. Use one of the four classes above.
+- **Render overlays through `createPortal(node, document.body)`**. Inline-rendered modals get clipped or fail to cover the viewport whenever an ancestor establishes a containing block (`transform`, `filter`, `perspective`, `will-change: transform`) — `position: fixed` then resolves against that ancestor instead of the viewport. The agent-catalog workspace/squad edit modal hit this and failed to cover the page; it now portals to body.
+- Never set `backdrop-filter: none` on any of those classes (or selectors targeting them) in any theme. The light-theme overrides at the bottom of `globals.css` are scoped to `::before` sheen pseudo-elements and a few non-overlay surfaces — do not extend them to the panels themselves.
+- Do not stack a floating panel inside another floating panel — glass-on-glass blurs the wrong layer (the parent panel's bg). If a popover needs a sub-popover, render both as siblings via Portal.
+- The `!important` on `backdrop-filter` exists because Tailwind v4's backdrop utilities and downstream theme resets historically shadowed the rule. Keep it.
+
+The contract is enforced by `tests/test_glass_blur_contract.py` (Python) and the unit test in `apps/web/src/app/__tests__/glass-blur.test.ts`. Both must pass.
+
+### Overlay enter/exit animation (mandatory)
+
+Modal/drawer/popover open and close must never feel abrupt. Pair the glass-blur class with the matching animation class and drive both from `useAnimatedPresence` (`@/hooks/use-animated-presence`).
+
+| Animation class | Surface |
+| --- | --- |
+| `app-overlay-anim` | The scrim (`app-overlay-backdrop`). |
+| `app-modal-anim` | Centered modal panels (`app-modal-panel`). |
+| `app-drawer-anim-right` | Right-side drawers. |
+| `app-drawer-anim-left` | Left-side drawers. |
+| `app-floating-anim` | Inline-portaled floating menus (e.g. `CommandBar` inline dropdown). Subtle fade + 4px lift + 0.98 scale, faster (160ms) than modals. |
+| Radix data-state animations | `Drawer`, `Popover`, `Tooltip`, `Select`, `CommandBarModal` (already wired via `data-[state=open]:animate-in`). |
+| Framer Motion | `agent-switcher`, `language-switcher`, `settings-warning-indicator`, `agent-catalog`'s `WorkspaceSelectorDropdown` / `CreatePopover`, `tour-coachmark` — these have bespoke choreography, leave them. |
+
+Pattern:
+
+```tsx
+const presence = useAnimatedPresence(open, null, { duration: 200 });
+useBodyScrollLock(presence.shouldRender);
+useEscapeToClose(presence.shouldRender, onClose);
+if (!presence.shouldRender) return null;
+
+return createPortal(
+  <>
+    <div
+      className="app-overlay-backdrop app-overlay-anim"
+      data-visible={presence.isVisible}
+      onClick={onClose}
+    />
+    <div className="app-modal-frame …">
+      <div
+        className="app-modal-panel app-modal-anim …"
+        data-visible={presence.isVisible}
+      >…</div>
+    </div>
+  </>,
+  document.body,
+);
+```
+
+Rules:
+- The animations are **`@keyframes`-based**, not `transition`-based. The enter keyframe (`app-modal-enter`, `app-overlay-enter`, etc.) fires the moment the element is inserted in the DOM, regardless of whether React batched the presence state into a single paint. Do not refactor these back into `transition: opacity ...` rules — the previous transition-based approach silently no-op'ed on open and is what made modals look "abrupt".
+- Never write `animation: ... var(--transition-base) ...`. The token is a `transition` shorthand, not an `animation` shorthand; the browser will reject the rule. Inline the duration + easing directly inside the `animation` declaration.
+- The `duration` you pass to `useAnimatedPresence` MUST match (or slightly exceed) the longest exit keyframe duration in CSS, otherwise the element either unmounts mid-animation or sticks around after fade-out. Current values: 180ms (overlay/modal exit), 200ms (drawer exit).
+- For non-presence surfaces (where the parent unmounts on close), the enter keyframe still fires automatically on mount — no local state flag needed. Exit will be abrupt; that's only acceptable for parent-managed dismissal.
+- Tests asserting on portal-rendered overlays should use `findByRole` / `await waitFor`, not synchronous `getByRole` — the presence helper still defers mount by one effect tick.
+- The hook intentionally mirrors a prop into state inside an effect (with an `eslint-disable react-hooks/set-state-in-effect` block). That's the textbook valid case for the rule — don't "fix" it by introducing derived state, since the delayed unmount needs persistent state.
 
 ## Motion
 
@@ -51,9 +119,9 @@ Primitives live under [`apps/web/src/components/ui/`](src/components/ui/) and [`
 - **Button** heights: `lg` 36 / `md` 32 / `sm` 28. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `ghost`, `dim`, `foreground`.
 - **Input / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`, focus ring `--accent` with `box-shadow: 0 0 0 1px var(--accent-muted)`.
 - **SoftTabs** ([`ui/soft-tabs.tsx`](src/components/ui/soft-tabs.tsx)): outer `h-9 p-0.5 rounded-pill`, inner buttons `h-8 px-3`.
-- **Tooltip**: `max-w-220`, `text-[0.75rem]`, radius-chip 8, opaque `--panel-strong` bg. No glass blur.
-- **Modal / Drawer** ([`ui/drawer.tsx`](src/components/ui/drawer.tsx)): Radix Dialog wrapper. Drawers use `modal={false}` by default to preserve context behind. Single panel, radius-shell 14, no `::before` sheens.
-- **Popover** ([`ui/popover.tsx`](src/components/ui/popover.tsx)): Radix Popover wrapper. Radius-panel 12, border-subtle, shadow-floating.
+- **Tooltip**: `max-w-220`, `text-[0.75rem]`, radius-chip 8. Glass surface — `--overlay-floating-bg` + `--overlay-floating-filter`.
+- **Modal / Drawer** ([`ui/drawer.tsx`](src/components/ui/drawer.tsx)): Radix Dialog wrapper. Drawers use `modal={false}` by default to preserve context behind. Single panel, radius-shell 14. Glass surface — `--overlay-modal-bg` + `--overlay-modal-filter`; the backdrop scrim uses `--overlay-backdrop-*`.
+- **Popover** ([`ui/popover.tsx`](src/components/ui/popover.tsx)): Radix Popover wrapper. Radius-panel 12, border-subtle, shadow-floating. Glass surface — `--overlay-floating-bg` + `--overlay-floating-filter`. Same treatment for `Select` content and any portal-rendered floating menu (`.app-floating-panel`).
 - **Card** ([`ui/card.tsx`](src/components/ui/card.tsx)): flat, single variant. Radius-panel 12, border-subtle, no shadow. Header border uses `--divider-hair`.
 - **ConnectionModalRouter** ([`editor/tabs/connection/connection-modal-router.tsx`](src/components/control-plane/editor/tabs/connection/connection-modal-router.tsx)): per-agent integration connect modal. Routes to sub-forms based on the catalog's `ConnectionProfile.strategy` (`oauth_only`, `oauth_preferred`, `api_key`, `connection_string`, `dual_token`, `local_path`, `local_app`, `none`). Never branch on integration name inside UI — declare the profile in the catalog instead.
 - **DynamicConstraintsPanel** ([`editor/tabs/constraints/dynamic-constraints-panel.tsx`](src/components/control-plane/editor/tabs/constraints/dynamic-constraints-panel.tsx)): renders only the runtime constraints the integration declares (`allowed_domains`, `allowed_paths`, `allowed_db_envs`, `allow_private_network`, `read_only_mode`). If the integration doesn't declare a key, the control is not in the DOM.
@@ -104,7 +172,6 @@ Subscribers to polled queries must never cause visible re-renders or flicker. In
 
 ## What NOT to do
 
-- No glassmorphism stacking (`backdrop-filter` + sheen gradients). Removed intentionally.
 - No nested containers (`Card` inside `Card`; `app-toolbar-card` wrapping filters).
 - No decorative illustrations in operational pages.
 - No purple gradients, no emoji-heavy UI, no Inter-imitator fonts beyond what's configured.

@@ -1,3 +1,5 @@
+pub mod isolation;
+
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::CString;
 use std::fs as stdfs;

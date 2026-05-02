@@ -429,6 +429,21 @@ class KnowledgeManager:
                         -hit.similarity,
                     )
                 )
+                # Cross-encoder rerank refines the relative order of the
+                # top-K hits while preserving the layer-priority and
+                # freshness coarse buckets. Layer priority is the operator's
+                # explicit ordering signal; we never let the reranker
+                # override that. Within ties on layer + freshness, the
+                # reranker picks the genuinely most relevant by query.
+                if len(hits) >= 2:
+                    from koda.services.reranker import rerank_top_k_indices  # noqa: PLC0415
+
+                    rerank_query = str(getattr(query_context, "query", "") or "")
+                    if rerank_query:
+                        cand_texts = [str(hit.entry.content or "")[:1000] for hit in hits]
+                        new_order = rerank_top_k_indices(rerank_query, cand_texts, top_k=min(8, len(hits)))
+                        if new_order is not None:
+                            hits = [hits[i] for i in new_order]
 
             primary_resolution = self._resolve_with_strategy(
                 query_context=query_context,

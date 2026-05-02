@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search, Server, Zap, Brain, HardDrive } from "lucide-react";
@@ -22,20 +23,16 @@ import {
 /* ------------------------------------------------------------------ */
 /*  Provider visual config                                             */
 /* ------------------------------------------------------------------ */
+/* Logos / accents / icon components live in the shared provider-brand
+ * module so every UI surface (system settings, agent editor, model
+ * picker) renders the same brand treatment for every provider.        */
 
-const PROVIDER_LOGOS: Record<string, string> = {
-  claude: "/providers/anthropic.svg",
-  codex: "/providers/openai.svg",
-  gemini: "/providers/google.svg",
-  ollama: "/providers/ollama.svg",
-};
-
-const PROVIDER_DISPLAY: Record<string, string> = {
-  claude: "Anthropic",
-  codex: "OpenAI",
-  gemini: "Google",
-  ollama: "Ollama",
-};
+import {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_DISPLAY_NAMES as PROVIDER_DISPLAY,
+  COLORED_BRAND_LOGO_PROVIDERS,
+} from "./provider-brand";
 
 /* ------------------------------------------------------------------ */
 /*  Inline provider logo                                               */
@@ -48,10 +45,39 @@ function ProviderIcon({
   providerId: string;
   size?: number;
 }) {
+  // Local-runtime providers (Ollama, Kokoro) get a CPU glyph in the
+  // theme's primary text color so on-device inference stays visually
+  // distinct from cloud providers without parsing model IDs.
+  const Icon = PROVIDER_ICON_COMPONENTS[providerId];
+  if (Icon) {
+    return (
+      <Icon
+        width={size}
+        height={size}
+        className="shrink-0 text-[var(--text-secondary)]"
+      />
+    );
+  }
+
   const logo = PROVIDER_LOGOS[providerId];
   if (!logo) {
     return <Server size={size} className="text-[var(--text-quaternary)]" />;
   }
+
+  // Colored brand logos render as a real image so the original palette
+  // is preserved across all states. Monochrome logos are mask-tinted.
+  if (COLORED_BRAND_LOGO_PROVIDERS.has(providerId)) {
+    return (
+      <Image
+        src={logo}
+        alt={PROVIDER_DISPLAY[providerId] ?? providerId}
+        width={size}
+        height={size}
+        className="shrink-0 object-contain"
+      />
+    );
+  }
+
   return (
     <span
       className="block shrink-0"

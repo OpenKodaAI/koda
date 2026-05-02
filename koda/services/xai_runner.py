@@ -22,11 +22,18 @@ XAI_PROFILE = ProviderHttpProfile(
     models_path="/v1/models",
     first_chunk_timeout_seconds=float(XAI_FIRST_CHUNK_TIMEOUT),
     request_timeout_seconds=float(XAI_TIMEOUT),
+    # Grok 4.x is multimodal end-to-end (vision is a default capability,
+    # not a separate `*-vision` SKU as in Grok 2/3). Keep the older
+    # vision-only SKUs for operators still pinned to legacy snapshots.
     vision_models=frozenset(
         {
+            "grok-4.3",
+            "grok-4.1-fast",
+            "grok-4-fast",
+            "grok-4-0709",
+            "grok-4-vision-0709",
             "grok-2-vision-1212",
             "grok-vision-beta",
-            "grok-4-vision-0709",
         }
     ),
 )

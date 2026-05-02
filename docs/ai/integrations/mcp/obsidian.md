@@ -10,7 +10,7 @@
 
 ## Descrição
 
-Acesse, busque e edite notas do seu vault Obsidian. Leia frontmatter, liste tags e pesquise conteúdo em toda a base.
+Access, search, and edit notes in your Obsidian vault. Read frontmatter, list tags, and search content across the vault.
 
 ## Connection profile
 
@@ -25,8 +25,8 @@ Acesse, busque e edite notas do seu vault Obsidian. Leia frontmatter, liste tags
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `readFile` | read | Ler conteúdo de uma nota |
-| `writeFile` | write | Criar ou atualizar nota |
+| `readFile` | read | Read note content |
+| `writeFile` | write | Create or update note |
 | `deleteFile` | destructive | Remover nota do vault |
 | `listVault` | read | Navegar estrutura do vault |
 | `searchVault` | read | Busca full-text no vault |

@@ -51,13 +51,23 @@ jobs:
         run: uv run mypy koda/ --ignore-missing-imports
 
   python-tests:
-    name: python-tests-${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # Phase B.4 — cross-platform matrix. macOS catches darwin-specific
+    # regressions (cgroup no-op path, isolation tests under #[cfg(target_os)],
+    # path handling differences) without committing to a full macOS-only
+    # build pipeline.
+    name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-14]
         python-version: ["3.11", "3.12"]
+        # macOS runners are scarce; only run the lower Python version
+        # there to keep CI cost predictable.
+        exclude:
+          - os: macos-14
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6.2.0

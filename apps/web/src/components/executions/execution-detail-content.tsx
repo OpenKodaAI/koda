@@ -31,7 +31,7 @@ import {
 import { DetailRow } from "../shared/detail-row";
 import { DetailsViewer } from "../audit/details-viewer";
 import { SyntaxHighlight, type SyntaxLang } from "../shared/syntax-highlight";
-import { translate, translateLiteral } from "@/lib/i18n";
+import { getCurrentLanguage, translate, translateLiteral } from "@/lib/i18n";
 
 export const EXECUTION_TRACE_SOURCE_META: Record<
   ExecutionDetail["trace_source"],
@@ -228,6 +228,76 @@ export function ExecutionSourceBadge({
   );
 }
 
+function formatCompactDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat(getCurrentLanguage(), {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(iso));
+}
+
+interface ExecutionDataStripItem {
+  label: string;
+  value: ReactNode;
+  title?: string;
+  mono?: boolean;
+  wrap?: boolean;
+}
+
+function ExecutionDataStrip({
+  items,
+  cols,
+}: {
+  items: ExecutionDataStripItem[];
+  cols: 2 | 3 | 4 | 5;
+}) {
+  const colsClass =
+    cols === 5
+      ? "sm:grid-cols-5"
+      : cols === 4
+        ? "sm:grid-cols-4"
+        : cols === 3
+          ? "sm:grid-cols-3"
+          : "sm:grid-cols-2";
+  const fitsSingleRow = items.length <= cols;
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]">
+      <div
+        className={cn(
+          "grid grid-cols-2 divide-x divide-y divide-[var(--divider-hair)]",
+          fitsSingleRow && "sm:divide-y-0",
+          colsClass,
+        )}
+      >
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex min-w-0 flex-col gap-1 px-3.5 py-3"
+          >
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              {item.label}
+            </span>
+            <span
+              title={item.title}
+              className={cn(
+                "block text-[0.8125rem] leading-tight text-[var(--text-primary)]",
+                item.wrap ? "break-words" : "truncate",
+                item.mono && "font-mono tabular-nums",
+              )}
+            >
+              {item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ExecutionDetailContent({
   data,
   detailLoaded = false,
@@ -268,13 +338,16 @@ export function ExecutionDetailContent({
   }
 
   const metrics = (
-    <div className="metric-strip">
-      <ExecutionMetric label={translate("common.cost")} value={formatCost(data.cost_usd)} mono />
-      <ExecutionMetric label={translate("common.duration")} value={formatDuration(data.duration_ms)} mono />
-      <ExecutionMetric label={translate("common.attempts")} value={`${data.attempt}/${data.max_attempts}`} mono />
-      <ExecutionMetric label={translate("common.tools")} value={String(data.tool_count)} mono />
-      <ExecutionMetric label={translate("common.warnings")} value={String(data.warnings.length)} mono />
-    </div>
+    <ExecutionDataStrip
+      cols={5}
+      items={[
+        { label: translate("common.cost"), value: formatCost(data.cost_usd), mono: true },
+        { label: translate("common.duration"), value: formatDuration(data.duration_ms), mono: true },
+        { label: translate("common.attempts"), value: `${data.attempt}/${data.max_attempts}`, mono: true },
+        { label: translate("common.tools"), value: String(data.tool_count), mono: true },
+        { label: translate("common.warnings"), value: String(data.warnings.length), mono: true },
+      ]}
+    />
   );
 
   const notices = (
@@ -303,41 +376,74 @@ export function ExecutionDetailContent({
     </>
   );
 
+  const stopReasonLabel =
+    data.stop_reason ?? translate("executions.detail.notProvided");
+
+  const timelineStrip = (
+    <ExecutionDataStrip
+      cols={3}
+      items={[
+        {
+          label: translate("common.createdAt", {
+            defaultValue: translateLiteral("Criada em"),
+          }),
+          value: formatCompactDateTime(data.created_at),
+          title: formatDateTime(data.created_at),
+          mono: true,
+        },
+        {
+          label: translate("common.startedAt"),
+          value: formatCompactDateTime(data.started_at),
+          title: formatDateTime(data.started_at),
+          mono: true,
+        },
+        {
+          label: translate("common.completedAt"),
+          value: formatCompactDateTime(data.completed_at),
+          title: formatDateTime(data.completed_at),
+          mono: true,
+        },
+      ]}
+    />
+  );
+
   const summarySection = (
     <DetailSection
       title={translate("executions.detail.signals")}
       variant={variant}
+      action={
+        <Link
+          href={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
+          className="button-pill is-active inline-flex"
+        >
+          {translate("executions.detail.openRuntimeRoom")}
+        </Link>
+      }
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <DetailRow label={translate("executions.detail.traceSource")}>
-          <ExecutionSourceBadge meta={traceSource} />
-        </DetailRow>
-        <DetailRow label={translate("executions.detail.responseSource")}>
-          <ExecutionSourceBadge meta={responseSource} />
-        </DetailRow>
-        <DetailRow label={translate("executions.detail.toolsSource")}>
-          <ExecutionSourceBadge meta={toolsSource} />
-        </DetailRow>
-        <DetailRow label={translate("executions.detail.stopReason")}>
-          <span className="font-mono">{data.stop_reason ?? translate("executions.detail.notProvided")}</span>
-        </DetailRow>
-        <DetailRow label={translate("common.createdAt", { defaultValue: translateLiteral("Criada em") })}>
-          {formatDateTime(data.created_at)}
-        </DetailRow>
-        <DetailRow label={translate("common.startedAt")}>{formatDateTime(data.started_at)}</DetailRow>
-        <DetailRow label={translate("common.completedAt")}>{formatDateTime(data.completed_at)}</DetailRow>
-        <DetailRow label={translate("common.totalTime")}>
-          <span className="font-mono">{formatDuration(data.duration_ms)}</span>
-        </DetailRow>
-        <DetailRow label={translate("executions.detail.runtime")}>
-          <Link
-            href={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
-            className="button-pill is-active"
-          >
-            {translate("executions.detail.openRuntimeRoom")}
-          </Link>
-        </DetailRow>
-      </div>
+      <ExecutionDataStrip
+        cols={4}
+        items={[
+          {
+            label: translate("executions.detail.traceSource"),
+            value: <ExecutionSourceBadge meta={traceSource} />,
+          },
+          {
+            label: translate("executions.detail.responseSource"),
+            value: <ExecutionSourceBadge meta={responseSource} />,
+          },
+          {
+            label: translate("executions.detail.toolsSource"),
+            value: <ExecutionSourceBadge meta={toolsSource} />,
+          },
+          {
+            label: translate("executions.detail.stopReason"),
+            value: stopReasonLabel,
+            title: stopReasonLabel,
+            mono: true,
+            wrap: true,
+          },
+        ]}
+      />
     </DetailSection>
   );
 
@@ -352,21 +458,39 @@ export function ExecutionDetailContent({
         onCopy={() => copyExecutionValue(data.query_text)}
         variant={variant}
       />
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <DetailRow label={translate("common.model")}>
-          <span className="font-mono">{data.model ?? "—"}</span>
-        </DetailRow>
-        <DetailRow label={translate("common.session")}>
-          <span className="break-all font-mono text-xs">{data.session_id ?? "—"}</span>
-        </DetailRow>
-        <DetailRow label={translate("common.workspaceDirectory")}>
-          <span className="break-all font-mono text-xs">{data.work_dir ?? "—"}</span>
-        </DetailRow>
-        <DetailRow label={translateLiteral("User / chat")}>
-          <span className="font-mono">
-            {data.user_id} / {data.chat_id}
-          </span>
-        </DetailRow>
+      <div className="mt-4">
+        <ExecutionDataStrip
+          cols={2}
+          items={[
+            {
+              label: translate("common.model"),
+              value: data.model ?? "—",
+              title: data.model ?? undefined,
+              mono: true,
+              wrap: true,
+            },
+            {
+              label: translate("common.session"),
+              value: data.session_id ?? "—",
+              title: data.session_id ?? undefined,
+              mono: true,
+              wrap: true,
+            },
+            {
+              label: translate("common.workspaceDirectory"),
+              value: data.work_dir ?? "—",
+              title: data.work_dir ?? undefined,
+              mono: true,
+              wrap: true,
+            },
+            {
+              label: translateLiteral("User / chat"),
+              value: `${data.user_id} / ${data.chat_id}`,
+              mono: true,
+              wrap: true,
+            },
+          ]}
+        />
       </div>
     </DetailSection>
   );
@@ -439,6 +563,7 @@ export function ExecutionDetailContent({
     return (
       <div className={cn("space-y-6", isPanel && "space-y-5")}>
         {metrics}
+        {timelineStrip}
         {notices}
         {summarySection}
         {entrySection}
@@ -452,21 +577,22 @@ export function ExecutionDetailContent({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       {metrics}
-      <div className="grid gap-7 xl:grid-cols-[minmax(0,1.55fr)_360px]">
+      {timelineStrip}
+      {summarySection}
+      <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-7">
           {entrySection}
           {responseSection}
           {toolsSection}
           {artifactsSection}
         </div>
-        <div className="space-y-7">
+        <aside className="space-y-7">
           {notices}
-          {summarySection}
           {timelineSection}
           {reasoningSection}
-        </div>
+        </aside>
       </div>
     </div>
   );
@@ -476,16 +602,21 @@ function DetailSection({
   title,
   variant,
   children,
+  action,
 }: {
   title: string;
   variant: ExecutionDetailVariant;
   children: ReactNode;
+  action?: ReactNode;
 }) {
   const isExpanded = variant === "expanded";
   return (
     <section className={cn("space-y-3.5", isExpanded && "space-y-4")}>
-      <div className="section-label">
-        <span>{title}</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="section-label flex-1">
+          <span>{title}</span>
+        </div>
+        {action}
       </div>
       {children}
     </section>
@@ -986,26 +1117,6 @@ function CodePanel({
           {content}
         </pre>
       )}
-    </div>
-  );
-}
-
-function ExecutionMetric({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  variant?: ExecutionDetailVariant;
-}) {
-  return (
-    <div className="metric-strip__item">
-      <span className="metric-label">{label}</span>
-      <span className={cn("text-[var(--text-primary)] text-base", mono && "font-mono tabular-nums")}>
-        {value}
-      </span>
     </div>
   );
 }

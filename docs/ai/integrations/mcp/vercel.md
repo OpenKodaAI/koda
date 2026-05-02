@@ -11,17 +11,18 @@
 
 ## Descrição
 
-Gerencie deployments, consulte logs de build e runtime, verifique domínios e monitore status dos projetos na Vercel.
+Manage deployments, inspect build and runtime logs, check domains, and monitor project status on Vercel.
 
 ## Connection profile
 
-**Strategy**: `api_key`
+**Strategy**: `oauth_preferred`
+- OAuth provider: `vercel` · scopes: `read write`
 
 ### Campos principais
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `VERCEL_TOKEN` | sim | password | Vercel API Token |
+| `VERCEL_TOKEN` | não | password | Vercel API Token (fallback) — Use preferencialmente OAuth; o token fica como fallback. |
 
 
 ## Runtime constraints
@@ -38,8 +39,8 @@ Nenhuma restrição de runtime aplicável a esta integração.
 | `get_deployment` | read | Detalhes de um deployment |
 | `get_deployment_build_logs` | read | Logs de build |
 | `get_runtime_logs` | read | Logs de runtime |
-| `deploy_to_vercel` | write | Criar novo deployment |
-| `check_domain_availability_and_price` | read | Verificar disponibilidade de domínio |
+| `deploy_to_vercel` | write | Create new deployment |
+| `check_domain_availability_and_price` | read | Check domain availability |
 
 ## Como o agente usa bem
 

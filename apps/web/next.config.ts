@@ -93,6 +93,12 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      { source: "/dlq", destination: "/routines/dlq", permanent: true },
+      { source: "/schedules", destination: "/routines/schedules", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

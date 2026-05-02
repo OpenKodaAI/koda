@@ -93,7 +93,7 @@ async def get_openai_compatible_capabilities(profile: ProviderHttpProfile, turn_
 
 async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode) -> ProviderCapabilities:
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         return ProviderCapabilities(
             provider=profile.provider_id,
             turn_mode=turn_mode,
@@ -244,7 +244,7 @@ async def run_openai_compatible(
         return _ok_result(profile, turn_mode, capabilities, text="(dry-run)", usage={}, cost=0.0)
 
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         return _error_result(
             profile,
             turn_mode,
@@ -415,7 +415,7 @@ async def run_openai_compatible_streaming(
         return
 
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         if metadata_collector is not None:
             metadata_collector["error"] = True
             metadata_collector["error_kind"] = "provider_auth"
@@ -543,6 +543,25 @@ async def run_openai_compatible_streaming(
         yield footer
 
     elapsed = time.monotonic() - started_at
+
+    # Empty-stream guard: server returned 200 but produced zero tokens. This
+    # happens with malformed SSE bodies (no ``data:`` lines), early EOF on
+    # chunked-encoded responses, or when llama-server crashes mid-request
+    # without flushing. The runner used to silently report success with empty
+    # output, which let the caller treat the response as a valid empty turn.
+    # Flag it as ``transient`` (retryable) since it's almost always a server
+    # state problem rather than a contract violation.
+    if not received_first_chunk:
+        _record_metrics(profile.provider_id, model, elapsed, streaming=True, success=False)
+        if metadata_collector is not None:
+            metadata_collector["error"] = True
+            metadata_collector["error_kind"] = "transient"
+            metadata_collector["retryable"] = True
+            metadata_collector["error_message"] = (
+                f"{profile.provider_id} stream produced no tokens (empty body or early EOF)."
+            )
+        return
+
     _record_metrics(profile.provider_id, model, elapsed, streaming=True, success=True)
 
     if metadata_collector is not None:

@@ -81,15 +81,20 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         category="cloud",
         documentation_url="https://supabase.com/docs/guides/getting-started/mcp",
         logo_key="supabase",
-        transport_type="stdio",
-        command_template=("npx", "-y", _PINNED_SUPABASE),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.supabase.com/mcp"),
+        remote_url="https://mcp.supabase.com/mcp",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
+            strategy="oauth_preferred",
+            oauth_provider="supabase",
+            oauth_scopes=("read", "write"),
             fields=(
                 ConnectionField(
                     key="SUPABASE_ACCESS_TOKEN",
-                    label="Personal Access Token",
+                    label="Personal Access Token (fallback)",
+                    required=False,
                     input_type="password",
+                    help="Use preferencialmente OAuth; o PAT fica como fallback para CI.",
                 ),
             ),
             scope_fields=(
@@ -98,7 +103,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     label="Project Reference (escopo)",
                     required=False,
                     input_type="text",
-                    help="Optional: restricts access to a single Supabase project.",
+                    help="Opcional: restringe acesso a um único projeto Supabase.",
                 ),
             ),
         ),
@@ -197,8 +202,18 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.vercel.com"),
         remote_url="https://mcp.vercel.com",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(ConnectionField(key="VERCEL_TOKEN", label="Vercel API Token", input_type="password"),),
+            strategy="oauth_preferred",
+            oauth_provider="vercel",
+            oauth_scopes=("read", "write"),
+            fields=(
+                ConnectionField(
+                    key="VERCEL_TOKEN",
+                    label="Vercel API Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help="Use preferencialmente OAuth; o token fica como fallback.",
+                ),
+            ),
         ),
         tools=(
             _r("list_projects", "Listar projetos"),
@@ -254,8 +269,18 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", _PINNED_SENTRY),
         connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(ConnectionField(key="SENTRY_ACCESS_TOKEN", label="Auth Token", input_type="password"),),
+            strategy="oauth_preferred",
+            oauth_provider="sentry",
+            oauth_scopes=("org:read", "project:read", "event:read"),
+            fields=(
+                ConnectionField(
+                    key="SENTRY_ACCESS_TOKEN",
+                    label="Auth Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help="Use preferencialmente OAuth; o token fica como fallback.",
+                ),
+            ),
             scope_fields=(
                 ConnectionField(
                     key="SENTRY_HOST",
@@ -403,10 +428,11 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             "add blocks, and manage your knowledge base."
         ),
         category="productivity",
-        documentation_url="https://github.com/makenotion/notion-mcp-server",
+        documentation_url="https://developers.notion.com/guides/mcp/get-started-with-mcp",
         logo_key="notion",
-        transport_type="stdio",
-        command_template=("npx", "-y", "@notionhq/notion-mcp-server"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.notion.com/mcp"),
+        remote_url="https://mcp.notion.com/mcp",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
             oauth_provider="notion",
@@ -416,6 +442,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     label="Notion Integration Token (fallback)",
                     required=False,
                     input_type="password",
+                    help="Use preferencialmente OAuth; o token fica como fallback.",
                 ),
             ),
         ),
@@ -445,12 +472,16 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", "@cloudflare/mcp-server-cloudflare"),
         connection_profile=ConnectionProfile(
-            strategy="api_key",
+            strategy="oauth_preferred",
+            oauth_provider="cloudflare",
+            oauth_scopes=("zone:read", "dns:edit", "worker:edit"),
             fields=(
                 ConnectionField(
                     key="CLOUDFLARE_API_TOKEN",
-                    label="Cloudflare API Token",
+                    label="Cloudflare API Token (fallback)",
+                    required=False,
                     input_type="password",
+                    help="Use preferencialmente OAuth; o token fica como fallback.",
                 ),
             ),
         ),
@@ -626,8 +657,9 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         category="cloud",
         documentation_url="https://developers.hubspot.com/mcp",
         logo_key="hubspot",
-        transport_type="stdio",
-        command_template=("npx", "-y", "@hubspot/mcp-server"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.hubspot.com"),
+        remote_url="https://mcp.hubspot.com",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
             oauth_provider="hubspot",
@@ -641,6 +673,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     label="Private App Access Token (fallback)",
                     required=False,
                     input_type="password",
+                    help="Use preferencialmente OAuth; o private app token fica como fallback.",
                 ),
             ),
         ),
@@ -719,11 +752,19 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
                     key="TWILIO_ACCOUNT_SID",
                     label="Account SID",
                     input_type="text",
+                    help="Encontre no painel Twilio (formato AC...).",
                 ),
                 ConnectionField(
-                    key="TWILIO_AUTH_TOKEN",
-                    label="Auth Token",
+                    key="TWILIO_API_KEY",
+                    label="API Key SID",
+                    input_type="text",
+                    help="Crie em Console → Account → API keys & tokens (formato SK...).",
+                ),
+                ConnectionField(
+                    key="TWILIO_API_SECRET",
+                    label="API Secret",
                     input_type="password",
+                    help="Mostrado apenas uma vez ao criar a API Key.",
                 ),
             ),
         ),
@@ -739,7 +780,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
     ),
     McpServerSpec(
         server_key="postgres_mcp",
-        display_name="PostgreSQL (MCP)",
+        display_name="PostgreSQL",
         tagline="SQL queries and schema inspection",
         description=(
             "Conecte a qualquer banco PostgreSQL externo para executar queries e inspecionar schema via protocolo MCP."
@@ -783,6 +824,397 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             _r("analyze_db_health", "Check database health"),
         ),
         tier="verticals",
+    ),
+    McpServerSpec(
+        server_key="atlassian",
+        display_name="Atlassian",
+        tagline="Jira issues, Confluence pages e Atlassian Cloud",
+        description=(
+            "Conecte ao Atlassian Cloud para gerenciar issues do Jira, páginas e spaces "
+            "do Confluence. Suporta OAuth 2.1 via Rovo MCP server (mcp.atlassian.com) "
+            "ou autenticação por email + API token quando o admin habilita."
+        ),
+        category="productivity",
+        documentation_url="https://support.atlassian.com/atlassian-rovo-mcp-server/",
+        logo_key="jira",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.atlassian.com/v1/mcp"),
+        remote_url="https://mcp.atlassian.com/v1/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="atlassian",
+            oauth_scopes=("read:jira-work", "write:jira-work", "read:confluence-content.all"),
+            fields=(
+                ConnectionField(
+                    key="ATLASSIAN_SITE_URL",
+                    label="Site URL (fallback)",
+                    required=False,
+                    input_type="text",
+                    help="Ex.: https://yourorg.atlassian.net (apenas para autenticação por API token)",
+                ),
+                ConnectionField(
+                    key="ATLASSIAN_USER_EMAIL",
+                    label="Email da conta (fallback)",
+                    required=False,
+                    input_type="text",
+                ),
+                ConnectionField(
+                    key="ATLASSIAN_API_TOKEN",
+                    label="API Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help=(
+                        "Crie em id.atlassian.com/manage-profile/security/api-tokens. "
+                        "Use preferencialmente OAuth — só preencha se o admin desabilitou o flow OAuth."
+                    ),
+                ),
+            ),
+        ),
+        tools=(
+            _r("get_issue", "Recuperar detalhes de um Jira issue"),
+            _r("search_issues", "Buscar issues com JQL"),
+            _w("create_issue", "Criar issue no Jira"),
+            _w("update_issue", "Atualizar campos de issue"),
+            _w("add_comment", "Adicionar comentário"),
+            _r("get_page", "Recuperar página do Confluence"),
+            _r("search_pages", "Buscar páginas do Confluence (CQL)"),
+            _w("create_page", "Criar página no Confluence"),
+            _w("update_page", "Atualizar página do Confluence"),
+            _r("list_projects", "Listar projetos do Jira"),
+            _r("list_spaces", "Listar spaces do Confluence"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="gitlab_mcp",
+        display_name="GitLab",
+        tagline="Repositórios, MRs, issues e CI/CD",
+        description=(
+            "Servidor MCP comunitário do GitLab: navega projetos, abre merge "
+            "requests, lê issues e consulta pipelines. Auth via Personal "
+            "Access Token (scope ``api`` ou ``read_api``)."
+        ),
+        category="development",
+        documentation_url="https://github.com/zereight/gitlab-mcp",
+        logo_key="gitlab",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@zereight/mcp-gitlab"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="GITLAB_PERSONAL_ACCESS_TOKEN",
+                    label="Personal Access Token",
+                    input_type="password",
+                    help="Crie em GitLab → User → Preferences → Access tokens com scope 'api' ou 'read_api'.",
+                ),
+                ConnectionField(
+                    key="GITLAB_API_URL",
+                    label="API URL (opcional)",
+                    required=False,
+                    input_type="text",
+                    help="Padrão: https://gitlab.com/api/v4. Use sua URL self-hosted se aplicável.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_projects", "Listar projetos"),
+            _r("get_project", "Detalhes do projeto"),
+            _r("list_issues", "Listar issues"),
+            _w("create_issue", "Criar issue"),
+            _r("list_merge_requests", "Listar merge requests"),
+            _w("create_merge_request", "Abrir merge request"),
+            _r("get_file_content", "Ler arquivo do repo"),
+            _w("create_or_update_file", "Criar/editar arquivo"),
+            _r("search_blobs", "Buscar código"),
+            _r("list_pipelines", "Listar pipelines CI"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="bitbucket",
+        display_name="Bitbucket",
+        tagline="Repositórios, PRs e pipelines",
+        description=(
+            "Servidor MCP comunitário para Bitbucket Cloud e Server. Lista "
+            "repositórios, gerencia pull requests, lê arquivos, executa builds. "
+            "Cloud: Username + App Password. Server: HTTP access token."
+        ),
+        category="development",
+        documentation_url="https://www.npmjs.com/package/@nexus2520/bitbucket-mcp-server",
+        logo_key="bitbucket",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@nexus2520/bitbucket-mcp-server"),
+        connection_profile=ConnectionProfile(
+            strategy="api_key",
+            fields=(
+                ConnectionField(
+                    key="BITBUCKET_USERNAME",
+                    label="Username (Cloud)",
+                    required=False,
+                    input_type="text",
+                    help="Para Bitbucket Cloud: seu username Atlassian.",
+                ),
+                ConnectionField(
+                    key="BITBUCKET_APP_PASSWORD",
+                    label="App Password (Cloud)",
+                    required=False,
+                    input_type="password",
+                    help=(
+                        "Crie em id.atlassian.com/manage-profile/security/app-passwords "
+                        "com escopos repository, pullrequest, pipeline."
+                    ),
+                ),
+                ConnectionField(
+                    key="BITBUCKET_TOKEN",
+                    label="HTTP Access Token (Server)",
+                    required=False,
+                    input_type="password",
+                    help="Para Bitbucket Server self-hosted, gere em User profile → Personal access tokens.",
+                ),
+                ConnectionField(
+                    key="BITBUCKET_URL",
+                    label="Base URL (Server)",
+                    required=False,
+                    input_type="text",
+                    help="Apenas para Bitbucket Server (ex.: https://bitbucket.empresa.com).",
+                ),
+                ConnectionField(
+                    key="BITBUCKET_DEFAULT_WORKSPACE",
+                    label="Workspace padrão (Cloud)",
+                    required=False,
+                    input_type="text",
+                    help="Opcional: limita o escopo a um único workspace.",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_repositories", "Listar repositórios"),
+            _r("get_repository", "Detalhes do repositório"),
+            _r("list_pull_requests", "Listar pull requests"),
+            _w("create_pull_request", "Abrir pull request"),
+            _w("merge_pull_request", "Fazer merge de PR"),
+            _r("get_pull_request", "Detalhes de PR"),
+            _w("comment_pull_request", "Comentar em PR"),
+            _r("get_file_content", "Ler arquivo do repo"),
+            _r("list_branches", "Listar branches"),
+            _r("list_pipelines", "Listar pipelines"),
+            _r("get_pipeline", "Detalhes de pipeline"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="gmail",
+        display_name="Gmail",
+        tagline="Mensagens, threads, drafts e labels",
+        description=(
+            "Acesse e gerencie sua caixa do Gmail via OAuth do Google. Lista "
+            "threads, lê mensagens, cria drafts, aplica/remove labels."
+        ),
+        category="productivity",
+        documentation_url="https://developers.google.com/gmail/api",
+        logo_key="gmail",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@gongrzhe/server-gmail-autoauth-mcp"),
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="google",
+            oauth_scopes=(
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/gmail.modify",
+            ),
+            fields=(
+                ConnectionField(
+                    key="GMAIL_OAUTH_CLIENT_ID",
+                    label="OAuth Client ID (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="GMAIL_OAUTH_CLIENT_SECRET",
+                    label="OAuth Client Secret (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_threads", "Listar threads"),
+            _r("read_message", "Ler mensagem"),
+            _r("search_messages", "Buscar mensagens (Gmail query)"),
+            _w("send_message", "Enviar mensagem"),
+            _w("create_draft", "Criar rascunho"),
+            _w("modify_labels", "Aplicar/remover labels"),
+            _d("delete_message", "Excluir mensagem"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="google_calendar",
+        display_name="Google Calendar",
+        tagline="Eventos, calendários e disponibilidade",
+        description=(
+            "Acesse Google Calendar via OAuth: lista calendários, cria/edita "
+            "eventos, consulta disponibilidade (free/busy) e RSVPs."
+        ),
+        category="productivity",
+        documentation_url="https://developers.google.com/calendar/api",
+        logo_key="google_calendar",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@cocal/google-calendar-mcp"),
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="google",
+            oauth_scopes=(
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.events",
+            ),
+            fields=(
+                ConnectionField(
+                    key="GOOGLE_OAUTH_CLIENT_ID",
+                    label="OAuth Client ID (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="GOOGLE_OAUTH_CLIENT_SECRET",
+                    label="OAuth Client Secret (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_calendars", "Listar calendários"),
+            _r("list_events", "Listar eventos"),
+            _r("get_event", "Detalhes de evento"),
+            _w("create_event", "Criar evento"),
+            _w("update_event", "Atualizar evento"),
+            _d("delete_event", "Excluir evento"),
+            _r("freebusy", "Consultar disponibilidade"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="google_drive",
+        display_name="Google Drive",
+        tagline="Arquivos, pastas e busca no Drive",
+        description=(
+            "Navegue e gerencie arquivos no Google Drive via OAuth: listar, "
+            "buscar, ler conteúdo, criar pastas e fazer upload de novos itens."
+        ),
+        category="productivity",
+        documentation_url="https://developers.google.com/drive/api",
+        logo_key="google_drive",
+        transport_type="stdio",
+        command_template=("npx", "-y", "@isaacphi/mcp-gdrive"),
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="google",
+            oauth_scopes=(
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/drive.file",
+            ),
+            fields=(
+                ConnectionField(
+                    key="GDRIVE_OAUTH_CLIENT_ID",
+                    label="OAuth Client ID (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+                ConnectionField(
+                    key="GDRIVE_OAUTH_CLIENT_SECRET",
+                    label="OAuth Client Secret (fallback)",
+                    required=False,
+                    input_type="password",
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_files", "Listar arquivos"),
+            _r("search_files", "Buscar arquivos (Drive query)"),
+            _r("read_file", "Ler conteúdo do arquivo"),
+            _w("create_folder", "Criar pasta"),
+            _w("upload_file", "Upload de arquivo"),
+            _w("update_file", "Atualizar arquivo"),
+            _d("delete_file", "Excluir arquivo"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="github_mcp",
+        display_name="GitHub",
+        tagline="Repositórios, PRs, issues e Copilot via MCP oficial",
+        description=(
+            "Servidor MCP oficial do GitHub: lê e edita repos, abre PRs, gerencia issues e "
+            "consulta Copilot/Actions. OAuth 2.1 via api.githubcopilot.com/mcp ou Personal "
+            "Access Token classic/fine-grained."
+        ),
+        category="development",
+        documentation_url="https://github.com/github/github-mcp-server",
+        logo_key="github",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://api.githubcopilot.com/mcp"),
+        remote_url="https://api.githubcopilot.com/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="oauth_preferred",
+            oauth_provider="github",
+            oauth_scopes=("repo", "read:org", "read:user"),
+            fields=(
+                ConnectionField(
+                    key="GITHUB_PERSONAL_ACCESS_TOKEN",
+                    label="Personal Access Token (fallback)",
+                    required=False,
+                    input_type="password",
+                    help=(
+                        "Use preferencialmente OAuth. Para PAT, gere em github.com/settings/tokens "
+                        "(classic ou fine-grained) com scopes 'repo', 'read:org' e 'read:user'."
+                    ),
+                ),
+            ),
+        ),
+        tools=(
+            _r("list_repos", "Listar repositórios"),
+            _r("get_repo", "Detalhes de um repositório"),
+            _r("list_issues", "Listar issues"),
+            _w("create_issue", "Criar issue"),
+            _w("comment_on_issue", "Comentar em issue"),
+            _r("list_pull_requests", "Listar pull requests"),
+            _w("create_pull_request", "Abrir pull request"),
+            _r("get_file_contents", "Ler arquivo do repo"),
+            _w("create_or_update_file", "Criar/editar arquivo"),
+            _r("search_code", "Buscar código"),
+            _r("list_workflow_runs", "Listar runs de Actions"),
+            _r("get_workflow_run", "Detalhes de run"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="aws_knowledge",
+        display_name="AWS Knowledge",
+        tagline="Documentação AWS, blogs e best practices",
+        description=(
+            "Servidor MCP oficial da AWS com acesso público (sem credenciais) "
+            "à documentação, blogs, What's New e guias de Well-Architected. "
+            "Para acesso a recursos AWS reais, use AWS API MCP ou IAM."
+        ),
+        category="cloud",
+        documentation_url="https://docs.aws.amazon.com/mcp/",
+        logo_key="aws",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://knowledge-mcp.global.api.aws"),
+        remote_url="https://knowledge-mcp.global.api.aws",
+        connection_profile=ConnectionProfile(strategy="none"),
+        tools=(
+            _r("search_documentation", "Buscar na documentação AWS"),
+            _r("read_documentation", "Ler página de documentação"),
+            _r("recommend", "Recomendar recursos AWS para um caso de uso"),
+            _r("search_whats_new", "Buscar anúncios What's New"),
+            _r("search_well_architected", "Buscar guias Well-Architected"),
+            _r("search_blogs", "Buscar blogs AWS"),
+        ),
+        tier="recommended",
     ),
 )
 

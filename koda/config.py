@@ -115,6 +115,30 @@ OWNER_GITHUB: str = _env("OWNER_GITHUB", "")
 # The control-plane supervisor must be able to boot before any agent runtime exists.
 AGENT_TOKEN: str = _env("AGENT_TOKEN", "") or ""
 AGENT_NAME: str = _env("AGENT_NAME", AGENT_ID or "Koda")
+# Telegram polling resumption (P1-2 of production-deployment-roadmap.md).
+# Default ``false`` — restarts no longer drop queued user messages. Operators
+# who explicitly want the legacy "discard backlog on reboot" behavior can set
+# this to ``true`` per agent or globally.
+TELEGRAM_DROP_PENDING_UPDATES: bool = _bool_env("TELEGRAM_DROP_PENDING_UPDATES", False)
+# Phase 1B — koda-bot-gateway opt-in. When enabled, workers stop opening
+# their own long-poll TCP connection to api.telegram.org and subscribe to
+# a single Rust gateway process that polls every bot centrally (resolves
+# P2-6: 1 long-poll per agent → 1 process for all). Default off so
+# existing single-host deployments keep their current behavior; flip to
+# ``true`` after `koda-bot-gateway` is deployed.
+BOT_GATEWAY_ENABLED: bool = _bool_env("BOT_GATEWAY_ENABLED", False)
+BOT_GATEWAY_GRPC_TARGET: str = (_env("BOT_GATEWAY_GRPC_TARGET", "127.0.0.1:50066") or "127.0.0.1:50066").strip()
+# Phase 1C — koda-policy-engine opt-in. When enabled, queue_manager
+# consults the policy engine before enqueuing each user message (rate,
+# concurrency, spend cap) and reports billed LLM cost back via
+# RecordSpend. Off by default so existing single-tenant deployments
+# continue to operate without a configured workspace policy.
+POLICY_ENGINE_ENABLED: bool = _bool_env("POLICY_ENGINE_ENABLED", False)
+POLICY_ENGINE_GRPC_TARGET: str = (_env("POLICY_ENGINE_GRPC_TARGET", "127.0.0.1:50067") or "127.0.0.1:50067").strip()
+# Workspace identifier the worker reports to the policy engine. In
+# single-tenant mode workers default to ``ws_default``; multi-tenant
+# Phase 3 will plumb this through control-plane.
+POLICY_ENGINE_WORKSPACE_ID: str = (_env("POLICY_ENGINE_WORKSPACE_ID", "ws_default") or "ws_default").strip()
 DEFAULT_WORK_DIR: str = _env("DEFAULT_WORK_DIR", str(Path.home()))
 PROJECT_DIRS: list[str] = [d.strip() for d in _env("PROJECT_DIRS", "").split(",") if d.strip()]
 STATE_BACKEND: str = (_env("STATE_BACKEND", "postgres") or "postgres").strip().lower()
@@ -153,14 +177,24 @@ MAX_TOTAL_BUDGET_USD: float = float(_env("MAX_TOTAL_BUDGET_USD", "50.0"))
 MAX_TURNS: int = int(_env("MAX_TURNS", "200"))
 FIRST_CHUNK_TIMEOUT: int = int(_env("FIRST_CHUNK_TIMEOUT", "300"))
 
+# Claude lineup verified against
+# https://platform.claude.com/docs/en/about-claude/models on 2026-05-01.
+# Current generally-available models: Opus 4.7 (flagship), Sonnet 4.6, Haiku 4.5.
+# Legacy entries kept so operators can pin previous-generation models, but the
+# 2024-05-14 snapshots (`claude-{sonnet,opus}-4-20250514`) are deliberately
+# omitted — they retire on 2026-06-15 per Anthropic's deprecation schedule.
 CLAUDE_AVAILABLE_MODELS: list[str] = _env_csv(
     "CLAUDE_AVAILABLE_MODELS",
-    "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5-20251001",
+    (
+        "claude-opus-4-7,claude-sonnet-4-6,claude-haiku-4-5-20251001,"
+        "claude-opus-4-6,claude-sonnet-4-5-20250929,"
+        "claude-opus-4-5-20251101,claude-opus-4-1-20250805"
+    ),
 )
 CLAUDE_TIER_MODELS: dict[str, str] = {
     "small": _env("CLAUDE_MODEL_SMALL", "claude-haiku-4-5-20251001"),
     "medium": _env("CLAUDE_MODEL_MEDIUM", "claude-sonnet-4-6"),
-    "large": _env("CLAUDE_MODEL_LARGE", "claude-opus-4-6"),
+    "large": _env("CLAUDE_MODEL_LARGE", "claude-opus-4-7"),
 }
 CLAUDE_DEFAULT_MODEL: str = _env(
     "CLAUDE_DEFAULT_MODEL",
@@ -175,33 +209,40 @@ CODEX_FIRST_CHUNK_TIMEOUT: int = int(_env("CODEX_FIRST_CHUNK_TIMEOUT", str(FIRST
 CODEX_SANDBOX: str = _env("CODEX_SANDBOX", "danger-full-access")
 CODEX_APPROVAL_POLICY: str = _env("CODEX_APPROVAL_POLICY", "never")
 CODEX_SKIP_GIT_REPO_CHECK: bool = _env("CODEX_SKIP_GIT_REPO_CHECK", "true").lower() == "true"
+# OpenAI / Codex lineup verified against
+# https://developers.openai.com/api/docs/models and the Codex models page on
+# 2026-05-01. GPT-5.5 (released 2026-04-24) is the new frontier; GPT-5.4
+# nano/mini cover lower-cost tiers; GPT-5.3-codex (+ codex-spark preview) and
+# GPT-5.2 stay as Codex-aligned alternatives. The 5.1 codex variants and
+# `gpt-5.2-codex` were pulled from the public docs and are dropped here.
 CODEX_AVAILABLE_MODELS: list[str] = _env_csv(
     "CODEX_AVAILABLE_MODELS",
-    (
-        "gpt-5.4,gpt-5.4-mini,"
-        "gpt-5.3-codex,gpt-5.3-codex-spark,"
-        "gpt-5.2-codex,gpt-5.2,"
-        "gpt-5.1-codex-max,gpt-5.1-codex-mini"
-    ),
+    ("gpt-5.5,gpt-5.4,gpt-5.4-mini,gpt-5.4-nano,gpt-5.3-codex,gpt-5.3-codex-spark,gpt-5.2"),
 )
 CODEX_TIER_MODELS: dict[str, str] = {
-    "small": _env("CODEX_MODEL_SMALL", "gpt-4o-mini"),
+    "small": _env("CODEX_MODEL_SMALL", "gpt-5.4-nano"),
     "medium": _env("CODEX_MODEL_MEDIUM", "gpt-5.4"),
-    "large": _env("CODEX_MODEL_LARGE", "gpt-5.4"),
+    "large": _env("CODEX_MODEL_LARGE", "gpt-5.5"),
 }
-CODEX_DEFAULT_MODEL: str = _env("CODEX_DEFAULT_MODEL", CODEX_TIER_MODELS["medium"])
+CODEX_DEFAULT_MODEL: str = _env("CODEX_DEFAULT_MODEL", CODEX_TIER_MODELS["large"])
 
 # --- Gemini CLI ---
 GEMINI_ENABLED: bool = _env("GEMINI_ENABLED", "false").lower() == "true"
 GEMINI_BIN: str = _env("GEMINI_BIN", "") or ""
 GEMINI_TIMEOUT: int = int(_env("GEMINI_TIMEOUT", str(CLAUDE_TIMEOUT)))
 GEMINI_FIRST_CHUNK_TIMEOUT: int = int(_env("GEMINI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+# Gemini lineup verified against https://ai.google.dev/gemini-api/docs/models
+# on 2026-05-01. 2.5 flash-lite/flash/pro are the production tiers; the 3.x
+# previews (flash-lite, flash, pro) are exposed for opt-in experimentation.
 GEMINI_AVAILABLE_MODELS: list[str] = _env_csv(
     "GEMINI_AVAILABLE_MODELS",
-    "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.5-pro,gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview",
+    (
+        "gemini-2.5-pro,gemini-2.5-flash,gemini-2.5-flash-lite,"
+        "gemini-3.1-pro-preview,gemini-3-flash-preview,gemini-3.1-flash-lite-preview"
+    ),
 )
 GEMINI_TIER_MODELS: dict[str, str] = {
-    "small": _env("GEMINI_MODEL_SMALL", "gemini-2.5-flash"),
+    "small": _env("GEMINI_MODEL_SMALL", "gemini-2.5-flash-lite"),
     "medium": _env("GEMINI_MODEL_MEDIUM", "gemini-2.5-flash"),
     "large": _env("GEMINI_MODEL_LARGE", "gemini-2.5-pro"),
 }
@@ -234,13 +275,6 @@ KOKORO_DEFAULT_LANGUAGE: str = _env("KOKORO_DEFAULT_LANGUAGE", "pt-br") or ""
 KOKORO_DEFAULT_VOICE: str = _env("KOKORO_DEFAULT_VOICE", "pf_dora") or ""
 KOKORO_VOICES_PATH: str = _env("KOKORO_VOICES_PATH", "") or ""
 
-# Sora (OpenAI Image/Video)
-SORA_ENABLED: bool = _env("SORA_ENABLED", "false").lower() == "true"
-SORA_AVAILABLE_MODELS: list[str] = [
-    m.strip() for m in (_env("SORA_AVAILABLE_MODELS", "sora-v1") or "").split(",") if m.strip()
-]
-SORA_DEFAULT_MODEL: str = _env("SORA_DEFAULT_MODEL", "sora-v1") or ""
-
 # --- Perplexity (HTTP, OpenAI-compatible) ---
 PERPLEXITY_ENABLED: bool = _env("PERPLEXITY_ENABLED", "false").lower() == "true"
 PERPLEXITY_AVAILABLE_MODELS: list[str] = _env_csv(
@@ -262,8 +296,9 @@ MISTRAL_AVAILABLE_MODELS: list[str] = _env_csv(
     "MISTRAL_AVAILABLE_MODELS",
     (
         "mistral-large-latest,mistral-medium-latest,mistral-small-latest,"
-        "codestral-latest,pixtral-large-latest,magistral-medium-latest,"
-        "ministral-8b-latest,ministral-3b-latest"
+        "codestral-latest,pixtral-large-latest,pixtral-12b-2409,"
+        "magistral-medium-latest,magistral-small-latest,"
+        "ministral-8b-latest,ministral-3b-latest,mistral-saba-latest"
     ),
 )
 MISTRAL_TIER_MODELS: dict[str, str] = {
@@ -280,16 +315,18 @@ QWEN_ENABLED: bool = _env("QWEN_ENABLED", "false").lower() == "true"
 QWEN_AVAILABLE_MODELS: list[str] = _env_csv(
     "QWEN_AVAILABLE_MODELS",
     (
+        "qwen3-max,qwen3-plus,qwen3-flash,"
+        "qwen3-vl-max,qwen3-vl-plus,qwen3-vl-flash,"
+        "qwen3-coder-plus,qwen3-coder-flash,qwen3-omni-30b-a3b,"
         "qwen-max,qwen-plus,qwen-turbo,qwen-long,"
-        "qwen3-coder-plus,qwen3-coder-flash,"
         "qwen2.5-72b-instruct,qwen2.5-coder-32b-instruct,"
-        "qwen-vl-max,qwen-vl-plus,qwq-32b"
+        "qwen-vl-max,qwen-vl-plus,qwq-32b,qvq-72b-preview"
     ),
 )
 QWEN_TIER_MODELS: dict[str, str] = {
-    "small": _env("QWEN_MODEL_SMALL", "qwen-turbo"),
-    "medium": _env("QWEN_MODEL_MEDIUM", "qwen-plus"),
-    "large": _env("QWEN_MODEL_LARGE", "qwen-max"),
+    "small": _env("QWEN_MODEL_SMALL", "qwen3-flash"),
+    "medium": _env("QWEN_MODEL_MEDIUM", "qwen3-plus"),
+    "large": _env("QWEN_MODEL_LARGE", "qwen3-max"),
 }
 QWEN_DEFAULT_MODEL: str = _env("QWEN_DEFAULT_MODEL", QWEN_TIER_MODELS["medium"])
 QWEN_TIMEOUT: int = int(_env("QWEN_TIMEOUT", "120"))
@@ -300,15 +337,16 @@ KIMI_ENABLED: bool = _env("KIMI_ENABLED", "false").lower() == "true"
 KIMI_AVAILABLE_MODELS: list[str] = _env_csv(
     "KIMI_AVAILABLE_MODELS",
     (
+        "kimi-k2.6,kimi-k2.5,"
         "kimi-k2-0905-preview,kimi-k2-0711-preview,kimi-latest,"
-        "moonshot-v1-128k,moonshot-v1-32k,moonshot-v1-8k,moonshot-v1-auto,"
-        "kimi-thinking-preview,kimi-vision-2024-12-09"
+        "kimi-thinking-preview,"
+        "moonshot-v1-128k,moonshot-v1-32k,moonshot-v1-8k,moonshot-v1-auto"
     ),
 )
 KIMI_TIER_MODELS: dict[str, str] = {
     "small": _env("KIMI_MODEL_SMALL", "moonshot-v1-8k"),
-    "medium": _env("KIMI_MODEL_MEDIUM", "moonshot-v1-32k"),
-    "large": _env("KIMI_MODEL_LARGE", "kimi-k2-0905-preview"),
+    "medium": _env("KIMI_MODEL_MEDIUM", "kimi-k2.5"),
+    "large": _env("KIMI_MODEL_LARGE", "kimi-k2.6"),
 }
 KIMI_DEFAULT_MODEL: str = _env("KIMI_DEFAULT_MODEL", KIMI_TIER_MODELS["large"])
 KIMI_TIMEOUT: int = int(_env("KIMI_TIMEOUT", "120"))
@@ -319,6 +357,8 @@ GROQ_ENABLED: bool = _env("GROQ_ENABLED", "false").lower() == "true"
 GROQ_AVAILABLE_MODELS: list[str] = _env_csv(
     "GROQ_AVAILABLE_MODELS",
     (
+        "openai/gpt-oss-120b,openai/gpt-oss-20b,openai/gpt-oss-safeguard-20b,"
+        "moonshotai/kimi-k2-instruct,qwen/qwen3-32b,"
         "llama-3.3-70b-versatile,llama-3.1-8b-instant,"
         "llama-3.2-1b-preview,llama-3.2-3b-preview,"
         "llama-3.2-11b-vision-preview,llama-3.2-90b-vision-preview,"
@@ -328,9 +368,9 @@ GROQ_AVAILABLE_MODELS: list[str] = _env_csv(
     ),
 )
 GROQ_TIER_MODELS: dict[str, str] = {
-    "small": _env("GROQ_MODEL_SMALL", "llama-3.1-8b-instant"),
-    "medium": _env("GROQ_MODEL_MEDIUM", "llama-3.3-70b-versatile"),
-    "large": _env("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile"),
+    "small": _env("GROQ_MODEL_SMALL", "openai/gpt-oss-20b"),
+    "medium": _env("GROQ_MODEL_MEDIUM", "openai/gpt-oss-120b"),
+    "large": _env("GROQ_MODEL_LARGE", "moonshotai/kimi-k2-instruct"),
 }
 GROQ_DEFAULT_MODEL: str = _env("GROQ_DEFAULT_MODEL", GROQ_TIER_MODELS["medium"])
 GROQ_TIMEOUT: int = int(_env("GROQ_TIMEOUT", "60"))
@@ -340,12 +380,12 @@ GROQ_FIRST_CHUNK_TIMEOUT: int = int(_env("GROQ_FIRST_CHUNK_TIMEOUT", "15"))
 DEEPSEEK_ENABLED: bool = _env("DEEPSEEK_ENABLED", "false").lower() == "true"
 DEEPSEEK_AVAILABLE_MODELS: list[str] = _env_csv(
     "DEEPSEEK_AVAILABLE_MODELS",
-    "deepseek-chat,deepseek-reasoner",
+    "deepseek-v4-pro,deepseek-v4-flash,deepseek-chat,deepseek-reasoner",
 )
 DEEPSEEK_TIER_MODELS: dict[str, str] = {
-    "small": _env("DEEPSEEK_MODEL_SMALL", "deepseek-chat"),
-    "medium": _env("DEEPSEEK_MODEL_MEDIUM", "deepseek-chat"),
-    "large": _env("DEEPSEEK_MODEL_LARGE", "deepseek-reasoner"),
+    "small": _env("DEEPSEEK_MODEL_SMALL", "deepseek-v4-flash"),
+    "medium": _env("DEEPSEEK_MODEL_MEDIUM", "deepseek-v4-flash"),
+    "large": _env("DEEPSEEK_MODEL_LARGE", "deepseek-v4-pro"),
 }
 DEEPSEEK_DEFAULT_MODEL: str = _env("DEEPSEEK_DEFAULT_MODEL", DEEPSEEK_TIER_MODELS["medium"])
 DEEPSEEK_TIMEOUT: int = int(_env("DEEPSEEK_TIMEOUT", "120"))
@@ -355,16 +395,90 @@ DEEPSEEK_FIRST_CHUNK_TIMEOUT: int = int(_env("DEEPSEEK_FIRST_CHUNK_TIMEOUT", str
 XAI_ENABLED: bool = _env("XAI_ENABLED", "false").lower() == "true"
 XAI_AVAILABLE_MODELS: list[str] = _env_csv(
     "XAI_AVAILABLE_MODELS",
-    ("grok-4-0709,grok-3,grok-3-mini,grok-3-fast,grok-3-mini-fast,grok-2-vision-1212,grok-2-1212"),
+    (
+        "grok-4.3,grok-4.1-fast,grok-4-fast,grok-4-0709,"
+        "grok-3,grok-3-mini,grok-3-fast,grok-3-mini-fast,"
+        "grok-2-vision-1212,grok-2-1212"
+    ),
 )
 XAI_TIER_MODELS: dict[str, str] = {
-    "small": _env("XAI_MODEL_SMALL", "grok-3-mini"),
-    "medium": _env("XAI_MODEL_MEDIUM", "grok-3"),
-    "large": _env("XAI_MODEL_LARGE", "grok-4-0709"),
+    "small": _env("XAI_MODEL_SMALL", "grok-4.1-fast"),
+    "medium": _env("XAI_MODEL_MEDIUM", "grok-4-fast"),
+    "large": _env("XAI_MODEL_LARGE", "grok-4.3"),
 }
-XAI_DEFAULT_MODEL: str = _env("XAI_DEFAULT_MODEL", XAI_TIER_MODELS["medium"])
+XAI_DEFAULT_MODEL: str = _env("XAI_DEFAULT_MODEL", XAI_TIER_MODELS["large"])
 XAI_TIMEOUT: int = int(_env("XAI_TIMEOUT", "120"))
 XAI_FIRST_CHUNK_TIMEOUT: int = int(_env("XAI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
+
+# --- llama.cpp (local Metal-accelerated inference, OpenAI-compatible) ---
+LLAMACPP_ENABLED: bool = _env("LLAMACPP_ENABLED", "false").lower() == "true"
+LLAMACPP_API_KEY: str = _env("LLAMACPP_API_KEY", "") or ""
+LLAMACPP_API_BASE_URL: str = _env("LLAMACPP_API_BASE_URL", "http://127.0.0.1:8080") or ""
+LLAMACPP_TIMEOUT: int = int(_env("LLAMACPP_TIMEOUT", "300"))
+LLAMACPP_FIRST_CHUNK_TIMEOUT: int = int(_env("LLAMACPP_FIRST_CHUNK_TIMEOUT", "60"))
+LLAMACPP_AVAILABLE_MODELS: list[str] = _env_csv("LLAMACPP_AVAILABLE_MODELS", "")
+LLAMACPP_TIER_MODELS: dict[str, str] = {
+    "small": _env("LLAMACPP_MODEL_SMALL", "") or "",
+    "medium": _env("LLAMACPP_MODEL_MEDIUM", "") or "",
+    "large": _env("LLAMACPP_MODEL_LARGE", "") or "",
+}
+LLAMACPP_DEFAULT_MODEL: str = _env("LLAMACPP_DEFAULT_MODEL", LLAMACPP_TIER_MODELS["medium"]) or ""
+LLAMACPP_GRAMMAR_FILE: str = _env("LLAMACPP_GRAMMAR_FILE", "") or ""
+LLAMACPP_DRAFT_MODEL: str = _env("LLAMACPP_DRAFT_MODEL", "") or ""
+LLAMACPP_BIN: str = _env("LLAMACPP_BIN", "llama-server") or "llama-server"
+
+# --- MLX (Apple-native local inference, OpenAI-compatible) ---
+MLX_ENABLED: bool = _env("MLX_ENABLED", "false").lower() == "true"
+MLX_API_KEY: str = _env("MLX_API_KEY", "") or ""
+MLX_API_BASE_URL: str = _env("MLX_API_BASE_URL", "http://127.0.0.1:8000") or ""
+MLX_TIMEOUT: int = int(_env("MLX_TIMEOUT", "300"))
+MLX_FIRST_CHUNK_TIMEOUT: int = int(_env("MLX_FIRST_CHUNK_TIMEOUT", "60"))
+MLX_AVAILABLE_MODELS: list[str] = _env_csv("MLX_AVAILABLE_MODELS", "")
+MLX_TIER_MODELS: dict[str, str] = {
+    "small": _env("MLX_MODEL_SMALL", "") or "",
+    "medium": _env("MLX_MODEL_MEDIUM", "") or "",
+    "large": _env("MLX_MODEL_LARGE", "") or "",
+}
+MLX_DEFAULT_MODEL: str = _env("MLX_DEFAULT_MODEL", MLX_TIER_MODELS["medium"]) or ""
+MLX_SERVER_BIN: str = _env("MLX_SERVER_BIN", "mlx_lm.server") or "mlx_lm.server"
+
+# --- Apple Silicon Metal acceleration (system-wide switch) ---
+# Defaults ON: when the host is Apple Silicon, Metal-capable runtimes
+# (llama.cpp, MLX) are allowed to use the GPU. The operator can disable
+# this from System Settings → Models & Providers; on non-Apple-Silicon
+# hosts the flag is a no-op (gated by ``is_apple_silicon()`` at runtime).
+METAL_ENABLED: bool = _env("METAL_ENABLED", "true").lower() == "true"
+
+# --- Local-runtime supervision (opt-in) ---
+LOCAL_RUNTIME_AUTO_SPAWN: bool = _env("LOCAL_RUNTIME_AUTO_SPAWN", "false").lower() == "true"
+LOCAL_RUNTIME_HEAVY_SLOTS: int = int(_env("LOCAL_RUNTIME_HEAVY_SLOTS", "1"))
+LOCAL_RUNTIME_QUEUE_TIMEOUT: int = int(_env("LOCAL_RUNTIME_QUEUE_TIMEOUT", "300"))
+LOCAL_MODEL_REGISTRY_PATH: str = _env("LOCAL_MODEL_REGISTRY_PATH", "") or ""
+
+# --- Auto-activation of local-inference quality bolt-ons ---
+# When true (default), enabling a local provider (llamacpp, mlx, ollama)
+# lights up the practices that make sense for the actual environment:
+# reranker if sentence-transformers is installed, vector cache if faiss is
+# installed, cascade routing with a sensible threshold, auto-spawn if the
+# binary is on PATH. Explicit env vars (RERANK_ENABLED=false, etc.) always
+# override. Resolution lives in koda/services/runtime_capabilities.py.
+LOCAL_AUTO_OPTIMIZE: bool = _env("LOCAL_AUTO_OPTIMIZE", "true").lower() == "true"
+
+# --- Constrained decoding (Phase 1 quality bolt-on) ---
+STRUCTURED_DECODING_ENABLED: bool = _env("STRUCTURED_DECODING_ENABLED", "true").lower() == "true"
+
+# --- Reranker (Phase 2 quality bolt-on) ---
+RERANK_ENABLED: bool = _env("RERANK_ENABLED", "false").lower() == "true"
+RERANK_MODEL: str = _env("RERANK_MODEL", "BAAI/bge-reranker-v2-m3") or ""
+RERANK_TOP_K: int = int(_env("RERANK_TOP_K", "8"))
+RERANK_DEVICE: str = _env("RERANK_DEVICE", "auto") or "auto"
+
+# --- Semantic cache vector backend (Phase 2 quality bolt-on) ---
+SEMANTIC_CACHE_BACKEND: str = (_env("SEMANTIC_CACHE_BACKEND", "lexical") or "lexical").lower()
+SEMANTIC_CACHE_THRESHOLD: float = float(_env("SEMANTIC_CACHE_THRESHOLD", "0.92"))
+
+# --- Cascade routing (Phase 4 quality bolt-on) ---
+LOCAL_PREFER_BELOW_COMPLEXITY: float = float(_env("LOCAL_PREFER_BELOW_COMPLEXITY", "0.0"))
 
 # --- Provider selection / fallback ---
 FUNCTIONAL_MODEL_DEFAULTS: dict = _env_json_object("MODEL_FUNCTION_DEFAULTS_JSON")
@@ -375,6 +489,8 @@ AVAILABLE_PROVIDERS: list[str] = [
         ("codex", CODEX_ENABLED),
         ("gemini", GEMINI_ENABLED),
         ("ollama", OLLAMA_ENABLED),
+        ("llamacpp", LLAMACPP_ENABLED),
+        ("mlx", MLX_ENABLED),
         ("perplexity", PERPLEXITY_ENABLED),
         ("mistral", MISTRAL_ENABLED),
         ("qwen", QWEN_ENABLED),
@@ -393,6 +509,8 @@ PROVIDER_MODELS: dict[str, list[str]] = {
     "codex": CODEX_AVAILABLE_MODELS,
     "gemini": GEMINI_AVAILABLE_MODELS,
     "ollama": OLLAMA_AVAILABLE_MODELS,
+    "llamacpp": LLAMACPP_AVAILABLE_MODELS,
+    "mlx": MLX_AVAILABLE_MODELS,
     "perplexity": PERPLEXITY_AVAILABLE_MODELS,
     "mistral": MISTRAL_AVAILABLE_MODELS,
     "qwen": QWEN_AVAILABLE_MODELS,
@@ -406,6 +524,8 @@ PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "codex": CODEX_DEFAULT_MODEL,
     "gemini": GEMINI_DEFAULT_MODEL,
     "ollama": OLLAMA_DEFAULT_MODEL,
+    "llamacpp": LLAMACPP_DEFAULT_MODEL,
+    "mlx": MLX_DEFAULT_MODEL,
     "perplexity": PERPLEXITY_DEFAULT_MODEL,
     "mistral": MISTRAL_DEFAULT_MODEL,
     "qwen": QWEN_DEFAULT_MODEL,
@@ -419,6 +539,8 @@ PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
     "codex": CODEX_TIER_MODELS,
     "gemini": GEMINI_TIER_MODELS,
     "ollama": OLLAMA_TIER_MODELS,
+    "llamacpp": LLAMACPP_TIER_MODELS,
+    "mlx": MLX_TIER_MODELS,
     "perplexity": PERPLEXITY_TIER_MODELS,
     "mistral": MISTRAL_TIER_MODELS,
     "qwen": QWEN_TIER_MODELS,
@@ -830,6 +952,13 @@ WHISPER_BIN: str = _env("WHISPER_BIN", "whisper-cli")
 WHISPER_MODEL: str = _env(
     "WHISPER_MODEL",
     str(Path.home() / ".cache" / "whisper-cpp" / "models" / "ggml-large-v3-turbo-q5_0.bin"),
+)
+# Directory used by the in-app downloader to place GGML model files. Defaults
+# to the parent of WHISPER_MODEL so the path resolves identically to the
+# whisper-cli expectations once a download completes.
+WHISPER_ASSET_ROOT: str = _env(
+    "WHISPER_ASSET_ROOT",
+    str(Path(WHISPER_MODEL).expanduser().parent),
 )
 WHISPER_LANGUAGE: str = _env("WHISPER_LANGUAGE", "pt")
 WHISPER_TIMEOUT: int = int(_env("WHISPER_TIMEOUT", "120"))
@@ -1501,6 +1630,16 @@ RUNTIME_RETENTION_SUCCESS_HOURS: int = int(_env("RUNTIME_RETENTION_SUCCESS_HOURS
 RUNTIME_RETENTION_FAILURE_HOURS: int = int(_env("RUNTIME_RETENTION_FAILURE_HOURS", "72"))
 RUNTIME_BUNDLE_RETENTION_DAYS: int = int(_env("RUNTIME_BUNDLE_RETENTION_DAYS", "7"))
 RUNTIME_HEARTBEAT_INTERVAL_SECONDS: int = int(_env("RUNTIME_HEARTBEAT_INTERVAL_SECONDS", "15"))
+
+# Per-task lease (crash-safe orchestration). Workers acquire a lease when
+# they pick up a task, renew it every ``HEARTBEAT_SECONDS``, and release it
+# on terminal state. The janitor reaps tasks whose lease has expired
+# (no renewal for ``DURATION_SECONDS``) — requeueing if attempts remain or
+# moving to ``failed`` when exhausted. ``DURATION`` must be ≥ 3× ``HEARTBEAT``
+# so a transient renewal hiccup does not trigger a false-positive reap.
+TASK_LEASE_DURATION_SECONDS: int = int(_env("TASK_LEASE_DURATION_SECONDS", "60"))
+TASK_LEASE_HEARTBEAT_SECONDS: int = int(_env("TASK_LEASE_HEARTBEAT_SECONDS", "15"))
+TASK_LEASE_JANITOR_INTERVAL_SECONDS: int = int(_env("TASK_LEASE_JANITOR_INTERVAL_SECONDS", "30"))
 RUNTIME_STALE_AFTER_SECONDS: int = int(_env("RUNTIME_STALE_AFTER_SECONDS", "60"))
 RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS: int = int(_env("RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS", "10"))
 RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS", "120"))
@@ -1528,6 +1667,15 @@ RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES: int = int(
 # Internal service kernels now run in Rust+gRPC only.
 INTERNAL_RPC_MODE: str = "rust"
 INTERNAL_RPC_DEADLINE_MS: int = int(_env("INTERNAL_RPC_DEADLINE_MS", "1500"))
+# Phase A.2 — process-local circuit breaker for internal gRPC clients.
+# Defaults: 5 failures within 30s open the breaker for 30s. After
+# cool-down a single half-open probe is allowed; on success the
+# breaker closes, on failure it re-opens. Tunable per deployment but
+# the defaults match what we observed during the pause/activate
+# cascading-deadlock incident (P0-3 of the production roadmap).
+INTERNAL_RPC_BREAKER_THRESHOLD: int = int(_env("INTERNAL_RPC_BREAKER_THRESHOLD", "5"))
+INTERNAL_RPC_BREAKER_WINDOW_SECONDS: float = float(_env("INTERNAL_RPC_BREAKER_WINDOW_SECONDS", "30"))
+INTERNAL_RPC_BREAKER_OPEN_SECONDS: float = float(_env("INTERNAL_RPC_BREAKER_OPEN_SECONDS", "30"))
 RUNTIME_KERNEL_SOCKET: str = (
     _env("RUNTIME_KERNEL_SOCKET", str(RUNTIME_EPHEMERAL_ROOT / "rpc" / "runtime-kernel.sock"))
     or str(RUNTIME_EPHEMERAL_ROOT / "rpc" / "runtime-kernel.sock")

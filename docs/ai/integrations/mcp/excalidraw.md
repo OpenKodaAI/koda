@@ -30,8 +30,8 @@ Nenhuma restrição de runtime aplicável a esta integração.
 | `import_scene` | write | Importar cena de arquivo |
 | `describe_scene` | read | Descrever elementos do diagrama |
 | `clear_canvas` | destructive | Limpar canvas |
-| `snapshot_scene` | read | Criar snapshot do diagrama |
-| `set_viewport` | write | Ajustar área de visualização |
+| `snapshot_scene` | read | Create diagram snapshot |
+| `set_viewport` | write | Adjust viewport |
 
 ## Como o agente usa bem
 

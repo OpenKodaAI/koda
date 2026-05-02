@@ -20,8 +20,8 @@ Governed Jira operations and deep issue context.
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `JIRA_URL` | sim | text | URL do site Jira |
-| `JIRA_USERNAME` | sim | text | Usuário (email) |
+| `JIRA_URL` | sim | text | Jira site URL |
+| `JIRA_USERNAME` | sim | text | Username (email) |
 | `JIRA_API_TOKEN` | sim | password | API Token |
 
 

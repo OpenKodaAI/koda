@@ -66,7 +66,7 @@ export function usePrefetchRouteData() {
         );
       }
 
-      if (href === "/dlq") {
+      if (href === "/routines" || href === "/routines/dlq") {
         prefetchers.push(
           queryClient.prefetchQuery({
             ...getTierQueryOptions("live"),

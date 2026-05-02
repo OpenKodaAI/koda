@@ -149,51 +149,6 @@ function GoogleLogo(props: LogoProps) {
   );
 }
 
-/* — PostgreSQL ----------------------------------------------------- */
-
-function PostgreSQLLogo(props: LogoProps) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <path
-        d="M22.4 4.8a10.6 10.6 0 0 0-3.2-.6c-2.5 0-4.4.9-5.6 2.4a8.2 8.2 0 0 0-4.2-1c-2.3 0-4 .8-5 2.3A6.7 6.7 0 0 0 3.5 13c0 4.5 2.2 10.1 5 12.6a3 3 0 0 0 2 .8c1.3 0 2.3-.9 2.5-1.7l.3-1.3c1.2.8 2.8 1.2 4.4 1.2 1.8 0 3.3-.5 4.4-1.6.1.5.3.9.6 1.2a2.8 2.8 0 0 0 2 .8c2.4 0 4.5-3.3 5.3-6.6.6-2.2.6-4.2-.1-5.7a8 8 0 0 0-7.5-7.9Z"
-        fill="#336791"
-        stroke="#F0F0F0"
-        strokeWidth="0.6"
-      />
-      <ellipse cx="13.2" cy="13" rx="1.5" ry="2" fill="#F0F0F0" />
-      <ellipse cx="19.8" cy="13" rx="1.5" ry="2" fill="#F0F0F0" />
-      <path
-        d="M14 18.5c0 0 1-1.2 2.5-1.2s2.5 1.2 2.5 1.2"
-        stroke="#F0F0F0"
-        strokeWidth="0.8"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-/* — AWS ------------------------------------------------------------ */
-
-function AWSLogo(props: LogoProps) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <path
-        d="M9.2 14.4c0 .5.1.9.2 1.2l.6.9a.4.4 0 0 1 .1.3c0 .1-.1.3-.3.4l-.9.6a.5.5 0 0 1-.3.1c-.1 0-.3-.1-.4-.2a4 4 0 0 1-.5-.6l-.4-.8a4.8 4.8 0 0 1-3.6 1.7c-1 0-1.9-.3-2.5-1S.5 15.5.5 14.7c0-.9.3-1.6 1-2.1.6-.5 1.5-.8 2.6-.8.5 0 1 0 1.5.1l1.4.3v-.8c0-.7-.1-1.2-.4-1.5-.3-.3-.9-.5-1.7-.5-.5 0-1 .1-1.5.2a5.4 5.4 0 0 0-1.4.5l-.4.1h-.2c-.2 0-.3-.1-.3-.4v-.7c0-.2 0-.3.1-.4l.3-.3c.4-.2 1-.4 1.6-.5a7.6 7.6 0 0 1 2-.3c1.5 0 2.6.3 3.3 1 .6.7 1 1.7 1 3v3.8ZM4.8 16c.4 0 .9-.1 1.4-.2.5-.2.9-.5 1.2-.8.2-.2.3-.5.4-.7V13h-1c-1 0-1.6.1-2 .4-.5.3-.7.7-.7 1.2 0 .4.1.8.3 1 .3.3.6.4 1 .4h-.6Zm11.3 1.6c-.2 0-.4 0-.5-.1-.1-.1-.2-.3-.3-.6L12.6 8.7c-.1-.3-.2-.5-.2-.6 0-.2.1-.4.4-.4h1.3c.3 0 .5 0 .6.1.1.1.2.3.3.6l1.8 7.2 1.7-7.2c.1-.3.2-.5.3-.6.1-.1.3-.1.6-.1H20c.3 0 .5 0 .6.1.1.1.2.3.3.6l1.7 7.3 1.9-7.3c.1-.3.2-.5.3-.6.1-.1.3-.1.6-.1h1.2c.3 0 .4.1.4.4 0 .1 0 .2-.1.3 0 .1 0 .3-.1.4l-2.8 8.2c-.1.3-.2.5-.3.6-.1.1-.3.1-.5.1H22c-.3 0-.5 0-.6-.1-.1-.1-.2-.3-.3-.7l-1.7-7-1.6 7c-.1.4-.2.6-.3.7-.1.1-.3.1-.6.1h-1.2Z"
-        fill="#F90"
-      />
-      <path
-        d="M27.3 21.4c-3.4 2.5-8.3 3.8-12.5 3.8a22.6 22.6 0 0 1-10.9-2.8c-.2-.2 0-.4.2-.3a30.7 30.7 0 0 0 11.2 2.3c2.7 0 5.7-.6 8.5-1.7.4-.2.8.3.4.5l.1.2Z"
-        fill="#F90"
-      />
-      <path
-        d="M28.5 20c-.3-.4-2-.2-2.8-.1-.2 0-.3-.2-.1-.3 1.4-1 3.6-.7 3.9-.4.3.3-.1 2.5-1.3 3.6-.2.2-.4.1-.3-.1.3-.7.9-2.4.6-2.7Z"
-        fill="#F90"
-      />
-    </svg>
-  );
-}
-
 /* — GitHub --------------------------------------------------------- */
 
 function GitHubLogo(props: LogoProps) {
@@ -228,18 +183,10 @@ function GitLabLogo(props: LogoProps) {
 /* — Notion --------------------------------------------------------- */
 
 function NotionLogo(props: LogoProps) {
+  // Inline render matching simpleicons' Notion mark — vector SVG path.
   return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <rect x="6" y="5.5" width="20" height="21" rx="2.8" fill="#FFFFFF" />
-      <path
-        d="M12 10.5h2.2l5.3 8.6v-8.6H22V22h-2.1l-5.5-8.9V22H12V10.5Z"
-        fill="#111111"
-      />
-      <path
-        d="M8.4 7.7 22.8 6.2c1-.1 1.8.6 1.8 1.6v16.4c0 .8-.6 1.5-1.4 1.6l-13.8 1.5c-.9.1-1.7-.6-1.7-1.6V9.3c0-.8.6-1.5 1.4-1.6Z"
-        stroke="#111111"
-        strokeWidth="1.2"
-      />
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933z" />
     </svg>
   );
 }
@@ -308,16 +255,23 @@ function GranolaLogo(props: LogoProps) {
 }
 
 const BRAND_IMAGE_LOGOS = {
+  atlassian: createRemoteLogo("https://cdn.simpleicons.org/atlassian/0052CC"),
+  aws: createRemoteLogo("https://www.vectorlogo.zone/logos/amazon_aws/amazon_aws-icon.svg"),
+  bitbucket: createRemoteLogo("https://cdn.simpleicons.org/bitbucket/2684FF"),
   brave: createRemoteLogo("https://cdn.simpleicons.org/brave/FB542B"),
   cloudflare: createRemoteLogo("https://www.vectorlogo.zone/logos/cloudflare/cloudflare-icon.svg"),
   docker: createRemoteLogo("https://www.vectorlogo.zone/logos/docker/docker-icon.svg"),
   excalidraw: createRemoteLogo("https://cdn.simpleicons.org/excalidraw/6965DB"),
   figma: createRemoteLogo("https://www.vectorlogo.zone/logos/figma/figma-icon.svg"),
+  gmail: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg"),
+  google_calendar: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg"),
+  google_drive: createRemoteLogo("https://www.vectorlogo.zone/logos/google_drive/google_drive-icon.svg"),
   google_maps: createRemoteLogo("https://www.vectorlogo.zone/logos/google_maps/google_maps-icon.svg"),
   hubspot: createRemoteLogo("https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg"),
   linear: createRemoteLogo("https://cdn.simpleicons.org/linear/FFFFFF"),
   mongodb: createRemoteLogo("https://www.vectorlogo.zone/logos/mongodb/mongodb-icon.svg"),
   obsidian: createRemoteLogo("https://cdn.simpleicons.org/obsidian/7C3AED"),
+  postgresql: createRemoteLogo("https://www.vectorlogo.zone/logos/postgresql/postgresql-icon.svg"),
   puppeteer: createRemoteLogo("https://cdn.simpleicons.org/puppeteer/40B5A4"),
   sentry: createRemoteLogo("https://cdn.simpleicons.org/sentry/FFFFFF"),
   slack: createRemoteLogo("https://www.vectorlogo.zone/logos/slack/slack-icon.svg"),
@@ -328,7 +282,9 @@ const BRAND_IMAGE_LOGOS = {
 } as const;
 
 const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
-  aws: AWSLogo,
+  atlassian: BRAND_IMAGE_LOGOS.atlassian,
+  aws: BRAND_IMAGE_LOGOS.aws,
+  bitbucket: BRAND_IMAGE_LOGOS.bitbucket,
   brave: BRAND_IMAGE_LOGOS.brave,
   browser: BrowserLogo,
   cloudflare: BRAND_IMAGE_LOGOS.cloudflare,
@@ -339,7 +295,10 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   filesystem: FilesystemLogo,
   github: GitHubLogo,
   gitlab: GitLabLogo,
+  gmail: BRAND_IMAGE_LOGOS.gmail,
   google: GoogleLogo,
+  google_calendar: BRAND_IMAGE_LOGOS.google_calendar,
+  google_drive: BRAND_IMAGE_LOGOS.google_drive,
   google_maps: BRAND_IMAGE_LOGOS.google_maps,
   granola: GranolaLogo,
   hubspot: BRAND_IMAGE_LOGOS.hubspot,
@@ -350,7 +309,7 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   mongodb: BRAND_IMAGE_LOGOS.mongodb,
   notion: NotionLogo,
   obsidian: BRAND_IMAGE_LOGOS.obsidian,
-  postgresql: PostgreSQLLogo,
+  postgresql: BRAND_IMAGE_LOGOS.postgresql,
   puppeteer: BRAND_IMAGE_LOGOS.puppeteer,
   sentry: BRAND_IMAGE_LOGOS.sentry,
   slack: BRAND_IMAGE_LOGOS.slack,
@@ -362,7 +321,9 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
+  atlassian: { from: "#2684FF", to: "#0052CC" },
   aws: { from: "#FF9900", to: "#232F3E" },
+  bitbucket: { from: "#2684FF", to: "#0052CC" },
   brave: { from: "#FB542B", to: "#FF8A4C" },
   browser: { from: "#7C9CFF", to: "#3656D4" },
   cloudflare: { from: "#F38020", to: "#F9AE40" },
@@ -373,7 +334,10 @@ export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   filesystem: { from: "#C48E35", to: "#7F5C2E" },
   github: { from: "#6E5494", to: "#24292E" },
   gitlab: { from: "#FC6D26", to: "#292961" },
+  gmail: { from: "#EA4335", to: "#C5221F" },
   google: { from: "#4285F4", to: "#34A853" },
+  google_calendar: { from: "#4285F4", to: "#0F9D58" },
+  google_drive: { from: "#0F9D58", to: "#FFCC00" },
   google_maps: { from: "#4285F4", to: "#34A853" },
   granola: { from: "#B2C248", to: "#1E1E1E" },
   hubspot: { from: "#FF7A59", to: "#FFB381" },

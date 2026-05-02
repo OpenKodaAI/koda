@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo } from "react";
 import { Check, Cpu, Server, Volume2 } from "lucide-react";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
@@ -16,6 +17,13 @@ import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
 import { ModelSelector } from "@/components/control-plane/shared/model-selector";
+import {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_ACCENTS,
+  COLORED_BRAND_LOGO_PROVIDERS,
+  providerDisplayName,
+} from "@/components/control-plane/shared/provider-brand";
 import { AnimatePresence, motion } from "framer-motion";
 import { FADE_TRANSITION, COLLAPSE_TRANSITION } from "@/components/control-plane/shared/motion-constants";
 import { cn } from "@/lib/utils";
@@ -44,33 +52,18 @@ function prettifyModelId(modelId: string) {
     .replace(/\bLlama\b/g, "Llama");
 }
 
-const PROVIDER_LOGOS: Record<string, string> = {
-  claude: "/providers/anthropic.svg",
-  codex: "/providers/openai.svg",
-  gemini: "/providers/google.svg",
-  ollama: "/providers/ollama.png",
-};
-
-const PROVIDER_ACCENTS: Record<string, string> = {
-  claude: "212 120 62",
-  codex: "16 163 127",
-  gemini: "86 138 248",
-  ollama: "56 189 248",
-};
-
 function providerDescription(providerId: string, title: string) {
-  if (providerId === "claude") {
-    return "Raciocínio forte";
-  }
-  if (providerId === "codex") {
-    return "Execução geral";
-  }
-  if (providerId === "gemini") {
-    return "Contexto amplo";
-  }
-  if (providerId === "ollama") {
-    return "Execução local";
-  }
+  if (providerId === "claude") return "Raciocínio forte";
+  if (providerId === "codex") return "Execução geral";
+  if (providerId === "gemini") return "Contexto amplo";
+  if (providerId === "ollama") return "Execução local";
+  if (providerId === "perplexity") return "Pesquisa em tempo real";
+  if (providerId === "mistral") return "Família Mistral";
+  if (providerId === "qwen") return "Qwen com VL e Coder";
+  if (providerId === "kimi") return "Contexto longo Moonshot";
+  if (providerId === "groq") return "Inferência via LPU";
+  if (providerId === "deepseek") return "DeepSeek V4 e Reasoner";
+  if (providerId === "xai") return "Grok 4 e variantes";
   return title;
 }
 
@@ -85,24 +78,52 @@ function ProviderLogo({
 }) {
   const accent = PROVIDER_ACCENTS[providerId] || "255 255 255";
   const accentColor = `rgb(${accent})`;
+  const Icon = PROVIDER_ICON_COMPONENTS[providerId];
   const logo = PROVIDER_LOGOS[providerId];
+  const preserveBrandColors = COLORED_BRAND_LOGO_PROVIDERS.has(providerId);
   const wrapperClass = size === "sm" ? "h-8 w-8 rounded-xl" : "h-11 w-11 rounded-2xl";
   const iconClass = size === "sm" ? "h-4 w-4" : "h-6 w-6";
   const fallbackIconClass = size === "sm" ? "h-4 w-4" : "h-5 w-5";
 
-  if (logo) {
+  const wrapperStyle = active
+    ? {
+        borderColor: `rgba(${accent}, 0.34)`,
+        backgroundColor: `rgba(${accent}, 0.1)`,
+      }
+    : undefined;
+  const wrapperBase = `flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`;
+
+  // Local-runtime providers (Ollama, Kokoro) render a CPU glyph in neutral
+  // grey so on-device inference is visually distinct from cloud providers.
+  if (Icon) {
     return (
-      <div
-        className={`flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`}
-        style={
-          active
-            ? {
-                borderColor: `rgba(${accent}, 0.34)`,
-                backgroundColor: `rgba(${accent}, 0.1)`,
-              }
-            : undefined
-        }
-      >
+      <div className={wrapperBase} style={wrapperStyle}>
+        <Icon
+          className={iconClass}
+          style={{ color: active ? accentColor : "rgb(255 255 255 / 0.78)" }}
+        />
+      </div>
+    );
+  }
+
+  if (logo) {
+    if (preserveBrandColors) {
+      // Colored brand logos render as a real image so the original palette
+      // stays intact (e.g. Mistral's orange gradient, Qwen's purple).
+      return (
+        <div className={wrapperBase} style={wrapperStyle}>
+          <Image
+            src={logo}
+            alt={providerDisplayName(providerId)}
+            width={size === "sm" ? 16 : 24}
+            height={size === "sm" ? 16 : 24}
+            className={`${iconClass} object-contain opacity-95`}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className={wrapperBase} style={wrapperStyle}>
         <span
           className={`block ${iconClass}`}
           style={{
@@ -122,17 +143,7 @@ function ProviderLogo({
   }
 
   return (
-    <div
-      className={`flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`}
-      style={
-        active
-          ? {
-              borderColor: `rgba(${accent}, 0.34)`,
-              backgroundColor: `rgba(${accent}, 0.1)`,
-            }
-            : undefined
-      }
-    >
+    <div className={wrapperBase} style={wrapperStyle}>
       <Server
         className={fallbackIconClass}
         style={{ color: active ? accentColor : "rgb(255 255 255 / 0.86)" }}
@@ -140,6 +151,7 @@ function ProviderLogo({
     </div>
   );
 }
+
 
 export function TabRecursos() {
   const { state, core, developerMode, updateAgentSpecField, updateDocument } = useAgentEditor();

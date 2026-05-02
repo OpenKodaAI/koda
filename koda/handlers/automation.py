@@ -76,12 +76,13 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         # Validate command against shell security filters (before croniter check)
-        from koda.config import BLOCKED_SHELL_PATTERN, GIT_META_CHARS
+        from koda.config import GIT_META_CHARS
+        from koda.services.blocked_patterns import is_blocked_shell
 
         if GIT_META_CHARS.search(command):
             await update.message.reply_text("Shell meta-characters are not allowed in cron commands.")
             return
-        if BLOCKED_SHELL_PATTERN.search(command):
+        if is_blocked_shell(command):
             await update.message.reply_text("Blocked: this command is not allowed for safety reasons.")
             return
 

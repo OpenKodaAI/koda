@@ -112,7 +112,7 @@ export function ToolGroupSection({
           <SelectTrigger
             sizeVariant="sm"
             onClick={(e) => e.stopPropagation()}
-            className="w-auto max-w-[180px] shrink-0 text-[var(--text-secondary)]"
+            className="w-auto shrink-0 whitespace-nowrap text-[var(--text-secondary)]"
             title={tl("Politica do grupo")}
           >
             <SelectValue />

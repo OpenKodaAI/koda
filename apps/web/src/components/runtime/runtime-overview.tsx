@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Activity, Bot as AgentIcon, Search } from "lucide-react";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
-import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -151,12 +151,12 @@ function AgentRailRow({
         index > 0 && "border-t border-[color:var(--divider-hair)]",
       )}
     >
-      <AgentGlyph
+      <AgentSigil
         agentId={overview.agentId}
+        label={overview.agentLabel}
         color={overview.agentColor}
-        variant="list"
-        shape="swatch"
-        className="h-6 w-6 shrink-0"
+        status={live ? "running" : undefined}
+        size="xs"
       />
       <div className="flex min-w-0 items-center gap-2">
         <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">

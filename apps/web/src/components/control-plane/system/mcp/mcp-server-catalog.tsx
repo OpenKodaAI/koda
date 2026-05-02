@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { Search, Plus, Puzzle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { Input } from "@/components/ui/input";
 import { requestJson } from "@/lib/http-client";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
 import { McpServerCard } from "./mcp-server-card";
@@ -221,12 +222,12 @@ export function McpServerCatalog() {
               size={15}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]"
             />
-            <input
+            <Input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={tl("Buscar servidores...")}
-              className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="pl-9"
               aria-label={tl("Buscar servidores MCP")}
             />
           </div>

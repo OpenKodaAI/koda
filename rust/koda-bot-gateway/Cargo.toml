@@ -1,0 +1,32 @@
+[package]
+name = "koda-bot-gateway"
+edition.workspace = true
+version.workspace = true
+description = "Telegram fan-in service consolidating all bot polling into one process (Phase 1B)."
+license = "Apache-2.0"
+
+[[bin]]
+name = "koda-bot-gateway"
+path = "src/main.rs"
+
+[lib]
+name = "koda_bot_gateway"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+koda-observability = { path = "../koda-observability" }
+koda-proto = { path = "../koda-proto" }
+prost = "0.13"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true

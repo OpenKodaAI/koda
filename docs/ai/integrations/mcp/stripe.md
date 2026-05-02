@@ -11,7 +11,7 @@
 
 ## Descrição
 
-Gerencie clientes, cobranças, assinaturas e reembolsos no Stripe. Crie payment links, inspecione invoices e consulte a documentação da API.
+Manage customers, charges, subscriptions, and refunds on Stripe. Create payment links, inspect invoices, and query the API documentation.
 
 ## Connection profile
 
@@ -37,12 +37,12 @@ Nenhuma restrição de runtime aplicável a esta integração.
 | `list_customers` | read | Listar clientes |
 | `create_invoice` | write | Criar fatura |
 | `finalize_invoice` | destructive | Finalizar fatura para pagamento |
-| `create_payment_link` | write | Gerar link de pagamento |
-| `list_payment_intents` | read | Listar intenções de pagamento |
-| `list_subscriptions` | read | Listar assinaturas |
+| `create_payment_link` | write | Create payment link |
+| `list_payment_intents` | read | List payment intents |
+| `list_subscriptions` | read | List subscriptions |
 | `cancel_subscription` | destructive | Cancelar assinatura |
-| `create_refund` | destructive | Processar reembolso |
-| `search_stripe_documentation` | read | Buscar na documentação Stripe |
+| `create_refund` | destructive | Process refund |
+| `search_stripe_documentation` | read | Search the Stripe documentation |
 
 ## Como o agente usa bem
 

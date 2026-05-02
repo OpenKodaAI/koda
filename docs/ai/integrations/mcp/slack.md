@@ -11,7 +11,7 @@
 
 ## Descrição
 
-Envie mensagens, leia histórico de canais, responda em threads e consulte perfis de usuários no Slack do seu workspace.
+Send messages, read channel history, reply in threads, and look up user profiles in your Slack workspace.
 
 ## Connection profile
 
@@ -34,14 +34,14 @@ Nenhuma restrição de runtime aplicável a esta integração.
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `slack_list_channels` | read | Listar canais disponíveis |
-| `slack_post_message` | write | Enviar mensagem no canal |
-| `slack_reply_to_thread` | write | Responder em thread |
-| `slack_add_reaction` | write | Adicionar reação com emoji |
-| `slack_get_channel_history` | read | Histórico de mensagens |
-| `slack_get_thread_replies` | read | Respostas de uma thread |
-| `slack_get_users` | read | Listar usuários do workspace |
-| `slack_get_user_profile` | read | Perfil de um usuário |
+| `slack_list_channels` | read | List available channels |
+| `slack_post_message` | write | Send message to channel |
+| `slack_reply_to_thread` | write | Reply in thread |
+| `slack_add_reaction` | write | Add emoji reaction |
+| `slack_get_channel_history` | read | Message history |
+| `slack_get_thread_replies` | read | Replies of a thread |
+| `slack_get_users` | read | List workspace users |
+| `slack_get_user_profile` | read | User profile |
 
 ## Como o agente usa bem
 

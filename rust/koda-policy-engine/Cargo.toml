@@ -1,0 +1,29 @@
+[package]
+name = "koda-policy-engine"
+edition.workspace = true
+version.workspace = true
+description = "Quotas, rate limits, and spend caps per workspace (Phase 1C)."
+license = "Apache-2.0"
+
+[[bin]]
+name = "koda-policy-engine"
+path = "src/main.rs"
+
+[lib]
+name = "koda_policy_engine"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+koda-observability = { path = "../koda-observability" }
+koda-proto = { path = "../koda-proto" }
+prost = "0.13"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+uuid = { version = "1.13", features = ["v4"] }

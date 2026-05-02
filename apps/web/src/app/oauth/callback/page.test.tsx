@@ -54,7 +54,7 @@ describe("OAuth callback page", () => {
 
     await waitFor(() => {
       expect(requestJsonMock).toHaveBeenCalledWith(
-        "/api/control-plane/connections/oauth/callback?state=state-1&code=code-1",
+        "/api/control-plane/connections/oauth/callback?mode=json&state=state-1&code=code-1",
       );
     });
     expect(await screen.findByText("Conectado com sucesso Linear Workspace")).toBeInTheDocument();

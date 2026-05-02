@@ -79,5 +79,5 @@ def test_deepseek_no_vision_support():
 
 def test_existing_providers_still_present():
     """Regression sentinel: pre-existing providers untouched."""
-    for legacy in ("claude", "codex", "gemini", "ollama", "elevenlabs", "kokoro", "whispercpp", "sora"):
+    for legacy in ("claude", "codex", "gemini", "ollama", "elevenlabs", "kokoro", "whispercpp"):
         assert legacy in CORE_PROVIDER_CATALOG

@@ -220,6 +220,43 @@ def _build_discard(result: RecallResult, reason: str) -> RecallDiscard:
     )
 
 
+def _apply_reranker(query: str, candidates: list[RecallResult]) -> list[RecallResult]:
+    """Optionally re-order candidates with a cross-encoder reranker.
+
+    Best-effort: if the feature flag is off, the reranker model fails to
+    load, or scoring raises, the original order is preserved. Reranker
+    scores are stored on ``result.score_breakdown['rerank']`` for audit.
+    """
+    if not candidates:
+        return candidates
+    try:
+        from koda.services.reranker import is_enabled, rerank_sync  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — keep recall non-fatal
+        return candidates
+    if not is_enabled():
+        return candidates
+    documents = [item.memory.content[:2000] for item in candidates]
+    try:
+        ranked = rerank_sync(query, documents)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("recall_rerank_failed", error=str(exc))
+        return candidates
+    if not ranked:
+        return candidates
+    indexed: dict[int, float] = dict(ranked)
+    if not any(score > 0 for score in indexed.values()):
+        return candidates
+    for idx, score in indexed.items():
+        if 0 <= idx < len(candidates):
+            breakdown = candidates[idx].score_breakdown or {}
+            breakdown["rerank"] = round(float(score), 4)
+            candidates[idx].score_breakdown = breakdown
+    reordered_top = [candidates[i] for i, _ in ranked if 0 <= i < len(candidates)]
+    seen_ids = {id(item) for item in reordered_top}
+    tail = [item for item in candidates if id(item) not in seen_ids]
+    return [*reordered_top, *tail]
+
+
 def _resolve_conflicts(
     results: list[RecallResult],
 ) -> tuple[list[RecallResult], list[RecallDiscard], list[RecallConflict]]:
@@ -427,6 +464,7 @@ async def build_memory_resolution(
     filtered, conflict_discards, conflicts = _resolve_conflicts(filtered)
     discarded.extend(conflict_discards)
     filtered = sorted(filtered, key=lambda item: item.combined_score, reverse=True)
+    filtered = _apply_reranker(query, filtered)
 
     selected: list[RecallResult] = []
     selected_word_sets: list[set[str]] = []

@@ -4,13 +4,14 @@
 - **Kind**: mcp
 - **Tier**: recommended
 - **Category**: productivity
-- **Canonical source**: https://github.com/makenotion/notion-mcp-server
-- **Transport**: stdio
-- **Install command**: `npx -y @notionhq/notion-mcp-server`
+- **Canonical source**: https://developers.notion.com/guides/mcp/get-started-with-mcp
+- **Transport**: http_sse
+- **Install command**: `npx -y mcp-remote@0.1.38 https://mcp.notion.com/mcp`
+- **Remote URL**: https://mcp.notion.com/mcp
 
 ## Descrição
 
-Busque, crie e edite páginas e data sources no Notion. Consulte conteúdo, adicione blocos e gerencie sua base de conhecimento.
+Search, create, and edit pages and data sources on Notion. Read content, add blocks, and manage your knowledge base.
 
 ## Connection profile
 
@@ -21,7 +22,7 @@ Busque, crie e edite páginas e data sources no Notion. Consulte conteúdo, adic
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `NOTION_TOKEN` | não | password | Notion Integration Token (fallback) |
+| `NOTION_TOKEN` | não | password | Notion Integration Token (fallback) — Use preferencialmente OAuth; o token fica como fallback. |
 
 
 ## Runtime constraints
@@ -33,13 +34,13 @@ Nenhuma restrição de runtime aplicável a esta integração.
 | Tool | Classificação | Descrição |
 |---|---|---|
 | `search_notion` | read | Busca full-text no workspace |
-| `query_data_source` | read | Consultar data source (v2) |
-| `get_page` | read | Recuperar conteúdo de página |
-| `create_page` | write | Criar nova página |
-| `update_page` | write | Atualizar propriedades de página |
-| `append_block` | write | Adicionar conteúdo a página |
+| `query_data_source` | read | Query data source (v2) |
+| `get_page` | read | Retrieve page content |
+| `create_page` | write | Create new page |
+| `update_page` | write | Update page properties |
+| `append_block` | write | Append content to page |
 | `get_data_source` | read | Schema de um data source |
-| `list_pages` | read | Listar páginas do workspace |
+| `list_pages` | read | List workspace pages |
 
 ## Como o agente usa bem
 

@@ -20,10 +20,6 @@ from koda.config import (
     AGENT_RESOURCE_ACCESS_POLICY,
     AGENT_TOOL_TIMEOUT,
     ALLOWED_GIT_CMDS,
-    BLOCKED_CONFLUENCE_PATTERN,
-    BLOCKED_GWS_PATTERN,
-    BLOCKED_JIRA_PATTERN,
-    BLOCKED_SHELL_PATTERN,
     BROWSER_FEATURES_ENABLED,
     BROWSER_TOOL_TIMEOUT,
     CONFLUENCE_ENABLED,
@@ -46,6 +42,7 @@ from koda.config import (
 )
 from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
+from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
 from koda.utils.workdir import validate_work_dir
 
@@ -79,6 +76,21 @@ def _coerce_int(value: object) -> int:
 
 _AGENT_CMD_RE = re.compile(r'<agent_cmd\s+tool="([^"]+)">(.*?)</agent_cmd>', re.DOTALL)
 _ACTION_PLAN_RE = re.compile(r"<action_plan>.*?</action_plan>", re.DOTALL | re.IGNORECASE)
+
+# Native-fast block-pattern matchers (Phase 1A + A.6 wire-up). Sourced
+# from the central :mod:`koda.services.blocked_patterns` registry so
+# every site of the runtime — handlers, cli_runner, dispatcher — uses
+# the same compiled guard. Building once at module load: when the
+# ``koda_command_guard`` wheel is installed the matcher is a Rust DFA
+# (linear time, no GIL); otherwise it falls back to Python re.compile.
+# A grep gate in ``tests/test_open_source_hygiene.py`` enforces that
+# no caller bypasses the registry by using ``BLOCKED_*_PATTERN.search``
+# directly. The ``noqa: E402`` here keeps the comment block above the
+# import so the rationale is co-located with the wire-up site.
+_BLOCKED_SHELL = _blocked_patterns_module.SHELL_GUARD
+_BLOCKED_GWS = _blocked_patterns_module.GWS_GUARD
+_BLOCKED_JIRA = _blocked_patterns_module.JIRA_GUARD
+_BLOCKED_CONFLUENCE = _blocked_patterns_module.CONFLUENCE_GUARD
 
 # Tools that modify state (require approval in supervised mode)
 _WRITE_TOOLS = frozenset(
@@ -496,7 +508,35 @@ async def execute_tool(
     *,
     policy_evaluation: PolicyEvaluation | None = None,
 ) -> AgentToolResult:
-    """Execute a single agent tool call with timeout and security checks."""
+    """Execute a single agent tool call with timeout and security checks.
+
+    Phase 2D — wraps the body in an OTel span so collectors see the
+    full hierarchy (queue_manager → tool_dispatcher → internal_rpc →
+    sidecar). ``start_span`` is a no-op when tracing is disabled
+    (``OTEL_EXPORTER_OTLP_ENDPOINT`` unset), so the overhead on quiet
+    hosts is a single attribute-dict construction per call.
+    """
+    from koda.config import AGENT_ID
+    from koda.observability import start_span
+
+    with start_span(
+        "tool_dispatcher.execute_tool",
+        tool=call.tool,
+        agent_id=AGENT_ID or "default",
+        task_id=ctx.task_id,
+        user_id=ctx.user_id,
+    ):
+        return await _execute_tool_traced(call, ctx, policy_evaluation=policy_evaluation)
+
+
+async def _execute_tool_traced(
+    call: AgentToolCall,
+    ctx: ToolContext,
+    *,
+    policy_evaluation: PolicyEvaluation | None = None,
+) -> AgentToolResult:
+    """Original execute_tool body — see ``execute_tool`` for the OTel
+    span wrapper that calls into here."""
     import time
 
     from koda.config import AGENT_ID
@@ -1065,7 +1105,7 @@ async def _handle_job_create(params: dict, ctx: ToolContext) -> AgentToolResult:
                 success=False,
                 output="shell_command requires trigger_type='cron', 'schedule_expr', and 'command'.",
             )
-        if BLOCKED_SHELL_PATTERN.search(command) or GIT_META_CHARS.search(command):
+        if (_BLOCKED_SHELL is not None and _BLOCKED_SHELL.is_blocked(command)) or GIT_META_CHARS.search(command):
             _audit_blocked("job_create", "dangerous_shell_pattern", user_id=ctx.user_id)
             return AgentToolResult(tool="job_create", success=False, output="Blocked: unsafe shell command.")
         try:
@@ -1278,7 +1318,7 @@ async def _handle_gws(params: dict, ctx: ToolContext) -> AgentToolResult:
             output="Missing required param: 'args'.",
         )
 
-    if BLOCKED_GWS_PATTERN and BLOCKED_GWS_PATTERN.search(args):
+    if _BLOCKED_GWS is not None and _BLOCKED_GWS.is_blocked(args):
         _audit_blocked("gws", "blocked_gws_pattern", user_id=ctx.user_id)
         return AgentToolResult(
             tool="gws",
@@ -1297,7 +1337,7 @@ async def _handle_gws(params: dict, ctx: ToolContext) -> AgentToolResult:
                 "gws",
                 args,
                 ctx.work_dir,
-                blocked_pattern=BLOCKED_GWS_PATTERN,
+                is_blocked=_blocked_patterns_module.is_blocked_gws,
                 timeout=AGENT_TOOL_TIMEOUT,
                 env=env,
             )
@@ -1344,7 +1384,7 @@ async def _handle_jira(params: dict, ctx: ToolContext) -> AgentToolResult:
             output="Missing required param: 'args' (e.g. 'issues search --jql ...').",
         )
 
-    if BLOCKED_JIRA_PATTERN and BLOCKED_JIRA_PATTERN.search(args):
+    if _BLOCKED_JIRA is not None and _BLOCKED_JIRA.is_blocked(args):
         _audit_blocked("jira", "blocked_jira_pattern", user_id=ctx.user_id)
         return AgentToolResult(
             tool="jira",
@@ -1409,7 +1449,7 @@ async def _handle_confluence(params: dict, ctx: ToolContext) -> AgentToolResult:
             output="Missing required param: 'args' (e.g. 'pages search --cql ...').",
         )
 
-    if BLOCKED_CONFLUENCE_PATTERN and BLOCKED_CONFLUENCE_PATTERN.search(args):
+    if _BLOCKED_CONFLUENCE is not None and _BLOCKED_CONFLUENCE.is_blocked(args):
         _audit_blocked("confluence", "blocked_confluence_pattern", user_id=ctx.user_id)
         return AgentToolResult(
             tool="confluence",

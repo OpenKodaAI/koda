@@ -20,7 +20,7 @@ Governed Google Workspace CLI and service-account credentials.
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `GOOGLE_APPLICATION_CREDENTIALS` | sim | textarea | Service Account JSON (caminho ou conteúdo) — Cole o JSON do service account ou o caminho absoluto do arquivo. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | sim | textarea | Service Account JSON (path or content) — Cole o JSON do service account ou o caminho absoluto do arquivo. |
 
 
 ## Runtime constraints

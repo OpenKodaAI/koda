@@ -270,13 +270,13 @@ function buildPageCommands(ctx: CommandBarContext): Command[] {
     { id: "home", path: "/", labelKey: "commandBar.pages.home", icon: Home, keywords: ["home", "overview", "inicio"] },
     { id: "control-plane", path: "/control-plane", labelKey: "commandBar.pages.controlPlane", icon: Sparkles, keywords: ["agents", "agentes", "control", "plane", "catalog"] },
     { id: "memory", path: "/memory", labelKey: "commandBar.pages.memory", icon: Network, keywords: ["memory", "memorias", "memoria", "graph", "curation"] },
-    { id: "schedules", path: "/schedules", labelKey: "commandBar.pages.schedules", icon: CalendarPlus, keywords: ["schedules", "schedule", "routines", "rotinas", "cron"] },
+    { id: "schedules", path: "/routines/schedules", labelKey: "commandBar.pages.schedules", icon: CalendarPlus, keywords: ["schedules", "schedule", "routines", "rotinas", "cron"] },
     { id: "sessions", path: "/sessions", labelKey: "commandBar.pages.sessions", icon: Terminal, keywords: ["sessions", "sessoes", "sessao", "chat"] },
     { id: "tasks", path: "/tasks", labelKey: "commandBar.pages.tasks", icon: ListChecks, keywords: ["tasks", "tarefas"] },
     { id: "runtime", path: "/runtime", labelKey: "commandBar.pages.runtime", icon: Activity, keywords: ["runtime", "execution", "live"] },
     { id: "executions", path: "/executions", labelKey: "commandBar.pages.executions", icon: History, keywords: ["executions", "history", "historico", "execucoes"] },
     { id: "costs", path: "/costs", labelKey: "commandBar.pages.costs", icon: Coins, keywords: ["costs", "custos", "billing"] },
-    { id: "dlq", path: "/dlq", labelKey: "commandBar.pages.dlq", icon: Inbox, keywords: ["dlq", "dead letter", "retry"] },
+    { id: "dlq", path: "/routines/dlq", labelKey: "commandBar.pages.dlq", icon: Inbox, keywords: ["dlq", "dead letter", "retry"] },
   ];
 
   return entries.map((entry) => ({
@@ -305,7 +305,7 @@ function buildActionCommands(ctx: CommandBarContext): Command[] {
       label: ctx.t("overview.composer.actions.newSchedule"),
       keywords: ["new", "schedule", "cron", "routine", "novo", "agendar"],
       icon: CalendarPlus,
-      onExecute: () => ctx.router.push("/schedules"),
+      onExecute: () => ctx.router.push("/routines/schedules"),
     },
     {
       id: "action:new-agent",

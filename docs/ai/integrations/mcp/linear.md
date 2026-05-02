@@ -11,7 +11,7 @@
 
 ## Descrição
 
-Gerencie issues, projetos e ciclos no Linear. Crie tickets, atualize status, adicione comentários e acompanhe o progresso das equipes.
+Manage issues, projects, and cycles on Linear. Create tickets, update status, add comments, and track team progress.
 
 ## Connection profile
 
@@ -33,13 +33,13 @@ Nenhuma restrição de runtime aplicável a esta integração.
 
 | Tool | Classificação | Descrição |
 |---|---|---|
-| `get_ticket` | read | Recuperar detalhes de um ticket |
-| `get_my_issues` | read | Issues atribuídas ao usuário atual |
-| `search_issues` | read | Buscar issues |
-| `create_issue` | write | Criar nova issue |
-| `update_issue` | write | Atualizar propriedades de issue |
-| `add_comment` | write | Adicionar comentário |
-| `get_teams` | read | Listar equipes |
+| `get_ticket` | read | Retrieve ticket details |
+| `get_my_issues` | read | Issues assigned to the current user |
+| `search_issues` | read | Search issues |
+| `create_issue` | write | Create new issue |
+| `update_issue` | write | Update issue properties |
+| `add_comment` | write | Add comment |
+| `get_teams` | read | List teams |
 | `list_projects` | read | Listar projetos |
 
 ## Como o agente usa bem

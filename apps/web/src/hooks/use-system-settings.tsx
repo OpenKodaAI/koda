@@ -14,6 +14,7 @@ import { useAsyncAction } from "@/hooks/use-async-action";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { useToast } from "@/hooks/use-toast";
+import { useDownloadJob } from "@/hooks/use-download-job";
 import type {
   ControlPlaneAgentConnection,
   ControlPlaneCoreIntegration,
@@ -83,6 +84,34 @@ type KokoroVoiceCatalogCacheEntry = {
   data: KokoroVoiceCatalog;
 };
 
+export type KokoroModelStatus = {
+  downloaded: boolean;
+  bytes: number;
+  local_path: string;
+  url: string;
+  version: string;
+  active_job?: ProviderDownloadJob | null;
+};
+
+export type WhisperVariantStatus = {
+  variant_id: string;
+  label: string;
+  description: string;
+  url: string;
+  filename: string;
+  approx_size_bytes: number;
+  downloaded: boolean;
+  bytes: number;
+  local_path: string;
+  active_job?: ProviderDownloadJob | null;
+};
+
+export type WhisperCatalog = {
+  items: WhisperVariantStatus[];
+  default_variant: string;
+  models_dir: string;
+};
+
 type IntegrationAction = "connect" | "verify" | "disconnect" | "enable" | "disable";
 
 type IntegrationVerificationResponse = {
@@ -135,7 +164,10 @@ type SystemSettingsContextValue = {
   elevenlabsVoicesLoading: boolean;
   kokoroVoiceCatalog: KokoroVoiceCatalog;
   kokoroVoicesLoading: boolean;
-  kokoroDownloadJobForVoice: (voiceId: string) => ProviderDownloadJob | null;
+  kokoroModelStatus: KokoroModelStatus | null;
+  whisperCatalog: WhisperCatalog | null;
+  isDownloadingKokoroAsset: (assetKey: string) => boolean;
+  isDownloadingWhisperVariant: (variantId: string) => boolean;
   ollamaModelCatalog: OllamaModelCatalog;
   ollamaModelsLoading: boolean;
   setField: <T extends keyof GeneralSystemSettings["values"]>(
@@ -153,7 +185,14 @@ type SystemSettingsContextValue = {
   disconnectProviderConnection: (providerId: string) => Promise<void>;
   loadElevenLabsVoices: (language?: string, options?: { force?: boolean }) => Promise<ElevenLabsVoiceCatalog>;
   loadKokoroVoices: (language?: string, options?: { force?: boolean }) => Promise<KokoroVoiceCatalog>;
+  loadKokoroModelStatus: (options?: { force?: boolean }) => Promise<KokoroModelStatus>;
+  loadWhisperCatalog: (options?: { force?: boolean }) => Promise<WhisperCatalog>;
   downloadKokoroVoice: (voiceId: string) => Promise<void>;
+  downloadKokoroModel: () => Promise<void>;
+  downloadWhisperModel: (variantId: string) => Promise<void>;
+  deleteKokoroModelAsset: () => Promise<void>;
+  deleteKokoroVoiceAsset: (voiceId: string) => Promise<void>;
+  deleteWhisperVariantAsset: (variantId: string) => Promise<void>;
   connectProviderLocal: (providerId: string) => Promise<void>;
   loadOllamaModels: (options?: { force?: boolean }) => Promise<OllamaModelCatalog>;
   isProviderActionPending: (providerId: string, action: "connect" | "verify" | "disconnect") => boolean;
@@ -418,7 +457,9 @@ export function SystemSettingsProvider({
   const [elevenlabsVoicesLoading, setElevenlabsVoicesLoading] = useState(false);
   const [kokoroVoiceCatalog, setKokoroVoiceCatalog] = useState<KokoroVoiceCatalog>(EMPTY_KOKORO_VOICE_CATALOG);
   const [kokoroVoicesLoading, setKokoroVoicesLoading] = useState(false);
-  const [kokoroDownloadJobs, setKokoroDownloadJobs] = useState<Record<string, ProviderDownloadJob>>({});
+  const [kokoroModelStatus, setKokoroModelStatus] = useState<KokoroModelStatus | null>(null);
+  const [whisperCatalog, setWhisperCatalog] = useState<WhisperCatalog | null>(null);
+  const downloadJob = useDownloadJob();
   const [ollamaModelCatalog, setOllamaModelCatalog] = useState<OllamaModelCatalog>(EMPTY_OLLAMA_MODEL_CATALOG);
   const [ollamaModelsLoading, setOllamaModelsLoading] = useState(false);
   const autoVerifySessionsRef = useRef<Record<string, string>>({});
@@ -464,7 +505,8 @@ export function SystemSettingsProvider({
     setProviderConnectionDrafts(buildProviderConnectionDrafts(settings));
     setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
       setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
-      setKokoroDownloadJobs({});
+      setKokoroModelStatus(null);
+      setWhisperCatalog(null);
       setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
       setIntegrationConnections(buildIntegrationConnectionMap(coreIntegrations));
       integrationVerificationCacheRef.current = {};
@@ -759,45 +801,10 @@ export function SystemSettingsProvider({
     [providerConnectionDrafts.ollama, providerConnections.ollama],
   );
 
-  useEffect(() => {
-    const activeJobs = Object.values(kokoroDownloadJobs).filter((job) =>
-      ["pending", "running"].includes(String(job.status)),
-    );
-    if (!activeJobs.length) {
-      return;
-    }
-
-    let cancelled = false;
-    const poll = async () => {
-      for (const job of activeJobs) {
-        try {
-          const refreshed = await requestJson<ProviderDownloadJob>(
-            `/api/control-plane/providers/kokoro/downloads/${job.id}`,
-          );
-          if (cancelled) return;
-          setKokoroDownloadJobs((current) => ({ ...current, [refreshed.asset_id]: refreshed }));
-          if (refreshed.status === "completed") {
-            kokoroVoiceCacheRef.current = {};
-            await loadKokoroVoices(
-              draft.values.models.kokoro_default_language || refreshed.language_id || "pt-br",
-              { force: true },
-            );
-          }
-        } catch {
-          // Keep last visible state until the user retries.
-        }
-      }
-    };
-
-    void poll();
-    const interval = window.setInterval(() => {
-      void poll();
-    }, 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [draft.values.models.kokoro_default_language, kokoroDownloadJobs, loadKokoroVoices]);
+  // Kokoro voice / model and Whisper variant downloads are now driven by
+  // `useDownloadJob` (sticky toast + central polling). The previous inline
+  // polling effect is intentionally removed — there must be exactly one poll
+  // loop per active download to keep the toast progress smooth.
 
   const openPendingLoginPopup = useCallback(
     (providerId: string) => {
@@ -1479,8 +1486,6 @@ export function SystemSettingsProvider({
               method: "PUT",
               body: JSON.stringify({
                 api_key: connectionDraft?.api_key || "",
-                project_id: connectionDraft?.project_id || "",
-                base_url: connectionDraft?.base_url || "",
                 // Ask the backend to verify + flip the enabled flag in a
                 // single round-trip. Falls back to the explicit verify call
                 // below when the backend can't self-verify (legacy or
@@ -1612,7 +1617,6 @@ export function SystemSettingsProvider({
 
   const startProviderLogin = useCallback(
     async (providerId: string) => {
-      const connectionDraft = providerConnectionDrafts[providerId];
       const providerOption = providerOptionMap[providerId];
       if (providerOption?.loginFlowKind === "browser") {
         openPendingLoginPopup(providerId);
@@ -1625,9 +1629,7 @@ export function SystemSettingsProvider({
             login_session: ProviderLoginSession;
           }>(`/api/control-plane/providers/${providerId}/connection/login/start`, {
             method: "POST",
-            body: JSON.stringify({
-              project_id: connectionDraft?.project_id || "",
-            }),
+            body: JSON.stringify({}),
           }),
         {
           successMessage: tl("Fluxo oficial de login iniciado."),
@@ -1637,7 +1639,7 @@ export function SystemSettingsProvider({
             setProviderConnectionDraft(providerId, {
               auth_mode: connection.auth_mode,
               api_key: "",
-              project_id: connection.project_id || connectionDraft?.project_id || "",
+              project_id: connection.project_id || "",
               login_session,
             });
             if (login_session.auth_url) {
@@ -1660,7 +1662,6 @@ export function SystemSettingsProvider({
       clearProviderLoginWindow,
       openPendingLoginPopup,
       openProviderAuthUrl,
-      providerConnectionDrafts,
       providerOptionMap,
       replaceProviderConnection,
       runAction,
@@ -1786,24 +1787,179 @@ export function SystemSettingsProvider({
     ],
   );
 
+  const loadKokoroModelStatus = useCallback(
+    async (_options?: { force?: boolean }): Promise<KokoroModelStatus> => {
+      const payload = await requestJson<KokoroModelStatus>("/api/control-plane/providers/kokoro/model");
+      setKokoroModelStatus(payload);
+      return payload;
+    },
+    [],
+  );
+
+  const loadWhisperCatalog = useCallback(
+    async (_options?: { force?: boolean }): Promise<WhisperCatalog> => {
+      const payload = await requestJson<WhisperCatalog>("/api/control-plane/providers/whispercpp/models");
+      setWhisperCatalog(payload);
+      return payload;
+    },
+    [],
+  );
+
   const downloadKokoroVoice = useCallback(
     async (voiceId: string) => {
+      const normalized = String(voiceId).trim().toLowerCase();
+      const metadata = kokoroVoiceCatalog.items.find((voice) => voice.voice_id === normalized);
+      const language = metadata?.language_label
+        ? ` · ${tl(metadata.language_label)}`
+        : "";
+      const voiceName = metadata?.name || normalized;
+      await downloadJob.start({
+        providerId: "kokoro",
+        assetKey: normalized,
+        startEndpoint: `/api/control-plane/providers/kokoro/voices/${encodeURIComponent(normalized)}/download`,
+        toastTitle: tl("Baixando voz Kokoro · {{voice}}", { voice: voiceName + language }),
+        successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+        onComplete: async () => {
+          kokoroVoiceCacheRef.current = {};
+          await loadKokoroVoices(draft.values.models.kokoro_default_language || "pt-br", {
+            force: true,
+          });
+        },
+      });
+    },
+    [downloadJob, draft.values.models.kokoro_default_language, kokoroVoiceCatalog.items, loadKokoroVoices, tl],
+  );
+
+  const downloadKokoroModel = useCallback(async () => {
+    await downloadJob.start({
+      providerId: "kokoro",
+      assetKey: "model",
+      startEndpoint: "/api/control-plane/providers/kokoro/model/download",
+      toastTitle: tl("Baixando modelo Kokoro"),
+      successMessage: tl("Modelo Kokoro pronto."),
+      onComplete: async () => {
+        await loadKokoroModelStatus({ force: true });
+      },
+    });
+  }, [downloadJob, loadKokoroModelStatus, tl]);
+
+  const downloadWhisperModel = useCallback(
+    async (variantId: string) => {
+      const normalized = String(variantId).trim();
+      const variant = whisperCatalog?.items.find((item) => item.variant_id === normalized);
+      const label = variant?.label || `Whisper ${normalized}`;
+      await downloadJob.start({
+        providerId: "whispercpp",
+        assetKey: normalized,
+        startEndpoint: `/api/control-plane/providers/whispercpp/models/${encodeURIComponent(normalized)}/download`,
+        toastTitle: tl("Baixando {{label}}", { label }),
+        successMessage: tl("{{label}} pronto.", { label }),
+        onComplete: async () => {
+          await loadWhisperCatalog({ force: true });
+        },
+      });
+    },
+    [downloadJob, loadWhisperCatalog, tl, whisperCatalog],
+  );
+
+  const isDownloadingKokoroAsset = useCallback(
+    (assetKey: string) => downloadJob.isActive("kokoro", String(assetKey).trim().toLowerCase()),
+    [downloadJob],
+  );
+
+  const isDownloadingWhisperVariant = useCallback(
+    (variantId: string) => downloadJob.isActive("whispercpp", String(variantId).trim()),
+    [downloadJob],
+  );
+
+  // ────────────────────────────────────────────────────────────────────
+  // Asset deletion. Each helper hits a DELETE endpoint, refreshes the
+  // catalog so the UI reflects the new on-disk state, and surfaces the
+  // freed bytes via toast so the operator sees disk space recovered.
+  // ────────────────────────────────────────────────────────────────────
+  const deleteKokoroModelAsset = useCallback(async () => {
+    await runAction(
+      "provider:kokoro:delete-model",
+      async () => {
+        const res = await fetch("/api/control-plane/providers/kokoro/model", {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `delete failed (${res.status})`);
+        }
+        return (await res.json()) as { bytes_freed?: number; removed?: boolean };
+      },
+      {
+        successMessage: tl("Modelo Kokoro removido."),
+        errorMessage: tl("Não foi possível remover o modelo Kokoro."),
+        onSuccess: async () => {
+          await loadKokoroModelStatus({ force: true });
+        },
+      },
+    );
+  }, [loadKokoroModelStatus, runAction, tl]);
+
+  const deleteKokoroVoiceAsset = useCallback(
+    async (voiceId: string) => {
+      const normalized = String(voiceId).trim().toLowerCase();
+      if (!normalized) return;
       await runAction(
-        `provider:kokoro:download:${voiceId}`,
-        async () =>
-          requestJson<ProviderDownloadJob>(`/api/control-plane/providers/kokoro/voices/${voiceId}/download`, {
-            method: "POST",
-          }),
+        `provider:kokoro:delete-voice:${normalized}`,
+        async () => {
+          const res = await fetch(
+            `/api/control-plane/providers/kokoro/voices/${encodeURIComponent(normalized)}`,
+            { method: "DELETE", credentials: "same-origin" },
+          );
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `delete failed (${res.status})`);
+          }
+          return (await res.json()) as { bytes_freed?: number; removed?: boolean };
+        },
         {
-          successMessage: tl("Download da voz iniciado."),
-          errorMessage: tl("Nao foi possivel iniciar o download da voz."),
-          onSuccess: (job) => {
-            setKokoroDownloadJobs((current) => ({ ...current, [job.asset_id]: job }));
+          successMessage: tl("Voz removida."),
+          errorMessage: tl("Não foi possível remover a voz."),
+          onSuccess: async () => {
+            kokoroVoiceCacheRef.current = {};
+            await loadKokoroVoices(draft.values.models.kokoro_default_language || "pt-br", {
+              force: true,
+            });
           },
         },
       );
     },
-    [runAction, tl],
+    [draft.values.models.kokoro_default_language, loadKokoroVoices, runAction, tl],
+  );
+
+  const deleteWhisperVariantAsset = useCallback(
+    async (variantId: string) => {
+      const normalized = String(variantId).trim();
+      if (!normalized) return;
+      await runAction(
+        `provider:whispercpp:delete:${normalized}`,
+        async () => {
+          const res = await fetch(
+            `/api/control-plane/providers/whispercpp/models/${encodeURIComponent(normalized)}`,
+            { method: "DELETE", credentials: "same-origin" },
+          );
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `delete failed (${res.status})`);
+          }
+          return (await res.json()) as { bytes_freed?: number; removed?: boolean };
+        },
+        {
+          successMessage: tl("Modelo Whisper removido."),
+          errorMessage: tl("Não foi possível remover o modelo Whisper."),
+          onSuccess: async () => {
+            await loadWhisperCatalog({ force: true });
+          },
+        },
+      );
+    },
+    [loadWhisperCatalog, runAction, tl],
   );
 
   const handleSave = useCallback(async () => {
@@ -1885,7 +2041,8 @@ export function SystemSettingsProvider({
         setProviderConnectionDrafts(buildProviderConnectionDrafts(refreshed));
         setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
         setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
-        setKokoroDownloadJobs({});
+        setKokoroModelStatus(null);
+        setWhisperCatalog(null);
         setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
         elevenlabsVoiceCacheRef.current = {};
         kokoroVoiceCacheRef.current = {};
@@ -1905,17 +2062,13 @@ export function SystemSettingsProvider({
     setProviderConnectionDrafts(buildProviderConnectionDrafts(baseline));
     setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
     setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
-    setKokoroDownloadJobs({});
+    setKokoroModelStatus(null);
+    setWhisperCatalog(null);
     setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
     elevenlabsVoiceCacheRef.current = {};
     kokoroVoiceCacheRef.current = {};
     ollamaModelCacheRef.current = {};
   }, [baseline]);
-
-  const kokoroDownloadJobForVoice = useCallback(
-    (voiceId: string) => kokoroDownloadJobs[String(voiceId).trim().toLowerCase()] || null,
-    [kokoroDownloadJobs],
-  );
 
   const isProviderActionPending = useCallback(
     (providerId: string, action: "connect" | "verify" | "disconnect") =>
@@ -1969,7 +2122,10 @@ export function SystemSettingsProvider({
     elevenlabsVoicesLoading,
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
-    kokoroDownloadJobForVoice,
+    kokoroModelStatus,
+    whisperCatalog,
+    isDownloadingKokoroAsset,
+    isDownloadingWhisperVariant,
     ollamaModelCatalog,
     ollamaModelsLoading,
     setField,
@@ -1982,7 +2138,14 @@ export function SystemSettingsProvider({
     disconnectProviderConnection,
     loadElevenLabsVoices,
     loadKokoroVoices,
+    loadKokoroModelStatus,
+    loadWhisperCatalog,
     downloadKokoroVoice,
+    downloadKokoroModel,
+    downloadWhisperModel,
+    deleteKokoroModelAsset,
+    deleteKokoroVoiceAsset,
+    deleteWhisperVariantAsset,
     loadOllamaModels,
     isProviderActionPending,
     providerActionStatus,
@@ -2029,7 +2192,10 @@ export function SystemSettingsProvider({
     elevenlabsVoicesLoading,
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
-    kokoroDownloadJobForVoice,
+    kokoroModelStatus,
+    whisperCatalog,
+    isDownloadingKokoroAsset,
+    isDownloadingWhisperVariant,
     ollamaModelCatalog,
     ollamaModelsLoading,
     setField,
@@ -2042,7 +2208,14 @@ export function SystemSettingsProvider({
     disconnectProviderConnection,
     loadElevenLabsVoices,
     loadKokoroVoices,
+    loadKokoroModelStatus,
+    loadWhisperCatalog,
     downloadKokoroVoice,
+    downloadKokoroModel,
+    downloadWhisperModel,
+    deleteKokoroModelAsset,
+    deleteKokoroVoiceAsset,
+    deleteWhisperVariantAsset,
     loadOllamaModels,
     isProviderActionPending,
     providerActionStatus,

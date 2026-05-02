@@ -113,7 +113,6 @@ const PROVIDER_HIGHLIGHT_COPY: Record<string, string> = {
   gemini: "Google Gemini para geração multimodal, AI Studio e autenticação oficial via Gemini CLI.",
   elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por agent.",
   ollama: "Ollama para modelos locais ou remotos com descoberta real do catálogo no endpoint configurado.",
-  sora: "Sora amplia os fluxos de mídia da OpenAI para geração visual e vídeo quando disponível.",
   kokoro: "Kokoro entrega TTS local com vozes sob demanda e operação otimizada para ambientes self-hosted.",
   whispercpp: "Whisper.cpp mantém transcrição local com runtime leve para ambientes controlados.",
 };

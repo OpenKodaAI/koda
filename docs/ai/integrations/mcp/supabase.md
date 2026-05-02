@@ -5,29 +5,31 @@
 - **Tier**: mandatory
 - **Category**: cloud
 - **Canonical source**: https://supabase.com/docs/guides/getting-started/mcp
-- **Transport**: stdio
-- **Install command**: `npx -y @supabase/mcp-server-supabase@0.7.0`
+- **Transport**: http_sse
+- **Install command**: `npx -y mcp-remote@0.1.38 https://mcp.supabase.com/mcp`
+- **Remote URL**: https://mcp.supabase.com/mcp
 
 ## Descrição
 
-Conecte ao Supabase para executar queries SQL, gerenciar tabelas, listar funções e inspecionar a configuração do projeto diretamente pela conversa.
+Connect to Supabase to run SQL queries, manage tables, list functions, and inspect project configuration directly from the chat.
 
 ## Connection profile
 
-**Strategy**: `api_key`
+**Strategy**: `oauth_preferred`
+- OAuth provider: `supabase` · scopes: `read write`
 
 ### Campos principais
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `SUPABASE_ACCESS_TOKEN` | sim | password | Personal Access Token |
+| `SUPABASE_ACCESS_TOKEN` | não | password | Personal Access Token (fallback) — Use preferencialmente OAuth; o PAT fica como fallback para CI. |
 
 
 ### Campos de escopo (opcionais)
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `SUPABASE_PROJECT_REF` | não | text | Project Reference (escopo) — Opcional: limita o acesso a um único projeto Supabase. |
+| `SUPABASE_PROJECT_REF` | não | text | Project Reference (escopo) — Opcional: restringe acesso a um único projeto Supabase. |
 
 
 ## Runtime constraints
@@ -41,12 +43,12 @@ Conecte ao Supabase para executar queries SQL, gerenciar tabelas, listar funçõ
 |---|---|---|
 | `list_tables` | read | Listar todas as tabelas do projeto |
 | `get_table_schema` | read | Inspecionar schema de uma tabela |
-| `execute_sql` | destructive | Executar queries SQL no banco |
-| `list_functions` | read | Listar funções Postgres |
-| `get_project_info` | read | Recuperar configuração do projeto |
-| `apply_migration` | destructive | Aplicar migration no banco |
-| `list_extensions` | read | Listar extensões instaladas |
-| `list_migrations` | read | Listar migrations aplicadas |
+| `execute_sql` | destructive | Run SQL queries on the database |
+| `list_functions` | read | List Postgres functions |
+| `get_project_info` | read | Retrieve project configuration |
+| `apply_migration` | destructive | Apply a migration on the database |
+| `list_extensions` | read | List installed extensions |
+| `list_migrations` | read | List applied migrations |
 
 ## Como o agente usa bem
 

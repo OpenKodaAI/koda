@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 CapabilityProbe = Literal["models_endpoint", "health_only", "static"]
+AuthMode = Literal["api_key", "local"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,10 @@ class ProviderHttpProfile:
     Both the runtime adapter (``openai_compatible_runner``) and the credential
     verifier (``provider_auth._verify_openai_compatible_api_key``) consume the
     same profile so URLs, headers and quirks cannot drift between paths.
+
+    ``auth_mode="local"`` skips the API-key requirement so local runtimes
+    (llama.cpp's ``llama-server``, ``mlx-openai-server``) can plug into the
+    same adapter without forcing operators to invent fake keys.
     """
 
     provider_id: str
@@ -34,6 +39,7 @@ class ProviderHttpProfile:
     extra_payload: tuple[tuple[str, object], ...] = ()
     allow_private_base_url: bool = False
     citations_extractor: Callable[[dict], list[str]] | None = None
+    auth_mode: AuthMode = "api_key"
 
     def chat_url(self) -> str:
         return _join(self.base_url, self.chat_path)
@@ -50,8 +56,12 @@ class ProviderHttpProfile:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            self.auth_header_name: self.auth_header_format.format(api_key=api_key),
         }
+        if self.auth_mode == "api_key":
+            headers[self.auth_header_name] = self.auth_header_format.format(api_key=api_key)
+        elif api_key:
+            # Local mode with an optional bearer (some operators front llama-server with a proxy)
+            headers[self.auth_header_name] = self.auth_header_format.format(api_key=api_key)
         for key, value in self.extra_headers:
             headers[key] = value
         return headers

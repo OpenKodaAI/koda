@@ -43,7 +43,7 @@ export function Drawer({
         {modal ? (
           <DialogPrimitive.Overlay
             className={cn(
-              "fixed inset-0 z-[70] bg-[rgba(0,0,0,0.72)] backdrop-blur-[8px]",
+              "app-overlay-backdrop fixed inset-0 z-[70]",
               "data-[state=open]:animate-in data-[state=closed]:animate-out",
               "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
             )}
@@ -54,7 +54,7 @@ export function Drawer({
             aria-label={closeLabel}
             onClick={() => onOpenChange(false)}
             className={cn(
-              "fixed inset-0 z-[70] cursor-default border-0 bg-[rgba(0,0,0,0.55)] backdrop-blur-[6px] transition-opacity",
+              "app-overlay-backdrop fixed inset-0 z-[70] cursor-default border-0 transition-opacity",
               open ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           />
@@ -62,8 +62,7 @@ export function Drawer({
         <DialogPrimitive.Content
           aria-describedby={description ? undefined : undefined}
           className={cn(
-            "fixed inset-y-0 z-[71] flex h-full flex-col border-l border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-modal-bg)] shadow-[var(--shadow-floating)] outline-none",
-            "backdrop-blur-[24px] backdrop-saturate-[150%]",
+            "app-drawer-panel fixed inset-y-0 z-[71] flex h-full flex-col rounded-none border-l border-[color:var(--overlay-surface-border)] outline-none",
             positionClass,
             "duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             className,

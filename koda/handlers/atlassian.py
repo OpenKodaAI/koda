@@ -6,8 +6,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from koda.config import (
-    BLOCKED_CONFLUENCE_PATTERN,
-    BLOCKED_JIRA_PATTERN,
     CONFLUENCE_ENABLED,
     JIRA_ENABLED,
 )
@@ -57,7 +55,9 @@ async def _run_jira(
         await update.message.reply_text(f"Usage: {usage_hint}")
         return
 
-    if BLOCKED_JIRA_PATTERN and BLOCKED_JIRA_PATTERN.search(args):
+    from koda.services.blocked_patterns import is_blocked_jira
+
+    if is_blocked_jira(args):
         await update.message.reply_text("This Jira operation is blocked for safety.")
         return
 
@@ -87,7 +87,9 @@ async def _run_confluence(
         await update.message.reply_text(f"Usage: {usage_hint}")
         return
 
-    if BLOCKED_CONFLUENCE_PATTERN and BLOCKED_CONFLUENCE_PATTERN.search(args):
+    from koda.services.blocked_patterns import is_blocked_confluence
+
+    if is_blocked_confluence(args):
         await update.message.reply_text("This Confluence operation is blocked for safety.")
         return
 

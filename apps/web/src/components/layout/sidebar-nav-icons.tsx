@@ -232,15 +232,18 @@ export function SchedulesNavIcon(props: SidebarIconProps) {
   );
 }
 
-export function DlqNavIcon(props: SidebarIconProps) {
+export function RoutinesNavIcon(props: SidebarIconProps) {
   return (
     <BaseIcon {...props}>
       <path
-        d="M3.333 6.66666V4.99999C3.333 4.07952 4.0792 3.33333 4.99967 3.33333H11.6663C12.5868 3.33333 13.333 4.07952 13.333 4.99999M3.333 6.66666H6.81257C7.2546 6.66666 7.67852 6.84225 7.99108 7.15482L9.51475 8.67849C9.82734 8.99108 10.2513 9.16666 10.6933 9.16666H13.333M3.333 6.66666C2.87456 6.66666 2.50293 7.0383 2.50293 7.49674V15C2.50293 15.9205 3.24912 16.6667 4.1696 16.6667H15.8363C16.7568 16.6667 17.5029 15.9205 17.5029 15V10.0032C17.5029 9.54124 17.1283 9.16666 16.6663 9.16666M13.333 4.99999V9.16666M13.333 4.99999H14.9997C15.9202 4.99999 16.6663 5.74619 16.6663 6.66666V9.16666M13.333 9.16666H16.6663"
+        d="M11.667 2.5L4 11.667H9.167L8.333 17.5L16 8.333H10.833L11.667 2.5Z"
         stroke="currentColor"
-        strokeWidth="1.66667"
+        strokeWidth="1.5"
         strokeLinejoin="round"
+        strokeLinecap="round"
+        fill="none"
       />
     </BaseIcon>
   );
 }
+

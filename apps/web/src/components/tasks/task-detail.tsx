@@ -51,19 +51,13 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
   return createPortal(
     <>
       <div
-        className={cn(
-          "app-overlay-backdrop",
-          presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-        )}
+        className="app-overlay-backdrop app-overlay-anim"
+        data-visible={presence.isVisible}
         onClick={onClose}
       />
       <div
-        className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full max-w-[720px] transition-opacity duration-150 ease-out",
-          presence.isVisible
-            ? "opacity-100"
-            : "pointer-events-none opacity-0"
-        )}
+        className="app-drawer-anim-right fixed inset-y-0 right-0 z-[70] w-full max-w-[720px]"
+        data-visible={presence.isVisible}
         role="dialog"
         aria-modal="true"
         aria-label={t("tasks.detail.dialogTitle", { id: renderedTask.id })}

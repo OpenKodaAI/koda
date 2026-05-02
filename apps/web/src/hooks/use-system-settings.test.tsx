@@ -111,6 +111,7 @@ function makeSettings(overrides?: {
         kokoro_default_language: "pt-br",
         kokoro_default_voice: "pf_dora",
         kokoro_default_voice_label: "",
+        metal_enabled: true,
         functional_defaults: {},
       },
       resources: {
@@ -199,8 +200,8 @@ describe("useSystemSettings", () => {
           connection_managed: true,
         }),
         makeProviderCatalogProvider({
-          id: "sora",
-          title: "Sora",
+          id: "hidden-test-provider",
+          title: "Hidden Test Provider",
           category: "media",
           supported_auth_modes: ["api_key"],
           supports_api_key: true,

@@ -22,7 +22,7 @@ Governed AWS profiles, regions, and CLI-backed runtime access.
 |---|---|---|---|
 | `AWS_ACCESS_KEY_ID` | sim | password | Access Key ID |
 | `AWS_SECRET_ACCESS_KEY` | sim | password | Secret Access Key |
-| `AWS_DEFAULT_REGION` | sim | text | Região padrão |
+| `AWS_DEFAULT_REGION` | sim | text | Default region |
 
 
 ### Campos de escopo (opcionais)

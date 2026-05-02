@@ -11,7 +11,7 @@ import {
 setCurrentLanguage("pt-BR");
 
 describe("control-plane-editor helpers", () => {
-  it("preserves advanced appearance/runtime keys while applying visible fields", () => {
+  it("preserves advanced appearance keys while applying visible fields", () => {
     const payload = buildAgentMetadataPayload({
       displayName: "UI QA Agent",
       status: "paused",
@@ -20,21 +20,11 @@ describe("control-plane-editor helpers", () => {
       squadId: "produto_platform",
       color: "#123456",
       colorRgb: "18, 52, 86",
-      healthPort: "8099",
-      healthUrl: "http://127.0.0.1:8099/health",
-      runtimeBaseUrl: "http://127.0.0.1:8099",
-      appearanceJson: JSON.stringify({
+      existingAppearance: {
         label: "Anterior",
         color: "#ffffff",
         badge: "qa",
-      }),
-      runtimeEndpointJson: JSON.stringify({
-        health_port: 8080,
-        headers: { Authorization: "Bearer local" },
-      }),
-      metadataJson: JSON.stringify({
-        owner: "ops",
-      }),
+      },
     });
 
     expect(payload.appearance).toEqual({
@@ -43,17 +33,27 @@ describe("control-plane-editor helpers", () => {
       color_rgb: "18, 52, 86",
       badge: "qa",
     });
-    expect(payload.runtime_endpoint).toEqual({
-      health_port: 8099,
-      health_url: "http://127.0.0.1:8099/health",
-      runtime_base_url: "http://127.0.0.1:8099",
-      headers: { Authorization: "Bearer local" },
-    });
-    expect(payload.metadata).toEqual({ owner: "ops" });
+    expect(payload).not.toHaveProperty("runtime_endpoint");
+    expect(payload).not.toHaveProperty("metadata");
     expect(payload.organization).toEqual({
       workspace_id: "produto",
       squad_id: "produto_platform",
     });
+  });
+
+  it("does not require an existing appearance", () => {
+    const payload = buildAgentMetadataPayload({
+      displayName: "Fresh Agent",
+      status: "paused",
+      storageNamespace: "fresh_agent",
+      workspaceId: "",
+      squadId: "",
+      color: "",
+      colorRgb: "",
+    });
+
+    expect(payload.appearance).toEqual({ label: "Fresh Agent" });
+    expect(payload.organization).toEqual({ workspace_id: null, squad_id: null });
   });
 
   it("rejects invalid health ports", () => {

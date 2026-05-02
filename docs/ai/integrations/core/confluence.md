@@ -20,8 +20,8 @@ Governed Confluence document access and mutations.
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `CONFLUENCE_URL` | sim | text | URL do site Confluence |
-| `CONFLUENCE_USERNAME` | sim | text | Usuário (email) |
+| `CONFLUENCE_URL` | sim | text | Confluence site URL |
+| `CONFLUENCE_USERNAME` | sim | text | Username (email) |
 | `CONFLUENCE_API_TOKEN` | sim | password | API Token |
 
 

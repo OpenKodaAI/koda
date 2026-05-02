@@ -2056,6 +2056,85 @@ class KnowledgeV2PostgresBackend:
                 ),
             ),
             _Migration(
+                "019b_scheduled_job_runs_lease_recovery_columns",
+                (
+                    # Added when scheduled_job_dispatcher started recovering
+                    # expired leases. Without these columns the recovery query
+                    # crashes the runtime on boot and the supervisor enters a
+                    # restart loop, never delivering user messages.
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS lease_recovery_count INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS last_recovered_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS trace_id TEXT""",
+                ),
+            ),
+            _Migration(
+                "019c_provider_session_map",
+                (
+                    # Maps koda's canonical session id ↔ provider-native session
+                    # id (Claude/Codex/Gemini resume tokens). Used by the
+                    # llm_runner fallback chain and by history_store when the
+                    # operator switches providers mid-conversation. Missing
+                    # this table causes "relation does not exist" the moment
+                    # the agent tries to persist its first turn.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."provider_session_map" (
+                            canonical_session_id TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            provider_session_id TEXT NOT NULL,
+                            last_model TEXT,
+                            last_used TEXT NOT NULL,
+                            PRIMARY KEY (canonical_session_id, provider)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_provider_session_map_last_used
+                           ON "{schema}"."provider_session_map" (last_used DESC)""",
+                ),
+            ),
+            _Migration(
+                "019d_sessions_table",
+                (
+                    # Per-user conversation sessions tracked by history_store.
+                    # The worker logs every user-initiated turn as a row here so
+                    # /sessions can list past conversations and the LLM runner
+                    # can resume the right provider-native session id. Missing
+                    # this table makes the first message of every user fail
+                    # with "relation 'sessions' does not exist".
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."sessions" (
+                            id BIGSERIAL PRIMARY KEY,
+                            user_id BIGINT NOT NULL,
+                            session_id TEXT NOT NULL,
+                            name TEXT,
+                            provider TEXT NOT NULL,
+                            provider_session_id TEXT,
+                            last_model TEXT,
+                            created_at TEXT NOT NULL,
+                            last_used TEXT NOT NULL,
+                            UNIQUE (user_id, session_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_user_last_used
+                           ON "{schema}"."sessions" (user_id, last_used DESC)""",
+                ),
+            ),
+            _Migration(
+                "019e_scheduled_jobs_policy_snapshot_columns",
+                (
+                    # Added when the scheduler began capturing a policy
+                    # snapshot for every job (model_policy + tool_policy at
+                    # creation time, hashed for change detection) and a
+                    # `config_version` for idempotent updates. Without these
+                    # columns the INSERT in scheduled_jobs.create_job fails
+                    # silently inside the LLM turn pipeline and the agent
+                    # stops responding to user messages.
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS policy_snapshot_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS policy_snapshot_hash TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS config_version INTEGER NOT NULL DEFAULT 1""",
+                ),
+            ),
+            _Migration(
                 "019_knowledge_governance_tables",
                 (
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."knowledge_candidates" (
@@ -2180,6 +2259,288 @@ class KnowledgeV2PostgresBackend:
                     f"""CREATE INDEX IF NOT EXISTS idx_knowledge_source_registry_lookup
                            ON "{schema}"."knowledge_source_registry"
                            (agent_id, status, is_canonical, updated_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "020_telegram_offsets",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_telegram_offsets" (
+                            agent_id TEXT PRIMARY KEY,
+                            last_update_id BIGINT NOT NULL DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                ),
+            ),
+            _Migration(
+                "021_bot_gateway",
+                (
+                    # Token registry — one row per agent. The bot-gateway
+                    # service polls Telegram on behalf of every registered
+                    # bot. ``bot_token`` is treated as a secret; gateway
+                    # logs redact it via the koda-security-core helpers.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_bot_gateway_tokens" (
+                            agent_id TEXT PRIMARY KEY,
+                            bot_token TEXT NOT NULL,
+                            registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    # Durable per-agent queue. Gateway INSERTs each Update
+                    # before advancing Telegram's polling offset, so a
+                    # restart never loses messages. Subscribers consume
+                    # rows in order and DELETE them via AcknowledgeUpdate
+                    # to confirm processing (at-least-once delivery).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_telegram_pending_updates" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            update_id BIGINT NOT NULL,
+                            payload_json JSONB NOT NULL,
+                            queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, update_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_telegram_pending_updates_lookup
+                           ON "{schema}"."cp_telegram_pending_updates"
+                           (agent_id, queued_at, id)""",
+                ),
+            ),
+            _Migration(
+                "022_policy_engine",
+                (
+                    # Per-workspace policy: rate, concurrency and spend caps.
+                    # ``enabled=false`` makes the policy-engine a no-op for that
+                    # workspace (used by single-tenant deployments that don't
+                    # care about isolation yet).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy" (
+                            workspace_id TEXT PRIMARY KEY,
+                            max_concurrent_agents INTEGER NOT NULL DEFAULT 0,
+                            max_messages_per_minute INTEGER NOT NULL DEFAULT 0,
+                            monthly_llm_spend_usd_cap DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            spend_warning_fraction DOUBLE PRECISION NOT NULL DEFAULT 0.8,
+                            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    # Append-only ledger of LLM spend. Aggregated lazily into
+                    # ``cp_policy_spend_window`` for fast cap decisions.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy_spend_ledger" (
+                            id BIGSERIAL PRIMARY KEY,
+                            workspace_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            cost_usd DOUBLE PRECISION NOT NULL,
+                            provider TEXT NOT NULL DEFAULT '',
+                            model TEXT NOT NULL DEFAULT '',
+                            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_policy_spend_lookup
+                           ON "{schema}"."cp_policy_spend_ledger"
+                           (workspace_id, recorded_at DESC)""",
+                    # Running monthly spend per workspace. Updated atomically
+                    # by RecordSpend so the hard-stop decision is sub-ms.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy_spend_window" (
+                            workspace_id TEXT PRIMARY KEY,
+                            window_start TIMESTAMPTZ NOT NULL,
+                            spent_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                ),
+            ),
+            _Migration(
+                "023_mcp_resources_prompts_custom",
+                (
+                    # Per-agent user-defined MCP servers (custom JSON paste / form).
+                    # System-wide custom rows live in cp_mcp_server_catalog with
+                    # is_custom=1; per-agent variants live here.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_user_servers" (
+                            server_key TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            owner_user_id TEXT,
+                            display_name TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            transport_type TEXT NOT NULL DEFAULT 'stdio',
+                            command_json TEXT NOT NULL DEFAULT '[]',
+                            args_json TEXT NOT NULL DEFAULT '[]',
+                            url TEXT,
+                            headers_schema_json TEXT NOT NULL DEFAULT '[]',
+                            env_schema_json TEXT NOT NULL DEFAULT '[]',
+                            auth_strategy TEXT NOT NULL DEFAULT 'no_auth',
+                            oauth_config_json TEXT NOT NULL DEFAULT '{{}}',
+                            isolation_profile TEXT NOT NULL DEFAULT 'auto',
+                            isolation_constraints_json TEXT NOT NULL DEFAULT '{{}}',
+                            runtime_constraints_json TEXT NOT NULL DEFAULT '[]',
+                            source TEXT NOT NULL DEFAULT 'manual',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            validation_signature TEXT,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (server_key, agent_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_user_servers_agent
+                           ON "{schema}"."cp_mcp_user_servers" (agent_id)""",
+                    # Capability snapshot cache (initialize + tools/list +
+                    # resources/list + prompts/list). One row per
+                    # (agent_id, server_key); refreshed on demand.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_capability_snapshots" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            server_info_json TEXT NOT NULL DEFAULT '{{}}',
+                            server_capabilities_json TEXT NOT NULL DEFAULT '{{}}',
+                            tools_json TEXT NOT NULL DEFAULT '[]',
+                            resources_json TEXT NOT NULL DEFAULT '[]',
+                            resource_templates_json TEXT NOT NULL DEFAULT '[]',
+                            prompts_json TEXT NOT NULL DEFAULT '[]',
+                            captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            ttl_seconds INTEGER NOT NULL DEFAULT 3600,
+                            error TEXT,
+                            PRIMARY KEY (agent_id, server_key)
+                        )""",
+                    # Discovered resources (data sources exposed by MCP server).
+                    # uri_hash is sha256(uri) — used as PK component to keep
+                    # the key short for long URIs.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_discovered_resources" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            uri_hash TEXT NOT NULL,
+                            uri TEXT NOT NULL,
+                            name TEXT,
+                            description TEXT,
+                            mime_type TEXT,
+                            is_template INTEGER NOT NULL DEFAULT 0,
+                            annotations_json TEXT NOT NULL DEFAULT '{{}}',
+                            schema_hash TEXT NOT NULL DEFAULT '',
+                            discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, uri_hash)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_discovered_resources_lookup
+                           ON "{schema}"."cp_mcp_discovered_resources" (agent_id, server_key)""",
+                    # Discovered prompts (reusable prompt templates exposed by MCP).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_discovered_prompts" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            prompt_name TEXT NOT NULL,
+                            description TEXT,
+                            arguments_json TEXT NOT NULL DEFAULT '[]',
+                            schema_hash TEXT NOT NULL DEFAULT '',
+                            discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, prompt_name)
+                        )""",
+                    # Unified per-capability policy table. Replaces the
+                    # tools-only cp_mcp_tool_policies; capability_kind
+                    # discriminates between tool / resource / prompt rows.
+                    # The legacy table stays untouched until a future cleanup.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_capability_policies" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            capability_kind TEXT NOT NULL,
+                            capability_name TEXT NOT NULL,
+                            policy TEXT NOT NULL DEFAULT 'auto',
+                            exposure_mode TEXT,
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, capability_kind, capability_name)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_capability_policies_lookup
+                           ON "{schema}"."cp_mcp_capability_policies"
+                           (agent_id, server_key, capability_kind)""",
+                    # Backfill: copy existing tool policies into the new table
+                    # so reads can transition without losing state. Idempotent
+                    # via ON CONFLICT DO NOTHING.
+                    f"""INSERT INTO "{schema}"."cp_mcp_capability_policies"
+                           (agent_id, server_key, capability_kind, capability_name, policy, updated_at)
+                           SELECT agent_id, server_key, 'tool', tool_name, policy, updated_at::timestamptz
+                           FROM "{schema}"."cp_mcp_tool_policies"
+                           ON CONFLICT DO NOTHING""",
+                    # ALTERs on cp_mcp_server_catalog for custom servers + isolation +
+                    # runtime token placement (where the OAuth/api_key token goes
+                    # at runtime: env var, auth header, or url param).
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS is_custom INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS isolation_profile TEXT NOT NULL DEFAULT 'auto'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS isolation_constraints_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS runtime_token_placement TEXT NOT NULL DEFAULT 'env_var'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_env_key TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_header_name TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_header_template TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS owner_user_id TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'curated'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS validation_signature TEXT""",
+                    # ALTER on oauth_sessions to add HMAC binding (defense in
+                    # depth against state replay across sessions).
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_sessions"
+                           ADD COLUMN IF NOT EXISTS state_hmac TEXT""",
+                ),
+            ),
+            _Migration(
+                "024_supervisor_cluster",
+                (
+                    # Phase 2A — leader-elected agent placement so a fleet of
+                    # supervisor instances can host the same active set without
+                    # two of them spawning duplicate workers for the same
+                    # agent. ``supervisor_id`` identifies the claiming process
+                    # (uuid generated at boot); ``heartbeat_at`` is refreshed
+                    # on every reconcile and other supervisors reap claims
+                    # whose heartbeat is older than
+                    # ``KODA_CLUSTER_HEARTBEAT_STALE_SECONDS``.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_agent_assignments" (
+                            agent_id TEXT PRIMARY KEY,
+                            supervisor_id TEXT NOT NULL,
+                            claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            version INTEGER NOT NULL DEFAULT 0,
+                            draining BOOLEAN NOT NULL DEFAULT FALSE
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_agent_assignments_supervisor
+                           ON "{schema}"."cp_agent_assignments"
+                           (supervisor_id, heartbeat_at DESC)""",
+                    # Phase 2E — supervisor runtime registry. Used by the
+                    # blue/green drain protocol: setting ``draining=TRUE``
+                    # for a supervisor causes the cluster module to release
+                    # its claims on next heartbeat instead of refreshing
+                    # them, so a rolling deploy hands work to the new
+                    # version without dropping in-flight requests.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_supervisor_runtimes" (
+                            supervisor_id TEXT PRIMARY KEY,
+                            version TEXT NOT NULL DEFAULT '',
+                            host TEXT NOT NULL DEFAULT '',
+                            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            draining BOOLEAN NOT NULL DEFAULT FALSE,
+                            capacity INTEGER NOT NULL DEFAULT 0
+                        )""",
+                ),
+            ),
+            _Migration(
+                "025_task_leases",
+                (
+                    # Per-task lease ownership for crash-safe orchestration.
+                    # ``lease_owner`` is the worker process UUID generated at
+                    # boot; ``lease_expires_at`` is the point past which any
+                    # other worker (or the janitor) is free to reclaim the
+                    # row. Acquisition, renewal, completion and reaping all
+                    # run as single atomic UPDATEs scoped to ``lease_owner``,
+                    # so two workers cannot execute the same task and a
+                    # crashed worker cannot resurrect a task that the janitor
+                    # already requeued.
+                    f"""ALTER TABLE "{schema}"."tasks"
+                           ADD COLUMN IF NOT EXISTS lease_owner TEXT""",
+                    f"""ALTER TABLE "{schema}"."tasks"
+                           ADD COLUMN IF NOT EXISTS lease_expires_at TEXT""",
+                    # Janitor sweep filter: scans active rows whose lease has
+                    # expired (or was never set, for legacy stuck rows). The
+                    # partial index keeps this O(stale rows) instead of
+                    # O(all tasks) on agents with long history.
+                    f"""CREATE INDEX IF NOT EXISTS idx_tasks_lease_sweep
+                           ON "{schema}"."tasks"
+                           (agent_id, lease_expires_at)
+                           WHERE status IN ('running', 'retrying')""",
                 ),
             ),
         )

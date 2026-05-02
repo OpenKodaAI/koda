@@ -129,14 +129,13 @@ def _make_manager(monkeypatch):
     return manager, rows, meta, secrets, login_sessions
 
 
-def test_core_provider_catalog_exposes_connection_flags_and_hides_sora():
+def test_core_provider_catalog_exposes_connection_flags():
     catalog = {item["id"]: item for item in resolve_core_provider_catalog()}
 
     assert catalog["ollama"]["supports_local_connection"] is True
     assert catalog["ollama"]["connection_managed"] is True
     assert catalog["claude"]["connection_managed"] is True
     assert catalog["kokoro"]["connection_managed"] is False
-    assert catalog["sora"]["show_in_settings"] is False
 
 
 def test_function_model_catalog_skips_hidden_standalone_providers():
@@ -144,7 +143,11 @@ def test_function_model_catalog_skips_hidden_standalone_providers():
 
     functional_catalog = build_function_model_catalog(catalog)
 
-    assert all(item["provider_id"] != "sora" for item in functional_catalog["video"])
+    # Hidden providers (show_in_settings=False) are filtered out of every functional bucket.
+    visible_ids = {payload["id"] for payload in catalog.values() if payload.get("show_in_settings", True)}
+    for entries in functional_catalog.values():
+        for entry in entries:
+            assert entry["provider_id"] in visible_ids
 
 
 def test_verify_provider_connection_flips_enabled_flag(monkeypatch):
@@ -275,6 +278,145 @@ def test_ollama_local_connection_round_trip_preserves_local_mode(monkeypatch):
     assert disconnected["connection"]["auth_mode"] == "local"
     assert disconnected["connection"]["verified"] is False
     assert disconnected["connection"]["base_url"] == "http://127.0.0.1:11434"
+
+
+def test_ollama_api_key_mode_ignores_local_base_url_overrides(monkeypatch):
+    """`_resolve_ollama_base_url` must hardcode the cloud endpoint in api_key mode.
+
+    Regression: when an operator first connected Ollama in `local` mode, the
+    local URL got persisted in meta. Switching to `api_key` mode would still
+    reuse that meta — the cloud verify hit `localhost:11434` and failed with
+    `Connection refused`. The same happened when the host environment had
+    a stray ``OLLAMA_BASE_URL=http://localhost:11434``.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    # Simulate the worst case: meta carries a local URL from a prior local-mode
+    # setup AND the host env exports OLLAMA_BASE_URL pointing at localhost.
+    manager._load_global_sections = lambda: {  # type: ignore[attr-defined]
+        "access": {
+            "provider_connection_meta": {
+                "OLLAMA": {"base_url": "http://localhost:11434"},
+            }
+        }
+    }
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    api_key_url = manager_mod.ControlPlaneManager._resolve_ollama_base_url(manager, auth_mode="api_key")
+    assert api_key_url == "https://ollama.com", f"api_key mode must always target Ollama Cloud, got {api_key_url!r}"
+
+    # Even with an env override that explicitly tries to inject a local URL
+    # via the per-call env arg (e.g. from `_merged_global_env()` polluted by
+    # legacy state), api_key mode stays on the cloud endpoint.
+    api_key_url_with_env = manager_mod.ControlPlaneManager._resolve_ollama_base_url(
+        manager,
+        auth_mode="api_key",
+        env={"OLLAMA_BASE_URL": "http://host.docker.internal:11434"},
+    )
+    assert api_key_url_with_env == "https://ollama.com"
+
+    # Local mode still honors the persisted meta — operators rely on this to
+    # point Koda at their local daemon when running outside Docker.
+    local_url = manager_mod.ControlPlaneManager._resolve_ollama_base_url(manager, auth_mode="local")
+    assert local_url == "http://localhost:11434"
+
+
+def test_ollama_api_key_connect_does_not_pollute_local_meta(monkeypatch):
+    """Connecting via API key must leave the local meta intact.
+
+    Regression: the previous flow wrote `https://ollama.com` into meta on
+    api_key connect, wiping the operator's local URL. Switching back to
+    local mode then pointed at the cloud and broke the local daemon flow.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, meta, _secrets, _sessions = _make_manager(monkeypatch)
+    meta["ollama"] = {"base_url": "http://127.0.0.1:11434"}
+
+    # Stub the verify call so we don't try to hit the network during the test.
+    monkeypatch.setattr(
+        manager_mod,
+        "verify_provider_api_key",
+        lambda provider_id, api_key, project_id="", base_url="": ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="api_key",
+            verified=True,
+            account_label="Ollama Cloud",
+            checked_via="api_key",
+            details={"provider": provider_id},
+        ),
+    )
+
+    manager_mod.ControlPlaneManager.put_provider_api_key_connection(
+        manager,
+        "ollama",
+        {"api_key": "sk-ollama-cloud"},
+    )
+
+    assert meta["ollama"]["base_url"] == "http://127.0.0.1:11434", (
+        f"local-mode meta base_url must survive an api_key connect; got {meta['ollama']['base_url']!r}"
+    )
+
+
+def test_ollama_api_key_verify_targets_cloud_endpoint(monkeypatch):
+    """End-to-end: verifying an Ollama api_key connection must hit the cloud.
+
+    Asserts the URL that reaches `verify_provider_api_key` is
+    `https://ollama.com`, not a local URL coming from prior local-mode meta
+    or a stale `OLLAMA_BASE_URL` in the host environment.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, rows, meta, _secrets, _sessions = _make_manager(monkeypatch)
+    # Replace the mocked `_resolve_ollama_base_url` from `_make_manager` with
+    # the real implementation so we exercise the auth_mode branch that we
+    # just hardened.
+    del manager._resolve_ollama_base_url  # type: ignore[attr-defined]
+    manager._load_global_sections = lambda: {  # type: ignore[attr-defined]
+        "access": {
+            "provider_connection_meta": {
+                "OLLAMA": {"base_url": "http://localhost:11434"},
+            }
+        }
+    }
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    rows["ollama"]["auth_mode"] = "api_key"
+    rows["ollama"]["configured"] = 1
+    meta["ollama"] = {"base_url": "http://localhost:11434"}
+
+    captured: dict[str, str] = {}
+
+    def _capture_verify(provider_id, api_key, project_id="", base_url=""):
+        captured["base_url"] = base_url
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="api_key",
+            verified=True,
+            account_label="Ollama Cloud",
+            checked_via="api_key",
+            details={"provider": provider_id},
+        )
+
+    monkeypatch.setattr(manager_mod, "verify_provider_api_key", _capture_verify)
+
+    # Stub the side-effect helpers that the verify path touches but that we
+    # don't care about for this assertion.
+    manager._mark_provider_enabled = lambda provider_id, *, enabled: None  # type: ignore[attr-defined]
+    manager._provider_login_session_dict = lambda state: {}  # type: ignore[attr-defined]
+    monkeypatch.setattr(manager_mod, "fetch_one", lambda *args, **kwargs: None)
+
+    manager_mod.ControlPlaneManager.put_provider_api_key_connection(
+        manager,
+        "ollama",
+        {"api_key": "sk-ollama-cloud", "verify_after_save": True},
+    )
+
+    assert captured["base_url"] == "https://ollama.com", (
+        "api_key verify must target Ollama Cloud regardless of local meta or "
+        f"stray OLLAMA_BASE_URL env; got {captured['base_url']!r}"
+    )
 
 
 def test_postgres_is_not_exposed_as_native_core_integration(monkeypatch):

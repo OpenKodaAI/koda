@@ -9,6 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import grpc
 import pytest
 
+# Phase B.1 — pull in real-Postgres fixtures so any test marked
+# ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
+# ``db_connection`` fixtures. The module also auto-skips marked
+# tests when no DSN is configured and testcontainers/Docker is
+# unreachable, so a contributor without Docker still gets a clean
+# pytest run.
+pytest_plugins = ["tests.postgres_fixtures"]
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 # Set env vars before importing config. Use explicit assignments so CI job-level

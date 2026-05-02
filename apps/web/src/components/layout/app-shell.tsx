@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { WorkspaceTopbar } from "@/components/layout/workspace-topbar";
 import { AppTourProvider } from "@/components/providers/app-tour-provider";
 import { ToastNotification } from "@/components/ui/toast-notification";
+import { ActiveDownloadsRebinder } from "@/components/layout/active-downloads-rebinder";
 import { ToastProvider } from "@/hooks/use-toast";
 import { sidebarCollapsedStorageCodec } from "@/lib/storage-codecs";
 import { cn } from "@/lib/utils";
@@ -162,6 +163,7 @@ export function AppShell({ children, serverPathname }: AppShellProps) {
             {children}
           </ShellViewportFrame>
           <ToastNotification />
+          <ActiveDownloadsRebinder />
           <CommandBarModal />
         </div>
       </AppTourProvider>

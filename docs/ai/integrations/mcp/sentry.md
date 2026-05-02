@@ -10,17 +10,18 @@
 
 ## Descrição
 
-Investigue erros em produção, analise stack traces, busque issues e monitore a saúde dos projetos com integração direta ao Sentry.
+Investigate production errors, analyze stack traces, search issues, and monitor project health with direct Sentry integration.
 
 ## Connection profile
 
-**Strategy**: `api_key`
+**Strategy**: `oauth_preferred`
+- OAuth provider: `sentry` · scopes: `org:read project:read event:read`
 
 ### Campos principais
 
 | Campo | Obrigatório | Tipo | Descrição |
 |---|---|---|---|
-| `SENTRY_ACCESS_TOKEN` | sim | password | Auth Token |
+| `SENTRY_ACCESS_TOKEN` | não | password | Auth Token (fallback) — Use preferencialmente OAuth; o token fica como fallback. |
 
 
 ### Campos de escopo (opcionais)
@@ -40,10 +41,10 @@ Nenhuma restrição de runtime aplicável a esta integração.
 |---|---|---|
 | `get_issues` | read | Recuperar issues de erro |
 | `get_issue_details` | read | Detalhes completos de uma issue |
-| `search_issues` | read | Buscar issues com filtros |
-| `list_projects` | read | Listar projetos monitorados |
-| `get_project_info` | read | Configuração do projeto |
-| `create_issue` | write | Criar nova issue |
+| `search_issues` | read | Search issues com filtros |
+| `list_projects` | read | List monitored projects |
+| `get_project_info` | read | Project configuration |
+| `create_issue` | write | Create new issue |
 | `update_issue` | write | Atualizar status de issue |
 
 ## Como o agente usa bem

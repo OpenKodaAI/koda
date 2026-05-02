@@ -217,6 +217,38 @@ class SkillEmbeddingIndex:
 
         # Sort descending by similarity.
         pairs.sort(key=lambda item: item[1], reverse=True)
+
+        # Reranker refinement on top-K cosine candidates. Falls through to
+        # cosine ordering when reranker is disabled or the model cannot
+        # load — the reranker is a precision lift, never a dependency.
+        if len(pairs) >= 2:
+            try:
+                from koda.services.reranker import rerank_top_k_indices
+
+                # Recover the candidate text used at index time so the
+                # cross-encoder scores against the same surface form.
+                cand_texts: list[str] = []
+                for skill_id, _ in pairs[:8]:
+                    doc = next(
+                        (
+                            d
+                            for d, doc_id in zip(
+                                raw["documents"][0] if raw["documents"] else [],
+                                result_ids,
+                                strict=False,
+                            )
+                            if doc_id == skill_id
+                        ),
+                        None,
+                    )
+                    cand_texts.append(doc or skill_id)
+                new_order = rerank_top_k_indices(query_text, cand_texts, top_k=min(8, len(pairs)))
+                if new_order is not None:
+                    head = [pairs[i] for i in new_order]
+                    tail = pairs[len(head) :]
+                    pairs = head + tail
+            except Exception:  # noqa: BLE001 — reranker is optional, never block
+                pass
         return pairs
 
 

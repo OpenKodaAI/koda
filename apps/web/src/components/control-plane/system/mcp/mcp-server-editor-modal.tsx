@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import { X, Plus, Trash2 } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -149,8 +151,8 @@ function EnvSchemaBuilder({
               className="flex items-start gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] p-3"
             >
               <div className="grid flex-1 grid-cols-2 gap-2">
-                <input
-                  className="field-shell px-3 py-1.5 text-xs text-[var(--text-primary)]"
+                <Input
+                  sizeVariant="sm"
                   value={field.key}
                   onChange={(e) =>
                     updateField(field._id, {
@@ -159,8 +161,8 @@ function EnvSchemaBuilder({
                   }
                   placeholder="CHAVE"
                 />
-                <input
-                  className="field-shell px-3 py-1.5 text-xs text-[var(--text-primary)]"
+                <Input
+                  sizeVariant="sm"
                   value={field.label}
                   onChange={(e) => updateField(field._id, { label: e.target.value })}
                   placeholder={tl("Rotulo")}
@@ -297,14 +299,14 @@ export function McpServerEditorModal({
   return createPortal(
     <>
       <div
-        className="app-overlay-backdrop z-[70]"
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
         onClick={onClose}
         aria-hidden="true"
       />
 
       <div className="app-modal-frame z-[80] overflow-y-auto px-4 py-6 sm:px-6">
         <div
-          className="app-modal-panel relative flex max-h-[min(86vh,58rem)] w-full max-w-2xl flex-col overflow-hidden"
+          className="app-modal-panel app-modal-anim relative flex max-h-[min(86vh,58rem)] w-full max-w-2xl flex-col overflow-hidden"
           role="dialog"
           aria-modal="true"
           aria-labelledby="mcp-editor-modal-title"
@@ -348,19 +350,17 @@ export function McpServerEditorModal({
                     : tl("Chave unica do servidor")
                 }
               >
-                <input
-                  className="field-shell text-[var(--text-primary)]"
+                <Input
                   value={form.server_key}
                   onChange={(e) => patch({ server_key: e.target.value })}
                   placeholder="meu-servidor"
                   disabled={isEditing || lockServerKey}
-                  aria-invalid={isReservedServerKey}
+                  invalid={isReservedServerKey}
                 />
               </FieldShell>
 
               <FieldShell label="Nome de exibicao">
-                <input
-                  className="field-shell text-[var(--text-primary)]"
+                <Input
                   value={form.display_name}
                   onChange={(e) => patch({ display_name: e.target.value })}
                   placeholder="Meu Servidor MCP"
@@ -368,8 +368,9 @@ export function McpServerEditorModal({
               </FieldShell>
 
               <FieldShell label="Descricao">
-                <textarea
-                  className="field-shell min-h-[60px] resize-y text-[var(--text-primary)]"
+                <Textarea
+                  rows={3}
+                  className="min-h-[60px]"
                   value={form.description}
                   onChange={(e) => patch({ description: e.target.value })}
                   placeholder={tl("Breve descricao do que esse servidor oferece")}
@@ -393,8 +394,8 @@ export function McpServerEditorModal({
 
               {form.transport_type === "stdio" ? (
                 <FieldShell label="Comando" description="Comando para iniciar o servidor">
-                  <input
-                    className="field-shell font-mono text-[var(--text-primary)]"
+                  <Input
+                    className="font-mono"
                     value={form.command}
                     onChange={(e) => patch({ command: e.target.value })}
                     placeholder="npx -y @example/mcp-server"
@@ -402,8 +403,7 @@ export function McpServerEditorModal({
                 </FieldShell>
               ) : (
                 <FieldShell label="URL" description="Endpoint HTTP/SSE do servidor">
-                  <input
-                    className="field-shell text-[var(--text-primary)]"
+                  <Input
                     value={form.url}
                     onChange={(e) => patch({ url: e.target.value })}
                     placeholder="https://mcp.example.com/sse"
@@ -432,8 +432,7 @@ export function McpServerEditorModal({
               </FieldShell>
 
               <FieldShell label="URL de documentacao" description="Opcional">
-                <input
-                  className="field-shell text-[var(--text-primary)]"
+                <Input
                   value={form.documentation_url}
                   onChange={(e) => patch({ documentation_url: e.target.value })}
                   placeholder="https://docs.example.com"

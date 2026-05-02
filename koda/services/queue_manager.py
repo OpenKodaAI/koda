@@ -55,6 +55,9 @@ from koda.config import (
     QUEUE_MAX_RECOVERY_ATTEMPTS,
     RUNTIME_ENVIRONMENTS_ENABLED,
     RUNTIME_HEARTBEAT_INTERVAL_SECONDS,
+    TASK_LEASE_DURATION_SECONDS,
+    TASK_LEASE_HEARTBEAT_SECONDS,
+    TASK_LEASE_JANITOR_INTERVAL_SECONDS,
     TASK_MAX_RETRY_ATTEMPTS,
     TASK_RETRY_BASE_DELAY,
     TASK_RETRY_MAX_DELAY,
@@ -78,17 +81,22 @@ from koda.services.prompt_budget import PromptBudgetPlanner, PromptSegment
 from koda.services.provider_runtime import TurnMode, infer_turn_mode
 from koda.services.response_markup import build_response_markup
 from koda.state.history_store import (
+    acquire_task_lease,
     create_task,
     delete_provider_session_mapping,
     dlq_insert,
     dlq_mark_retried,
+    extend_task_lease,
     get_provider_session_mapping,
     list_pending_tasks_for_recovery,
     log_query,
+    reap_expired_task_leases,
+    release_task_lease,
     save_provider_session_mapping,
     save_session,
     save_user_cost,
     update_task_status,
+    update_task_with_lease,
 )
 from koda.state.knowledge_governance_store import get_execution_reliability_stats, list_approved_runbooks
 from koda.telegram_types import BotContext
@@ -1822,6 +1830,96 @@ async def _runtime_heartbeat_loop(task_id: int, env_id: int | None, phase_getter
     while True:
         await asyncio.sleep(RUNTIME_HEARTBEAT_INTERVAL_SECONDS)
         await controller.heartbeat(task_id=task_id, env_id=env_id, phase=phase_getter())
+
+
+# Per-process worker identity used as the ``lease_owner`` on every task
+# this process claims. Generated once at import so heartbeat renewals and
+# the final terminal UPDATE all carry the same owner; the janitor's reaper
+# can then unambiguously identify orphaned rows by comparing against this
+# identity (or, more importantly, by spotting an expired lease whose owner
+# is no longer renewing).
+_WORKER_ID = f"worker_{os.getpid()}_{uuid.uuid4().hex[:12]}"
+
+
+async def _task_lease_renewal_loop(task_id: int, owner: str, cancel: asyncio.Event) -> None:
+    """Extend the per-task lease while the worker is processing it.
+
+    Returns cleanly when ``cancel`` is set (worker reached a terminal state
+    and is finalizing). On extension failure — meaning the row's
+    ``lease_owner`` no longer matches us, i.e. the janitor reaped the task
+    or another worker stole the row — the loop sets ``cancel`` to let the
+    worker observe the loss at its next checkpoint. Any subsequent
+    :func:`update_task_with_lease` call from the worker will return False,
+    so the worker cannot resurrect a row the janitor already requeued.
+    """
+    interval = max(0.001, float(TASK_LEASE_HEARTBEAT_SECONDS))
+    while not cancel.is_set():
+        try:
+            await asyncio.wait_for(cancel.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            pass
+        try:
+            renewed = await asyncio.to_thread(extend_task_lease, task_id, owner, TASK_LEASE_DURATION_SECONDS)
+        except Exception:
+            log.exception("task_lease_renewal_error", task_id=task_id, owner=owner)
+            continue
+        if not renewed:
+            log.error(
+                "task_lease_lost",
+                task_id=task_id,
+                owner=owner,
+                detail="extend returned 0 rows — janitor reaped or another worker stole this task",
+            )
+            cancel.set()
+            return
+
+
+async def _stale_task_lease_janitor() -> None:
+    """Background sweep that reaps tasks whose lease has expired.
+
+    Each cycle issues two atomic ``UPDATE … RETURNING`` queries — one for
+    rows still inside the retry budget (requeued, ``attempt += 1``) and
+    one for exhausted rows (terminal ``failed`` with explicit error). The
+    Postgres row-level lock makes this safe under any number of concurrent
+    workers and parallel janitor instances; the worker's renewal loop
+    competes for the same row and either wins (extending the lease before
+    the janitor sees it as expired) or loses (lease expired → worker's
+    next ``update_task_with_lease`` returns False and the worker bails).
+    """
+    interval = max(0.001, float(TASK_LEASE_JANITOR_INTERVAL_SECONDS))
+    log.info("task_lease_janitor_started", interval_seconds=interval)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            reaped = await asyncio.to_thread(reap_expired_task_leases)
+            if not reaped:
+                continue
+            for entry in reaped:
+                outcome = entry.get("outcome", "unknown")
+                log.warning(
+                    "task_lease_reaped",
+                    task_id=entry.get("id"),
+                    user_id=entry.get("user_id"),
+                    chat_id=entry.get("chat_id"),
+                    attempt=entry.get("attempt"),
+                    max_attempts=entry.get("max_attempts"),
+                    outcome=outcome,
+                )
+                from koda.services import audit as _audit
+
+                _audit.emit_task_lifecycle(
+                    "task.lease_reaped",
+                    user_id=int(entry.get("user_id") or 0),
+                    task_id=int(entry.get("id") or 0),
+                    outcome=outcome,
+                    attempt=int(entry.get("attempt") or 0),
+                )
+        except asyncio.CancelledError:
+            log.info("task_lease_janitor_stopped")
+            raise
+        except Exception:
+            log.exception("task_lease_janitor_cycle_failed")
 
 
 async def _prepare_query_context(
@@ -4406,6 +4504,24 @@ async def _post_process(
         if ctx and getattr(ctx, "execution_episode_id", None) is not None:
             context.user_data["last_execution_episode_id"] = ctx.execution_episode_id
 
+        # Phase A.1 — record billed LLM spend with the workspace
+        # policy engine so the monthly cap + warning thresholds reflect
+        # real-time consumption. Permissive on failure (spend-ledger
+        # drift is preferable to losing a generated response).
+        if cost > 0:
+            from koda.config import AGENT_ID
+            from koda.internal_rpc.policy_engine import record_spend_safe
+            from koda.services.policy_engine_runtime import get_policy_engine_client
+
+            policy_client = await get_policy_engine_client()
+            await record_spend_safe(
+                policy_client,
+                agent_id=str(AGENT_ID or "default"),
+                cost_usd=float(cost),
+                provider=str(run_result.provider or ""),
+                model=str(log_model or ""),
+            )
+
     # Extract and store memories (fire-and-forget)
     if not run_result.error and not dry_run and final_status == "completed":
         try:
@@ -4717,6 +4833,8 @@ async def _execute_single_task(
     runtime = get_runtime_controller()
     heartbeat_task: asyncio.Task[None] | None = None
     runtime_capacity: contextlib.AsyncExitStack | None = None
+    lease_cancel: asyncio.Event | None = None
+    lease_loop: asyncio.Task[None] | None = None
 
     audit.emit_task_lifecycle("task.assigned", user_id=user_id, task_id=task_id)
     execution_timeline.append(
@@ -4809,12 +4927,34 @@ async def _execute_single_task(
                             )
                 except Exception:
                     log.debug("runtime_environments_setup_skipped", task_id=task_id)
+            # Atomic lease acquisition. If another worker (or the janitor)
+            # already holds a fresh lease on this row we abort silently —
+            # the row is being processed elsewhere and double-execution is
+            # not safe. The renewal loop then keeps the lease alive at
+            # ``TASK_LEASE_HEARTBEAT_SECONDS`` cadence; on lease loss the
+            # loop sets ``lease_cancel`` and every subsequent
+            # ``update_task_with_lease`` call rejects, so the worker can
+            # bail without resurrecting a row the janitor already requeued.
+            try:
+                lease_acquired = await asyncio.to_thread(
+                    acquire_task_lease, task_id, _WORKER_ID, TASK_LEASE_DURATION_SECONDS
+                )
+            except Exception:
+                log.exception("task_lease_acquire_error", task_id=task_id, worker=_WORKER_ID)
+                lease_acquired = False
+            if not lease_acquired:
+                log.warning(
+                    "task_lease_acquire_skipped",
+                    task_id=task_id,
+                    worker=_WORKER_ID,
+                    detail="another worker holds a fresh lease or task is already terminal",
+                )
+                audit.emit_task_lifecycle("task.lease_skipped", user_id=user_id, task_id=task_id)
+                return
             task_info.status = "running"
             task_info.started_at = time.time()
-            try:
-                update_task_status(task_id, "running", started_at=datetime.now().isoformat())
-            except Exception:
-                log.debug("task_status_update_skipped", task_id=task_id)
+            lease_cancel = asyncio.Event()
+            lease_loop = asyncio.create_task(_task_lease_renewal_loop(task_id, _WORKER_ID, lease_cancel))
             if RUNTIME_ENVIRONMENTS_ENABLED:
                 with contextlib.suppress(Exception):
                     await runtime.mark_phase(
@@ -4844,7 +4984,13 @@ async def _execute_single_task(
                 task_info.status = "failed"
                 task_info.error_message = str(e)
                 task_info.completed_at = time.time()
-                update_task_status(task_id, "failed", error_message=str(e), completed_at=datetime.now().isoformat())
+                update_task_with_lease(
+                    task_id,
+                    _WORKER_ID,
+                    "failed",
+                    error_message=str(e),
+                    completed_at=datetime.now().isoformat(),
+                )
                 if item.update and item.update.message:
                     await item.update.message.reply_text(str(e))
                 else:
@@ -4940,8 +5086,9 @@ async def _execute_single_task(
             ctx.runtime_env_id = task_info.runtime_env_id
             ctx.runtime_classification = task_info.runtime_classification or "light"
             ctx.runtime_environment_kind = task_info.runtime_environment_kind or "dev_worktree"
-            update_task_status(
+            update_task_with_lease(
                 task_id,
+                _WORKER_ID,
                 "running",
                 provider=ctx.provider,
                 model=ctx.model,
@@ -5153,8 +5300,9 @@ async def _execute_single_task(
 
                     task_info.status = final_status
                     task_info.completed_at = time.time()
-                    update_task_status(
+                    update_task_with_lease(
                         task_id,
+                        _WORKER_ID,
                         final_status,
                         cost_usd=run_result.cost_usd,
                         completed_at=datetime.now().isoformat(),
@@ -5385,8 +5533,9 @@ async def _execute_single_task(
                                 severity="warning",
                                 payload={"error": last_error, "attempt": attempt, "delay_seconds": delay},
                             )
-                        update_task_status(
+                        update_task_with_lease(
                             task_id,
+                            _WORKER_ID,
                             "retrying",
                             attempt=attempt,
                             error_message=last_error,
@@ -5430,8 +5579,9 @@ async def _execute_single_task(
             task_info.status = "failed"
             task_info.error_message = last_error
             task_info.completed_at = time.time()
-            update_task_status(
+            update_task_with_lease(
                 task_id,
+                _WORKER_ID,
                 "failed",
                 error_message=last_error,
                 completed_at=datetime.now().isoformat(),
@@ -5587,7 +5737,13 @@ async def _execute_single_task(
         task_info.status = "failed"
         task_info.error_message = error_str
         task_info.completed_at = time.time()
-        update_task_status(task_id, "failed", error_message=error_str, completed_at=datetime.now().isoformat())
+        update_task_with_lease(
+            task_id,
+            _WORKER_ID,
+            "failed",
+            error_message=error_str,
+            completed_at=datetime.now().isoformat(),
+        )
         if item:
             await _finalize_scheduled_run(
                 item=item,
@@ -5605,8 +5761,9 @@ async def _execute_single_task(
         cancellation_reason = task_info.error_message or "Cancelled by scheduler control."
         task_info.status = "cancelled"
         task_info.completed_at = time.time()
-        update_task_status(
+        update_task_with_lease(
             task_id,
+            _WORKER_ID,
             "cancelled",
             error_message=cancellation_reason,
             completed_at=datetime.now().isoformat(),
@@ -5637,7 +5794,13 @@ async def _execute_single_task(
         task_info.error_message = error_str
         task_info.completed_at = time.time()
         try:
-            update_task_status(task_id, "failed", error_message=error_str, completed_at=datetime.now().isoformat())
+            update_task_with_lease(
+                task_id,
+                _WORKER_ID,
+                "failed",
+                error_message=error_str,
+                completed_at=datetime.now().isoformat(),
+            )
         except Exception:
             log.debug("task_status_update_in_error_handler_failed", task_id=task_id)
         if RUNTIME_ENVIRONMENTS_ENABLED:
@@ -5735,6 +5898,20 @@ async def _execute_single_task(
     finally:
         if heartbeat_task:
             heartbeat_task.cancel()
+        # Stop the lease renewal loop and best-effort release the lease.
+        # Terminal-state transitions (failed/completed/cancelled) already
+        # cleared the lease atomically via update_task_with_lease, so the
+        # release call below is a no-op for the happy path. It only matters
+        # when the worker exits via a code path that did NOT hit a terminal
+        # update_task_with_lease — in that case we clear the lease so the
+        # janitor classifies the row consistently on its next sweep.
+        if lease_cancel is not None:
+            lease_cancel.set()
+        if lease_loop is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(lease_loop, timeout=2)
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(release_task_lease, task_id, _WORKER_ID)
         if runtime_capacity is not None:
             await runtime_capacity.aclose()
         metrics.ACTIVE_TASKS.labels(agent_id=_agent_id_label).dec()
@@ -6146,6 +6323,30 @@ async def enqueue(
     if pending_count >= MAX_QUEUED_TASKS_PER_USER:
         await update.message.reply_text(_queue_capacity_message(pending_count))
         return None
+
+    # Phase A.1 — workspace policy gate. When ``POLICY_ENGINE_ENABLED``
+    # is False the helper short-circuits to allow with zero overhead;
+    # when enabled it consults the engine for rate / concurrency /
+    # spend-cap decisions. Failures fall through permissively (the
+    # bot-gateway's at-least-once delivery means we never silently
+    # drop a user message, only skip the policy check during outage).
+    from koda.config import AGENT_ID
+    from koda.internal_rpc.policy_engine import check_ingest_or_allow
+    from koda.services.policy_engine_runtime import get_policy_engine_client
+
+    policy_client = await get_policy_engine_client()
+    decision = await check_ingest_or_allow(
+        policy_client,
+        agent_id=str(AGENT_ID or "default"),
+        message_size_bytes=len(query_text or ""),
+    )
+    if not decision.allowed:
+        retry_hint = ""
+        if decision.retry_after_ms > 0:
+            retry_hint = f" (try again in ~{decision.retry_after_ms / 1000:.1f}s)"
+        await update.message.reply_text(f"Workspace policy blocked this message: {decision.deny_reason}{retry_hint}")
+        return None
+
     provider = context.user_data.get("provider")
     provider_sessions = context.user_data.get("provider_sessions", {})
     task_id = create_task(

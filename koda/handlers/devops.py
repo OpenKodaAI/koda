@@ -8,13 +8,11 @@ from telegram.ext import ContextTypes
 
 from koda.config import (
     ALLOWED_DOCKER_CMDS,
-    BLOCKED_DOCKER_PATTERN,
-    BLOCKED_GH_PATTERN,
-    BLOCKED_GLAB_PATTERN,
     DOCKER_ENABLED,
     GH_ENABLED,
     GLAB_ENABLED,
 )
+from koda.services.blocked_patterns import is_blocked_docker, is_blocked_gh, is_blocked_glab
 from koda.services.cli_runner import run_cli_command
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
@@ -54,7 +52,7 @@ async def cmd_gh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     work_dir = context.user_data["work_dir"]
     try:
         with _core_cli_env_context("gh") as env:
-            result = await run_cli_command("gh", args, work_dir, blocked_pattern=BLOCKED_GH_PATTERN, env=env)
+            result = await run_cli_command("gh", args, work_dir, is_blocked=is_blocked_gh, env=env)
     except RuntimeError as exc:
         await update.message.reply_text(str(exc))
         return
@@ -77,7 +75,7 @@ async def cmd_glab(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     work_dir = context.user_data["work_dir"]
     try:
         with _core_cli_env_context("glab") as env:
-            result = await run_cli_command("glab", args, work_dir, blocked_pattern=BLOCKED_GLAB_PATTERN, env=env)
+            result = await run_cli_command("glab", args, work_dir, is_blocked=is_blocked_glab, env=env)
     except RuntimeError as exc:
         await update.message.reply_text(str(exc))
         return
@@ -102,7 +100,7 @@ async def cmd_docker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "docker",
         args,
         work_dir,
-        blocked_pattern=BLOCKED_DOCKER_PATTERN,
+        is_blocked=is_blocked_docker,
         allowed_cmds=ALLOWED_DOCKER_CMDS,
     )
     await send_long_message(update, f"```\n{result}\n```")

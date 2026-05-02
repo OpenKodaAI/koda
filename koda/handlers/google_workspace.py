@@ -9,11 +9,11 @@ from telegram.ext import ContextTypes
 
 from koda.agent_contract import canonicalize_gws_command_args
 from koda.config import (
-    BLOCKED_GWS_PATTERN,
     GWS_CREDENTIALS_FILE,
     GWS_ENABLED,
     GWS_TIMEOUT,
 )
+from koda.services.blocked_patterns import is_blocked_gws
 from koda.services.cli_runner import run_cli_command
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
@@ -105,7 +105,7 @@ async def _run_gws(
                 "gws",
                 command_args,
                 work_dir,
-                blocked_pattern=BLOCKED_GWS_PATTERN,
+                is_blocked=is_blocked_gws,
                 timeout=GWS_TIMEOUT,
                 env=env,
             )
