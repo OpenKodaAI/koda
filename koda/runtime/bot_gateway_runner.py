@@ -1,4 +1,4 @@
-"""Phase 1B worker runner: consume Updates from koda-bot-gateway.
+"""Worker runner: consume Updates from koda-bot-gateway.
 
 When ``BOT_GATEWAY_ENABLED=true`` the worker delegates Telegram polling
 to the central Rust gateway. Each worker still constructs the same PTB

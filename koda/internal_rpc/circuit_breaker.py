@@ -1,12 +1,10 @@
 """Circuit breaker for internal gRPC clients.
 
-Direct fix for P0-3 of the production roadmap: a single sidecar that
-hangs on a slow gRPC call must not freeze every worker on the host.
-Today's implementation has no breaker — every internal_rpc call goes
-through and waits for the full ``INTERNAL_RPC_DEADLINE_MS`` (default
-1500ms) before failing, even when the upstream has been broken for
-minutes. At 50 workers × 5 sidecars × N calls per turn, that compounds
-into the deadlocks observed during pause/activate debugging.
+A single sidecar that hangs on a slow gRPC call must not freeze every
+worker on the host. Without a breaker, every internal_rpc call waits
+for the full ``INTERNAL_RPC_DEADLINE_MS`` (default 1500ms) before
+failing, even when the upstream has been broken for minutes. At 50
+workers × 5 sidecars × N calls per turn, that compounds into deadlocks.
 
 This is a pragmatic, language-local breaker (not a Rust proxy):
 - ``CircuitBreaker`` wraps any awaitable call site.
@@ -14,10 +12,9 @@ This is a pragmatic, language-local breaker (not a Rust proxy):
 - ``open`` skips the call entirely and raises
   :class:`CircuitOpenError` immediately so callers fall back to their
   degrade path within microseconds instead of waiting on a hung RPC.
-- The breaker is process-local (one per worker × upstream). For
-  cluster-wide breaker coordination, Phase 1D-v2 / Phase 2 may move
-  the state into a shared store; the API is shaped to allow that
-  without callers changing.
+- The breaker is process-local (one per worker × upstream). The API is
+  shaped to later move the state into a shared store for cluster-wide
+  coordination without changing call sites.
 
 Usage::
 

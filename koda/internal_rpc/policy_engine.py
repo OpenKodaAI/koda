@@ -5,8 +5,8 @@ gateway on the message-ingest hot path and after every billed LLM
 call. This module exposes a thin async wrapper so callers don't have
 to know about the protobuf shapes; failures fall through to a
 permissive default (allow with no warning) so a transient gateway
-outage cannot block all user traffic — Phase 1D's circuit breaker
-turns this into a structured policy when it lands.
+outage cannot block all user traffic. The shared circuit breaker
+upgrades this fall-through into a structured policy.
 """
 
 from __future__ import annotations

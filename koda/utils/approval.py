@@ -855,12 +855,9 @@ def _blocked_pattern_for_command(command_name: str) -> Any | None:
     """Return a guard exposing ``is_blocked(text)`` for the given
     command, or ``None`` when the command has no blocked pattern.
 
-    Phase A.6 — guards are sourced from the central
+    Guards are sourced from the central
     :mod:`koda.services.blocked_patterns` registry so the approval
-    flow uses the same DFA as the handlers and the dispatcher. The
-    legacy "import from handler module" path was removed because
-    handlers now import the helper functions and no longer expose the
-    raw ``BLOCKED_*_PATTERN`` attribute.
+    flow uses the same DFA as the handlers and the dispatcher.
     """
     normalized_command = str(command_name or "").strip().lower()
     from koda.services import blocked_patterns

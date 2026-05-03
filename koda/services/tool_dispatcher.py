@@ -510,9 +510,9 @@ async def execute_tool(
 ) -> AgentToolResult:
     """Execute a single agent tool call with timeout and security checks.
 
-    Phase 2D — wraps the body in an OTel span so collectors see the
-    full hierarchy (queue_manager → tool_dispatcher → internal_rpc →
-    sidecar). ``start_span`` is a no-op when tracing is disabled
+    Wraps the body in an OTel span so collectors see the full hierarchy
+    (queue_manager → tool_dispatcher → internal_rpc → sidecar).
+    ``start_span`` is a no-op when tracing is disabled
     (``OTEL_EXPORTER_OTLP_ENDPOINT`` unset), so the overhead on quiet
     hosts is a single attribute-dict construction per call.
     """

@@ -832,7 +832,7 @@ def main() -> None:
         bot_gateway_enabled=BOT_GATEWAY_ENABLED,
     )
     if BOT_GATEWAY_ENABLED:
-        # Phase 1B path: consume the per-agent stream from
+        # Bot-gateway path: consume the per-agent stream from
         # koda-bot-gateway. The gateway owns Telegram polling for every
         # bot centrally; the worker just dispatches received Updates
         # through PTB and acknowledges after handlers complete (at-

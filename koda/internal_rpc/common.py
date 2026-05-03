@@ -15,14 +15,14 @@ GENERATED_PROTO_ROOT = Path(__file__).resolve().parent / "generated"
 def resolve_grpc_target(raw_target: str) -> tuple[str, str]:
     """Normalize a target string into a (target, transport_tag) tuple.
 
-    Phase 2B accepts a comma-separated list of host:port endpoints,
-    e.g. ``"sidecar-a:50063,sidecar-b:50063"``. Multi-target strings
-    are translated to gRPC's ``ipv4:`` resolver scheme so the channel
+    Accepts a comma-separated list of host:port endpoints, e.g.
+    ``"sidecar-a:50063,sidecar-b:50063"``. Multi-target strings are
+    translated to gRPC's ``ipv4:`` resolver scheme so the channel
     natively load-balances across the configured pool — workers stop
     being pinned to one sidecar replica and a single hung instance can
-    no longer freeze every caller (P2-2 of the production roadmap).
-    UDS targets stay untouched: a UDS path inherently points at one
-    process so the pool concept does not apply there.
+    no longer freeze every caller. UDS targets stay untouched: a UDS
+    path inherently points at one process so the pool concept does not
+    apply there.
     """
     target = raw_target.strip()
     if not target.startswith(("unix://", "/")) and "," in target:
@@ -137,7 +137,7 @@ def ensure_generated_proto_path() -> Path:
 
 
 def make_internal_breaker(name: str) -> Any:
-    """Phase A.2 — process-local circuit breaker for an internal RPC.
+    """Process-local circuit breaker for an internal RPC.
 
     Each gRPC client constructs one breaker keyed by the upstream
     service name (``"runtime_kernel"``, ``"memory_engine"`` etc.).

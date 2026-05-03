@@ -45,12 +45,11 @@ async def run_cli_command_detailed(
 ) -> CliCommandResult:
     """Run a CLI command and return structured execution details.
 
-    Block-pattern check accepts either an ``is_blocked`` callable (the
-    Phase A.6 wire-up — caller passes a helper from
-    :mod:`koda.services.blocked_patterns`) or a legacy ``blocked_pattern``
-    ``re.Pattern`` for backward compatibility. The callable form is
-    preferred because it routes through the native DFA from
-    ``koda_command_guard`` when available.
+    Block-pattern check accepts either an ``is_blocked`` callable
+    (caller passes a helper from :mod:`koda.services.blocked_patterns`)
+    or a legacy ``blocked_pattern`` ``re.Pattern`` for backward
+    compatibility. The callable form is preferred because it routes
+    through the native DFA from ``koda_command_guard`` when available.
     """
     if not args.strip():
         return CliCommandResult(binary=binary, args=args, text=f"Usage: /{binary} <args>", blocked=True)

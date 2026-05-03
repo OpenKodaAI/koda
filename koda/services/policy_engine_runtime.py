@@ -1,10 +1,10 @@
 """Process-local lazy singleton of :class:`PolicyEngineClient`.
 
-Phase A.1 wires the policy-engine into the queue_manager hot path
-(ingest gate + post-LLM spend ledger). Each worker holds at most one
-gRPC channel to the engine; the channel is created on first use,
-reused across all subsequent calls in the same process, and closed
-when the process exits.
+Wires the policy-engine into the queue_manager hot path (ingest gate +
+post-LLM spend ledger). Each worker holds at most one gRPC channel to
+the engine; the channel is created on first use, reused across all
+subsequent calls in the same process, and closed when the process
+exits.
 
 When ``config.POLICY_ENGINE_ENABLED`` is ``False`` the helper returns
 ``None`` and the queue_manager wrappers

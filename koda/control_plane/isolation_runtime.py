@@ -1,11 +1,9 @@
-"""Phase A.3 — wire cgroup v2 limits into the supervisor's spawn path.
+"""Wire cgroup v2 limits into the supervisor's spawn path.
 
-Phase 1E shipped the Linux body of ``WorkspaceLimits`` /
-``apply_workspace_limits`` / ``place_pid`` in the Rust runtime-kernel
-crate. The supervisor never invoked them, so workers continued to run
-without OS-level isolation. This module is the Python wrapper that
-the supervisor calls before and after ``asyncio.create_subprocess_exec``
-to:
+The Linux body of ``WorkspaceLimits`` / ``apply_workspace_limits`` /
+``place_pid`` lives in the Rust runtime-kernel crate. This module is
+the Python wrapper that the supervisor calls before and after
+``asyncio.create_subprocess_exec`` to:
 
 1. Build a per-workspace ``WorkspaceLimits`` from operator-tunable
    defaults (``KODA_AGENT_DEFAULT_*`` env vars).

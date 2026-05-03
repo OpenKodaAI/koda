@@ -1,14 +1,14 @@
-"""Per-agent Telegram polling offset (P1-2).
+"""Per-agent Telegram polling offset.
 
-Phase 0 of the production roadmap replaced ``drop_pending_updates=True``
-with the Telegram server-side offset. To make crashes diagnosable and
-to lay groundwork for the bot-pool, the supervisor records the
-last seen ``update_id`` per agent in ``cp_telegram_offsets``.
+Replaces ``drop_pending_updates=True`` with the Telegram server-side
+offset. To make crashes diagnosable and to support the centralized
+bot-gateway, the supervisor records the last seen ``update_id`` per
+agent in ``cp_telegram_offsets``.
 
 The DB row is observability + recovery aid, not a hard ack: Telegram is
-still the source of truth for what the bot has consumed. When Phase 1
-introduces a centralized bot gateway that polls all bots from a single
-process, this table becomes the offset map that drives its dispatcher.
+still the source of truth for what the bot has consumed. The
+centralized bot gateway uses this table as the offset map that drives
+its dispatcher.
 """
 
 from __future__ import annotations

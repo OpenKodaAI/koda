@@ -5,11 +5,10 @@ The runtime has multiple sites that historically called
 exposed by ``koda/config.py``. Two problems with that:
 
 1. Python ``re.search`` carries catastrophic-backtracking risk on
-   user-controlled inputs. The Phase 1A ``koda-command-guard`` PyO3
-   crate compiles each pattern to a linear-time DFA via the Rust
-   ``regex`` crate; we want every block-pattern site to go through
-   that DFA so a malicious or malformed shell argument cannot blow up
-   matching.
+   user-controlled inputs. The ``koda-command-guard`` PyO3 crate
+   compiles each pattern to a linear-time DFA via the Rust ``regex``
+   crate; we want every block-pattern site to go through that DFA so
+   a malicious or malformed shell argument cannot blow up matching.
 2. Repeated ``re.compile`` lookups are paid per call. Compiling each
    pattern *once* at module load and reusing the resulting guard is
    the right shape — but doing so inline at every call site (as

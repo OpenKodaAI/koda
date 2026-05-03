@@ -637,7 +637,7 @@ class ControlPlaneSupervisor:
         return web.json_response({"applied": applied, "draining": False})
 
     async def _heartbeat_loop(self) -> None:
-        """Phase A.5 — independent heartbeat task.
+        """Independent heartbeat task.
 
         Refreshes ``cp_agent_assignments.heartbeat_at`` and the
         ``cp_supervisor_runtimes`` row at a tighter cadence than
@@ -929,12 +929,10 @@ class ControlPlaneSupervisor:
     def _workspace_id_for_agent(self, agent_id: str) -> str:
         """Resolve the workspace_id used for cgroup isolation.
 
-        Today the manager exposes ``workspace_id`` on the agent row
-        (Phase 0/1 added the column even though enforcement is
-        deferred to Phase 3). When the column is unset / NULL, fall
-        back to ``"default"`` so the cgroup directory still exists
-        and an operator can attach limits at runtime via
-        ``KODA_AGENT_DEFAULT_*`` env vars.
+        The manager exposes ``workspace_id`` on the agent row. When
+        the column is unset / NULL, fall back to ``"default"`` so the
+        cgroup directory still exists and an operator can attach
+        limits at runtime via ``KODA_AGENT_DEFAULT_*`` env vars.
         """
         try:
             row = self._manager.get_agent(agent_id) if hasattr(self._manager, "get_agent") else None

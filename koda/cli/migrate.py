@@ -50,10 +50,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--check",
         action="store_true",
         help=(
-            "Phase 2C CI gate: connect to the DSN, list pending migration "
-            "versions and exit non-zero if any exist. Does NOT apply them. "
-            "Use this in release pipelines to refuse a deploy whose code "
-            "expects a schema that has not been rolled out yet."
+            "CI gate: connect to the DSN, list pending migration versions "
+            "and exit non-zero if any exist. Does NOT apply them. Use this "
+            "in release pipelines to refuse a deploy whose code expects a "
+            "schema that has not been rolled out yet."
         ),
     )
     return parser

@@ -1,9 +1,9 @@
-"""Phase 2A — supervisor cluster: leader-elected agent placement.
+"""Supervisor cluster: leader-elected agent placement.
 
-Today's supervisor (``koda/control_plane/supervisor.py``) is host-local.
+A bare supervisor (``koda/control_plane/supervisor.py``) is host-local.
 A second instance on a sibling host would spawn a duplicate worker for
 every active agent — a hard scaling block once the cluster grows past
-one supervisor (P2-1).
+one supervisor.
 
 The cluster module replaces the implicit "I own everything" with an
 explicit claim recorded in ``cp_agent_assignments`` (migration 024):
@@ -234,7 +234,7 @@ class ClusterClient:
         supervisor row. Returns the number of assignment rows touched.
 
         Draining supervisors release instead of refreshing — the
-        Phase 2E blue/green protocol relies on this to hand work over
+        blue/green deployment protocol relies on this to hand work over
         to the new version without losing in-flight messages.
         """
         if not self.config.enabled:

@@ -1,12 +1,10 @@
 """Async gRPC client for koda-bot-gateway.
 
-The Phase 1B service consolidates Telegram polling into a single Rust
+The bot-gateway consolidates Telegram polling into a single Rust
 process. Workers consume their per-agent stream via this client when
 ``BOT_GATEWAY_ENABLED=true`` and fall back to the legacy in-process
-polling when it is not. See
-``docs/architecture/production-deployment-roadmap.md`` (P2-6) for the
-broader roadmap and ``proto/bot_gateway/v1/bot_gateway.proto`` for the
-wire contract.
+polling when it is not. See ``proto/bot_gateway/v1/bot_gateway.proto``
+for the wire contract.
 """
 
 from __future__ import annotations

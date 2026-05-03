@@ -137,7 +137,7 @@ POLICY_ENGINE_ENABLED: bool = _bool_env("POLICY_ENGINE_ENABLED", False)
 POLICY_ENGINE_GRPC_TARGET: str = (_env("POLICY_ENGINE_GRPC_TARGET", "127.0.0.1:50067") or "127.0.0.1:50067").strip()
 # Workspace identifier the worker reports to the policy engine. In
 # single-tenant mode workers default to ``ws_default``; multi-tenant
-# Phase 3 will plumb this through control-plane.
+# deployments plumb this through control-plane.
 POLICY_ENGINE_WORKSPACE_ID: str = (_env("POLICY_ENGINE_WORKSPACE_ID", "ws_default") or "ws_default").strip()
 DEFAULT_WORK_DIR: str = _env("DEFAULT_WORK_DIR", str(Path.home()))
 PROJECT_DIRS: list[str] = [d.strip() for d in _env("PROJECT_DIRS", "").split(",") if d.strip()]

@@ -8,11 +8,10 @@ the Rust ``koda_command_guard`` PyO3 module (RE2-style DFA, linear
 time, no GIL contention) and fall back to the original Python regex if
 the native wheel is not installed in this environment.
 
-Goal: Phase 1A of ``docs/architecture/production-deployment-roadmap.md``
-calls for a regex DFA on the security-critical hot path. The fallback
+A regex DFA is required on the security-critical hot path. The fallback
 keeps dev environments without the native wheel working unchanged; the
 production deploy installs the wheel via maturin and gets the speedup
-+ guarantee against catastrophic backtracking automatically.
+plus a guarantee against catastrophic backtracking automatically.
 """
 
 from __future__ import annotations
