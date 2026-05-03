@@ -12,9 +12,7 @@ from koda.skills._registry import SkillRegistry, _parse_skill_file
 SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "koda" / "skills"
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _write(path: Path, text: str) -> Path:
@@ -63,9 +61,7 @@ def _make_frontmatter_skill(tmp_path: Path, filename: str = "testing.md") -> Pat
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 class TestLoadsExistingFiles:

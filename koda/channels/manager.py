@@ -17,9 +17,7 @@ from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 
-# ---------------------------------------------------------------------------
 # Adapter registry — maps channel_type keys to adapter classes
-# ---------------------------------------------------------------------------
 
 _ADAPTER_REGISTRY: dict[str, type[ChannelAdapter]] = {}
 
@@ -57,9 +55,7 @@ def _safe_register(channel_type: str, module_path: str, class_name: str) -> None
         log.debug("channel_adapter.%s: not available (missing dependency or import error)", channel_type)
 
 
-# ---------------------------------------------------------------------------
 # Secret-key mapping — which secrets indicate a channel is configured
-# ---------------------------------------------------------------------------
 
 CHANNEL_SECRET_KEYS: dict[str, list[str]] = {
     "telegram": ["AGENT_TOKEN"],
@@ -83,9 +79,7 @@ def detect_configured_channels(secrets: dict[str, str]) -> list[str]:
     return configured
 
 
-# ---------------------------------------------------------------------------
 # ChannelManager
-# ---------------------------------------------------------------------------
 
 
 class ChannelManager:

@@ -113,9 +113,7 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int) -> None:
         await conn.close()
 
 
-# ---------------------------------------------------------------------------
 # upsert_terminal / list_terminals
-# ---------------------------------------------------------------------------
 
 
 async def test_upsert_terminal_creates_row_with_returning_id(runtime_db: str) -> None:
@@ -179,9 +177,7 @@ async def test_update_terminal_persists_offsets(runtime_db: str) -> None:
     assert rows[0]["last_offset"] == 1024
 
 
-# ---------------------------------------------------------------------------
 # upsert_process / update_process / list_processes
-# ---------------------------------------------------------------------------
 
 
 async def test_upsert_process_creates_row(runtime_db: str) -> None:
@@ -210,12 +206,8 @@ async def test_upsert_process_idempotent_for_same_pid_role_kind(runtime_db: str)
     Re-calling updates the existing row instead of inserting a duplicate."""
     await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
     store = _build_store("agent_a")
-    first = store.upsert_process(
-        task_id=1, env_id=None, pid=99, pgid=99, role="worker", command="bash"
-    )
-    second = store.upsert_process(
-        task_id=1, env_id=None, pid=99, pgid=99, role="worker", command="bash --new-flag"
-    )
+    first = store.upsert_process(task_id=1, env_id=None, pid=99, pgid=99, role="worker", command="bash")
+    second = store.upsert_process(task_id=1, env_id=None, pid=99, pgid=99, role="worker", command="bash --new-flag")
     assert first == second
     rows = store.list_processes(task_id=1)
     assert len(rows) == 1
@@ -226,9 +218,7 @@ async def test_upsert_process_idempotent_for_same_pid_role_kind(runtime_db: str)
 async def test_update_process_marks_exited(runtime_db: str) -> None:
     await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
     store = _build_store("agent_a")
-    pid_db = store.upsert_process(
-        task_id=1, env_id=None, pid=77, pgid=77, role="worker", command="echo"
-    )
+    pid_db = store.upsert_process(task_id=1, env_id=None, pid=77, pgid=77, role="worker", command="echo")
     store.update_process(pid_db, status="exited", exit_code=0, exited=True)
     rows = store.list_processes(task_id=1)
     assert rows[0]["status"] == "exited"
@@ -268,9 +258,7 @@ async def test_list_processes_isolated_per_agent(runtime_db: str) -> None:
     assert [r["pid"] for r in b_rows] == [20]
 
 
-# ---------------------------------------------------------------------------
 # add_browser_session / update / list
-# ---------------------------------------------------------------------------
 
 
 async def test_add_browser_session_round_trip(runtime_db: str) -> None:
@@ -323,14 +311,26 @@ async def test_list_browser_sessions_isolated_per_agent(runtime_db: str) -> None
 
     store_a = _build_store("agent_a")
     store_a.add_browser_session(
-        task_id=1, env_id=None, scope_id=1, transport="vnc",
-        status="active", display_id=None, vnc_port=None, novnc_port=None,
+        task_id=1,
+        env_id=None,
+        scope_id=1,
+        transport="vnc",
+        status="active",
+        display_id=None,
+        vnc_port=None,
+        novnc_port=None,
     )
 
     store_b = _build_store("agent_b")
     store_b.add_browser_session(
-        task_id=2, env_id=None, scope_id=2, transport="cdp",
-        status="active", display_id=None, vnc_port=None, novnc_port=None,
+        task_id=2,
+        env_id=None,
+        scope_id=2,
+        transport="cdp",
+        status="active",
+        display_id=None,
+        vnc_port=None,
+        novnc_port=None,
     )
 
     a_rows = store_a.list_browser_sessions(task_id=1)
@@ -341,9 +341,7 @@ async def test_list_browser_sessions_isolated_per_agent(runtime_db: str) -> None
     assert b_rows[0]["transport"] == "cdp"
 
 
-# ---------------------------------------------------------------------------
 # add_recovery_action — audit trail for recovery sweeps
-# ---------------------------------------------------------------------------
 
 
 async def test_add_recovery_action_persists_with_details(runtime_db: str) -> None:
@@ -363,7 +361,8 @@ async def test_add_recovery_action_persists_with_details(runtime_db: str) -> Non
         rows = await conn.fetch(
             "SELECT action, status, details_json FROM knowledge_v2.runtime_recovery_actions "
             "WHERE agent_id = $1 AND id = $2",
-            "agent_a", aid,
+            "agent_a",
+            aid,
         )
     finally:
         await conn.close()
@@ -395,9 +394,9 @@ async def test_add_recovery_action_with_checkpoint_reference(runtime_db: str) ->
     conn = await asyncpg.connect(runtime_db)
     try:
         row = await conn.fetchrow(
-            "SELECT action, checkpoint_id FROM knowledge_v2.runtime_recovery_actions "
-            "WHERE agent_id = $1 AND id = $2",
-            "agent_a", aid,
+            "SELECT action, checkpoint_id FROM knowledge_v2.runtime_recovery_actions WHERE agent_id = $1 AND id = $2",
+            "agent_a",
+            aid,
         )
     finally:
         await conn.close()

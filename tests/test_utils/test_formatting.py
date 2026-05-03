@@ -10,9 +10,7 @@ from koda.utils.formatting import (
     safe_markdown_to_telegram_html,
 )
 
-# ---------------------------------------------------------------------------
 # Existing MarkdownV2 tests
-# ---------------------------------------------------------------------------
 
 
 class TestEscapeMarkdownV2:
@@ -90,9 +88,7 @@ class TestExtractAndReplaceLargeBlocks:
         assert len(files) == 2
 
 
-# ---------------------------------------------------------------------------
 # GFM → Telegram HTML converter tests
-# ---------------------------------------------------------------------------
 
 
 class TestEscapeHtml:

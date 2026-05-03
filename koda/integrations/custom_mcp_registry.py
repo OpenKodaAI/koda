@@ -32,9 +32,7 @@ from koda.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Allowlists / denylists
-# ---------------------------------------------------------------------------
 
 # Commands that are permitted as the first argv element for a stdio MCP.
 # Reasoning: each is a well-known package runner / interpreter that we'll wrap
@@ -112,9 +110,7 @@ _KEY_FORMAT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
-# ---------------------------------------------------------------------------
 # Payload model
-# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -160,9 +156,7 @@ class ValidationError(ValueError):
     """Raised when a custom server payload fails validation."""
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 
 def normalize_server_key(slug: str) -> str:
@@ -402,9 +396,7 @@ def import_claude_desktop_json(
     return result
 
 
-# ---------------------------------------------------------------------------
 # Internals
-# ---------------------------------------------------------------------------
 
 
 def _payload_from_claude_desktop(name: str, spec: dict[str, Any]) -> CustomServerPayload:

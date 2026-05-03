@@ -45,9 +45,7 @@ def test_strip_for_tts_forbidden_substrings(case: dict[str, Any]) -> None:
     cleaned = strip_for_tts(case["input"])
     for forbidden in case.get("forbidden") or []:
         assert forbidden not in cleaned, (
-            f"\n  case_id: {case['id']}\n"
-            f"  forbidden substring leaked: {forbidden!r}\n"
-            f"  cleaned: {cleaned!r}"
+            f"\n  case_id: {case['id']}\n  forbidden substring leaked: {forbidden!r}\n  cleaned: {cleaned!r}"
         )
 
 
@@ -64,9 +62,7 @@ def test_dataset_has_minimum_diversity() -> None:
     cases = load_sanitization_dataset()
     assert len(cases) >= 50, f"dataset too small: {len(cases)} cases"
     categories = {c.get("category") for c in cases}
-    assert {"covered", "gap", "edge", "acceptance"}.issubset(categories), (
-        f"missing categories; got: {categories}"
-    )
+    assert {"covered", "gap", "edge", "acceptance"}.issubset(categories), f"missing categories; got: {categories}"
 
 
 def test_dataset_ids_unique() -> None:

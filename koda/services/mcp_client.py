@@ -17,9 +17,7 @@ from koda.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Data classes
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +103,7 @@ class McpResourceContent:
     contents: list[dict[str, Any]] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
 # Errors
-# ---------------------------------------------------------------------------
 
 
 class McpError(Exception):
@@ -120,9 +116,7 @@ class McpError(Exception):
         self.data = data
 
 
-# ---------------------------------------------------------------------------
 # Transport protocol
-# ---------------------------------------------------------------------------
 
 
 class McpTransport(Protocol):
@@ -138,9 +132,7 @@ class McpTransport(Protocol):
     def is_alive(self) -> bool: ...
 
 
-# ---------------------------------------------------------------------------
 # Stdio transport
-# ---------------------------------------------------------------------------
 
 
 class StdioTransport:
@@ -283,9 +275,7 @@ class StdioTransport:
         return self._process is not None and self._process.returncode is None
 
 
-# ---------------------------------------------------------------------------
 # HTTP transport
-# ---------------------------------------------------------------------------
 
 
 def _validate_url(url: str) -> None:
@@ -400,9 +390,7 @@ class HttpSseTransport:
         return True  # Stateless; always considered alive.
 
 
-# ---------------------------------------------------------------------------
 # Session
-# ---------------------------------------------------------------------------
 
 
 class McpSession:

@@ -354,9 +354,7 @@ async def test_build_memory_resolution_audits_full_considered_and_discarded_sets
     assert audit_kwargs["total_discarded"] == 48
 
 
-# ---------------------------------------------------------------------------
 # Recall cache tests
-# ---------------------------------------------------------------------------
 
 
 class TestRecallCache:
@@ -450,9 +448,7 @@ class TestRecallCache:
         assert len(_recall_cache) == 0
 
 
-# ---------------------------------------------------------------------------
 # Diversity filter tests
-# ---------------------------------------------------------------------------
 
 
 class TestIsRedundant:

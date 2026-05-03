@@ -36,8 +36,7 @@ class _FakeStore:
 
     def is_port_allocated(self, host: str, port: int) -> bool:
         return any(
-            r["host"] == host and r["port"] == port and r["status"] in {"allocated", "active"}
-            for r in self.rows
+            r["host"] == host and r["port"] == port and r["status"] in {"allocated", "active"} for r in self.rows
         )
 
     def add_port_allocation(
@@ -117,9 +116,7 @@ def free_port() -> int:
         return int(s.getsockname()[1])
 
 
-# ---------------------------------------------------------------------------
 # Allocate happy path
-# ---------------------------------------------------------------------------
 
 
 def test_allocate_uses_first_free_port(free_port: int) -> None:
@@ -211,9 +208,7 @@ def test_allocate_falls_through_store_errors(free_port: int) -> None:
     assert store.add_calls == 3
 
 
-# ---------------------------------------------------------------------------
 # Release path
-# ---------------------------------------------------------------------------
 
 
 def test_release_task_ports_marks_all_active_as_released(free_port: int) -> None:
@@ -275,9 +270,7 @@ def test_release_with_purposes_iterable(free_port: int) -> None:
     assert by_id[c["id"]]["status"] == "allocated"
 
 
-# ---------------------------------------------------------------------------
 # Concurrency: the threading.Lock serializes allocations in the same allocator
-# ---------------------------------------------------------------------------
 
 
 def test_concurrent_allocations_from_same_allocator_serialize(free_port: int) -> None:
@@ -291,9 +284,7 @@ def test_concurrent_allocations_from_same_allocator_serialize(free_port: int) ->
     def one(idx: int) -> None:
         try:
             barrier.wait(timeout=5)
-            out = allocator.allocate(
-                task_id=idx, env_id=idx, purpose="dev", start_port=free_port, window=200
-            )
+            out = allocator.allocate(task_id=idx, env_id=idx, purpose="dev", start_port=free_port, window=200)
             results.append(int(out["port"]))
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)

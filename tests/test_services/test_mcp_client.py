@@ -18,9 +18,7 @@ from koda.services.mcp_client import (
     StdioTransport,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _mock_process() -> MagicMock:
@@ -70,9 +68,7 @@ def _wire_stdout_responses(proc: MagicMock, responses: list[dict]) -> None:
     proc.stdout.readline = AsyncMock(side_effect=_readline)
 
 
-# ---------------------------------------------------------------------------
 # StdioTransport tests
-# ---------------------------------------------------------------------------
 
 
 class TestStdioTransport:
@@ -180,9 +176,7 @@ class TestStdioTransport:
             await transport.close()
 
 
-# ---------------------------------------------------------------------------
 # HttpSseTransport tests
-# ---------------------------------------------------------------------------
 
 
 class TestHttpSseTransport:
@@ -267,9 +261,7 @@ class TestHttpSseTransport:
             HttpSseTransport("ftp://example.com/mcp")
 
 
-# ---------------------------------------------------------------------------
 # McpSession tests
-# ---------------------------------------------------------------------------
 
 
 class TestMcpSession:
@@ -405,9 +397,7 @@ class TestMcpSession:
         assert await session.ping() is False
 
 
-# ---------------------------------------------------------------------------
 # Data class sanity checks
-# ---------------------------------------------------------------------------
 
 
 class TestDataClasses:

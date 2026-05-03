@@ -10,9 +10,7 @@ import pytest
 
 import koda.control_plane.manager as manager_mod
 
-# ---------------------------------------------------------------------------
 # Lightweight in-memory DB stub
-# ---------------------------------------------------------------------------
 
 
 class _MemDB:
@@ -196,9 +194,7 @@ class _DictRow(dict):
         return super().keys()
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 def _run_coro_sync_stub(coro: Any) -> Any:
@@ -232,9 +228,7 @@ def mcp_manager(monkeypatch: pytest.MonkeyPatch):
     return mgr, db
 
 
-# ---------------------------------------------------------------------------
 # MCP Catalog tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPCatalog:
@@ -325,9 +319,7 @@ class TestMCPCatalog:
         assert len(db.tables["cp_mcp_tool_policies"]) == 0
 
 
-# ---------------------------------------------------------------------------
 # MCP Agent Connection tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPAgentConnections:
@@ -451,9 +443,7 @@ class TestCanonicalConnections:
         assert payload["connection_key"] == "core:browser"
 
 
-# ---------------------------------------------------------------------------
 # MCP Tool Policy tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPToolPolicies:
@@ -512,9 +502,7 @@ class TestMCPToolPolicies:
             assert result["policy"] == policy
 
 
-# ---------------------------------------------------------------------------
 # test_mcp_connection / discover_mcp_tools tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPTestConnection:

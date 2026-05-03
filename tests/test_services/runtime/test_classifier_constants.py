@@ -24,9 +24,7 @@ from koda.services.runtime.constants import (
     RUNTIME_PHASES,
 )
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — heavy keywords
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -58,9 +56,7 @@ def test_classify_heavy_keywords(query: str, why: str) -> None:
     assert out.reasons == ["matched_heavy_keywords"]
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — standard keywords
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -92,9 +88,7 @@ def test_classify_standard_keywords(query: str, why: str) -> None:
     assert out.environment_kind == "dev_worktree"
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — default to light
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -118,9 +112,7 @@ def test_classify_default_light(query: str) -> None:
     assert out.reasons == ["default_light"]
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — heavy beats standard when both match
-# ---------------------------------------------------------------------------
 
 
 def test_classify_heavy_wins_over_standard() -> None:
@@ -129,9 +121,7 @@ def test_classify_heavy_wins_over_standard() -> None:
     assert out.classification == "heavy"
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — explicit override
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("override", ["light", "standard", "heavy"])
@@ -155,9 +145,7 @@ def test_classify_override_normalizes_case_and_whitespace() -> None:
     assert out.classification == "heavy"
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — case insensitivity in patterns
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -174,9 +162,7 @@ def test_classify_heavy_case_insensitive(query: str) -> None:
     assert classify_task(query).classification == "heavy"
 
 
-# ---------------------------------------------------------------------------
 # classifier.classify_task — return shape
-# ---------------------------------------------------------------------------
 
 
 def test_classify_returns_dataclass() -> None:
@@ -186,9 +172,7 @@ def test_classify_returns_dataclass() -> None:
     assert set(d.keys()) == {"classification", "isolation", "duration", "environment_kind", "reasons"}
 
 
-# ---------------------------------------------------------------------------
 # constants — phase enum, mutation-blocked, recoverable, final
-# ---------------------------------------------------------------------------
 
 
 def test_classifications_are_canonical() -> None:
@@ -272,9 +256,7 @@ def test_event_types_unique_and_categorized() -> None:
         "recovery",
         "cleanup",
     }
-    assert expected_categories.issubset(categories), (
-        f"missing categories: {expected_categories - categories}"
-    )
+    assert expected_categories.issubset(categories), f"missing categories: {expected_categories - categories}"
 
 
 def test_event_types_use_dot_separator() -> None:

@@ -26,9 +26,7 @@ from koda.services.db_manager import DBManager, _EnvPool
 pytestmark = [pytest.mark.postgres]
 
 
-# ---------------------------------------------------------------------------
 # Test schema lifecycle
-# ---------------------------------------------------------------------------
 
 _EVENTS_TABLE = "dbmgr_events"
 _EMPTY_TABLE = "dbmgr_empty"
@@ -112,9 +110,7 @@ def _make_pg_env_config(**overrides: object) -> PostgresEnvConfig:
     return PostgresEnvConfig(**base)  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------
 # Smoke / availability
-# ---------------------------------------------------------------------------
 
 
 async def test_pool_is_available(dbm_real: DBManager) -> None:
@@ -137,17 +133,13 @@ async def test_select_real_table_with_count(dbm_real: DBManager) -> None:
 
 
 async def test_select_with_where_index(dbm_real: DBManager) -> None:
-    out = await dbm_real.query(
-        f"SELECT count(*)::int AS c FROM public.{_EVENTS_TABLE} WHERE kind = 'kind-2'"
-    )
+    out = await dbm_real.query(f"SELECT count(*)::int AS c FROM public.{_EVENTS_TABLE} WHERE kind = 'kind-2'")
     # 50 rows per kind (250 / 5)
     assert "50" in out
 
 
 async def test_explain_returns_plan(dbm_real: DBManager) -> None:
-    out = await dbm_real.explain(
-        f"SELECT * FROM public.{_EVENTS_TABLE} WHERE kind = 'kind-1' LIMIT 10"
-    )
+    out = await dbm_real.explain(f"SELECT * FROM public.{_EVENTS_TABLE} WHERE kind = 'kind-1' LIMIT 10")
     assert "Index Scan" in out or "Bitmap Index Scan" in out or "Seq Scan" in out
     assert _EVENTS_TABLE in out
 
@@ -165,9 +157,7 @@ async def test_get_schema_columns_for_table(dbm_real: DBManager) -> None:
     assert "payload" in out
 
 
-# ---------------------------------------------------------------------------
 # Empty result formatting
-# ---------------------------------------------------------------------------
 
 
 async def test_empty_result_says_no_results(dbm_real: DBManager) -> None:
@@ -176,9 +166,7 @@ async def test_empty_result_says_no_results(dbm_real: DBManager) -> None:
     assert "Rows: 0" in out
 
 
-# ---------------------------------------------------------------------------
 # Truncation at max_rows
-# ---------------------------------------------------------------------------
 
 
 async def test_max_rows_truncation(dbm_real: DBManager) -> None:
@@ -201,9 +189,7 @@ async def test_exactly_max_rows_no_truncation(dbm_real: DBManager) -> None:
     assert "Rows: 10" in out
 
 
-# ---------------------------------------------------------------------------
 # Read-only enforcement against a real DB
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -227,17 +213,13 @@ async def test_write_statements_blocked_against_real_db(dbm_real: DBManager, sql
 
 
 async def test_writable_cte_blocked_against_real_db(dbm_real: DBManager) -> None:
-    out = await dbm_real.query(
-        f"WITH d AS (DELETE FROM public.{_EVENTS_TABLE} RETURNING *) SELECT * FROM d"
-    )
+    out = await dbm_real.query(f"WITH d AS (DELETE FROM public.{_EVENTS_TABLE} RETURNING *) SELECT * FROM d")
     assert out.startswith("Error:")
     verify = await dbm_real.query(f"SELECT count(*)::int AS c FROM public.{_EVENTS_TABLE}")
     assert "250" in verify
 
 
-# ---------------------------------------------------------------------------
 # Statement-level timeout
-# ---------------------------------------------------------------------------
 
 
 async def test_query_timeout_short_circuits(dbm_real: DBManager) -> None:
@@ -251,9 +233,7 @@ async def test_query_timeout_short_circuits(dbm_real: DBManager) -> None:
     assert "Rows: 1" in follow_up
 
 
-# ---------------------------------------------------------------------------
 # Concurrency / pool behavior
-# ---------------------------------------------------------------------------
 
 
 async def test_concurrent_queries_share_pool(dbm_real: DBManager) -> None:
@@ -272,19 +252,13 @@ async def test_pool_recovery_after_error(dbm_real: DBManager) -> None:
     assert "Rows: 1" in good
 
 
-# ---------------------------------------------------------------------------
 # Multi-env routing — set up a 2nd env on the same physical DB but separate pool
-# ---------------------------------------------------------------------------
 
 
 async def test_multi_env_explicit_routing(seeded_postgres_url: str) -> None:
     dbm = DBManager()
-    dev_pool = await asyncpg.create_pool(
-        seeded_postgres_url, min_size=1, max_size=2
-    )
-    prod_pool = await asyncpg.create_pool(
-        seeded_postgres_url, min_size=1, max_size=2
-    )
+    dev_pool = await asyncpg.create_pool(seeded_postgres_url, min_size=1, max_size=2)
+    prod_pool = await asyncpg.create_pool(seeded_postgres_url, min_size=1, max_size=2)
     dbm._envs["dev"] = _EnvPool(pool=dev_pool)
     dbm._envs["prod"] = _EnvPool(pool=prod_pool)
     try:
@@ -306,9 +280,7 @@ async def test_multi_env_explicit_routing(seeded_postgres_url: str) -> None:
         await dbm.stop()
 
 
-# ---------------------------------------------------------------------------
 # Coverage: PostgresEnvConfig SSL + DSN building paths
-# ---------------------------------------------------------------------------
 
 
 def test_ssl_context_disable_returns_none() -> None:
@@ -329,9 +301,7 @@ def test_ssl_context_build_modes(mode: str) -> None:
     assert ctx is not None
 
 
-# ---------------------------------------------------------------------------
 # Smoke: pg_stat_activity baseline returns to <= baseline + 1 after teardown
-# ---------------------------------------------------------------------------
 
 
 async def test_pg_stat_activity_baseline(seeded_postgres_url: str) -> None:

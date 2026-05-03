@@ -26,9 +26,7 @@ from koda.services.tool_dispatcher import (
     parse_agent_commands,
 )
 
-# ---------------------------------------------------------------------------
 # parse_agent_commands — happy path
-# ---------------------------------------------------------------------------
 
 
 def test_parse_single_well_formed_call() -> None:
@@ -51,8 +49,7 @@ def test_parse_with_surrounding_text() -> None:
 
 def test_parse_multiple_calls() -> None:
     text = (
-        '<agent_cmd tool="file_read">{"path": "/a"}</agent_cmd>\n'
-        '<agent_cmd tool="file_read">{"path": "/b"}</agent_cmd>'
+        '<agent_cmd tool="file_read">{"path": "/a"}</agent_cmd>\n<agent_cmd tool="file_read">{"path": "/b"}</agent_cmd>'
     )
     calls, _ = parse_agent_commands(text)
     assert len(calls) == 2
@@ -78,9 +75,7 @@ def test_parse_multiline_body_via_dotall() -> None:
     assert calls[0].params == {"path": "/x", "content": "hello"}
 
 
-# ---------------------------------------------------------------------------
 # parse_agent_commands — malformed JSON skipped without raising
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -112,13 +107,11 @@ def test_parse_mix_of_valid_and_malformed() -> None:
     assert [c.tool for c in calls] == ["ok", "ok2"]
 
 
-# ---------------------------------------------------------------------------
 # parse_agent_commands — clean-text behavior
-# ---------------------------------------------------------------------------
 
 
 def test_clean_strips_action_plan_blocks() -> None:
-    text = "<action_plan>I will read files.</action_plan>\n" '<agent_cmd tool="file_read">{"path": "/x"}</agent_cmd>'
+    text = '<action_plan>I will read files.</action_plan>\n<agent_cmd tool="file_read">{"path": "/x"}</agent_cmd>'
     _, clean = parse_agent_commands(text)
     assert "action_plan" not in clean
     assert "I will read files" not in clean
@@ -138,9 +131,7 @@ def test_clean_strips_outer_whitespace() -> None:
     assert clean == ""
 
 
-# ---------------------------------------------------------------------------
 # parse_agent_commands — degenerate inputs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -151,7 +142,7 @@ def test_clean_strips_outer_whitespace() -> None:
         "<agent_cmd>missing tool attr</agent_cmd>",
         '<agent_cmd tool="">{}</agent_cmd>',  # empty tool name — regex requires ≥1 char
         "<agent_cmd tool='single-quote'>{}</agent_cmd>",  # single quotes → not matched
-        "<AGENT_CMD tool=\"x\">{}</AGENT_CMD>",  # case-sensitive tag → not matched
+        '<AGENT_CMD tool="x">{}</AGENT_CMD>',  # case-sensitive tag → not matched
     ],
 )
 def test_parse_no_match_returns_no_calls(text: str) -> None:
@@ -161,9 +152,7 @@ def test_parse_no_match_returns_no_calls(text: str) -> None:
     assert calls == []
 
 
-# ---------------------------------------------------------------------------
 # Hypothesis fuzz — never crash on arbitrary input
-# ---------------------------------------------------------------------------
 
 
 @given(text=st.text(max_size=500))
@@ -220,9 +209,7 @@ def test_parse_strips_whitespace_around_tool_name() -> None:
     assert calls[0].tool == "job_list"
 
 
-# ---------------------------------------------------------------------------
 # _infer_tool_category — prefix-based routing
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

@@ -18,9 +18,7 @@ from koda.services.tool_dispatcher import (
     parse_agent_commands,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_ctx(**overrides) -> ToolContext:
@@ -88,9 +86,7 @@ def _dispatcher_policy_stub(request: pytest.FixtureRequest):
         yield
 
 
-# ---------------------------------------------------------------------------
 # Parsing tests
-# ---------------------------------------------------------------------------
 
 
 class TestParseAgentCommands:
@@ -152,9 +148,7 @@ class TestParseAgentCommands:
         assert "After" in clean
 
 
-# ---------------------------------------------------------------------------
 # Execution tests — web
-# ---------------------------------------------------------------------------
 
 
 class TestWebTools:
@@ -229,9 +223,7 @@ class TestBrowserScope:
         navigate.assert_awaited_once_with(987, "https://example.com", allow_private=False)
 
 
-# ---------------------------------------------------------------------------
 # Feature flags
-# ---------------------------------------------------------------------------
 
 
 class TestFeatureFlags:
@@ -281,9 +273,7 @@ class TestFeatureFlags:
         assert "not enabled" in result.output
 
 
-# ---------------------------------------------------------------------------
 # Security
-# ---------------------------------------------------------------------------
 
 
 class TestSecurity:
@@ -320,9 +310,7 @@ class TestSecurity:
         assert "does not exist" in result.output
 
 
-# ---------------------------------------------------------------------------
 # Supervised mode
-# ---------------------------------------------------------------------------
 
 
 class TestSupervisedMode:
@@ -373,9 +361,7 @@ class TestSupervisedMode:
         assert result.success
 
 
-# ---------------------------------------------------------------------------
 # Unknown tool / timeout
-# ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:
@@ -414,9 +400,7 @@ class TestEdgeCases:
         assert "model" in result.output
 
 
-# ---------------------------------------------------------------------------
 # Browser tools
-# ---------------------------------------------------------------------------
 
 
 class TestBrowserTools:
@@ -740,9 +724,7 @@ class TestBrowserTools:
         assert "submitted" in result.output.lower()
 
 
-# ---------------------------------------------------------------------------
 # Database tools
-# ---------------------------------------------------------------------------
 
 
 class TestDBTools:
@@ -774,9 +756,7 @@ class TestDBTools:
         assert tool_name in result.output
 
 
-# ---------------------------------------------------------------------------
 # Format results
-# ---------------------------------------------------------------------------
 
 
 class TestFormatResults:
@@ -797,9 +777,7 @@ class TestFormatResults:
         assert 'success="false"' in formatted
 
 
-# ---------------------------------------------------------------------------
 # _is_write_tool classification (arg-aware)
-# ---------------------------------------------------------------------------
 
 
 class TestIsWriteTool:
@@ -925,9 +903,7 @@ class TestIsWriteTool:
         assert _is_write_tool("cache_clear", {}) is True
 
 
-# ---------------------------------------------------------------------------
 # Script & Cache tool handler tests
-# ---------------------------------------------------------------------------
 
 
 class TestScriptTools:
@@ -1660,9 +1636,7 @@ async def test_execute_tool_blocks_mcp_tool_via_central_gate_without_queue_manag
     handler.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
 # request_skill tests
-# ---------------------------------------------------------------------------
 
 
 class TestRequestSkill:

@@ -9,9 +9,7 @@ import pytest
 from koda.services.mcp_client import McpToolDefinition
 from koda.services.mcp_manager import McpServerInstance, McpServerManager
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 _SAMPLE_TOOLS = [
     McpToolDefinition(name="read_file", description="Read a file"),
@@ -42,9 +40,7 @@ def _mock_http_transport() -> MagicMock:
     return transport
 
 
-# ---------------------------------------------------------------------------
 # McpServerInstance tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -189,9 +185,7 @@ async def test_instance_refresh_tools():
     assert inst.cached_tools_at >= original_ts
 
 
-# ---------------------------------------------------------------------------
 # McpServerManager tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

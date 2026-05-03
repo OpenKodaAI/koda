@@ -133,9 +133,7 @@ def test_image_query_floors_at_half_regardless_of_text():
     assert complexity_score("ok", has_images=True) >= 0.5
 
 
-# ---------------------------------------------------------------------------
 # Routing decisions on the labeled corpus — the key behavioral assertion.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("query", _TRIVIAL + _SIMPLE, ids=lambda q: q[:30])
@@ -164,9 +162,7 @@ def test_above_threshold_queries_keep_cloud_chain(query: str):
     assert result == chain, f"complex query routed local: {result}"
 
 
-# ---------------------------------------------------------------------------
 # Rate of correct routing on the labeled set
-# ---------------------------------------------------------------------------
 
 
 def test_routing_decision_accuracy_on_labeled_corpus():

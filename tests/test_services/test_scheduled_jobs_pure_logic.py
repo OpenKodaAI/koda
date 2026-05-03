@@ -27,9 +27,7 @@ from koda.services.scheduled_jobs import (
     compute_next_run,
 )
 
-# ---------------------------------------------------------------------------
 # _parse_interval_seconds
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -82,9 +80,7 @@ def test_parse_interval_seconds_invalid(expr: str) -> None:
     assert _parse_interval_seconds(expr) is None
 
 
-# ---------------------------------------------------------------------------
 # _normalize_timezone_name
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -110,16 +106,12 @@ def test_normalize_timezone_name_rejects_invalid(bad: str) -> None:
         _normalize_timezone_name(bad)
 
 
-# ---------------------------------------------------------------------------
 # compute_next_run — interval
-# ---------------------------------------------------------------------------
 
 
 def test_compute_next_run_interval_basic() -> None:
     after = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
-    nxt = compute_next_run(
-        trigger_type="interval", schedule_expr="3600", timezone_name="UTC", after=after
-    )
+    nxt = compute_next_run(trigger_type="interval", schedule_expr="3600", timezone_name="UTC", after=after)
     assert nxt == after + timedelta(seconds=3600)
 
 
@@ -130,30 +122,20 @@ def test_compute_next_run_interval_with_suffix() -> None:
 
 
 def test_compute_next_run_interval_invalid_returns_none() -> None:
-    assert (
-        compute_next_run(trigger_type="interval", schedule_expr="bogus", timezone_name="UTC")
-        is None
-    )
+    assert compute_next_run(trigger_type="interval", schedule_expr="bogus", timezone_name="UTC") is None
 
 
 def test_compute_next_run_interval_zero_returns_none() -> None:
-    assert (
-        compute_next_run(trigger_type="interval", schedule_expr="0", timezone_name="UTC")
-        is None
-    )
+    assert compute_next_run(trigger_type="interval", schedule_expr="0", timezone_name="UTC") is None
 
 
-# ---------------------------------------------------------------------------
 # compute_next_run — one_shot
-# ---------------------------------------------------------------------------
 
 
 def test_compute_next_run_one_shot_future() -> None:
     after = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
     target = "2026-05-15T08:30:00+00:00"
-    nxt = compute_next_run(
-        trigger_type="one_shot", schedule_expr=target, timezone_name="UTC", after=after
-    )
+    nxt = compute_next_run(trigger_type="one_shot", schedule_expr=target, timezone_name="UTC", after=after)
     assert nxt is not None
     assert nxt == datetime(2026, 5, 15, 8, 30, 0, tzinfo=UTC)
 
@@ -169,16 +151,12 @@ def test_compute_next_run_one_shot_past_returns_none() -> None:
     assert nxt is None
 
 
-# ---------------------------------------------------------------------------
 # compute_next_run — cron with timezone & DST edges
-# ---------------------------------------------------------------------------
 
 
 def test_compute_next_run_cron_daily_utc() -> None:
     after = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
-    nxt = compute_next_run(
-        trigger_type="cron", schedule_expr="0 2 * * *", timezone_name="UTC", after=after
-    )
+    nxt = compute_next_run(trigger_type="cron", schedule_expr="0 2 * * *", timezone_name="UTC", after=after)
     assert nxt == datetime(2026, 5, 2, 2, 0, 0, tzinfo=UTC)
 
 
@@ -217,9 +195,7 @@ def test_compute_next_run_cron_returns_utc_with_matching_offset() -> None:
 
 def test_compute_next_run_cron_hourly() -> None:
     after = datetime(2026, 5, 1, 12, 30, 0, tzinfo=UTC)
-    nxt = compute_next_run(
-        trigger_type="cron", schedule_expr="0 * * * *", timezone_name="UTC", after=after
-    )
+    nxt = compute_next_run(trigger_type="cron", schedule_expr="0 * * * *", timezone_name="UTC", after=after)
     assert nxt == datetime(2026, 5, 1, 13, 0, 0, tzinfo=UTC)
 
 
@@ -234,21 +210,14 @@ def test_compute_next_run_cron_monthly() -> None:
     assert nxt == datetime(2026, 6, 1, 0, 0, 0, tzinfo=UTC)
 
 
-# ---------------------------------------------------------------------------
 # compute_next_run — invalid trigger_type returns None
-# ---------------------------------------------------------------------------
 
 
 def test_compute_next_run_unknown_trigger_returns_none() -> None:
-    assert (
-        compute_next_run(trigger_type="weekly", schedule_expr="anything", timezone_name="UTC")
-        is None
-    )
+    assert compute_next_run(trigger_type="weekly", schedule_expr="anything", timezone_name="UTC") is None
 
 
-# ---------------------------------------------------------------------------
 # _scheduler_retry_delay — exponential backoff formula
-# ---------------------------------------------------------------------------
 
 
 def test_scheduler_retry_delay_attempt_1() -> None:

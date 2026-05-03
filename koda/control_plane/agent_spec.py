@@ -1339,9 +1339,7 @@ def parse_json_env_value(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-# ---------------------------------------------------------------------------
 # Hierarchical prompt spec: Workspace -> Squad -> Agent
-# ---------------------------------------------------------------------------
 
 WORKSPACE_SPEC_FIELDS: dict[str, set[str] | None] = {
     "hard_rules": {"non_negotiables", "forbidden_actions", "security_rules"},

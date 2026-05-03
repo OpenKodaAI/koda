@@ -10,9 +10,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-# ---------------------------------------------------------------------------
 # Regex helpers
-# ---------------------------------------------------------------------------
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _WHEN_TO_USE_RE = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
@@ -24,9 +22,7 @@ _OUTPUT_FORMAT_RE = re.compile(
 )
 
 
-# ---------------------------------------------------------------------------
 # SkillDefinition
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -56,9 +52,7 @@ class SkillDefinition:
     output_format_enforcement: str = ""
 
 
-# ---------------------------------------------------------------------------
 # Parser
-# ---------------------------------------------------------------------------
 
 
 def _first_sentence(text: str) -> str:
@@ -217,9 +211,7 @@ def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
     )
 
 
-# ---------------------------------------------------------------------------
 # Registry
-# ---------------------------------------------------------------------------
 
 
 class SkillRegistry:
@@ -314,9 +306,7 @@ class SkillRegistry:
         self._alias_index = index
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 _shared_registry: SkillRegistry | None = None
 

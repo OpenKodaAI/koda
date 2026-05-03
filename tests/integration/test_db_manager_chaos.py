@@ -38,9 +38,7 @@ async def chaos_dbm(postgres_url: str) -> AsyncIterator[DBManager]:
         await dbm.stop()
 
 
-# ---------------------------------------------------------------------------
 # Statement timeout — server-side cancellation
-# ---------------------------------------------------------------------------
 
 
 async def test_query_timeout_returns_error_not_exception(chaos_dbm: DBManager) -> None:
@@ -51,18 +49,15 @@ async def test_query_timeout_returns_error_not_exception(chaos_dbm: DBManager) -
     assert "Rows: 1" in follow
 
 
-# ---------------------------------------------------------------------------
 # Connection killed mid-flight — server forcibly terminates one backend
-# ---------------------------------------------------------------------------
 
 
-async def test_pool_recovers_after_backend_termination(
-    chaos_dbm: DBManager, postgres_url: str
-) -> None:
+async def test_pool_recovers_after_backend_termination(chaos_dbm: DBManager, postgres_url: str) -> None:
     """When a backend is killed mid-query, asyncpg surfaces an error; the
     pool returns the broken connection to the bin and the next query
     succeeds via a fresh connection.
     """
+
     # Run a slow query in the background so we can target its backend.
     async def slow_query() -> str:
         return await chaos_dbm.query("SELECT pg_sleep(3)", timeout=10)
@@ -104,9 +99,7 @@ async def test_pool_recovers_after_backend_termination(
     assert "Rows: 1" in after
 
 
-# ---------------------------------------------------------------------------
 # Pool saturation — serialize multiple slow queries through max_size=2
-# ---------------------------------------------------------------------------
 
 
 async def test_pool_saturation_serializes_without_error(chaos_dbm: DBManager) -> None:
@@ -125,9 +118,7 @@ async def test_pool_saturation_serializes_without_error(chaos_dbm: DBManager) ->
     assert len(success) == 6
 
 
-# ---------------------------------------------------------------------------
 # Repeated error path — the manager logs and returns; never throws to caller
-# ---------------------------------------------------------------------------
 
 
 async def test_repeated_errors_do_not_break_pool(chaos_dbm: DBManager) -> None:

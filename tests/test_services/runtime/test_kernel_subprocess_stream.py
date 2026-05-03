@@ -39,9 +39,7 @@ from koda.services.runtime.kernel_subprocess import (
     should_use_runtime_kernel_process,
 )
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelStreamReader — readline
-# ---------------------------------------------------------------------------
 
 
 async def test_readline_returns_complete_line_with_newline() -> None:
@@ -96,9 +94,7 @@ async def test_readline_handles_chunks_split_across_feeds() -> None:
     assert line == b"partial-line\n"
 
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelStreamReader — read (drain to EOF)
-# ---------------------------------------------------------------------------
 
 
 async def test_read_returns_all_buffered_then_eof() -> None:
@@ -129,9 +125,7 @@ async def test_read_drains_buffer_after_partial_readline() -> None:
     assert rest == b"second and rest"
 
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelStreamReader — binary / ANSI / Unicode preservation
-# ---------------------------------------------------------------------------
 
 
 async def test_ansi_escape_sequences_pass_through() -> None:
@@ -163,9 +157,7 @@ async def test_utf8_multibyte_preserved_across_chunks() -> None:
     assert line.decode("utf-8") == "olã mundo\n"
 
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelStreamReader — finish() idempotency / EOF behavior
-# ---------------------------------------------------------------------------
 
 
 async def test_finish_is_idempotent() -> None:
@@ -185,9 +177,7 @@ async def test_feed_after_finish_does_not_appear_in_output() -> None:
     assert out == b""
 
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelStdinWriter — buffer + close + commit
-# ---------------------------------------------------------------------------
 
 
 class _DummyProcess:
@@ -255,9 +245,7 @@ async def test_stdin_writer_wait_closed_resolves_after_process_started() -> None
     await asyncio.wait_for(w.wait_closed(), timeout=1.0)
 
 
-# ---------------------------------------------------------------------------
 # should_use_runtime_kernel_process
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("task_id", [1, 42, 999999])
@@ -274,9 +262,7 @@ def test_should_use_kernel_process_zero_task_id_is_truthy() -> None:
     assert should_use_runtime_kernel_process(runtime_task_id=0) is True
 
 
-# ---------------------------------------------------------------------------
 # create_runtime_kernel_process
-# ---------------------------------------------------------------------------
 
 
 def test_create_kernel_process_returns_correct_type_and_attrs() -> None:
@@ -322,9 +308,7 @@ def test_create_kernel_process_env_dict_is_copied() -> None:
     assert proc.env == {"FOO": "bar"}
 
 
-# ---------------------------------------------------------------------------
 # RuntimeKernelProcess constructor invariants
-# ---------------------------------------------------------------------------
 
 
 def test_kernel_process_streams_initialized() -> None:

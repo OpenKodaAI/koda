@@ -45,11 +45,14 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
                 _StubRuntimeAccessService,
             ),
             patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "test-token"),
-            patch("koda.services.runtime.api._schedule_detail_payload", return_value={
-                "job": {"id": 999, "status": "active"},
-                "runs": [],
-                "events": [],
-            }),
+            patch(
+                "koda.services.runtime.api._schedule_detail_payload",
+                return_value={
+                    "job": {"id": 999, "status": "active"},
+                    "runs": [],
+                    "events": [],
+                },
+            ),
         ]
         for entry in self._patches:
             entry.start()

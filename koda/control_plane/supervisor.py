@@ -180,9 +180,7 @@ async def _probe_sidecar(name: str, target: str) -> dict[str, Any]:
 # so the supervisor itself (``-m koda.control_plane``) never matches —
 # the ``.`` makes the next char non-whitespace. Captures the agent id so
 # the caller can cross-check against the spawn target.
-_KODA_WORKER_CMD_RE = re.compile(
-    r"-m\s+koda\s+.*?--agent-id\s+(\S+)"
-)
+_KODA_WORKER_CMD_RE = re.compile(r"-m\s+koda\s+.*?--agent-id\s+(\S+)")
 
 
 def _extract_health_port(health_url: str) -> int | None:
@@ -359,8 +357,7 @@ async def _ensure_health_port_free(
             )
             if not killed:
                 raise OrphanResolutionError(
-                    f"Failed to terminate orphan worker pid={pid} for "
-                    f"{agent_id!r} on {host}:{port}."
+                    f"Failed to terminate orphan worker pid={pid} for {agent_id!r} on {host}:{port}."
                 )
         else:
             raise OrphanResolutionError(
@@ -371,10 +368,7 @@ async def _ensure_health_port_free(
     # Port should be free now, but verify before returning so we never spawn
     # into a still-bound port.
     if _port_in_use(host, port):
-        raise OrphanResolutionError(
-            f"Health port {host}:{port} remained in use after orphan "
-            f"cleanup for {agent_id!r}."
-        )
+        raise OrphanResolutionError(f"Health port {host}:{port} remained in use after orphan cleanup for {agent_id!r}.")
 
 
 class OrphanResolutionError(RuntimeError):

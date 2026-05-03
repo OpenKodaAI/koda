@@ -100,9 +100,7 @@ def broker_factory(tmp_path: Path):
     return make
 
 
-# ---------------------------------------------------------------------------
 # publish() persistence + NDJSON
-# ---------------------------------------------------------------------------
 
 
 async def test_publish_returns_event_dict(broker_factory) -> None:
@@ -151,9 +149,7 @@ async def test_publish_appends_ndjson_file(broker_factory, tmp_path: Path) -> No
 async def test_publish_appends_multiple_lines(broker_factory, tmp_path: Path) -> None:
     broker, _ = broker_factory()
     for i in range(5):
-        await broker.publish(
-            task_id=7, env_id=1, attempt=1, phase="x", event_type="t", payload={"i": i}
-        )
+        await broker.publish(task_id=7, env_id=1, attempt=1, phase="x", event_type="t", payload={"i": i})
     ndjson_path = tmp_path / "tasks" / "7" / "events.ndjson"
     lines = ndjson_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 5
@@ -184,9 +180,7 @@ async def test_publish_isolates_files_per_task(broker_factory, tmp_path: Path) -
     assert json.loads(b_lines[0])["event_type"] == "b"
 
 
-# ---------------------------------------------------------------------------
 # Subscribe / unsubscribe / fan-out
-# ---------------------------------------------------------------------------
 
 
 async def test_subscribe_receives_published_event(broker_factory) -> None:
@@ -224,9 +218,7 @@ async def test_subscriber_added_after_publish_does_not_get_history(broker_factor
     assert q.qsize() == 0
 
 
-# ---------------------------------------------------------------------------
 # Backpressure: full subscriber queue does not block the publisher
-# ---------------------------------------------------------------------------
 
 
 async def test_full_subscriber_queue_does_not_block_publisher(broker_factory) -> None:
@@ -249,9 +241,7 @@ async def test_full_subscriber_queue_does_not_block_publisher(broker_factory) ->
     assert full_q.get_nowait() == {"prefilled": True}
 
 
-# ---------------------------------------------------------------------------
 # iter_events: backfill + live filtering
-# ---------------------------------------------------------------------------
 
 
 async def test_iter_events_backfills_then_streams_new(broker_factory) -> None:
@@ -382,9 +372,7 @@ async def test_iter_events_handles_concurrent_publishers(broker_factory) -> None
 
     consumer = asyncio.create_task(consume())
     await asyncio.sleep(0.05)
-    publishers = [
-        broker.publish(task_id=1, env_id=1, attempt=1, phase="x", event_type=f"e{i}") for i in range(10)
-    ]
+    publishers = [broker.publish(task_id=1, env_id=1, attempt=1, phase="x", event_type=f"e{i}") for i in range(10)]
     await asyncio.gather(*publishers)
     await asyncio.wait_for(consumer, timeout=2.0)
     assert sorted(received) == list(range(1, 11))

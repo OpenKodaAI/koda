@@ -42,9 +42,7 @@ COMMENT_META_STATUS_PRESENT = "present"
 COMMENT_META_STATUS_MISSING = "missing"
 COMMENT_META_STATUS_ERROR = "error"
 
-# ---------------------------------------------------------------------------
 # Media type helpers
-# ---------------------------------------------------------------------------
 
 SUPPORTED_IMAGE_MIMES = frozenset(
     {

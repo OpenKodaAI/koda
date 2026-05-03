@@ -29,9 +29,7 @@ _RESTART_BACKOFF_SCHEDULE: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0)
 _MAX_RESTART_ATTEMPTS = len(_RESTART_BACKOFF_SCHEDULE)
 
 
-# ---------------------------------------------------------------------------
 # Single server instance
-# ---------------------------------------------------------------------------
 
 
 class McpServerInstance:
@@ -209,9 +207,7 @@ class McpServerInstance:
         return list(self._cached_tools)
 
 
-# ---------------------------------------------------------------------------
 # Global registry
-# ---------------------------------------------------------------------------
 
 
 class McpServerManager:
@@ -412,8 +408,6 @@ class McpServerManager:
             )
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 mcp_server_manager = McpServerManager()

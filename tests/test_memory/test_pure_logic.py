@@ -30,9 +30,7 @@ from koda.memory.types import (
     build_content_hash,
 )
 
-# ---------------------------------------------------------------------------
 # build_content_hash
-# ---------------------------------------------------------------------------
 
 
 def test_content_hash_is_deterministic() -> None:
@@ -72,9 +70,7 @@ def test_content_hash_distinguishes_distinct_content() -> None:
     assert a != c
 
 
-# ---------------------------------------------------------------------------
 # build_conflict_key
-# ---------------------------------------------------------------------------
 
 
 def test_conflict_key_is_24_hex_chars() -> None:
@@ -104,9 +100,7 @@ def test_conflict_key_changes_with_memory_type() -> None:
     assert a != b
 
 
-# ---------------------------------------------------------------------------
 # Memory.__post_init__ derives content_hash, subject, conflict_key, scope
-# ---------------------------------------------------------------------------
 
 
 def test_memory_post_init_derives_content_hash() -> None:
@@ -160,9 +154,7 @@ def test_memory_post_init_does_not_overwrite_explicit_values() -> None:
     assert m.conflict_key == "explicit-key"
 
 
-# ---------------------------------------------------------------------------
 # _recency_factor — exponential half-life decay
-# ---------------------------------------------------------------------------
 
 
 def test_recency_factor_now_is_one() -> None:
@@ -193,9 +185,7 @@ def test_recency_factor_custom_half_life_overrides_default() -> None:
     assert long > short  # longer half-life → memory still fresher
 
 
-# ---------------------------------------------------------------------------
 # _scope_reason — additive boosts when context matches
-# ---------------------------------------------------------------------------
 
 
 def _scope_test_memory(**overrides: object) -> Memory:
@@ -235,9 +225,7 @@ def test_scope_reason_full_stack_combines() -> None:
         team="security",
         source_episode_id=42,
     )
-    boost, reasons = _scope_reason(
-        m, session_id="s1", project_key="alpha", environment="prod", team="security"
-    )
+    boost, reasons = _scope_reason(m, session_id="s1", project_key="alpha", environment="prod", team="security")
     # 0.08 + 0.07 + 0.04 + 0.03 + 0.05 = 0.27
     assert boost == pytest.approx(0.27)
     expected = ["same_session", "same_project", "same_environment", "same_team", "episodic_bundle"]
@@ -251,9 +239,7 @@ def test_scope_reason_session_mismatch_no_boost() -> None:
     assert "same_session" not in reasons
 
 
-# ---------------------------------------------------------------------------
 # _compute_combined_score — formula and clamping
-# ---------------------------------------------------------------------------
 
 
 def _result(
@@ -339,9 +325,7 @@ def test_combined_score_breakdown_is_attached() -> None:
     assert expected.issubset(keys)
 
 
-# ---------------------------------------------------------------------------
 # _is_redundant — Jaccard-style word-set redundancy check
-# ---------------------------------------------------------------------------
 
 
 def test_is_redundant_empty_candidate_returns_false() -> None:

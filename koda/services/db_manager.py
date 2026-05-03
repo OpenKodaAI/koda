@@ -583,9 +583,7 @@ class DBManager:
         return env_name, pool
 
 
-# ---------------------------------------------------------------------------
 # Write query validation (module-level)
-# ---------------------------------------------------------------------------
 
 _ALLOWED_WRITE_RE = re.compile(r"^\s*(INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 _BLOCKED_DDL_RE = re.compile(r"\b(DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|VACUUM|REINDEX|CLUSTER)\b", re.IGNORECASE)

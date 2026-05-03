@@ -102,9 +102,7 @@ async def _direct_query(dsn: str, sql: str, *params: Any) -> list[asyncpg.Record
         await conn.close()
 
 
-# ---------------------------------------------------------------------------
 # ClusterConfig.from_env — pure logic
-# ---------------------------------------------------------------------------
 
 
 def test_config_from_env_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,56 +160,94 @@ def test_config_from_env_stale_seconds_invalid_default_30(monkeypatch: pytest.Mo
     assert cfg.heartbeat_stale_seconds == 30
 
 
-# ---------------------------------------------------------------------------
 # Disabled-mode is a safe no-op (no DB calls)
-# ---------------------------------------------------------------------------
 
 
 def test_disabled_register_returns_false() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.register() is False
 
 
 def test_disabled_claim_returns_empty_set() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.claim_agents(["a", "b"]) == set()
 
 
 def test_disabled_heartbeat_returns_zero() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.heartbeat() == 0
 
 
 def test_disabled_release_all_returns_zero() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.release_all_for_supervisor() == 0
 
 
 def test_disabled_list_owned_agents_returns_empty() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.list_owned_agents() == set()
 
 
 def test_disabled_set_draining_returns_false() -> None:
-    client = ClusterClient(config=ClusterConfig(
-        enabled=False, supervisor_id="sup", version="", host="h", capacity=0, heartbeat_stale_seconds=30,
-    ))
+    client = ClusterClient(
+        config=ClusterConfig(
+            enabled=False,
+            supervisor_id="sup",
+            version="",
+            host="h",
+            capacity=0,
+            heartbeat_stale_seconds=30,
+        )
+    )
     assert client.set_draining(True) is False
 
 
-# ---------------------------------------------------------------------------
 # register() — upsert + repeated calls
-# ---------------------------------------------------------------------------
 
 
 async def test_register_upserts_supervisor_row(cluster_db: str) -> None:
@@ -219,7 +255,7 @@ async def test_register_upserts_supervisor_row(cluster_db: str) -> None:
     assert client.register() is True
     rows = await _direct_query(
         cluster_db,
-        'SELECT supervisor_id, capacity, draining FROM knowledge_v2.cp_supervisor_runtimes WHERE supervisor_id = $1',
+        "SELECT supervisor_id, capacity, draining FROM knowledge_v2.cp_supervisor_runtimes WHERE supervisor_id = $1",
         "supA",
     )
     assert len(rows) == 1
@@ -234,7 +270,7 @@ async def test_register_idempotent(cluster_db: str) -> None:
     client.register()
     rows = await _direct_query(
         cluster_db,
-        'SELECT count(*)::int AS n FROM knowledge_v2.cp_supervisor_runtimes WHERE supervisor_id = $1',
+        "SELECT count(*)::int AS n FROM knowledge_v2.cp_supervisor_runtimes WHERE supervisor_id = $1",
         "supA",
     )
     assert rows[0]["n"] == 1
@@ -270,7 +306,7 @@ async def test_claim_agents_takes_unowned_candidates(cluster_db: str) -> None:
     assert claimed == {"agent_x", "agent_y", "agent_z"}
     rows = await _direct_query(
         cluster_db,
-        'SELECT agent_id, supervisor_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id',
+        "SELECT agent_id, supervisor_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id",
     )
     assert sorted(r["agent_id"] for r in rows) == ["agent_x", "agent_y", "agent_z"]
     assert all(r["supervisor_id"] == "supA" for r in rows)
@@ -290,7 +326,7 @@ async def test_claim_agents_respects_capacity_limit(cluster_db: str) -> None:
     assert len(claimed) == 2
     rows = await _direct_query(
         cluster_db,
-        'SELECT count(*)::int AS n FROM knowledge_v2.cp_agent_assignments WHERE supervisor_id = $1',
+        "SELECT count(*)::int AS n FROM knowledge_v2.cp_agent_assignments WHERE supervisor_id = $1",
         "supA",
     )
     assert rows[0]["n"] == 2
@@ -310,7 +346,7 @@ async def test_claim_agents_ignores_already_owned_by_other_when_fresh(cluster_db
     # Verify ownership untouched.
     rows = await _direct_query(
         cluster_db,
-        'SELECT agent_id, supervisor_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id',
+        "SELECT agent_id, supervisor_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id",
     )
     owners = {r["agent_id"]: r["supervisor_id"] for r in rows}
     assert owners == {"agent_x": "supA", "agent_y": "supA", "agent_z": "supB"}
@@ -329,8 +365,9 @@ async def test_claim_agents_reclaims_stale_heartbeat(cluster_db: str) -> None:
     conn = await asyncpg.connect(cluster_db)
     try:
         await conn.execute(
-            'UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = $2',
-            stale, "agent_x",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = $2",
+            stale,
+            "agent_x",
         )
     finally:
         await conn.close()
@@ -339,7 +376,7 @@ async def test_claim_agents_reclaims_stale_heartbeat(cluster_db: str) -> None:
     assert claimed == {"agent_x"}
     rows = await _direct_query(
         cluster_db,
-        'SELECT supervisor_id FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1',
+        "SELECT supervisor_id FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1",
         "agent_x",
     )
     assert rows[0]["supervisor_id"] == "supB"
@@ -355,9 +392,7 @@ async def test_claim_agents_reclaims_own_existing_assignment(cluster_db: str) ->
     assert again == {"agent_x"}
 
 
-# ---------------------------------------------------------------------------
 # heartbeat() — refreshes timestamps
-# ---------------------------------------------------------------------------
 
 
 async def test_heartbeat_refreshes_assignment_timestamp(cluster_db: str) -> None:
@@ -367,7 +402,7 @@ async def test_heartbeat_refreshes_assignment_timestamp(cluster_db: str) -> None
 
     before = await _direct_query(
         cluster_db,
-        'SELECT heartbeat_at FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1',
+        "SELECT heartbeat_at FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1",
         "agent_x",
     )
     initial_ts = before[0]["heartbeat_at"]
@@ -376,8 +411,9 @@ async def test_heartbeat_refreshes_assignment_timestamp(cluster_db: str) -> None
     conn = await asyncpg.connect(cluster_db)
     try:
         await conn.execute(
-            'UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = $2',
-            datetime.now(UTC) - timedelta(seconds=10), "agent_x",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = $2",
+            datetime.now(UTC) - timedelta(seconds=10),
+            "agent_x",
         )
     finally:
         await conn.close()
@@ -387,7 +423,7 @@ async def test_heartbeat_refreshes_assignment_timestamp(cluster_db: str) -> None
 
     after = await _direct_query(
         cluster_db,
-        'SELECT heartbeat_at FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1',
+        "SELECT heartbeat_at FROM knowledge_v2.cp_agent_assignments WHERE agent_id = $1",
         "agent_x",
     )
     assert after[0]["heartbeat_at"] > initial_ts - timedelta(seconds=15)
@@ -400,9 +436,7 @@ async def test_heartbeat_returns_zero_when_no_claims(cluster_db: str) -> None:
     assert sup.heartbeat() == 0
 
 
-# ---------------------------------------------------------------------------
 # Draining: heartbeat releases all claims
-# ---------------------------------------------------------------------------
 
 
 async def test_draining_heartbeat_releases_all(cluster_db: str) -> None:
@@ -435,9 +469,7 @@ async def test_draining_supervisor_cannot_claim(cluster_db: str) -> None:
     assert sup.claim_agents(["x"]) == set()
 
 
-# ---------------------------------------------------------------------------
 # release_agent / release_all_for_supervisor
-# ---------------------------------------------------------------------------
 
 
 async def test_release_agent_drops_one_claim(cluster_db: str) -> None:
@@ -471,14 +503,12 @@ async def test_release_all_for_supervisor_only_drops_own(cluster_db: str) -> Non
     assert released == 2
     rows = await _direct_query(
         cluster_db,
-        'SELECT agent_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id',
+        "SELECT agent_id FROM knowledge_v2.cp_agent_assignments ORDER BY agent_id",
     )
     assert [r["agent_id"] for r in rows] == ["z"]
 
 
-# ---------------------------------------------------------------------------
 # list_owned_agents — agent_id set scoped per supervisor
-# ---------------------------------------------------------------------------
 
 
 async def test_list_owned_agents_scoped_per_supervisor(cluster_db: str) -> None:
@@ -492,9 +522,7 @@ async def test_list_owned_agents_scoped_per_supervisor(cluster_db: str) -> None:
     assert sup_b.list_owned_agents() == {"b1"}
 
 
-# ---------------------------------------------------------------------------
 # Concurrency — race two supervisors over a stale candidate set
-# ---------------------------------------------------------------------------
 
 
 async def test_two_sequential_supervisors_partition_stale_pool(cluster_db: str) -> None:
@@ -515,8 +543,7 @@ async def test_two_sequential_supervisors_partition_stale_pool(cluster_db: str) 
     conn = await asyncpg.connect(cluster_db)
     try:
         await conn.execute(
-            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 "
-            "WHERE agent_id = ANY($2::text[])",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = ANY($2::text[])",
             datetime.now(UTC) - timedelta(seconds=60),
             ["a", "b", "c", "d"],
         )
@@ -566,8 +593,7 @@ async def test_concurrent_threads_no_double_claim_via_skip_locked(cluster_db: st
     conn_setup = await asyncpg.connect(cluster_db)
     try:
         await conn_setup.execute(
-            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 "
-            "WHERE agent_id = ANY($2::text[])",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = ANY($2::text[])",
             datetime.now(UTC) - timedelta(seconds=60),
             ["x1", "x2", "x3"],
         )
@@ -617,8 +643,7 @@ async def test_unowned_and_stale_partition_combine_under_capacity(cluster_db: st
     conn = await asyncpg.connect(cluster_db)
     try:
         await conn.execute(
-            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 "
-            "WHERE agent_id = ANY($2::text[])",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = ANY($2::text[])",
             datetime.now(UTC) - timedelta(seconds=60),
             ["s1", "s2"],
         )
@@ -641,8 +666,7 @@ async def test_unowned_preferred_over_stale_under_capacity_pressure(cluster_db: 
     conn = await asyncpg.connect(cluster_db)
     try:
         await conn.execute(
-            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 "
-            "WHERE agent_id = ANY($2::text[])",
+            "UPDATE knowledge_v2.cp_agent_assignments SET heartbeat_at = $1 WHERE agent_id = ANY($2::text[])",
             datetime.now(UTC) - timedelta(seconds=60),
             ["stale1", "stale2"],
         )

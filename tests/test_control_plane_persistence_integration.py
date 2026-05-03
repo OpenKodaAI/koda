@@ -22,9 +22,7 @@ import pytest
 import koda.control_plane.manager as manager_mod
 import koda.state.primary as state_primary
 
-# ---------------------------------------------------------------------------
 # Layer A — primary_execute / fetch_* fail-loud when backend is unavailable.
-# ---------------------------------------------------------------------------
 
 
 def test_primary_execute_raises_when_backend_missing_in_postgres_mode(monkeypatch):
@@ -66,9 +64,7 @@ def test_primary_execute_is_quiet_when_not_in_postgres_mode(monkeypatch):
     assert asyncio.run(state_primary.primary_fetch_val("SELECT 1")) is None
 
 
-# ---------------------------------------------------------------------------
 # Layer C — post-write verify in _persist_global_sections.
-# ---------------------------------------------------------------------------
 
 
 def _manager() -> manager_mod.ControlPlaneManager:
@@ -119,9 +115,7 @@ def test_persist_global_sections_passes_when_rows_are_visible(monkeypatch):
     assert version == 7
 
 
-# ---------------------------------------------------------------------------
 # Layer E — diagnostics endpoint exposes real state.
-# ---------------------------------------------------------------------------
 
 
 def test_diagnostics_reports_backend_unavailable(monkeypatch):

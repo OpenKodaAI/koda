@@ -9,9 +9,7 @@ if TYPE_CHECKING:
     from koda.skills._registry import SkillRegistry
     from koda.skills._selector import SkillMatch
 
-# ---------------------------------------------------------------------------
 # Approach section extraction
-# ---------------------------------------------------------------------------
 
 _APPROACH_RE = re.compile(
     r"^##\s+(?:Approach|Abordagem)\s*\n(.*?)(?=^##\s|\Z)",
@@ -27,18 +25,14 @@ def _extract_approach(full_content: str) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
 # Token estimation
-# ---------------------------------------------------------------------------
 
 
 def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-# ---------------------------------------------------------------------------
 # Graph resolution
-# ---------------------------------------------------------------------------
 
 
 def resolve_skill_graph(
@@ -141,9 +135,7 @@ def resolve_skill_graph(
     return [match_by_id[sid] for sid in ordered if sid in match_by_id]
 
 
-# ---------------------------------------------------------------------------
 # Directive block
-# ---------------------------------------------------------------------------
 
 _DIRECTIVE = (
     "<directive>\n"
@@ -155,9 +147,7 @@ _DIRECTIVE = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Prompt composition
-# ---------------------------------------------------------------------------
 
 
 def compose_skill_prompt(
@@ -241,9 +231,7 @@ def _skill_content(m: SkillMatch, *, progressive: bool) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
 # Output requirements composition
-# ---------------------------------------------------------------------------
 
 
 def compose_output_requirements(resolved: list[SkillMatch]) -> str:

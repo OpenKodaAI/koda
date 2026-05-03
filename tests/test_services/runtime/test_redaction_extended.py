@@ -19,9 +19,7 @@ import pytest
 
 from koda.services.runtime.redaction import redact_json_dumps, redact_value
 
-# ---------------------------------------------------------------------------
 # Plain content passes through unchanged
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -54,9 +52,7 @@ def test_empty_list_round_trips() -> None:
     assert redact_value([]) == []
 
 
-# ---------------------------------------------------------------------------
 # Structural preservation
-# ---------------------------------------------------------------------------
 
 
 def test_dict_keys_preserved_for_non_secret_values() -> None:
@@ -106,9 +102,7 @@ def test_list_of_dicts_recursively_redacted() -> None:
     assert out[0]["api_key"] == "[REDACTED]"
 
 
-# ---------------------------------------------------------------------------
 # Common secret patterns (using the existing mask contract: [REDACTED])
-# ---------------------------------------------------------------------------
 
 
 def test_authorization_bearer_token_masked() -> None:
@@ -174,9 +168,7 @@ def test_api_key_case_insensitive(key: str) -> None:
     assert out[key] == "[REDACTED]"
 
 
-# ---------------------------------------------------------------------------
 # Idempotence: a redacted payload re-redacts to the same shape
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -197,9 +189,7 @@ def test_redact_idempotent(value: object) -> None:
     assert once == twice
 
 
-# ---------------------------------------------------------------------------
 # redact_json_dumps: serialization layer
-# ---------------------------------------------------------------------------
 
 
 def test_json_dumps_returns_valid_json_string() -> None:
@@ -246,9 +236,7 @@ def test_json_dumps_empty_payloads() -> None:
     assert json.loads(redact_json_dumps([])) == []
 
 
-# ---------------------------------------------------------------------------
 # Defensive: arbitrary key_hint values do not crash
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

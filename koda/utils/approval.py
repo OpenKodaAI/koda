@@ -64,9 +64,7 @@ class _TelegramBotLike(Protocol):
 
 CommandHandlerFunc = Callable[..., Coroutine[Any, Any, Any]]
 
-# ---------------------------------------------------------------------------
 # Defense in depth: ContextVar gate
-# ---------------------------------------------------------------------------
 
 _execution_approved: contextvars.ContextVar[bool] = contextvars.ContextVar("_execution_approved", default=False)
 
@@ -76,9 +74,7 @@ def check_execution_approved() -> bool:
     return _execution_approved.get()
 
 
-# ---------------------------------------------------------------------------
 # Pending operations store (in-memory, lost on restart)
-# ---------------------------------------------------------------------------
 
 _PENDING_OPS: dict[str, dict[str, Any]] = {}
 _APPROVAL_GRANTS: dict[str, dict[str, Any]] = {}
@@ -288,9 +284,7 @@ async def revoke_scoped_approval_state(
         _PENDING_AGENT_CMD_OPS.pop(op_id, None)
 
 
-# ---------------------------------------------------------------------------
 # READ/WRITE classifiers
-# ---------------------------------------------------------------------------
 
 
 def _always_write(_args: str) -> bool:
@@ -1227,9 +1221,7 @@ def _is_cron_write(args: str) -> bool:
     return first != "list"
 
 
-# ---------------------------------------------------------------------------
 # Registry
-# ---------------------------------------------------------------------------
 
 WRITE_CLASSIFIERS: dict[str, Callable[[str], bool]] = {
     # Always WRITE
@@ -1282,9 +1274,7 @@ def is_write_operation(command_name: str, args: str) -> bool:
     return bool(classifier(args))
 
 
-# ---------------------------------------------------------------------------
 # Approval keyboard
-# ---------------------------------------------------------------------------
 
 
 async def _show_approval_keyboard(
@@ -1360,9 +1350,7 @@ async def _show_approval_keyboard(
     await message.reply_text(approval_message, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
-# ---------------------------------------------------------------------------
 # Dispatch approved operation
-# ---------------------------------------------------------------------------
 
 
 async def dispatch_approved_operation(op_id: str) -> None:
@@ -1404,9 +1392,7 @@ async def dispatch_approved_operation(op_id: str) -> None:
             )
 
 
-# ---------------------------------------------------------------------------
 # Decorator
-# ---------------------------------------------------------------------------
 
 
 def with_approval(
@@ -1861,9 +1847,7 @@ async def rotate_session_approval_state(
     return previous_session_id, next_session_id
 
 
-# ---------------------------------------------------------------------------
 # Agent-cmd approval (for agent loop tool calls)
-# ---------------------------------------------------------------------------
 
 _PENDING_AGENT_CMD_OPS: dict[str, dict[str, Any]] = {}
 

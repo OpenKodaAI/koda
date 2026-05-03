@@ -38,9 +38,7 @@ from typing import Any, cast
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Device resolution
-# ---------------------------------------------------------------------------
 
 
 def _resolve_device(requested: str | None = None) -> str:
@@ -63,9 +61,7 @@ def _resolve_device(requested: str | None = None) -> str:
     return "cpu"
 
 
-# ---------------------------------------------------------------------------
 # Model cache (per (model_name, device))
-# ---------------------------------------------------------------------------
 
 
 _embed_models: dict[tuple[str, str], Any] = {}
@@ -142,9 +138,7 @@ def reset_embedding_load_cache(model_name: str | None = None) -> None:
                 _embed_models.pop(key, None)
 
 
-# ---------------------------------------------------------------------------
 # Per-(model, text) LRU cache
-# ---------------------------------------------------------------------------
 
 _EMBED_CACHE_MAX_ENTRIES = int(os.environ.get("EMBEDDING_TEXT_CACHE_SIZE", "1024"))
 _embed_cache: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
@@ -193,9 +187,7 @@ def reset_embed_cache_for_tests() -> None:
         _cache_misses = 0
 
 
-# ---------------------------------------------------------------------------
 # Fallback hash-based vector
-# ---------------------------------------------------------------------------
 
 
 def fallback_text_vector(text: str, *, dim: int = 128) -> list[float]:
@@ -212,9 +204,7 @@ def fallback_text_vector(text: str, *, dim: int = 128) -> list[float]:
     return vector
 
 
-# ---------------------------------------------------------------------------
 # Public API (signature-compatible with the previous version)
-# ---------------------------------------------------------------------------
 
 
 def embed_text_with_model(text: str, model: Any | None) -> list[float]:
@@ -274,9 +264,7 @@ def embed_batch(texts: list[str], *, model_name: str) -> list[list[float]]:
     return cast(list[list[float]], results)
 
 
-# ---------------------------------------------------------------------------
 # Active embedding model resolution (DB → env → catalog default)
-# ---------------------------------------------------------------------------
 
 
 def resolve_active_embedding_repo() -> str:

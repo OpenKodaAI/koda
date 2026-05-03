@@ -281,9 +281,7 @@ def test_scenario_resolves_as_expected(scenario: Scenario):
     assert snap["spawn_mlx"] is scenario.expected_spawn_mlx, f"spawn_mlx mismatch in {scenario.label}: {snap}"
 
 
-# ---------------------------------------------------------------------------
 # Explicit overrides — every feature × every direction
-# ---------------------------------------------------------------------------
 
 
 _OVERRIDE_TABLE: list[tuple[str, str, Callable[[], object], object]] = [
@@ -331,9 +329,7 @@ def test_explicit_override_always_wins_against_auto_activation(
         assert result == expected, f"{env_key}={env_val} → expected {expected}, got {result}"
 
 
-# ---------------------------------------------------------------------------
 # Determinism — same inputs always resolve to same outputs
-# ---------------------------------------------------------------------------
 
 
 def test_resolution_is_deterministic_across_calls():

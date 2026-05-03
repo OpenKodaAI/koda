@@ -30,9 +30,7 @@ def _clean_env(monkeypatch):
     yield monkeypatch
 
 
-# ---------------------------------------------------------------------------
 # Env-explicit override always wins
-# ---------------------------------------------------------------------------
 
 
 class TestExplicitOverrideWins:
@@ -69,9 +67,7 @@ class TestExplicitOverrideWins:
             assert caps.effective_local_prefer_threshold() == 0.0
 
 
-# ---------------------------------------------------------------------------
 # Auto-optimize off → everything stays at "off" defaults
-# ---------------------------------------------------------------------------
 
 
 class TestAutoOptimizeDisabled:
@@ -188,9 +184,7 @@ class TestAutoActivationHappyPath:
             assert caps.effective_auto_spawn("llamacpp") is False
 
 
-# ---------------------------------------------------------------------------
 # Apple Silicon detection → metal_path_active flag
-# ---------------------------------------------------------------------------
 
 
 class TestMetalPath:
@@ -247,9 +241,7 @@ class TestMetalPath:
             assert caps.effective_auto_spawn("mlx") is False
 
 
-# ---------------------------------------------------------------------------
 # Snapshot endpoint — single payload the web UI consumes
-# ---------------------------------------------------------------------------
 
 
 class TestSnapshot:

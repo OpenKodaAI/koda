@@ -219,9 +219,7 @@ def _queue_manager_action_allowed(
     return False
 
 
-# ---------------------------------------------------------------------------
 # Dataclasses
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -369,9 +367,7 @@ class _RuntimeGuardrailError(Exception):
     """Runtime guardrail triggered and execution must stop safely."""
 
 
-# ---------------------------------------------------------------------------
 # Helper functions (compact tool labels, status line)
-# ---------------------------------------------------------------------------
 
 
 def _compact_tool_label(name: str, input_data: dict | None = None) -> str:
@@ -964,9 +960,7 @@ async def _record_execution_episode(
     )
 
 
-# ---------------------------------------------------------------------------
 # Module-level state
-# ---------------------------------------------------------------------------
 
 active_processes: dict[int, Any] = {}  # task_id -> local subprocess or runtime-kernel proxy
 _user_queues: dict[int, asyncio.Queue] = {}
@@ -1701,9 +1695,7 @@ def _validate_work_dir(work_dir: str | None, *, strict: bool = False) -> str:
     return DEFAULT_WORK_DIR
 
 
-# ---------------------------------------------------------------------------
 # Queue item parsing and context preparation
-# ---------------------------------------------------------------------------
 
 
 def _parse_queue_item(item: Any) -> QueueItem:
@@ -2757,9 +2749,7 @@ async def _prepare_query_context(
     )
 
 
-# ---------------------------------------------------------------------------
 # Provider execution (streaming + fallback)
-# ---------------------------------------------------------------------------
 
 
 async def _run_streaming(
@@ -3354,9 +3344,7 @@ async def _run_with_provider_fallback(
     )
 
 
-# ---------------------------------------------------------------------------
 # Agent tool loop
-# ---------------------------------------------------------------------------
 
 
 async def _run_agent_loop(
@@ -4102,9 +4090,7 @@ async def _run_agent_loop(
     return current_result
 
 
-# ---------------------------------------------------------------------------
 # Response sending
-# ---------------------------------------------------------------------------
 
 
 def _build_operational_footer(ctx: QueryContext | None, run_result: RunResult) -> str:
@@ -4437,9 +4423,7 @@ async def _send_response(
         )
 
 
-# ---------------------------------------------------------------------------
 # Post-processing
-# ---------------------------------------------------------------------------
 
 
 async def _post_process(
@@ -4653,9 +4637,7 @@ async def _post_process(
     )
 
 
-# ---------------------------------------------------------------------------
 # Main queue processor (orchestrator) — parallel dispatcher
-# ---------------------------------------------------------------------------
 
 
 async def _process_task_item(
@@ -6037,9 +6019,7 @@ async def _send_typing(chat_id: int, context: BotContext) -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 
 def build_runtime_context(application: Any, user_id: int, *, bot_override: Any | None = None) -> Any:

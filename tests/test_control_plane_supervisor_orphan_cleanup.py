@@ -44,6 +44,7 @@ from koda.control_plane.supervisor import (
 
 # ---------- _extract_health_port ----------------------------------------- #
 
+
 class TestExtractHealthPort:
     def test_returns_port_from_explicit_url(self) -> None:
         assert _extract_health_port("http://127.0.0.1:8080/health") == 8080
@@ -60,6 +61,7 @@ class TestExtractHealthPort:
 
 
 # ---------- _port_in_use ------------------------------------------------- #
+
 
 class TestPortInUse:
     def test_returns_true_when_port_is_held(self) -> None:
@@ -85,6 +87,7 @@ class TestPortInUse:
 
 # ---------- _is_koda_agent_worker --------------------------------------- #
 
+
 class TestIsKodaAgentWorker:
     @pytest.fixture
     def patched_ps(self):
@@ -93,9 +96,7 @@ class TestIsKodaAgentWorker:
         def _make(stdout: str, returncode: int = 0):
             return SimpleNamespace(stdout=stdout, returncode=returncode)
 
-        with patch(
-            "koda.control_plane.supervisor.subprocess.run"
-        ) as mock_run:
+        with patch("koda.control_plane.supervisor.subprocess.run") as mock_run:
             mock_run.return_value = _make("")
             yield mock_run
 
@@ -140,6 +141,7 @@ class TestIsKodaAgentWorker:
 
 # ---------- _kill_orphan_worker ----------------------------------------- #
 
+
 class TestKillOrphanWorker:
     @pytest.mark.asyncio
     async def test_terminates_on_sigterm(self) -> None:
@@ -163,6 +165,7 @@ class TestKillOrphanWorker:
         # SIGTERM was sent, SIGKILL was NOT.
         signals = [sig for _, sig in kill_calls if sig != 0]
         import signal as _signal
+
         assert _signal.SIGTERM in signals
         assert _signal.SIGKILL not in signals
 
@@ -184,6 +187,7 @@ class TestKillOrphanWorker:
         # We escalated (SIGTERM then SIGKILL) but the process never died.
         signals = [sig for _, sig in kill_calls if sig != 0]
         import signal as _signal
+
         assert _signal.SIGTERM in signals
         assert _signal.SIGKILL in signals
         assert result is False  # final probe still found it alive
@@ -200,6 +204,7 @@ class TestKillOrphanWorker:
 
 # ---------- _ensure_health_port_free ------------------------------------ #
 
+
 class TestEnsureHealthPortFree:
     @pytest.mark.asyncio
     async def test_no_op_when_port_already_free(self) -> None:
@@ -207,9 +212,7 @@ class TestEnsureHealthPortFree:
             "koda.control_plane.supervisor._port_in_use",
             return_value=False,
         ):
-            with patch(
-                "koda.control_plane.supervisor._pids_listening_on"
-            ) as mock_pids:
+            with patch("koda.control_plane.supervisor._pids_listening_on") as mock_pids:
                 await _ensure_health_port_free("127.0.0.1", 8080, "KODA")
                 mock_pids.assert_not_called()
 
@@ -234,9 +237,7 @@ class TestEnsureHealthPortFree:
                         new_callable=AsyncMock,
                         return_value=True,
                     ) as mock_kill:
-                        await _ensure_health_port_free(
-                            "127.0.0.1", 8080, "KODA"
-                        )
+                        await _ensure_health_port_free("127.0.0.1", 8080, "KODA")
                         mock_kill.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -254,9 +255,7 @@ class TestEnsureHealthPortFree:
                     return_value=False,
                 ):
                     with pytest.raises(OrphanResolutionError):
-                        await _ensure_health_port_free(
-                            "127.0.0.1", 8080, "KODA"
-                        )
+                        await _ensure_health_port_free("127.0.0.1", 8080, "KODA")
 
     @pytest.mark.asyncio
     async def test_raises_when_lsof_cannot_identify_holder(self) -> None:
@@ -269,9 +268,7 @@ class TestEnsureHealthPortFree:
                 return_value=[],
             ):
                 with pytest.raises(OrphanResolutionError):
-                    await _ensure_health_port_free(
-                        "127.0.0.1", 8080, "KODA"
-                    )
+                    await _ensure_health_port_free("127.0.0.1", 8080, "KODA")
 
     @pytest.mark.asyncio
     async def test_raises_when_kill_fails(self) -> None:
@@ -293,9 +290,7 @@ class TestEnsureHealthPortFree:
                         return_value=False,
                     ):
                         with pytest.raises(OrphanResolutionError):
-                            await _ensure_health_port_free(
-                                "127.0.0.1", 8080, "KODA"
-                            )
+                            await _ensure_health_port_free("127.0.0.1", 8080, "KODA")
 
     @pytest.mark.asyncio
     async def test_raises_when_port_still_in_use_after_kill(self) -> None:
@@ -320,6 +315,4 @@ class TestEnsureHealthPortFree:
                         return_value=True,
                     ):
                         with pytest.raises(OrphanResolutionError):
-                            await _ensure_health_port_free(
-                                "127.0.0.1", 8080, "KODA"
-                            )
+                            await _ensure_health_port_free("127.0.0.1", 8080, "KODA")

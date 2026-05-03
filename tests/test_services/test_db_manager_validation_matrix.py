@@ -210,6 +210,7 @@ def test_unicode_lookalikes_pass_through(dbm: DBManager) -> None:
 
 # ----- Empty / whitespace-only --------------------------------------------
 
+
 @pytest.mark.parametrize("sql", ["", "   ", "\n\n", "\t"])
 def test_empty_or_whitespace_only_blocked(dbm: DBManager, sql: str) -> None:
     err = dbm._validate_query(sql)
@@ -217,6 +218,7 @@ def test_empty_or_whitespace_only_blocked(dbm: DBManager, sql: str) -> None:
 
 
 # ----- Aggregate sanity ----------------------------------------------------
+
 
 def _all_kw_with_separators() -> Sequence[str]:
     seps = [" ", "\t", "\n", "  "]

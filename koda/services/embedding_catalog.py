@@ -76,9 +76,7 @@ class EmbeddingModelDefinition:
     to avoid breaking JSON consumers that still read the field."""
 
 
-# ---------------------------------------------------------------------------
 # Catalog
-# ---------------------------------------------------------------------------
 #
 # The picks below are tuned for Koda's actual workload — multilingual
 # (PT-BR + EN heavy), short queries / docs, real-time retrieval. Numbers
@@ -209,9 +207,7 @@ _CATALOG: tuple[EmbeddingModelDefinition, ...] = (
 CATALOG: dict[str, EmbeddingModelDefinition] = {model.id: model for model in _CATALOG}
 
 
-# ---------------------------------------------------------------------------
 # Filesystem helpers — answer "is this model already on disk?"
-# ---------------------------------------------------------------------------
 
 
 def _hf_cache_dir() -> Path:
@@ -282,9 +278,7 @@ def model_disk_bytes(model_id: str) -> int:
     return total
 
 
-# ---------------------------------------------------------------------------
 # Public catalog payload — what the API endpoint returns
-# ---------------------------------------------------------------------------
 
 
 def model_payload(model_id: str) -> dict[str, Any]:
@@ -305,9 +299,7 @@ def catalog_payload(active_model_id: str | None = None) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
 # Deletion — wipe a downloaded model's HF cache directory
-# ---------------------------------------------------------------------------
 
 
 def delete_model(model_id: str) -> dict[str, Any]:

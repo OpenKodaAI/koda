@@ -79,6 +79,7 @@ def _native_runner(provider: str) -> ModuleType:
         raise KeyError(f"No native runner registered for provider {provider!r}")
     return importlib.import_module(module_path)
 
+
 _agent_id_label = AGENT_ID or "default"
 
 _COMMON_RETRY_PATTERN = re.compile(

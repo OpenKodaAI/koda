@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 _SIMILARITY_THRESHOLD = 0.35
 
-# ---------------------------------------------------------------------------
 # Embedding helpers
-# ---------------------------------------------------------------------------
 
 _embed_model: Any = None
 _embed_model_available: bool | None = None
@@ -80,9 +78,7 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     return [_tfidf_vector(t) for t in texts]
 
 
-# ---------------------------------------------------------------------------
 # SkillEmbeddingIndex
-# ---------------------------------------------------------------------------
 
 
 class SkillEmbeddingIndex:
@@ -252,9 +248,7 @@ class SkillEmbeddingIndex:
         return pairs
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 _shared_index: SkillEmbeddingIndex | None = None
 

@@ -47,9 +47,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 
-# ---------------------------------------------------------------------------
 # CORPUS — domain-specific to Koda's actual use case
-# ---------------------------------------------------------------------------
 
 # Each entry is (a, b) — both sides should embed close together.
 PARAPHRASE_PAIRS_PT: list[tuple[str, str]] = [
@@ -356,9 +354,7 @@ RANKING_CORPUS: list[RankingCase] = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # Scoring helpers
-# ---------------------------------------------------------------------------
 
 
 def cosine(a: Any, b: Any) -> float:
@@ -501,9 +497,7 @@ def reranker_uplift(
     )
 
 
-# ---------------------------------------------------------------------------
 # Performance helpers
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -576,9 +570,7 @@ def measure_perf(model: Any, prep: Any, sample_text: str = "como deployar servi�
     )
 
 
-# ---------------------------------------------------------------------------
 # Model loading
-# ---------------------------------------------------------------------------
 
 
 def load_model(model_name: str, device: str) -> tuple[Any, Any]:
@@ -613,9 +605,7 @@ def load_reranker(device: str) -> Any:
     return CrossEncoder("BAAI/bge-reranker-base", device=device)
 
 
-# ---------------------------------------------------------------------------
 # Driver
-# ---------------------------------------------------------------------------
 
 
 @dataclass

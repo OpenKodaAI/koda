@@ -22,9 +22,7 @@ import pytest
 
 from koda.utils.tts import AVAILABLE_VOICES, VoiceConfig, synthesize_speech
 
-# ---------------------------------------------------------------------------
 # AVAILABLE_VOICES — contract surface
-# ---------------------------------------------------------------------------
 
 
 _EXPECTED_VOICE_IDS = {"alice", "bill", "brian", "pf_dora", "pm_alex", "pm_santa"}
@@ -67,9 +65,7 @@ def test_voice_config_namedtuple_shape() -> None:
     assert hasattr(cfg, "fallback_kokoro")
 
 
-# ---------------------------------------------------------------------------
 # synthesize_speech — routing
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

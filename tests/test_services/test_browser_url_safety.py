@@ -18,9 +18,7 @@ import pytest
 
 from koda.services.browser_manager import _check_browser_url_safety, _maybe_await
 
-# ---------------------------------------------------------------------------
 # data: / about: schemes are always allowed
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -37,9 +35,7 @@ def test_data_about_schemes_always_allowed(url: str) -> None:
     assert _check_browser_url_safety(url, allow_private=True) is None
 
 
-# ---------------------------------------------------------------------------
 # Non-http(s) schemes are rejected when allow_private (with explicit reason)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -59,9 +55,7 @@ def test_non_http_schemes_rejected_in_private_mode(url: str) -> None:
     assert "http, https, data, and about" in err.lower()
 
 
-# ---------------------------------------------------------------------------
 # Missing hostname rejected in private mode
-# ---------------------------------------------------------------------------
 
 
 def test_missing_hostname_rejected_in_private_mode() -> None:
@@ -70,9 +64,7 @@ def test_missing_hostname_rejected_in_private_mode() -> None:
     assert "hostname" in err.lower()
 
 
-# ---------------------------------------------------------------------------
 # Public URLs delegate to the upstream _check_url_safety
-# ---------------------------------------------------------------------------
 
 
 def test_public_url_delegates_to_check_url_safety_when_not_allow_private() -> None:
@@ -148,9 +140,7 @@ def test_dns_resolution_failure_returns_clear_error() -> None:
     assert "nonexistent.invalid" in out
 
 
-# ---------------------------------------------------------------------------
 # _maybe_await — pure awaitable detection helper
-# ---------------------------------------------------------------------------
 
 
 async def test_maybe_await_does_nothing_for_non_awaitable() -> None:

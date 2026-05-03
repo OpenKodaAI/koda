@@ -46,9 +46,7 @@ class _FakeStore:
         return list(self._processes.get((task_id, env_id or 0), []))
 
 
-# ---------------------------------------------------------------------------
 # No stale envs → no-op
-# ---------------------------------------------------------------------------
 
 
 def test_no_stale_environments_returns_empty_list() -> None:
@@ -67,9 +65,7 @@ def test_recover_calls_list_stale_with_iso_timestamp() -> None:
     assert cutoff.endswith("+00:00") or cutoff.endswith("Z")
 
 
-# ---------------------------------------------------------------------------
 # reattach: live processes present
-# ---------------------------------------------------------------------------
 
 
 def test_recover_reattach_when_at_least_one_process_alive() -> None:
@@ -84,9 +80,7 @@ def test_recover_reattach_when_at_least_one_process_alive() -> None:
     )
     rm = RecoveryManager(store)  # type: ignore[arg-type]
     out = rm.recover_stale()
-    assert out == [
-        {"env_id": 100, "task_id": 1, "action": "reattach", "alive_process_count": 1}
-    ]
+    assert out == [{"env_id": 100, "task_id": 1, "action": "reattach", "alive_process_count": 1}]
 
 
 def test_recover_reattach_counts_all_alive_processes() -> None:
@@ -132,9 +126,7 @@ def test_recover_reattach_takes_precedence_over_checkpoint() -> None:
     assert "checkpoint_id" not in out[0]
 
 
-# ---------------------------------------------------------------------------
 # reconstruct: no live processes but a checkpoint exists
-# ---------------------------------------------------------------------------
 
 
 def test_recover_reconstruct_when_only_checkpoint_present() -> None:
@@ -145,9 +137,7 @@ def test_recover_reconstruct_when_only_checkpoint_present() -> None:
     )
     rm = RecoveryManager(store)  # type: ignore[arg-type]
     out = rm.recover_stale()
-    assert out == [
-        {"env_id": 50, "task_id": 5, "action": "reconstruct", "checkpoint_id": 9999}
-    ]
+    assert out == [{"env_id": 50, "task_id": 5, "action": "reconstruct", "checkpoint_id": 9999}]
 
 
 def test_recover_reconstruct_when_no_processes_recorded() -> None:
@@ -163,9 +153,7 @@ def test_recover_reconstruct_when_no_processes_recorded() -> None:
     assert out[0]["checkpoint_id"] == 1234
 
 
-# ---------------------------------------------------------------------------
 # mark_recoverable_failed: neither processes nor checkpoint
-# ---------------------------------------------------------------------------
 
 
 def test_recover_marks_recoverable_failed_when_nothing_to_recover() -> None:
@@ -189,9 +177,7 @@ def test_recover_marks_recoverable_failed_when_only_dead_processes() -> None:
     assert out[0]["action"] == "mark_recoverable_failed"
 
 
-# ---------------------------------------------------------------------------
 # Multiple stale envs in one sweep
-# ---------------------------------------------------------------------------
 
 
 def test_recover_handles_mix_of_actions_in_one_sweep() -> None:
@@ -203,9 +189,9 @@ def test_recover_handles_mix_of_actions_in_one_sweep() -> None:
         ],
         checkpoints={20: {"id": 200}},
         processes={
-            (10, 1): [{"pid": 1, "status": "running"}],   # reattach
-            (20, 2): [{"pid": 2, "status": "exited"}],    # checkpoint → reconstruct
-            (30, 3): [],                                  # nothing → mark failed
+            (10, 1): [{"pid": 1, "status": "running"}],  # reattach
+            (20, 2): [{"pid": 2, "status": "exited"}],  # checkpoint → reconstruct
+            (30, 3): [],  # nothing → mark failed
         },
     )
     rm = RecoveryManager(store)  # type: ignore[arg-type]
@@ -231,9 +217,7 @@ def test_recover_preserves_order_from_list_stale_environments() -> None:
     assert [item["env_id"] for item in out] == [99, 50, 1]
 
 
-# ---------------------------------------------------------------------------
 # Edge: env id / task_id coercion
-# ---------------------------------------------------------------------------
 
 
 def test_recover_coerces_str_env_and_task_ids_to_int() -> None:

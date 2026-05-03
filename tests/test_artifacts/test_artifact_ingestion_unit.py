@@ -21,9 +21,7 @@ from koda.services.artifact_ingestion import (
     detect_artifact_kind,
 )
 
-# ---------------------------------------------------------------------------
 # detect_artifact_kind — MIME wins
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -59,9 +57,7 @@ def test_detect_kind_by_mime(mime: str, expected: ArtifactKind) -> None:
     assert detect_artifact_kind(mime_type=mime) == expected
 
 
-# ---------------------------------------------------------------------------
 # detect_artifact_kind — extension fallback when MIME missing
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -98,9 +94,7 @@ def test_detect_kind_by_extension_fallback(path: str, expected: ArtifactKind) ->
     assert detect_artifact_kind(path=path, mime_type="") == expected
 
 
-# ---------------------------------------------------------------------------
 # detect_artifact_kind — URL when nothing else available
-# ---------------------------------------------------------------------------
 
 
 def test_detect_kind_url_only_returns_url() -> None:
@@ -112,9 +106,7 @@ def test_detect_kind_url_with_path_prefers_extension() -> None:
     assert detect_artifact_kind(path="/tmp/file.pdf", url="https://x") == ArtifactKind.PDF
 
 
-# ---------------------------------------------------------------------------
 # detect_artifact_kind — unknown / pathless / mimeless
-# ---------------------------------------------------------------------------
 
 
 def test_detect_kind_unknown_returns_unknown() -> None:
@@ -135,9 +127,7 @@ def test_detect_kind_html_mime_overrides_pdf_extension() -> None:
     assert detect_artifact_kind(path="/tmp/disguised.pdf", mime_type="text/html") == ArtifactKind.HTML
 
 
-# ---------------------------------------------------------------------------
 # ArtifactRef.cache_identity — scope-leak prevention
-# ---------------------------------------------------------------------------
 
 
 def _ref(**overrides: Any) -> ArtifactRef:

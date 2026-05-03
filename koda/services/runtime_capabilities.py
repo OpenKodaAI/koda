@@ -94,9 +94,7 @@ def is_metal_path_active() -> bool:
     return LLAMACPP_ENABLED or MLX_ENABLED
 
 
-# ---------------------------------------------------------------------------
 # Feature-level effective state
-# ---------------------------------------------------------------------------
 
 
 def effective_rerank_enabled() -> bool:

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_integration_manager(monkeypatch):
@@ -83,9 +81,7 @@ def _make_integration_manager(monkeypatch):
     return manager, integration_rows, env_fields, secrets
 
 
-# ---------------------------------------------------------------------------
 # Phase 1A — Verified status truthfulness
-# ---------------------------------------------------------------------------
 
 
 class TestVerifiedStatusTruthfulness:
@@ -129,9 +125,7 @@ class TestVerifiedStatusTruthfulness:
         assert result["status"] == "not_configured"
 
 
-# ---------------------------------------------------------------------------
 # Phase 1B — S3 client consolidation
-# ---------------------------------------------------------------------------
 
 
 class TestS3ClientConsolidation:
@@ -202,9 +196,7 @@ class TestS3ClientConsolidation:
         assert call_kwargs["region_name"] == "eu-west-1"
 
 
-# ---------------------------------------------------------------------------
 # Phase 2 — AWS verification with STS
-# ---------------------------------------------------------------------------
 
 
 class TestAWSVerification:
@@ -321,9 +313,7 @@ class TestAWSVerification:
         assert "InvalidClientTokenId" in result["last_error"]
 
 
-# ---------------------------------------------------------------------------
 # Phase 4 — GitHub / GitLab verification and Postgres SSH secrets
-# ---------------------------------------------------------------------------
 
 
 class TestGitHubVerification:
@@ -414,9 +404,7 @@ class TestLegacyPostgresCredentials:
         assert "postgres" not in manager_mod._GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES
 
 
-# ---------------------------------------------------------------------------
 # Phase 3 — GWS service account key as secret
-# ---------------------------------------------------------------------------
 
 
 class TestGWSVerification:
@@ -509,9 +497,7 @@ class TestGWSVerification:
         assert "missing" in result["last_error"]
 
 
-# ---------------------------------------------------------------------------
 # Phase 5 — Jira / Confluence timeout protection
-# ---------------------------------------------------------------------------
 
 
 class TestJiraConfluenceTimeout:

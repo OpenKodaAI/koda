@@ -12,9 +12,7 @@ from koda.skills._registry import SkillRegistry, _build_skill_from_dict
 SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "koda" / "skills"
 
 
-# ---------------------------------------------------------------------------
 # normalize_custom_skills
-# ---------------------------------------------------------------------------
 
 
 def test_normalize_valid_skill() -> None:
@@ -85,9 +83,7 @@ def test_normalize_non_list() -> None:
     assert normalize_custom_skills(42) == []
 
 
-# ---------------------------------------------------------------------------
 # _build_skill_from_dict
-# ---------------------------------------------------------------------------
 
 
 def test_build_from_dict_full() -> None:
@@ -148,9 +144,7 @@ def test_build_from_dict_uses_instruction_as_summary() -> None:
     assert skill.awareness_summary == "Helps with database migrations"
 
 
-# ---------------------------------------------------------------------------
 # merge_agent_skills
-# ---------------------------------------------------------------------------
 
 
 def test_merge_adds_custom_skills() -> None:

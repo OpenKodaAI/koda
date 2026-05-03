@@ -40,9 +40,7 @@ logger = get_logger(__name__)
 IsolationKind = Literal["native", "bwrap", "sandbox-exec", "docker"]
 
 
-# ---------------------------------------------------------------------------
 # Constraints
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,9 +95,7 @@ class IsolationConstraints:
         )
 
 
-# ---------------------------------------------------------------------------
 # Strategy protocol
-# ---------------------------------------------------------------------------
 
 
 class IsolationStrategy(Protocol):
@@ -121,9 +117,7 @@ class IsolationStrategy(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # Implementations
-# ---------------------------------------------------------------------------
 
 
 class NativeIsolation:
@@ -339,9 +333,7 @@ class DockerIsolation:
         return argv, {}
 
 
-# ---------------------------------------------------------------------------
 # Factory
-# ---------------------------------------------------------------------------
 
 
 def select_isolation_strategy(
@@ -374,9 +366,7 @@ def select_isolation_strategy(
     return candidates["native"]
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 # Env names that must not propagate into the sandbox even if a custom server

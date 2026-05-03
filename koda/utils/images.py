@@ -79,9 +79,7 @@ def cleanup_previous_images(user_data: dict) -> None:
                 Path(p).unlink(missing_ok=True)
 
 
-# ---------------------------------------------------------------------------
 # Periodic cleanup of stale temp files
-# ---------------------------------------------------------------------------
 
 _CLEANUP_INTERVAL_SEC = 1800  # 30 minutes
 _CLEANUP_MAX_AGE_SEC = 3600  # 1 hour

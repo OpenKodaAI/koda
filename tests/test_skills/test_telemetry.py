@@ -14,9 +14,7 @@ from koda.skills._telemetry import (
     emit_skill_selection,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _skill(sid: str = "tdd") -> SkillDefinition:
@@ -41,9 +39,7 @@ def _match(
     )
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 class TestEmitSkillSelection:
@@ -110,9 +106,7 @@ class TestEmitSkillReload:
         assert event.details["modified"] == ["old-skill"]
 
 
-# ---------------------------------------------------------------------------
 # Format marker extraction
-# ---------------------------------------------------------------------------
 
 
 class TestExtractFormatMarkers:
@@ -142,9 +136,7 @@ class TestExtractFormatMarkers:
         assert _extract_format_markers("just write a summary") == []
 
 
-# ---------------------------------------------------------------------------
 # Skill compliance emission
-# ---------------------------------------------------------------------------
 
 
 class TestEmitSkillCompliance:

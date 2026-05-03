@@ -28,9 +28,7 @@ from koda.logging_config import get_logger
 log = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Protocol (structural subtyping — no inheritance required)
-# ---------------------------------------------------------------------------
 
 
 class MessageBridge(Protocol):
@@ -63,9 +61,7 @@ class MessageBridge(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # Telegram implementation (wraps the existing context.bot / update.message)
-# ---------------------------------------------------------------------------
 
 
 class TelegramMessageBridge:
@@ -113,9 +109,7 @@ class TelegramMessageBridge:
         return await self._bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, **kwargs)
 
 
-# ---------------------------------------------------------------------------
 # Generic adapter bridge (routes through ChannelAdapter methods)
-# ---------------------------------------------------------------------------
 
 
 class AdapterMessageBridge:

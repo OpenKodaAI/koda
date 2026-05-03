@@ -14,9 +14,7 @@ from koda.skills._composer import (
 from koda.skills._registry import SkillDefinition
 from koda.skills._selector import SkillMatch
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _skill(
@@ -71,9 +69,7 @@ def _registry_from_skills(*skills: SkillDefinition) -> MagicMock:
     return mock
 
 
-# ---------------------------------------------------------------------------
 # 2-tier progressive disclosure tests
-# ---------------------------------------------------------------------------
 
 
 class TestTwoTierDisclosure:
@@ -125,9 +121,7 @@ class TestTwoTierDisclosure:
         assert 'mode="active"' in result
 
 
-# ---------------------------------------------------------------------------
 # Output requirements tests
-# ---------------------------------------------------------------------------
 
 
 class TestOutputRequirements:
@@ -158,9 +152,7 @@ class TestOutputRequirements:
         assert result == ""
 
 
-# ---------------------------------------------------------------------------
 # Token budget tests
-# ---------------------------------------------------------------------------
 
 
 class TestTokenBudget:
@@ -184,9 +176,7 @@ class TestTokenBudget:
         assert 'name="Low"' not in result
 
 
-# ---------------------------------------------------------------------------
 # XML wrapping tests
-# ---------------------------------------------------------------------------
 
 
 class TestXMLWrapping:
@@ -206,9 +196,7 @@ class TestXMLWrapping:
         assert 'confidence="85%"' in result
 
 
-# ---------------------------------------------------------------------------
 # Graph resolution tests
-# ---------------------------------------------------------------------------
 
 
 class TestResolveGraph:
@@ -241,9 +229,7 @@ class TestResolveGraph:
         assert "b" not in resolved_ids
 
 
-# ---------------------------------------------------------------------------
 # Approach extraction tests
-# ---------------------------------------------------------------------------
 
 
 class TestApproachExtraction:
@@ -274,9 +260,7 @@ class TestApproachExtraction:
         assert "Algo." not in result
 
 
-# ---------------------------------------------------------------------------
 # Edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:

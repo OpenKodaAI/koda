@@ -19,9 +19,7 @@ import pytest
 
 import koda.services.metrics as metrics
 
-# ---------------------------------------------------------------------------
 # Module surface — all advertised RUNTIME_* metrics exist
-# ---------------------------------------------------------------------------
 
 
 _RUNTIME_NAMES = (
@@ -53,9 +51,7 @@ def test_runtime_metric_exists(name: str) -> None:
     assert getattr(metrics, name) is not None
 
 
-# ---------------------------------------------------------------------------
 # Module surface — agent_id-labeled metrics
-# ---------------------------------------------------------------------------
 
 
 _AGENT_LABELED_NAMES = (
@@ -76,9 +72,7 @@ def test_agent_metric_exists(name: str) -> None:
     assert hasattr(metrics, name), f"missing labeled metric: {name}"
 
 
-# ---------------------------------------------------------------------------
 # Counter increment behavior
-# ---------------------------------------------------------------------------
 
 
 def _value(metric, **labels: str) -> float:
@@ -133,9 +127,7 @@ def test_runtime_guardrail_hits_per_label() -> None:
         assert after_b == before_b
 
 
-# ---------------------------------------------------------------------------
 # Gauge set semantics
-# ---------------------------------------------------------------------------
 
 
 def test_runtime_active_envs_set() -> None:
@@ -167,9 +159,7 @@ def test_runtime_phase_total_per_phase_label() -> None:
         assert prov_v == 1.0
 
 
-# ---------------------------------------------------------------------------
 # Histogram observation behavior
-# ---------------------------------------------------------------------------
 
 
 def test_request_duration_histogram_observe_succeeds() -> None:
@@ -195,9 +185,7 @@ def test_cost_per_query_histogram_observe_succeeds() -> None:
         child.observe(v)
 
 
-# ---------------------------------------------------------------------------
 # Fallback contract — _MetricFactory has the full surface
-# ---------------------------------------------------------------------------
 
 
 def test_fallback_factory_contract_inline() -> None:
@@ -242,9 +230,7 @@ def test_fallback_factory_contract_inline() -> None:
     child.set(99)
 
 
-# ---------------------------------------------------------------------------
 # Naming convention — every metric name is koda_*
-# ---------------------------------------------------------------------------
 
 
 def test_runtime_metrics_use_koda_prefix() -> None:

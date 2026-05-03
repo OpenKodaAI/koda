@@ -42,9 +42,7 @@ class VoiceDecision:
         return cls(True, plain, "speak")
 
 
-# ---------------------------------------------------------------------------
 # Audio gating
-# ---------------------------------------------------------------------------
 
 
 def test_does_not_speak_when_user_audio_disabled() -> None:
@@ -58,9 +56,7 @@ def test_does_not_speak_when_tts_globally_disabled() -> None:
     assert d.should_call_tts is False
 
 
-# ---------------------------------------------------------------------------
 # is_mostly_code gate
-# ---------------------------------------------------------------------------
 
 
 def test_speaks_for_plain_prose() -> None:
@@ -90,9 +86,7 @@ def test_speaks_when_response_has_minor_code_block() -> None:
     assert "```" not in d.cleaned
 
 
-# ---------------------------------------------------------------------------
 # strip_for_tts emptiness gate
-# ---------------------------------------------------------------------------
 
 
 def test_skips_when_only_markdown_formatting() -> None:
@@ -132,9 +126,7 @@ def test_speaks_link_as_text_only() -> None:
     assert "a documentação" in d.cleaned
 
 
-# ---------------------------------------------------------------------------
 # Hardening: forbidden tokens in cleaned text
-# ---------------------------------------------------------------------------
 
 
 _FORBIDDEN_IN_TTS_INPUT = ("```", "**", "&amp;", "<script", "https://", "http://")
@@ -154,7 +146,7 @@ def test_real_world_response_has_no_forbidden_tokens() -> None:
 
 def test_long_response_truncated_at_sentence_boundary() -> None:
     """Long response is truncated by strip_for_tts at TTS_MAX_CHARS."""
-    response = ("Esta é uma frase. " * 1000)
+    response = "Esta é uma frase. " * 1000
     d = VoiceDecision.from_response(response, audio_enabled=True, tts_enabled=True)
     assert d.should_call_tts is True
     # Truncation pass keeps it ≤ TTS_MAX_CHARS (4000).

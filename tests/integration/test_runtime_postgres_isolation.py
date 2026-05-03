@@ -100,9 +100,11 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
 def _build_store(agent_id: str):
     """Build a fresh PostgresRuntimeStore bound to the given agent_id."""
     import koda.config as config_mod
+
     config_mod.AGENT_ID = agent_id  # patches the imported constant
     # Reload the postgres_store module so its agent_scope helper re-reads AGENT_ID.
     import koda.services.runtime.postgres_store as ps_mod
+
     importlib.reload(ps_mod)
     return ps_mod.PostgresRuntimeStore()
 
@@ -131,9 +133,7 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int, user_id: int = 10
         await conn.close()
 
 
-# ---------------------------------------------------------------------------
 # add_event monotonic seq + cross-agent isolation
-# ---------------------------------------------------------------------------
 
 
 async def test_add_event_assigns_monotonic_seq_within_task(runtime_db: str) -> None:
@@ -209,9 +209,7 @@ async def test_list_events_empty_when_no_events(runtime_db: str) -> None:
     assert store.list_events(task_id=99) == []
 
 
-# ---------------------------------------------------------------------------
 # create_environment + cross-agent isolation
-# ---------------------------------------------------------------------------
 
 
 async def test_create_environment_writes_row_and_updates_task(runtime_db: str) -> None:
@@ -246,8 +244,9 @@ async def test_create_environment_writes_row_and_updates_task(runtime_db: str) -
     conn = await asyncpg.connect(runtime_db)
     try:
         row = await conn.fetchrow(
-            'SELECT env_id, current_phase, classification FROM knowledge_v2.tasks WHERE agent_id = $1 AND id = $2',
-            "agent_a", 1,
+            "SELECT env_id, current_phase, classification FROM knowledge_v2.tasks WHERE agent_id = $1 AND id = $2",
+            "agent_a",
+            1,
         )
     finally:
         await conn.close()
@@ -327,18 +326,14 @@ async def test_list_environments_scoped_per_agent(runtime_db: str) -> None:
     assert {e["task_id"] for e in b_envs} == {2}
 
 
-# ---------------------------------------------------------------------------
 # Port allocation persistence + cross-agent uniqueness
-# ---------------------------------------------------------------------------
 
 
 async def test_port_allocation_round_trip(runtime_db: str) -> None:
     await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
     store = _build_store("agent_a")
 
-    aid = store.add_port_allocation(
-        task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5900
-    )
+    aid = store.add_port_allocation(task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5900)
     assert aid > 0
     rows = store.list_port_allocations(task_id=1)
     assert len(rows) == 1
@@ -353,9 +348,7 @@ async def test_port_allocation_round_trip(runtime_db: str) -> None:
 async def test_port_allocation_release_persists(runtime_db: str) -> None:
     await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
     store = _build_store("agent_a")
-    aid = store.add_port_allocation(
-        task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5910
-    )
+    aid = store.add_port_allocation(task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5910)
     store.update_port_allocation(aid, status="released", released=True)
     rows = store.list_port_allocations(task_id=1)
     assert rows[0]["status"] == "released"
@@ -374,17 +367,13 @@ async def test_port_allocation_isolated_per_agent(runtime_db: str) -> None:
     await _seed_task(runtime_db, agent_id="agent_b", task_id=2)
 
     store_a = _build_store("agent_a")
-    store_a.add_port_allocation(
-        task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5920
-    )
+    store_a.add_port_allocation(task_id=1, env_id=None, purpose="vnc", host="127.0.0.1", port=5920)
     assert store_a.is_port_allocated("127.0.0.1", 5920) is True
 
     store_b = _build_store("agent_b")
     # From agent_b's scope, the port appears free even though agent_a has it.
     assert store_b.is_port_allocated("127.0.0.1", 5920) is False
-    store_b.add_port_allocation(
-        task_id=2, env_id=None, purpose="vnc", host="127.0.0.1", port=5920
-    )
+    store_b.add_port_allocation(task_id=2, env_id=None, purpose="vnc", host="127.0.0.1", port=5920)
     # agent_b list shows only its own allocation.
     a_rows = store_a.list_port_allocations(task_id=1)
     b_rows = store_b.list_port_allocations(task_id=2)
@@ -392,9 +381,7 @@ async def test_port_allocation_isolated_per_agent(runtime_db: str) -> None:
     assert len(b_rows) == 1
 
 
-# ---------------------------------------------------------------------------
 # Index sanity (EXPLAIN) — list_events hot path uses idx_runtime_events_task
-# ---------------------------------------------------------------------------
 
 
 async def test_runtime_events_query_uses_index(runtime_db: str) -> None:
@@ -415,7 +402,9 @@ async def test_runtime_events_query_uses_index(runtime_db: str) -> None:
             WHERE agent_id = $1 AND task_id = $2 AND id > $3
             ORDER BY id ASC
             """,
-            "agent_a", 1, 0,
+            "agent_a",
+            1,
+            0,
         )
     finally:
         await conn.close()

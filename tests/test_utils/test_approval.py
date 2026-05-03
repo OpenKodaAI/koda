@@ -39,9 +39,7 @@ def _reset_contextvar():
     _execution_approved.reset(token)
 
 
-# ---------------------------------------------------------------------------
 # TestIsWriteOperation — classifier tests
-# ---------------------------------------------------------------------------
 
 
 class TestIsWriteOperation:
@@ -238,9 +236,7 @@ class TestIsWriteOperation:
         assert is_write_operation("unknown_cmd", "anything") is True
 
 
-# ---------------------------------------------------------------------------
 # TestWithApprovalDecorator
-# ---------------------------------------------------------------------------
 
 
 class TestWithApprovalDecorator:
@@ -401,9 +397,7 @@ class TestWithApprovalDecorator:
         _PENDING_OPS.clear()
 
 
-# ---------------------------------------------------------------------------
 # TestDispatchApprovedOperation
-# ---------------------------------------------------------------------------
 
 
 class TestDispatchApprovedOperation:
@@ -515,9 +509,7 @@ class TestDispatchApprovedOperation:
         assert any(grant["grant_id"] in _APPROVAL_GRANTS for grant in grants)
 
 
-# ---------------------------------------------------------------------------
 # TestResetApprovalState
-# ---------------------------------------------------------------------------
 
 
 class TestResetApprovalState:
@@ -590,9 +582,7 @@ class TestScopedApprovalRevocation:
             assert grant["grant_id"] not in _APPROVAL_GRANTS
 
 
-# ---------------------------------------------------------------------------
 # TestOpIdEntropy
-# ---------------------------------------------------------------------------
 
 
 class TestOpIdEntropy:
@@ -649,9 +639,7 @@ class TestOpIdEntropy:
         _PENDING_OPS.clear()
 
 
-# ---------------------------------------------------------------------------
 # TestPendingOpsLimit
-# ---------------------------------------------------------------------------
 
 
 class TestPendingOpsLimit:
@@ -727,9 +715,7 @@ class TestPendingOpsLimit:
         _PENDING_OPS.clear()
 
 
-# ---------------------------------------------------------------------------
 # TestEnvPrintenvClassification
-# ---------------------------------------------------------------------------
 
 
 class TestEnvPrintenvClassification:
@@ -745,9 +731,7 @@ class TestEnvPrintenvClassification:
         assert is_write_operation("shell", "set") is True
 
 
-# ---------------------------------------------------------------------------
 # TestAgentCmdApproval — agent-cmd approval infrastructure
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -945,9 +929,7 @@ class TestAgentCmdApproval:
         assert third is None
 
 
-# ---------------------------------------------------------------------------
 # TestPeriodicCleanup — background approval cleanup
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -980,9 +962,7 @@ async def test_periodic_cleanup_removes_stale_ops():
     assert "stale_agent_test" not in _PENDING_AGENT_CMD_OPS
 
 
-# ---------------------------------------------------------------------------
 # TestApprovalEdgeCases — race conditions, timeout, cross-user
-# ---------------------------------------------------------------------------
 
 
 class TestApprovalEdgeCases:

@@ -54,9 +54,7 @@ def _write_raw(data: dict[str, Any]) -> None:
         log.warning("pending_approvals: failed to write %s", fp, exc_info=True)
 
 
-# ------------------------------------------------------------------
 # Public API
-# ------------------------------------------------------------------
 
 
 async def save_pending_op(

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
 # Write query validation
-# ---------------------------------------------------------------------------
 
 
 class TestWriteValidation:
@@ -82,9 +80,7 @@ class TestWriteValidation:
         assert _validate_write_query("   ") != ""
 
 
-# ---------------------------------------------------------------------------
 # WHERE clause enforcement
-# ---------------------------------------------------------------------------
 
 
 class TestWhereRequired:
@@ -114,9 +110,7 @@ class TestWhereRequired:
         assert _check_where_required("INSERT INTO users (name) VALUES ('x')") is None
 
 
-# ---------------------------------------------------------------------------
 # Affected rows parsing
-# ---------------------------------------------------------------------------
 
 
 class TestParseAffectedRows:
@@ -146,9 +140,7 @@ class TestParseAffectedRows:
         assert _parse_affected_rows("") == 0
 
 
-# ---------------------------------------------------------------------------
 # Tool prompt
-# ---------------------------------------------------------------------------
 
 
 class TestDbWritePrompt:

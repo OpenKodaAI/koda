@@ -7,9 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-# ---------------------------------------------------------------------------
 # Multi-token auth tests
-# ---------------------------------------------------------------------------
 
 
 def _make_request(token: str | None) -> MagicMock:
@@ -101,9 +99,7 @@ class TestMultiTokenAuth:
             assert result.status == 401
 
 
-# ---------------------------------------------------------------------------
 # Crypto rotation tests
-# ---------------------------------------------------------------------------
 
 
 class TestCryptoRotation:

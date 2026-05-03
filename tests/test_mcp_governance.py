@@ -12,9 +12,7 @@ from koda.services.mcp_bridge import (
 )
 from koda.services.mcp_client import McpToolAnnotations, McpToolDefinition
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_instance(
@@ -31,9 +29,7 @@ def _make_instance(
     return inst
 
 
-# ---------------------------------------------------------------------------
 # Task 1 – prompt generation tests
-# ---------------------------------------------------------------------------
 
 
 class TestMcpPromptGeneration:
@@ -222,9 +218,7 @@ class TestMcpPromptGeneration:
         assert "mcp_github__list_repos" in result
 
 
-# ---------------------------------------------------------------------------
 # Task 2 – policy classification tests
-# ---------------------------------------------------------------------------
 
 
 class TestMcpPolicyClassification:
