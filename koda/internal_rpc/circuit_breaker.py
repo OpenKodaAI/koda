@@ -111,11 +111,12 @@ class CircuitBreaker:
         cool-down expires, exactly one half-open call is permitted —
         success closes the breaker, failure re-opens it.
         """
-        await self._maybe_transition_after_cooldown()
         if self._state.state is State.OPEN:
-            raise CircuitOpenError(
-                f"circuit_breaker_open:{self.name}; cool down for ~{self._cooldown_remaining():.1f}s before retrying"
-            )
+            await self._maybe_transition_after_cooldown()
+            if self._state.state is State.OPEN:
+                raise CircuitOpenError(
+                    f"circuit_breaker_open:{self.name}; cool down for ~{self._cooldown_remaining():.1f}s before retrying"
+                )
         try:
             result = await fn(*args, **kwargs)
         except Exception:
@@ -126,6 +127,8 @@ class CircuitBreaker:
             return result
 
     async def _record_success(self) -> None:
+        if self._state.state is State.CLOSED and not self._state.failures_window:
+            return  # Fast path for healthy closed state
         async with self._lock:
             if self._state.state is State.HALF_OPEN:
                 log.info("circuit_breaker_closed_after_half_open_success", name=self.name)
@@ -158,6 +161,8 @@ class CircuitBreaker:
         )
 
     async def _maybe_transition_after_cooldown(self) -> None:
+        if self._state.state is not State.OPEN:
+            return
         async with self._lock:
             if self._state.state is not State.OPEN:
                 return

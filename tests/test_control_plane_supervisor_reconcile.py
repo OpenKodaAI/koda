@@ -112,9 +112,7 @@ class _FakeManager:
         self.publish_calls.append(agent_id)
         return {"version": 1}
 
-    def build_runtime_snapshot(
-        self, agent_id: str, version: int | None = None
-    ) -> RuntimeSnapshot:
+    def build_runtime_snapshot(self, agent_id: str, version: int | None = None) -> RuntimeSnapshot:
         snap = self._snapshots[agent_id]
         return snap
 
@@ -141,9 +139,7 @@ class _FakeManager:
         return None
 
 
-def _make_supervisor(
-    manager: _FakeManager, link: SimpleNamespace
-) -> ControlPlaneSupervisor:
+def _make_supervisor(manager: _FakeManager, link: SimpleNamespace) -> ControlPlaneSupervisor:
     with patch(
         "koda.control_plane.supervisor.get_control_plane_manager",
         return_value=manager,
@@ -195,9 +191,7 @@ async def test_reconcile_skips_paused_agents() -> None:
 async def test_reconcile_caches_health_url_for_dashboard() -> None:
     """After a successful reconcile the supervisor must cache the health URL
     keyed by agent_id so /health can render the legacy payload shape."""
-    manager = _FakeManager(
-        [{"id": "AGENT_A", "status": "active", "applied_version": 1}]
-    )
+    manager = _FakeManager([{"id": "AGENT_A", "status": "active", "applied_version": 1}])
     manager.add_snapshot(_runtime_snapshot("AGENT_A", port=9100))
 
     fake_link = SimpleNamespace(
@@ -225,9 +219,7 @@ async def test_reconcile_caches_health_url_for_dashboard() -> None:
 async def test_reconcile_drops_stale_status_when_agent_is_removed() -> None:
     """An agent that disappears from the manager must NOT linger in the
     /health output. Otherwise the dashboard ghosts dead agents forever."""
-    manager = _FakeManager(
-        [{"id": "AGENT_OLD", "status": "active", "applied_version": 1}]
-    )
+    manager = _FakeManager([{"id": "AGENT_OLD", "status": "active", "applied_version": 1}])
     manager.add_snapshot(_runtime_snapshot("AGENT_OLD", port=9001))
 
     ensure_mock = AsyncMock(
@@ -271,9 +263,7 @@ async def test_reconcile_marks_apply_finished_on_running_transition() -> None:
     """A worker entering RUNNING is the trigger for marking the apply
     successful in the dashboard. Operators read this to know whether their
     last edit took effect."""
-    manager = _FakeManager(
-        [{"id": "AGENT_OK", "status": "active", "applied_version": 5}]
-    )
+    manager = _FakeManager([{"id": "AGENT_OK", "status": "active", "applied_version": 5}])
     manager.add_snapshot(_runtime_snapshot("AGENT_OK", port=9001, version=5))
 
     fake_link = SimpleNamespace(
@@ -305,9 +295,7 @@ async def test_reconcile_marks_apply_failed_on_spawn_blocked() -> None:
     """SPAWN_BLOCKED is the kernel's pre-flight signal that the worker
     cannot start (port held, executable missing, etc). The dashboard must
     surface that as a failed apply, not as a silent stall."""
-    manager = _FakeManager(
-        [{"id": "AGENT_X", "status": "active", "applied_version": 1}]
-    )
+    manager = _FakeManager([{"id": "AGENT_X", "status": "active", "applied_version": 1}])
     manager.add_snapshot(_runtime_snapshot("AGENT_X", port=9001))
 
     fake_link = SimpleNamespace(
@@ -328,9 +316,7 @@ async def test_reconcile_marks_apply_failed_on_spawn_blocked() -> None:
     supervisor = _make_supervisor(manager, fake_link)
     await supervisor._reconcile_once()
 
-    failures = [
-        call for call in manager.apply_calls if call[0] == "AGENT_X" and call[2] is False
-    ]
+    failures = [call for call in manager.apply_calls if call[0] == "AGENT_X" and call[2] is False]
     assert failures, "spawn-blocked must mark apply as failed"
     _agent_id, _version, _success, details = failures[0]
     assert details.get("reason") == "port held"
@@ -340,9 +326,7 @@ async def test_reconcile_marks_apply_failed_on_spawn_blocked() -> None:
 async def test_reconcile_does_not_remark_apply_for_unchanged_state() -> None:
     """Once a worker is RUNNING, subsequent reconciles must NOT spam
     mark_apply_finished. That would flood the dashboard's audit log."""
-    manager = _FakeManager(
-        [{"id": "AGENT_OK", "status": "active", "applied_version": 1}]
-    )
+    manager = _FakeManager([{"id": "AGENT_OK", "status": "active", "applied_version": 1}])
     manager.add_snapshot(_runtime_snapshot("AGENT_OK", port=9001))
 
     fake_link = SimpleNamespace(
@@ -365,21 +349,17 @@ async def test_reconcile_does_not_remark_apply_for_unchanged_state() -> None:
     first_count = len(manager.apply_calls)
     await supervisor._reconcile_once()
     await supervisor._reconcile_once()
-    assert len(manager.apply_calls) == first_count, (
-        "mark_apply_finished must only fire on state transitions"
-    )
+    assert len(manager.apply_calls) == first_count, "mark_apply_finished must only fire on state transitions"
 
 
 @pytest.mark.asyncio
 async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -> None:
     """The spec built for the kernel must:
-      * Forward whitelisted parent env (PATH, HOME, …).
-      * Apply the manager's runtime env on top.
-      * Re-apply system-critical infra env from the parent so a stale
-        snapshot can never override the host."""
-    manager = _FakeManager(
-        [{"id": "AGENT_E", "status": "active", "applied_version": 1}]
-    )
+    * Forward whitelisted parent env (PATH, HOME, …).
+    * Apply the manager's runtime env on top.
+    * Re-apply system-critical infra env from the parent so a stale
+      snapshot can never override the host."""
+    manager = _FakeManager([{"id": "AGENT_E", "status": "active", "applied_version": 1}])
     manager.add_snapshot(_runtime_snapshot("AGENT_E", port=9001))
 
     fake_link = SimpleNamespace(
@@ -398,7 +378,7 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
 
     parent_env = {
         "PATH": "/usr/bin:/usr/local/bin",
-        "HOME": "/Users/operator",
+        "HOME": "/workspace/koda",
         "POSTGRES_URL": "postgres://live",
         "DANGEROUS_LEAK": "should-not-forward",
     }
@@ -407,7 +387,7 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
 
     env = dict(spec.environment)
     # Whitelisted parent env reaches the worker.
-    assert env["HOME"] == "/Users/operator"
+    assert env["HOME"] == "/workspace/koda"
     # Snapshot env still wins for non-system keys (only SYSTEM_ENV_KEYS get
     # forced from parent).
     assert env["AGENT_ID"] == "AGENT_E"

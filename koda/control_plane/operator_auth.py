@@ -314,16 +314,26 @@ class OperatorAuthService:
         self,
         *,
         registration_token: str,
+        bootstrap_code: str = "",
         username: str,
         email: str,
         password: str,
         display_name: str = "",
+        remote_ip: str | None = None,
+        forwarded_for: str | None = None,
     ) -> dict[str, Any]:
         if self.has_owner():
             raise ValueError("Owner account already exists. Sign in instead.")
         row = self._registration_row(registration_token)
         if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
             raise ValueError("Registration token is invalid or expired.")
+
+        # Verify bootstrap_code if provided (double-check registration link)
+        if bootstrap_code:
+            normalized_code = str(bootstrap_code or "").strip().upper()
+            if _hash_secret(normalized_code) != str(row.get("code_hash")):
+                raise ValueError("Setup code does not match registration token.")
+
         normalized_username = _normalize_username(username)
         normalized_email = _normalize_email(email)
         if not normalized_username:
@@ -380,12 +390,18 @@ class OperatorAuthService:
             user_id=user_id,
             subject_type="operator",
             label="web_owner_registration",
-            metadata={"origin": "register_owner"},
+            metadata={
+                "origin": "register_owner",
+                "remote_ip": remote_ip,
+                "forwarded_for": forwarded_for,
+            },
         )
         emit_security(
             "security.operator_owner_registered",
             user_id=_optional_audit_user_id(user_id),
             username=normalized_username,
+            remote_ip=remote_ip,
+            forwarded_for=forwarded_for,
         )
         return {
             "ok": True,
@@ -393,6 +409,139 @@ class OperatorAuthService:
             "session_token": session_token,
             "auth": self.auth_status(context),
         }
+
+    def reset_password_with_recovery_code(
+        self,
+        identifier: str,
+        recovery_code: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        normalized_id = identifier.strip().lower()
+        row = fetch_one(
+            "SELECT * FROM cp_operator_users WHERE lower(username) = ? OR lower(email) = ?",
+            (normalized_id, normalized_id),
+        )
+        if not row:
+            # Constant-time-ish side-effect to prevent enumeration
+            _password_hasher().hash("dummy")
+            raise ValueError("Invalid identifier or recovery code.")
+
+        if row.get("locked_until") and not _is_expired(row["locked_until"]):
+            raise ValueError("Account is locked. Please wait.")
+
+        code_hash = _hash_secret(recovery_code.strip())
+        code_row = fetch_one(
+            "SELECT * FROM cp_operator_recovery_codes WHERE user_id = ? AND code_hash = ?",
+            (str(row["id"]), code_hash),
+        )
+        if not code_row or code_row.get("consumed_at"):
+            raise ValueError("Invalid identifier or recovery code.")
+
+        if len(str(new_password or "")) < _PASSWORD_MIN_LENGTH:
+            raise ValueError(f"Password must have at least {_PASSWORD_MIN_LENGTH} characters.")
+
+        password_hash = _password_hasher().hash(new_password)
+        execute(
+            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ?, failed_login_attempts = 0, locked_until = '' WHERE id = ?",
+            (password_hash, now_iso(), str(row["id"])),
+        )
+        execute(
+            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? WHERE id = ?",
+            (now_iso(), "password_reset", str(code_row["id"])),
+        )
+
+        emit_security(
+            "security.operator_password_reset_recovery",
+            user_id=_optional_audit_user_id(str(row["id"])),
+            username=str(row["username"]),
+        )
+        return {"ok": True}
+
+    def change_password(
+        self,
+        context: OperatorAuthContext,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        try:
+            _password_hasher().verify(str(row["password_hash"]), current_password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            raise ValueError("Incorrect current password.")
+
+        if len(str(new_password or "")) < _PASSWORD_MIN_LENGTH:
+            raise ValueError(f"Password must have at least {_PASSWORD_MIN_LENGTH} characters.")
+
+        password_hash = _password_hasher().hash(new_password)
+        execute(
+            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, now_iso(), context.user_id),
+        )
+        emit_security(
+            "security.operator_password_changed",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"ok": True}
+
+    def recovery_codes_summary(self, context: OperatorAuthContext) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        rows = fetch_all(
+            "SELECT count(*) as count FROM cp_operator_recovery_codes WHERE user_id = ? AND consumed_at = ''",
+            (context.user_id,),
+        )
+        return {
+            "active_count": rows[0]["count"] if rows else 0,
+        }
+
+    def regenerate_recovery_codes(self, context: OperatorAuthContext, current_password: str) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        try:
+            _password_hasher().verify(str(row["password_hash"]), current_password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            raise ValueError("Incorrect current password.")
+
+        # Invalidate existing
+        execute(
+            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? WHERE user_id = ? AND consumed_at = ''",
+            (now_iso(), "regenerated", context.user_id),
+        )
+
+        generation = uuid4().hex[:8]
+        new_codes = []
+        for _ in range(8):
+            code = _random_secret("rc").split("_")[1][:12]
+            code_hash = _hash_secret(code)
+            new_codes.append(code)
+            execute(
+                """
+                INSERT INTO cp_operator_recovery_codes (
+                    id, user_id, code_hash, code_hint, created_at, generation
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (f"rec_{uuid4().hex}", context.user_id, code_hash, code[:4], now_iso(), generation),
+            )
+
+        execute(
+            "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
+            (generation, now_iso(), context.user_id),
+        )
+
+        emit_security(
+            "security.operator_recovery_codes_regenerated",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"codes": new_codes}
 
     def _set_login_failure(self, row: Any | None, *, identifier: str) -> None:
         if row is None:

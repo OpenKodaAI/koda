@@ -19,7 +19,7 @@ running gRPC server — pure dataclass / proto conversion checks.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

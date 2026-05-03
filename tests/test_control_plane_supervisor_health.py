@@ -138,9 +138,7 @@ async def test_health_payload_shape_with_all_healthy() -> None:
         }
 
     request = SimpleNamespace()
-    with patch.object(
-        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
-    ):
+    with patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
     payload = json.loads(response.body.decode())
@@ -187,9 +185,7 @@ async def test_health_marks_degraded_when_worker_exited() -> None:
         }
 
     request = SimpleNamespace()
-    with patch.object(
-        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
-    ):
+    with patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
     payload = json.loads(response.body.decode())
@@ -221,9 +217,7 @@ async def test_health_marks_degraded_when_worker_spawn_blocked() -> None:
         }
 
     request = SimpleNamespace()
-    with patch.object(
-        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
-    ):
+    with patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
     payload = json.loads(response.body.decode())
@@ -259,9 +253,7 @@ async def test_health_marks_degraded_when_sidecar_unreachable() -> None:
         }
 
     request = SimpleNamespace()
-    with patch.object(
-        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
-    ):
+    with patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
     payload = json.loads(response.body.decode())
@@ -303,9 +295,7 @@ async def test_health_renders_starting_worker_as_alive_but_not_probed() -> None:
         }
 
     request = SimpleNamespace()
-    with patch.object(
-        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
-    ):
+    with patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
     payload = json.loads(response.body.decode())

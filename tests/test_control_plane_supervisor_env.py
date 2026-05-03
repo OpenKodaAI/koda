@@ -31,9 +31,7 @@ def test_supervisor_propagates_grpc_sidecar_targets() -> None:
     from koda.control_plane import supervisor as supervisor_mod
 
     system_keys = supervisor_mod._SYSTEM_ENV_KEYS
-    build_spec_src = inspect.getsource(
-        supervisor_mod.ControlPlaneSupervisor._build_spec
-    )
+    build_spec_src = inspect.getsource(supervisor_mod.ControlPlaneSupervisor._build_spec)
     for env_key in (
         "SECURITY_GRPC_TARGET",
         "MEMORY_GRPC_TARGET",

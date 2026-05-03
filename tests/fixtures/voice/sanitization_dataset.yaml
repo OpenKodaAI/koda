@@ -261,15 +261,15 @@ cases:
   # ---- File paths / kbd shortcuts (gap) ----
   - id: filepath-unix-01
     category: gap
-    input: "Veja /Users/x/koda/tts.py"
-    expected: "Veja /Users/x/koda/tts.py"
+    input: "Veja /workspace/koda/koda/tts.py"
+    expected: "Veja /workspace/koda/koda/tts.py"
     forbidden: []
     notes: "Slashes and dots in path. TTS will read each separator literally."
 
   - id: filepath-win-01
     category: gap
-    input: "O arquivo C:\\Users\\x.txt está"
-    expected: "O arquivo C:\\Users\\x.txt está"
+    input: "O arquivo C:\\workspace\\koda.txt está"
+    expected: "O arquivo C:\\workspace\\koda.txt está"
     forbidden: []
 
   # ---- Combined cases ----

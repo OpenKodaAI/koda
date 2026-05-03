@@ -2,7 +2,7 @@
 
 This directory hosts Playwright specs that exercise the 6 product surfaces
 covered by the test plan in
-`/Users/larissamiyoshi/.claude/plans/algumas-funcionalidades-do-koda-valiant-melody.md`:
+`/plans/design-spec.md`:
 
 | Spec file              | Feature   | Coverage                                                         |
 | ---------------------- | --------- | ---------------------------------------------------------------- |
