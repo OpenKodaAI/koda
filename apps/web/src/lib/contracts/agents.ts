@@ -8,9 +8,7 @@ import {
   safeText,
 } from "@/lib/contracts/sanitizers";
 
-/* ------------------------------------------------------------------ */
 /*  Schemas                                                            */
-/* ------------------------------------------------------------------ */
 
 export const createAgentBodySchema = z.object({
   id: safeIdentifier(120),
@@ -94,9 +92,7 @@ export const onboardingBootstrapBodySchema = z.object({
     .default({}),
 }).passthrough();
 
-/* ------------------------------------------------------------------ */
 /*  Registration                                                       */
-/* ------------------------------------------------------------------ */
 
 // POST /agents
 registerBodySchema({

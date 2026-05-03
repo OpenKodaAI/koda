@@ -15,9 +15,7 @@ import {
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ToolItem = {
   id: string;
@@ -38,9 +36,7 @@ type ToolGroupSectionProps = {
   defaultExpanded?: boolean;
 };
 
-/* ------------------------------------------------------------------ */
 /*  Select options                                                     */
-/* ------------------------------------------------------------------ */
 
 const GROUP_POLICY_OPTIONS: { value: GroupPolicy; labelKey: string }[] = [
   { value: "always_allow", labelKey: "Sempre permitir" },
@@ -49,9 +45,7 @@ const GROUP_POLICY_OPTIONS: { value: GroupPolicy; labelKey: string }[] = [
   { value: "custom", labelKey: "Customizado" },
 ];
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function ToolGroupSection({
   label,

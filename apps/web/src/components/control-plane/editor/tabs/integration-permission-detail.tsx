@@ -31,9 +31,7 @@ import type {
 import { INTEGRATION_CATALOG } from "@/components/control-plane/system/integrations/integration-catalog-data";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type IntegrationPermissionDetailProps = {
   entry: AgentIntegrationEntry;
@@ -66,9 +64,7 @@ export type IntegrationPermissionDetailProps = {
   secretOptions?: CompactGrantOption[];
 };
 
-/* ------------------------------------------------------------------ */
 /*  Helpers: build tool items from MCP / core data                     */
-/* ------------------------------------------------------------------ */
 
 function buildMcpToolItems(
   entry: AgentIntegrationEntry,
@@ -167,9 +163,7 @@ function computeGroupPolicy(tools: ToolItem[]): GroupPolicy {
 }
 
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function IntegrationPermissionDetail({
   entry,

@@ -22,9 +22,7 @@ import {
   type McpCategory,
 } from "./mcp-catalog-utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 type EnvFieldDraft = McpEnvSchemaField & { _id: number };
 
@@ -103,9 +101,7 @@ function emptyFormState(): EditorFormState {
   };
 }
 
-/* ------------------------------------------------------------------ */
 /*  Env Schema Builder                                                 */
-/* ------------------------------------------------------------------ */
 
 function EnvSchemaBuilder({
   fields,
@@ -194,9 +190,7 @@ function EnvSchemaBuilder({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Editor Modal                                                       */
-/* ------------------------------------------------------------------ */
 
 export function McpServerEditorModal({
   server,

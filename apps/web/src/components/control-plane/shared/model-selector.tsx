@@ -20,9 +20,7 @@ import {
   type ModelMeta,
 } from "./model-metadata";
 
-/* ------------------------------------------------------------------ */
 /*  Provider visual config                                             */
-/* ------------------------------------------------------------------ */
 /* Logos / accents / icon components live in the shared provider-brand
  * module so every UI surface (system settings, agent editor, model
  * picker) renders the same brand treatment for every provider.        */
@@ -34,9 +32,7 @@ import {
   COLORED_BRAND_LOGO_PROVIDERS,
 } from "./provider-brand";
 
-/* ------------------------------------------------------------------ */
 /*  Inline provider logo                                               */
-/* ------------------------------------------------------------------ */
 
 function ProviderIcon({
   providerId,
@@ -98,9 +94,7 @@ function ProviderIcon({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Metric bar                                                         */
-/* ------------------------------------------------------------------ */
 
 function MetricBar({
   label,
@@ -134,9 +128,7 @@ function MetricBar({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Detail card                                                        */
-/* ------------------------------------------------------------------ */
 
 function formatSizeBytes(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
@@ -246,9 +238,7 @@ function ModelDetailCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Model row — always shows tooltip on hover                          */
-/* ------------------------------------------------------------------ */
 
 function buildMergedMeta(opt: ModelOption): ModelMeta | null {
   const api = opt.apiMeta;
@@ -330,9 +320,7 @@ function ModelRow({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function prettifyModelId(modelId: string) {
   if (!modelId) return "";
@@ -345,9 +333,7 @@ function prettifyModelId(modelId: string) {
     .replace(/\bQwen\b/g, "Qwen");
 }
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 type ModelOption = {
   providerId: string;
@@ -381,9 +367,7 @@ export type ModelSelectorProps = {
   functionId?: string;
 };
 
-/* ------------------------------------------------------------------ */
 /*  ModelSelector                                                      */
-/* ------------------------------------------------------------------ */
 
 const PANEL_MAX_H = 368; // search bar (~52) + list (~320)
 

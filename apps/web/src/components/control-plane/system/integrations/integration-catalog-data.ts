@@ -1,6 +1,4 @@
-/* ------------------------------------------------------------------ */
 /*  Extended integration catalog – data layer                          */
-/* ------------------------------------------------------------------ */
 
 export type IntegrationCategory = "development" | "productivity" | "data" | "cloud";
 
@@ -348,9 +346,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 export type IntegrationStatus = "disabled" | "pending" | "connected";
 

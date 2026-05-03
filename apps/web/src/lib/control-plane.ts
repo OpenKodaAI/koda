@@ -23,9 +23,7 @@ export type ControlPlaneAgentOrganization = {
   squad_name?: string | null;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad spec types — hierarchical prompt governance              */
-/* -------------------------------------------------------------------------- */
 
 export type WorkspaceSpec = Record<string, never>;
 export type SquadSpec = Record<string, never>;
@@ -34,9 +32,7 @@ export interface ScopePromptDocuments {
   system_prompt_md?: string;
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad entity types                                             */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneWorkspaceSquad = {
   id: string;
@@ -647,9 +643,7 @@ export type ControlPlaneRuntimeAccess = {
 
 export type ControlPlaneServerRuntimeAccess = ControlPlaneRuntimeAccess;
 
-/* -------------------------------------------------------------------------- */
 /*  MCP types                                                                  */
-/* -------------------------------------------------------------------------- */
 
 export type McpToolPolicy = "auto" | "always_allow" | "always_ask" | "blocked";
 
@@ -678,9 +672,7 @@ export type McpEnvSchemaField = {
   input_type?: string;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  ConnectionProfile — declarative per-integration connection contract        */
-/* -------------------------------------------------------------------------- */
 
 export type ConnectionStrategy =
   | "none"
@@ -869,9 +861,7 @@ export type ControlPlaneConnectionTools = {
   };
 };
 
-/* -------------------------------------------------------------------------- */
 /*  MCP capabilities — Tools + Resources + Prompts                            */
-/* -------------------------------------------------------------------------- */
 
 export type McpDiscoveredResource = {
   uri: string;
@@ -952,9 +942,7 @@ export type ControlPlaneConnectionCapabilities = {
   };
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Custom MCP servers — system-wide + per-agent                              */
-/* -------------------------------------------------------------------------- */
 
 export type McpCustomServerScope = "system" | "agent";
 
@@ -1010,9 +998,7 @@ export type McpClaudeDesktopImportResult = {
   errors: Array<{ name: string; message: string }>;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Core integration type                                                      */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneCoreIntegration = {
   id: string;
@@ -1093,9 +1079,7 @@ export type GeneralSystemSettingsCatalogProvider = {
   functional_models?: Array<Record<string, unknown>>;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Onboarding status type                                                     */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneOnboardingStatus = {
   has_owner?: boolean;
@@ -1724,9 +1708,7 @@ export async function getControlPlaneCoreIntegrations() {
   } satisfies ControlPlaneCoreIntegrations;
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad spec API                                                 */
-/* -------------------------------------------------------------------------- */
 
 export async function getWorkspaceSpec(workspaceId: string) {
   return controlPlaneFetchJson<{ spec: WorkspaceSpec; documents: ScopePromptDocuments }>(

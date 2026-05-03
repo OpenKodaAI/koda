@@ -5,9 +5,7 @@ import { motion } from "framer-motion";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ToolPolicy = "always_allow" | "always_ask" | "blocked";
 
@@ -17,9 +15,7 @@ type ToolPolicySegmentProps = {
   disabled?: boolean;
 };
 
-/* ------------------------------------------------------------------ */
 /*  Policy option config                                               */
-/* ------------------------------------------------------------------ */
 
 const POLICY_OPTIONS = [
   {
@@ -45,9 +41,7 @@ const POLICY_OPTIONS = [
   },
 ] as const;
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function ToolPolicySegment({
   value,

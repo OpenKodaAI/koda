@@ -44,9 +44,7 @@ import type {
   McpOAuthStatus,
 } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Props                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ConnectionModalRouterProps = {
   entry: AgentIntegrationEntry;
@@ -60,9 +58,7 @@ export type ConnectionModalRouterProps = {
 
 type TestResult = { success: boolean; message: string } | null;
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function fieldsFromProfile(profile: ConnectionProfile | null | undefined): {
   primary: ConnectionField[];
@@ -111,9 +107,7 @@ function mcpExistingEnvKeys(entry: AgentIntegrationEntry): Set<string> {
   return new Set(Object.keys(entry.mcpConnection?.env_values ?? {}));
 }
 
-/* ------------------------------------------------------------------ */
 /*  ModalShell                                                         */
-/* ------------------------------------------------------------------ */
 
 type ShellProps = {
   entry: AgentIntegrationEntry;
@@ -288,9 +282,7 @@ function ModalShell({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Field renderer                                                     */
-/* ------------------------------------------------------------------ */
 
 type FieldState = {
   value: string;
@@ -395,9 +387,7 @@ function FieldRow({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Save helpers                                                       */
-/* ------------------------------------------------------------------ */
 
 type FieldValues = Record<string, FieldState>;
 
@@ -507,9 +497,7 @@ async function saveCore(params: {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  The router                                                         */
-/* ------------------------------------------------------------------ */
 
 export function ConnectionModalRouter({
   entry,

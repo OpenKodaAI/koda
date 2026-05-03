@@ -3,15 +3,11 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Language detection                                                 */
-/* ------------------------------------------------------------------ */
 
 export type SyntaxLang = "json" | "sql" | "shell" | "diff" | "python" | "typescript" | "yaml" | "html" | "css" | "plain";
 
-/* ------------------------------------------------------------------ */
 /*  Extension → language detection                                     */
-/* ------------------------------------------------------------------ */
 
 const EXT_TO_LANG: Record<string, SyntaxLang> = {
   ".json": "json",
@@ -156,9 +152,7 @@ export function detectLang(content: string): SyntaxLang {
   return "plain";
 }
 
-/* ------------------------------------------------------------------ */
 /*  Token types                                                        */
-/* ------------------------------------------------------------------ */
 
 interface Token {
   type:
@@ -182,9 +176,7 @@ interface Token {
   text: string;
 }
 
-/* ------------------------------------------------------------------ */
 /*  JSON tokenizer                                                     */
-/* ------------------------------------------------------------------ */
 
 function tokenizeJson(code: string): Token[] {
   const tokens: Token[] = [];
@@ -225,9 +217,7 @@ function tokenizeJson(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  SQL tokenizer                                                      */
-/* ------------------------------------------------------------------ */
 
 const SQL_KEYWORDS = new Set([
   "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER",
@@ -290,9 +280,7 @@ function tokenizeSql(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Shell tokenizer                                                    */
-/* ------------------------------------------------------------------ */
 
 function tokenizeShell(code: string): Token[] {
   const tokens: Token[] = [];
@@ -339,9 +327,7 @@ function tokenizeShell(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Diff tokenizer (line-based)                                        */
-/* ------------------------------------------------------------------ */
 
 function tokenizeDiff(code: string): Token[] {
   const tokens: Token[] = [];
@@ -368,9 +354,7 @@ function tokenizeDiff(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Python tokenizer                                                   */
-/* ------------------------------------------------------------------ */
 
 const PY_KEYWORDS = new Set([
   "def", "class", "import", "from", "return", "if", "elif", "else", "for",
@@ -425,9 +409,7 @@ function tokenizePython(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  TypeScript tokenizer                                               */
-/* ------------------------------------------------------------------ */
 
 const TS_KEYWORDS = new Set([
   "const", "let", "var", "function", "class", "interface", "type", "enum",
@@ -475,9 +457,7 @@ function tokenizeTypeScript(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  YAML tokenizer (line-based)                                        */
-/* ------------------------------------------------------------------ */
 
 function tokenizeYaml(code: string): Token[] {
   const tokens: Token[] = [];
@@ -536,9 +516,7 @@ function tokenizeYaml(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  HTML tokenizer                                                     */
-/* ------------------------------------------------------------------ */
 
 function tokenizeHtml(code: string): Token[] {
   const tokens: Token[] = [];
@@ -594,9 +572,7 @@ function tokenizeHtml(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  CSS tokenizer                                                      */
-/* ------------------------------------------------------------------ */
 
 function tokenizeCss(code: string): Token[] {
   const tokens: Token[] = [];
@@ -637,9 +613,7 @@ function tokenizeCss(code: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Tokenize dispatcher                                                */
-/* ------------------------------------------------------------------ */
 
 function tokenize(code: string, lang: SyntaxLang): Token[] {
   switch (lang) {
@@ -667,9 +641,7 @@ function tokenize(code: string, lang: SyntaxLang): Token[] {
   }
 }
 
-/* ------------------------------------------------------------------ */
 /*  Rendering                                                          */
-/* ------------------------------------------------------------------ */
 
 const TOKEN_CLASS: Record<Token["type"], string> = {
   plain: "",
@@ -703,9 +675,7 @@ function renderTokens(tokens: Token[]): ReactNode[] {
   });
 }
 
-/* ------------------------------------------------------------------ */
 /*  Public component                                                   */
-/* ------------------------------------------------------------------ */
 
 interface SyntaxHighlightProps {
   children: string;
@@ -880,9 +850,7 @@ export function SyntaxHighlight({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Utility: highlight JSON for inline use (e.g. DetailsViewer)        */
-/* ------------------------------------------------------------------ */
 
 export function renderHighlightedCode(
   code: string,

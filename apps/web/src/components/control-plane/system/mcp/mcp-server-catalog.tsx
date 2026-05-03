@@ -19,9 +19,7 @@ import {
 } from "./mcp-catalog-utils";
 import { useMcpCatalogSuggestions } from "@/hooks/use-mcp-catalog-suggestions";
 
-/* ------------------------------------------------------------------ */
 /*  Category filter chip                                               */
-/* ------------------------------------------------------------------ */
 
 function CategoryChip({
   label,
@@ -50,9 +48,7 @@ function CategoryChip({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Suggested server chip                                              */
-/* ------------------------------------------------------------------ */
 
 function SuggestedChip({
   name,
@@ -83,9 +79,7 @@ function SuggestedChip({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Main catalog component                                             */
-/* ------------------------------------------------------------------ */
 
 export function McpServerCatalog() {
   const { t, tl } = useAppI18n();

@@ -12,9 +12,7 @@ import {
   type McpCategory,
 } from "./mcp-catalog-utils";
 
-/* ------------------------------------------------------------------ */
 /*  Transport badge                                                    */
-/* ------------------------------------------------------------------ */
 
 function TransportBadge({ type }: { type: "stdio" | "http_sse" }) {
   const isStdio = type === "stdio";
@@ -33,9 +31,7 @@ function TransportBadge({ type }: { type: "stdio" | "http_sse" }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  MCP Server Card                                                    */
-/* ------------------------------------------------------------------ */
 
 export function McpServerCard({
   server,

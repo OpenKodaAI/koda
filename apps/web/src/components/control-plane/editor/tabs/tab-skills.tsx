@@ -29,9 +29,7 @@ import {
   type CustomSkill,
 } from "@/lib/policy-serializers";
 
-/* -------------------------------------------------------------------------- */
 /*  Constants                                                                  */
-/* -------------------------------------------------------------------------- */
 
 const SKILL_CATEGORIES = [
   { value: "general", label: "General" },
@@ -76,9 +74,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
 
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-/* -------------------------------------------------------------------------- */
 /*  CategoryBadge                                                              */
-/* -------------------------------------------------------------------------- */
 
 function CategoryBadge({ category }: { category: string }) {
   const colors = CATEGORY_COLORS[category] ?? CATEGORY_COLORS.general;
@@ -92,9 +88,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  TabSkills                                                                  */
-/* -------------------------------------------------------------------------- */
 
 export function TabSkills() {
   const { state, developerMode, updateAgentSpecField } = useAgentEditor();

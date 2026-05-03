@@ -31,9 +31,7 @@ import type {
   RuntimeConstraintKey,
 } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type IntegrationGrantValue = {
   enabled?: boolean;
@@ -106,9 +104,7 @@ type UseAgentIntegrationPermissionsParams = {
   integrationGrants: Record<string, IntegrationGrantValue>;
 };
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function deriveCoreStatus(
   integration: ControlPlaneCoreIntegration,
@@ -508,9 +504,7 @@ function deriveCustomConnectionProfile(entry: McpCustomServerEntry): ConnectionP
   };
 }
 
-/* ------------------------------------------------------------------ */
 /*  Hook                                                               */
-/* ------------------------------------------------------------------ */
 
 export function useAgentIntegrationPermissions({
   agentId,

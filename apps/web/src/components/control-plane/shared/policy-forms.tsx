@@ -592,9 +592,7 @@ export function KnowledgePolicyForm({
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Simplified forms (normal mode)                                             */
-/* -------------------------------------------------------------------------- */
 
 export function MemoryPolicyFormSimple({
   policy,

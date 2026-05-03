@@ -14,9 +14,7 @@ import {
 } from "./channel-catalog-data";
 import { ChannelConnectionModal } from "@/components/control-plane/editor/channel-connection-modal";
 
-/* ------------------------------------------------------------------ */
 /*  Channel inline SVG logos                                           */
-/* ------------------------------------------------------------------ */
 
 function TelegramLogo({ className }: { className?: string }) {
   return (
@@ -111,15 +109,11 @@ export function renderChannelLogo(logoKey: string, className?: string) {
   return <div className={cn("rounded bg-[var(--field-bg)]", className)} />;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 type AgentInfo = { username: string; name: string };
 
-/* ------------------------------------------------------------------ */
 /*  Channel card                                                       */
-/* ------------------------------------------------------------------ */
 
 function ChannelCard({
   channel,
@@ -175,9 +169,7 @@ function ChannelCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Channel connection area                                            */
-/* ------------------------------------------------------------------ */
 
 export function ChannelConnectionArea() {
   const { state } = useAgentEditor();

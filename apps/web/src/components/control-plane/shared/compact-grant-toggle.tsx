@@ -4,9 +4,7 @@ import { motion } from "framer-motion";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export interface CompactGrantOption {
   value: string;
@@ -22,9 +20,7 @@ interface CompactGrantToggleProps {
   onToggle: (value: string) => void;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Compact toggle switch                                              */
-/* ------------------------------------------------------------------ */
 
 function MiniSwitch({
   checked,
@@ -61,9 +57,7 @@ function MiniSwitch({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Status pill                                                        */
-/* ------------------------------------------------------------------ */
 
 function StatusPill({ label, tone }: { label: string; tone: "accent" | "neutral" }) {
   return (
@@ -80,9 +74,7 @@ function StatusPill({ label, tone }: { label: string; tone: "accent" | "neutral"
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Main component                                                     */
-/* ------------------------------------------------------------------ */
 
 export function CompactGrantToggle({
   title,

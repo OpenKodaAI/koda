@@ -55,9 +55,7 @@ export const artifactDetailSchema = z.object({
 
 export type ArtifactDetail = z.infer<typeof artifactDetailSchema>;
 
-/* ------------------------------------------------------------------ */
 /*  Stream payload: artifact_ready                                     */
-/* ------------------------------------------------------------------ */
 
 export const artifactReadyEventPayloadSchema = z.object({
   artifact: artifactDetailSchema,
@@ -73,9 +71,7 @@ export function parseArtifactReadyPayload(
   return result.success ? result.data : null;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Preview-size limits (defense in depth — also enforced by backend)  */
-/* ------------------------------------------------------------------ */
 
 export const ARTIFACT_PREVIEW_LIMITS = {
   /** code / markdown / text / html / xml */

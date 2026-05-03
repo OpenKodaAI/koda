@@ -13,9 +13,7 @@ import { renderIntegrationLogo } from "./integration-logos";
 import type { GeneralSystemSettingsCredentialField } from "@/lib/control-plane";
 import type { IntegrationCatalogEntry } from "./integration-catalog-data";
 
-/* ------------------------------------------------------------------ */
 /*  Connection modal                                                   */
-/* ------------------------------------------------------------------ */
 
 export function IntegrationConnectionModal({
   entry,

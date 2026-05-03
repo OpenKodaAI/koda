@@ -142,9 +142,7 @@ def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch)
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # 7-provider HTTP runtime sentinels
-# ─────────────────────────────────────────────────────────────────────────────
 
 _HTTP_OPENAI_COMPATIBLE_PROVIDERS = (
     "perplexity",
@@ -205,9 +203,7 @@ def test_http_provider_keys_threaded_through_provider_env():
     assert "PERPLEXITY_API_BASE_URL" in allowed
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Gemini API key verification — must use header, never query string
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_gemini_api_key_verify_uses_header_not_query_string(monkeypatch):
@@ -266,9 +262,7 @@ def test_gemini_api_key_verify_uses_header_not_query_string(monkeypatch):
     assert result.details == {}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Native HTTP provider verify contracts (auth header + URL)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class _CapturedResponse:

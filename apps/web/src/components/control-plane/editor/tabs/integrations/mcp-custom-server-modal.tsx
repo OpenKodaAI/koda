@@ -24,9 +24,7 @@ import { renderIntegrationLogo } from "@/components/control-plane/system/integra
 
 import type { McpClaudeDesktopImportResult, McpCustomServerEntry } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 type Mode = "form" | "json";
 
@@ -65,9 +63,7 @@ export type McpCustomServerModalProps = {
   agentLabel?: string;
 };
 
-/* ------------------------------------------------------------------ */
 /*  State helpers                                                      */
-/* ------------------------------------------------------------------ */
 
 let _envFieldId = 0;
 function nextId(): number {
@@ -87,9 +83,7 @@ const SAFE_COMMANDS = ["npx", "uvx", "node", "python", "python3", "deno", "bun",
 
 const SAMPLE_JSON = EMPTY_MCP_SERVERS_TEMPLATE;
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function McpCustomServerModal({
   open,
@@ -418,9 +412,7 @@ export function McpCustomServerModal({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Form body                                                          */
-/* ------------------------------------------------------------------ */
 
 type FormBodyProps = {
   serverKey: string;
@@ -581,9 +573,7 @@ function FormBody(props: FormBodyProps) {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Field — single label + control row, no description noise           */
-/* ------------------------------------------------------------------ */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -596,9 +586,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Sub-builders                                                       */
-/* ------------------------------------------------------------------ */
 
 function EnvSchemaBuilder({
   fields,
@@ -726,9 +714,7 @@ function HeadersBuilder({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  JSON body                                                          */
-/* ------------------------------------------------------------------ */
 
 function JsonBody({
   value,

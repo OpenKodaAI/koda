@@ -1,8 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 
-/* ------------------------------------------------------------------ */
 /*  Brand SVG logos for core integrations + MCP servers                */
-/* ------------------------------------------------------------------ */
 
 import {
   useId,

@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { safeContent, safeText } from "@/lib/contracts/sanitizers";
 
-/* ------------------------------------------------------------------ */
 /*  Schemas (used by runtime route handlers, not the proxy)            */
-/* ------------------------------------------------------------------ */
 
 export const scheduleActionBodySchema = z.object({
   user_id: z.union([z.string().trim().min(1), z.number()]),

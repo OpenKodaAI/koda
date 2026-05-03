@@ -1,6 +1,4 @@
-/* -------------------------------------------------------------------------- */
 /*  Policy Serializers — structured form ↔ canonical AgentSpec JSON           */
-/* -------------------------------------------------------------------------- */
 
 import type { ControlPlaneCoreProviders } from "@/lib/control-plane";
 
@@ -124,9 +122,7 @@ function asTierModels(
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Mission Profile                                                           */
-/* -------------------------------------------------------------------------- */
 
 export interface MissionProfileData {
   mission: string;
@@ -179,9 +175,7 @@ export function serializeMissionProfile(data: MissionProfileData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Interaction Style                                                         */
-/* -------------------------------------------------------------------------- */
 
 export interface InteractionStyleData {
   tone: string;
@@ -234,9 +228,7 @@ export function serializeInteractionStyle(data: InteractionStyleData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Operating Instructions                                                    */
-/* -------------------------------------------------------------------------- */
 
 export interface OperatingInstructionsData {
   default_workflow: string[];
@@ -285,9 +277,7 @@ export function serializeOperatingInstructions(
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Hard Rules                                                                */
-/* -------------------------------------------------------------------------- */
 
 export interface HardRulesData {
   non_negotiables: string[];
@@ -332,9 +322,7 @@ export function serializeHardRules(data: HardRulesData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Response Policy                                                           */
-/* -------------------------------------------------------------------------- */
 
 export interface ResponsePolicyData {
   language: string;
@@ -387,9 +375,7 @@ export function serializeResponsePolicy(data: ResponsePolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Autonomy Policy                                                           */
-/* -------------------------------------------------------------------------- */
 
 export interface AutonomyPolicyData {
   default_approval_mode: string;
@@ -430,9 +416,7 @@ export function serializeAutonomyPolicy(data: AutonomyPolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Model Policy                                                              */
-/* -------------------------------------------------------------------------- */
 
 export interface ModelPolicyData {
   allowed_providers: string[];
@@ -626,9 +610,7 @@ export function normalizeModelPolicyForCore(
   };
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Tool Policy                                                               */
-/* -------------------------------------------------------------------------- */
 
 export interface ToolPolicyData {
   allowed_tool_ids: string[];
@@ -659,9 +641,7 @@ export function serializeToolPolicy(data: ToolPolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Execution Policy                                                          */
-/* -------------------------------------------------------------------------- */
 
 export interface ExecutionPolicyData {
   version: number;
@@ -735,9 +715,7 @@ export function serializeExecutionPolicy(data: ExecutionPolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Resource Access Policy                                                    */
-/* -------------------------------------------------------------------------- */
 
 export interface ResourceAccessPolicyData {
   allowed_global_secret_keys: string[];
@@ -829,9 +807,7 @@ export function serializeResourceAccessPolicy(data: ResourceAccessPolicyData): s
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Memory Policy                                                             */
-/* -------------------------------------------------------------------------- */
 
 export interface MemoryPolicyData {
   enabled: boolean;
@@ -970,9 +946,7 @@ export function serializeMemoryPolicy(data: MemoryPolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Knowledge Policy                                                          */
-/* -------------------------------------------------------------------------- */
 
 export interface KnowledgePolicyData {
   enabled: boolean;
@@ -1063,9 +1037,7 @@ export function serializeKnowledgePolicy(data: KnowledgePolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Voice Policy                                                              */
-/* -------------------------------------------------------------------------- */
 
 export interface VoicePolicyData {
   mode: string;
@@ -1103,9 +1075,7 @@ export function serializeVoicePolicy(data: VoicePolicyData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Image Analysis Policy                                                     */
-/* -------------------------------------------------------------------------- */
 
 export interface ImageAnalysisPolicyData {
   fallback_behavior: string;
@@ -1150,9 +1120,7 @@ export function serializeImageAnalysisPolicy(
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Memory Extraction Schema                                                  */
-/* -------------------------------------------------------------------------- */
 
 export interface MemoryExtractionSchemaData {
   template: string;
@@ -1185,9 +1153,7 @@ export function serializeMemoryExtractionSchema(
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace Spec                                                             */
-/* -------------------------------------------------------------------------- */
 
 export interface WorkspaceSpecData {
   hard_rules: {
@@ -1298,9 +1264,7 @@ export function serializeWorkspaceSpec(data: WorkspaceSpecData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Squad Spec                                                                 */
-/* -------------------------------------------------------------------------- */
 
 export interface SquadSpecData {
   operating_instructions: {
@@ -1406,9 +1370,7 @@ export function serializeSquadSpec(data: SquadSpecData): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Skill Policy Stubs                                                         */
-/* -------------------------------------------------------------------------- */
 
 export type CustomSkill = {
   id: string;

@@ -15,9 +15,7 @@ import {
   serializeMemoryPolicy,
 } from "@/lib/policy-serializers";
 
-/* -------------------------------------------------------------------------- */
 /*  Tab: Conhecimento (simplified)                                             */
-/* -------------------------------------------------------------------------- */
 
 export function TabConhecimento() {
   const {

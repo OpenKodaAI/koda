@@ -15,9 +15,7 @@ import {
 } from "./channel-catalog-data";
 import { renderChannelLogo } from "./channel-connection-area";
 
-/* ------------------------------------------------------------------ */
 /*  Tag input for multi-value fields (e.g., allowed user IDs)          */
-/* ------------------------------------------------------------------ */
 
 function TagsInput({
   value,
@@ -116,9 +114,7 @@ type ValidateResponse = {
 
 type AgentInfo = { username: string; name: string };
 
-/* ------------------------------------------------------------------ */
 /*  Modal                                                              */
-/* ------------------------------------------------------------------ */
 
 export function ChannelConnectionModal({
   agentId,

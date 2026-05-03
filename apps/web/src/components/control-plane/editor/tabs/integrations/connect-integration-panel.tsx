@@ -28,9 +28,7 @@ import { JsonEditor } from "@/components/ui/json-editor";
 import type { AgentIntegrationEntry } from "@/hooks/use-agent-integration-permissions";
 import type { ConnectionField, McpOAuthStatus } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ConnectIntegrationPanelProps = {
   entry: AgentIntegrationEntry;
@@ -90,9 +88,7 @@ function buildMcpServerJsonTemplate(
   return JSON.stringify({ mcpServers: { [entry.key]: config } }, null, 2);
 }
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export const ConnectIntegrationPanel = forwardRef<
   ConnectIntegrationPanelHandle,
@@ -296,9 +292,7 @@ export const ConnectIntegrationPanel = forwardRef<
   );
 });
 
-/* ------------------------------------------------------------------ */
 /*  Internals                                                          */
-/* ------------------------------------------------------------------ */
 
 function FieldRow({
   field,

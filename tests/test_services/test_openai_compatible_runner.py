@@ -64,9 +64,7 @@ def ready_capability() -> ProviderCapabilities:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Pure-function tests
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestPayloadBuilder:
@@ -327,9 +325,7 @@ class TestCitations:
         assert "[1] https://a.com" in result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Integration tests with mocked HTTP
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRunOpenAICompatible:

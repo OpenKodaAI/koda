@@ -42,9 +42,7 @@ export interface JsonEditorProps {
   ariaLabel?: string;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Tokenizer                                                          */
-/* ------------------------------------------------------------------ */
 
 type TokenKind = "key" | "string" | "number" | "bool" | "null" | "punct" | "ws";
 
@@ -116,9 +114,7 @@ function tokenize(source: string): Token[] {
   return tokens;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Token color resolution                                             */
-/* ------------------------------------------------------------------ */
 
 // Soft IDE-style palette tuned for the Koda dark canvas. Bright enough to
 // be legible against `--panel-soft`, muted enough to never compete with
@@ -134,9 +130,7 @@ const TOKEN_CLASS: Record<TokenKind, string> = {
   ws: "",
 };
 
-/* ------------------------------------------------------------------ */
 /*  Validation                                                         */
-/* ------------------------------------------------------------------ */
 
 function validateJson(source: string): JsonValidation {
   const trimmed = source.trim();
@@ -165,9 +159,7 @@ function validateJson(source: string): JsonValidation {
   }
 }
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function JsonEditor({
   value,
@@ -264,9 +256,7 @@ export function JsonEditor({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Templates                                                          */
-/* ------------------------------------------------------------------ */
 
 /**
  * Empty Claude Desktop-style template — single placeholder server, no

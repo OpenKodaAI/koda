@@ -47,9 +47,7 @@ const NO_WORKSPACE_KEY = "__no_workspace__";
 const NO_SQUAD_KEY = "__no_squad__";
 const MIN_WORKSPACE_LANES = 3;
 
-/* ------------------------------------------------------------------ */
 /*  WorkspaceSelectorDropdown                                         */
-/* ------------------------------------------------------------------ */
 
 function WorkspaceSelectorDropdown({
   workspaceTabs,
@@ -214,9 +212,7 @@ function WorkspaceSelectorDropdown({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  CreatePopover                                                     */
-/* ------------------------------------------------------------------ */
 
 function CreatePopover({
   onCreateAgent,

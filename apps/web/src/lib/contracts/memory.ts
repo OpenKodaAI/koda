@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { registerBodySchema } from "@/lib/contracts/proxy-body-schemas";
 
-/* ------------------------------------------------------------------ */
 /*  Schemas                                                            */
-/* ------------------------------------------------------------------ */
 
 export const memoryCurationActionBodySchema = z.object({
   target_type: z.enum(["memory", "cluster"]),
@@ -12,9 +10,7 @@ export const memoryCurationActionBodySchema = z.object({
   duplicate_of_memory_id: z.number().int().nullable().optional(),
 });
 
-/* ------------------------------------------------------------------ */
 /*  Registration                                                       */
-/* ------------------------------------------------------------------ */
 
 // POST /agents/{id}/memory-curation/actions
 registerBodySchema({

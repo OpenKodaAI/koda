@@ -56,9 +56,7 @@ def clear_openai_compatible_capability_cache() -> None:
     _CAPABILITY_CACHE.clear()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Capability probing
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def get_openai_compatible_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode) -> ProviderCapabilities:
@@ -204,9 +202,7 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Public runner entrypoints
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def run_openai_compatible(
@@ -577,9 +573,7 @@ async def run_openai_compatible_streaming(
             metadata_collector.setdefault("metadata", {})["citations"] = citations_collected
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _resolve_credentials(profile: ProviderHttpProfile) -> tuple[str, dict[str, str]]:

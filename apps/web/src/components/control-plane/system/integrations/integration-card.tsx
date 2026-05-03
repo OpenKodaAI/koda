@@ -8,9 +8,7 @@ import {
   integrationCardRootClassName,
 } from "./integration-card-presentation";
 
-/* ------------------------------------------------------------------ */
 /*  Integration card for the marketplace grid                          */
-/* ------------------------------------------------------------------ */
 
 export function IntegrationCard({
   entry,

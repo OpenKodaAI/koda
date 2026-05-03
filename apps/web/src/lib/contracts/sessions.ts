@@ -2,9 +2,7 @@ import { z } from "zod";
 import { registerBodySchema } from "@/lib/contracts/proxy-body-schemas";
 import { safeContent } from "@/lib/contracts/sanitizers";
 
-/* ------------------------------------------------------------------ */
 /*  Mention + command schemas                                          */
-/* ------------------------------------------------------------------ */
 
 export const mentionKindSchema = z.enum(["skill", "mcp"]);
 
@@ -27,9 +25,7 @@ export const composerCommandSchema = z.object({
 
 export type ComposerCommand = z.infer<typeof composerCommandSchema>;
 
-/* ------------------------------------------------------------------ */
 /*  Schemas                                                            */
-/* ------------------------------------------------------------------ */
 
 export const sendSessionMessageBodySchema = z.object({
   text: safeContent(10_000).min(1, "Message text is required."),
@@ -38,9 +34,7 @@ export const sendSessionMessageBodySchema = z.object({
   command: composerCommandSchema.optional(),
 });
 
-/* ------------------------------------------------------------------ */
 /*  Registration (dashboard proxy: /agents/{id}/sessions/messages)     */
-/* ------------------------------------------------------------------ */
 
 registerBodySchema({
   method: "POST",
@@ -52,9 +46,7 @@ registerBodySchema({
   schema: sendSessionMessageBodySchema,
 });
 
-/* ------------------------------------------------------------------ */
 /*  Approvals                                                          */
-/* ------------------------------------------------------------------ */
 
 export const approvalDecisionSchema = z.enum([
   "approve",
@@ -102,9 +94,7 @@ export interface PendingApproval {
   decision: string | null;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Runtime session stream event envelope                              */
-/* ------------------------------------------------------------------ */
 
 export type SessionStreamEventKind =
   | "task_started"
@@ -146,9 +136,7 @@ export function isSessionStreamEvent(value: unknown): value is SessionStreamEven
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Typed stream payload schemas (narrow, additive)                    */
-/* ------------------------------------------------------------------ */
 
 export const messageChunkPayloadSchema = z.object({
   delta: z.string(),

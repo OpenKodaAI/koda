@@ -6,9 +6,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
-/* -------------------------------------------------------------------------- */
 /*  InheritedContext — visual indicator for inherited workspace/squad values   */
-/* -------------------------------------------------------------------------- */
 
 interface InheritedContextProps {
   source: "workspace" | "squad";
@@ -36,9 +34,7 @@ export function InheritedContext({ source, children }: InheritedContextProps) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  InheritedList — renders a list of inherited string values                  */
-/* -------------------------------------------------------------------------- */
 
 interface InheritedListProps {
   source: "workspace" | "squad";
@@ -57,9 +53,7 @@ export function InheritedList({ source, label, items }: InheritedListProps) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  InheritedValue — renders a single inherited scalar value                   */
-/* -------------------------------------------------------------------------- */
 
 interface InheritedValueProps {
   source: "workspace" | "squad";
@@ -77,9 +71,7 @@ export function InheritedValue({ source, label, value }: InheritedValueProps) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  InheritedPromptPreview — renders inherited markdown prompt blocks          */
-/* -------------------------------------------------------------------------- */
 
 interface InheritedPromptPreviewProps {
   source: "workspace" | "squad";

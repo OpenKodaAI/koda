@@ -24,9 +24,7 @@ import {
   integrationCardRootClassName,
 } from "./integration-card-presentation";
 
-/* ------------------------------------------------------------------ */
 /*  Category labels for provider types                                 */
-/* ------------------------------------------------------------------ */
 
 const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   general: "LLM",
@@ -34,9 +32,7 @@ const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   media: "Mídia",
 };
 
-/* ------------------------------------------------------------------ */
 /*  Transition variants                                                */
-/* ------------------------------------------------------------------ */
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -54,9 +50,7 @@ const viewOut = {
   transition: { duration: 0.28, ease: EASE },
 } as const;
 
-/* ------------------------------------------------------------------ */
 /*  Provider card (matching IntegrationCard layout)                    */
-/* ------------------------------------------------------------------ */
 
 function ProviderCard({
   provider,
@@ -97,9 +91,7 @@ function ProviderCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Provider detail view (matches integration detail layout)           */
-/* ------------------------------------------------------------------ */
 
 const PROVIDER_CATEGORY_DISPLAY: Record<string, string> = {
   general: "LLM",
@@ -263,9 +255,7 @@ function ProviderDetailView({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Provider grid (list view)                                          */
-/* ------------------------------------------------------------------ */
 
 function ProviderListView({
   onSelect,
@@ -372,9 +362,7 @@ function ProviderListView({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Main export: manages list ↔ detail switching                       */
-/* ------------------------------------------------------------------ */
 
 export function ProviderGrid() {
   const { providerOptions } = useSystemSettings();
