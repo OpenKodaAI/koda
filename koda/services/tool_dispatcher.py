@@ -901,9 +901,7 @@ def _is_write_tool(tool: str, params: dict) -> bool:
     return resolution.access_level != "read"
 
 
-# ---------------------------------------------------------------------------
 # Tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_job_list(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -1812,9 +1810,7 @@ async def _handle_browser_cookies(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="browser_cookies", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Browser tab handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_tab_open(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -1976,9 +1972,7 @@ async def _handle_browser_pdf(params: dict, ctx: ToolContext) -> AgentToolResult
     return AgentToolResult(tool="browser_pdf", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Script Library handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_script_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2125,9 +2119,7 @@ async def _handle_script_delete(params: dict, ctx: ToolContext) -> AgentToolResu
     )
 
 
-# ---------------------------------------------------------------------------
 # Cache management handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_cache_stats(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2183,9 +2175,7 @@ async def _handle_cache_clear(params: dict, ctx: ToolContext) -> AgentToolResult
     return AgentToolResult(tool="cache_clear", success=True, output=f"Cleared {count} cached entries.")
 
 
-# ---------------------------------------------------------------------------
 # Snapshot handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_snapshot_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2352,9 +2342,7 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
     return AgentToolResult(tool="request_skill", success=True, output="\n\n".join(parts))
 
 
-# ---------------------------------------------------------------------------
 # File operations handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_fileops_available(tool: str) -> AgentToolResult | None:
@@ -2695,9 +2683,7 @@ async def _handle_file_info(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="file_info", success=False, output=f"Error: {e}")
 
 
-# ---------------------------------------------------------------------------
 # Shell tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_shell_available(tool: str) -> AgentToolResult | None:
@@ -2831,9 +2817,7 @@ async def _handle_shell_output(params: dict, ctx: ToolContext) -> AgentToolResul
     return AgentToolResult(tool="shell_output", success=True, output=f"Exit {bg.exit_code}:\n{output}")
 
 
-# ---------------------------------------------------------------------------
 # Git tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_git_available(tool: str) -> AgentToolResult | None:
@@ -3006,9 +2990,7 @@ async def _handle_git_pull(params: dict, ctx: ToolContext) -> AgentToolResult:
     return await _run_git("pull", args, ctx, timeout=60)
 
 
-# ---------------------------------------------------------------------------
 # Plugin handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_plugin_available(tool: str) -> AgentToolResult | None:
@@ -3143,9 +3125,7 @@ async def _handle_plugin_reload(params: dict, ctx: ToolContext) -> AgentToolResu
     return AgentToolResult(tool="plugin_reload", success=True, output=f"Plugin '{name}' reloaded.")
 
 
-# ---------------------------------------------------------------------------
 # Workflow handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_workflow_available(tool: str) -> AgentToolResult | None:
@@ -3266,9 +3246,7 @@ async def _handle_workflow_delete(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="workflow_delete", success=True, output=f"Workflow '{name}' deleted.")
 
 
-# ---------------------------------------------------------------------------
 # Inter-agent communication handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_inter_agent_available(tool: str) -> AgentToolResult | None:
@@ -3389,9 +3367,7 @@ async def _handle_agent_broadcast(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="agent_broadcast", success=True, output=f"Broadcast sent to {count} agents.")
 
 
-# ---------------------------------------------------------------------------
 # Webhook handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_webhook_available(tool: str) -> AgentToolResult | None:
@@ -3471,9 +3447,7 @@ async def _handle_event_wait(params: dict, ctx: ToolContext) -> AgentToolResult:
     )
 
 
-# ---------------------------------------------------------------------------
 # Browser network interception handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_network_capture_start(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3537,9 +3511,7 @@ async def _handle_browser_network_mock(params: dict, ctx: ToolContext) -> AgentT
     return AgentToolResult(tool="browser_network_mock", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Browser session persistence handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_session_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3581,9 +3553,7 @@ async def _handle_browser_session_list(params: dict, ctx: ToolContext) -> AgentT
     return AgentToolResult(tool="browser_session_list", success=success, output=text, data=data, data_format="json")
 
 
-# ---------------------------------------------------------------------------
 # Handler registry
-# ---------------------------------------------------------------------------
 
 _ToolHandler = Callable[[dict, ToolContext], Awaitable[AgentToolResult]]
 

@@ -1492,9 +1492,7 @@ def _last_url(text: str) -> str:
     return urls[-1] if urls else ""
 
 
-# ---------------------------------------------------------------------------
 # OAuth relay: rewrite CLI callback URLs so they go through the control plane
-# ---------------------------------------------------------------------------
 
 _OAUTH_RELAY_TARGETS: dict[str, str] = {}
 """Maps session_id → internal callback URL (http://localhost:PORT/...)."""
@@ -1582,9 +1580,7 @@ def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
-# ---------------------------------------------------------------------------
 # Claude direct OAuth PKCE — bypass CLI subprocess entirely
-# ---------------------------------------------------------------------------
 
 _CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _CLAUDE_OAUTH_AUTH_URL = "https://claude.com/cai/oauth/authorize"
