@@ -115,7 +115,8 @@ class CircuitBreaker:
             await self._maybe_transition_after_cooldown()
             if self._state.state is State.OPEN:
                 raise CircuitOpenError(
-                    f"circuit_breaker_open:{self.name}; cool down for ~{self._cooldown_remaining():.1f}s before retrying"
+                    f"circuit_breaker_open:{self.name}; "
+                    f"cool down for ~{self._cooldown_remaining():.1f}s before retrying"
                 )
         try:
             result = await fn(*args, **kwargs)

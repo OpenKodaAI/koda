@@ -442,7 +442,11 @@ class OperatorAuthService:
 
         password_hash = _password_hasher().hash(new_password)
         execute(
-            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ?, failed_login_attempts = 0, locked_until = '' WHERE id = ?",
+            """
+            UPDATE cp_operator_users
+            SET password_hash = ?, updated_at = ?, failed_login_attempts = 0, locked_until = ''
+            WHERE id = ?
+            """,
             (password_hash, now_iso(), str(row["id"])),
         )
         execute(
@@ -472,7 +476,7 @@ class OperatorAuthService:
         try:
             _password_hasher().verify(str(row["password_hash"]), current_password)
         except (VerifyMismatchError, VerificationError, InvalidHashError):
-            raise ValueError("Incorrect current password.")
+            raise ValueError("Incorrect current password.") from None
 
         if len(str(new_password or "")) < _PASSWORD_MIN_LENGTH:
             raise ValueError(f"Password must have at least {_PASSWORD_MIN_LENGTH} characters.")
@@ -509,11 +513,15 @@ class OperatorAuthService:
         try:
             _password_hasher().verify(str(row["password_hash"]), current_password)
         except (VerifyMismatchError, VerificationError, InvalidHashError):
-            raise ValueError("Incorrect current password.")
+            raise ValueError("Incorrect current password.") from None
 
         # Invalidate existing
         execute(
-            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? WHERE user_id = ? AND consumed_at = ''",
+            """
+            UPDATE cp_operator_recovery_codes
+            SET consumed_at = ?, consumed_reason = ?
+            WHERE user_id = ? AND consumed_at = ''
+            """,
             (now_iso(), "regenerated", context.user_id),
         )
 
