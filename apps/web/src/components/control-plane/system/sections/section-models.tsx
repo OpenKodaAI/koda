@@ -60,6 +60,7 @@ import { FieldShell } from "@/components/control-plane/system/shared/field-shell
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
 import { AnimatedSwitch } from "@/components/control-plane/system/shared/animated-switch";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
+import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { ProviderLoginSession } from "@/lib/control-plane";
@@ -1568,7 +1569,7 @@ export function ProviderAccordionItem({
 // ---------------------------------------------------------------------------
 
 export function SectionModels() {
-  const { tl } = useAppI18n();
+  const { tl, t } = useAppI18n();
   const { draft, setField, providerOptions, enabledProviders, moveFallback, providerConnections, sectionErrors } =
     useSystemSettings();
   const modelsErrors = sectionErrors.models;
@@ -1582,7 +1583,73 @@ export function SectionModels() {
     generalProviders.some((provider) => provider.id === providerId),
   );
   const modelFunctions = draft.catalogs.model_functions || [];
-  const functionalCatalog = draft.catalogs.functional_model_catalog || {};
+  const functionalCatalog = useMemo(
+    () => draft.catalogs.functional_model_catalog || {},
+    [draft.catalogs.functional_model_catalog],
+  );
+
+  const effortCapableModels = useMemo(() => {
+    const seen = new Set<string>();
+    const items: Array<{
+      providerId: string;
+      modelId: string;
+      providerTitle: string;
+      modelTitle: string;
+      capability: EffortCapability;
+    }> = [];
+    for (const list of Object.values(functionalCatalog)) {
+      for (const item of list) {
+        if (!item.effort_kind) continue;
+        const slug = `${item.provider_id}:${item.model_id}`;
+        if (seen.has(slug)) continue;
+        seen.add(slug);
+        let capability: EffortCapability;
+        if (item.effort_kind === "enum") {
+          const values: string[] = Array.isArray(item.effort_enum_values)
+            ? item.effort_enum_values.map(String)
+            : [];
+          capability = {
+            kind: "enum",
+            values,
+            defaultValue:
+              typeof item.effort_default === "string" ? item.effort_default : undefined,
+          };
+        } else {
+          capability = {
+            kind: "tokens",
+            min: Number(item.effort_token_min ?? 0),
+            max: Number(item.effort_token_max ?? 0),
+            defaultValue:
+              typeof item.effort_default === "number" ? item.effort_default : undefined,
+          };
+        }
+        items.push({
+          providerId: item.provider_id,
+          modelId: item.model_id,
+          providerTitle: item.provider_title || item.provider_id,
+          modelTitle: item.title,
+          capability,
+        });
+      }
+    }
+    items.sort((a, b) =>
+      a.providerTitle.localeCompare(b.providerTitle) || a.modelTitle.localeCompare(b.modelTitle),
+    );
+    return items;
+  }, [functionalCatalog]);
+
+  function updateEffortDefault(slug: string, next: string | number | null) {
+    const current = { ...(draft.values.models.effort_defaults || {}) };
+    if (next === null) {
+      delete current[slug];
+    } else {
+      current[slug] = next;
+    }
+    setField("models", {
+      ...draft.values.models,
+      effort_defaults: current,
+    });
+  }
 
   function updateFunctionalDefault(functionId: string, compositeValue: string) {
     const nextDefaults = { ...(draft.values.models.functional_defaults || {}) };
@@ -1889,6 +1956,47 @@ export function SectionModels() {
           })}
         </div>
       </SettingsFieldGroup>
+
+      {effortCapableModels.length > 0 && (
+        <SettingsFieldGroup title={t("modelEffort.sectionTitle")}>
+          <p className="-mt-2 text-xs text-[var(--text-tertiary)] leading-relaxed">
+            {t("modelEffort.sectionDescription")}
+          </p>
+          <div className="flex flex-col">
+            {effortCapableModels.map((item, index) => {
+              const slug = `${item.providerId}:${item.modelId}`;
+              const stored = draft.values.models.effort_defaults?.[slug];
+              const value: string | number | null =
+                typeof stored === "string" || typeof stored === "number" ? stored : null;
+              return (
+                <div
+                  key={slug}
+                  className={`flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-6 ${
+                    index === 0 ? "" : "border-t border-[color:var(--divider-hair)]"
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium text-[var(--text-primary)]">
+                      {item.modelTitle}
+                    </span>
+                    <span className="text-xs text-[var(--text-tertiary)]">
+                      {item.providerTitle}
+                    </span>
+                  </div>
+                  <div className="sm:w-[360px]">
+                    <EffortPicker
+                      capability={item.capability}
+                      value={value ?? item.capability.defaultValue ?? null}
+                      onChange={(next) => updateEffortDefault(slug, next)}
+                      context="global"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SettingsFieldGroup>
+      )}
 
       {/* ---- Aceleração de hardware ---- */}
       <SettingsFieldGroup title={tl("Aceleração de hardware")}>

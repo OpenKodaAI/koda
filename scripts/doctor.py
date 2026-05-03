@@ -205,15 +205,6 @@ def run_strict_hardening(env: dict[str, str], *, env_file: Path) -> list[dict[st
     )
 
     # --- Auth posture ---------------------------------------------------------
-    auth_mode = env.get("CONTROL_PLANE_AUTH_MODE", "token").strip().lower() or "token"
-    checks.append(
-        {
-            "name": "control_plane_auth_mode_is_token",
-            "ok": auth_mode == "token",
-            "value": auth_mode,
-        }
-    )
-
     api_token = env.get("CONTROL_PLANE_API_TOKEN", "").strip()
     checks.append(
         {

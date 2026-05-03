@@ -1442,6 +1442,76 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
             },
         },
     },
+    {
+        "server_key": "superhuman",
+        "display_name": "Superhuman",
+        "description": (
+            "Servidor MCP remoto oficial Superhuman Mail. Mail + calendar com "
+            "agente de produtividade que responde no seu tom. OAuth-only."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.mail.superhuman.com/mcp",
+        "url": "https://mcp.mail.superhuman.com/mcp",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://help.superhuman.com/hc/en-us/articles/49810745762067-Superhuman-Mail-MCP-Server",
+        "logo_key": "superhuman",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Superhuman. Sem fallback manual.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Mail e calendario com agente de produtividade",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "miro",
+        "display_name": "Miro",
+        "description": (
+            "Servidor MCP remoto oficial Miro em mcp.miro.com. Boards, items, "
+            "diagrams e code-board generation. OAuth 2.1 com DCR."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.miro.com/",
+        "url": "https://mcp.miro.com/",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://developers.miro.com/docs/miro-mcp",
+        "logo_key": "miro",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "https://mcp.miro.com/.well-known/oauth-authorization-server",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Miro com scopes boards:read e boards:write.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Boards, diagramas e code-board generation",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
 )
 
 

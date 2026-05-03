@@ -19,8 +19,6 @@ Every item below is verifiable. The matching checks live in
 
 ## Auth
 
-- [ ] `CONTROL_PLANE_AUTH_MODE=token` (NEVER `development` or `open`
-      in production).
 - [ ] `CONTROL_PLANE_API_TOKEN` is at least 32 random bytes (use
       `openssl rand -hex 32`).
 - [ ] `WEB_OPERATOR_SESSION_SECRET` is at least 32 random bytes.

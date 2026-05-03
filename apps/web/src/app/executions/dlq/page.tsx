@@ -1,5 +1,5 @@
 import DLQPageClient from "@/components/features/dlq/dlq-page-client";
 
-export default function RoutinesDLQPage() {
+export default function ExecutionsDLQPage() {
   return <DLQPageClient />;
 }

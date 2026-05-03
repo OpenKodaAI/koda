@@ -442,6 +442,7 @@ export interface ModelPolicyData {
   default_models: Record<string, string>;
   tier_models: Record<string, { small?: string; medium?: string; large?: string }>;
   functional_defaults: Record<string, { provider_id: string; model_id: string }>;
+  effort_overrides: Record<string, string | number>;
   max_budget_usd: number | null;
   max_total_budget_usd: number | null;
   _extra: Record<string, unknown>;
@@ -455,6 +456,7 @@ const MODEL_POLICY_KEYS = [
   "default_models",
   "tier_models",
   "functional_defaults",
+  "effort_overrides",
   "max_budget_usd",
   "max_total_budget_usd",
 ];
@@ -472,6 +474,19 @@ function asFunctionalDefaults(value: unknown): Record<string, { provider_id: str
   return result;
 }
 
+function asEffortOverrides(value: unknown): Record<string, string | number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, string | number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "string" && raw.trim()) {
+      result[key] = raw;
+    } else if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = raw;
+    }
+  }
+  return result;
+}
+
 export function parseModelPolicy(json: string): ModelPolicyData {
   const obj = safeParseJson(json);
   const { known, extra } = extractKnown(obj, MODEL_POLICY_KEYS);
@@ -485,6 +500,7 @@ export function parseModelPolicy(json: string): ModelPolicyData {
     default_models: asStringMap(known.default_models),
     tier_models: asTierModels(known.tier_models),
     functional_defaults: asFunctionalDefaults(known.functional_defaults),
+    effort_overrides: asEffortOverrides(known.effort_overrides),
     max_budget_usd:
       known.max_budget_usd === undefined || known.max_budget_usd === null
         ? null
@@ -509,6 +525,7 @@ export function serializeModelPolicy(data: ModelPolicyData): string {
         default_models: data.default_models,
         tier_models: data.tier_models,
         functional_defaults: data.functional_defaults,
+        effort_overrides: data.effort_overrides,
         max_budget_usd: data.max_budget_usd,
         max_total_budget_usd: data.max_total_budget_usd,
       },

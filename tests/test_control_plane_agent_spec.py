@@ -4,11 +4,72 @@ from __future__ import annotations
 
 from koda.control_plane.agent_spec import (
     compose_agent_prompt,
+    normalize_effort_overrides,
+    normalize_model_policy,
     normalize_resource_access_policy,
     render_markdown_documents_from_agent_spec,
     resolve_scope_documents,
     validate_agent_spec,
 )
+
+
+def test_normalize_effort_overrides_accepts_enum_and_tokens() -> None:
+    result = normalize_effort_overrides(
+        {
+            "codex:gpt-5": "high",
+            "claude:claude-opus-4-7": "medium",
+            "deepseek:deepseek-v4-pro": 4000,
+        }
+    )
+    assert result == {
+        "codex:gpt-5": "high",
+        "claude:claude-opus-4-7": "medium",
+        "deepseek:deepseek-v4-pro": 4000,
+    }
+
+
+def test_normalize_effort_overrides_drops_unknown_models_and_invalid_values() -> None:
+    result = normalize_effort_overrides(
+        {
+            "codex:gpt-5": "INVALID",
+            "claude:claude-bogus": "medium",
+            "mistral:mistral-large-latest": 5000,  # provider has no effort capability
+            "deepseek:deepseek-v4-pro": 999_999,  # out of range
+            "deepseek:deepseek-v4-pro ": "not-a-number",
+            "no-colon": "medium",
+            ":": "low",
+        }
+    )
+    assert result == {}
+
+
+def test_normalize_effort_overrides_lowercases_and_strips_keys() -> None:
+    result = normalize_effort_overrides({"  CODEX:gpt-5 ": "HIGH"})
+    assert result == {"codex:gpt-5": "high"}
+
+
+def test_normalize_model_policy_includes_effort_overrides_and_drops_invalid() -> None:
+    policy = normalize_model_policy(
+        {
+            "allowed_providers": ["codex"],
+            "effort_overrides": {
+                "codex:gpt-5": "low",
+                "mistral:mistral-large-latest": 5000,
+            },
+        }
+    )
+    assert policy["allowed_providers"] == ["codex"]
+    assert policy["effort_overrides"] == {"codex:gpt-5": "low"}
+
+
+def test_normalize_model_policy_omits_effort_overrides_when_empty() -> None:
+    policy = normalize_model_policy(
+        {
+            "allowed_providers": ["codex"],
+            "effort_overrides": {"mistral:mistral-large-latest": 5000},
+        }
+    )
+    assert "effort_overrides" not in policy
 
 
 def test_compose_agent_prompt_escapes_reserved_tags() -> None:

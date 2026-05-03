@@ -304,6 +304,7 @@ class QueryContext:
     prompt_budget: dict[str, Any] | None = None
     asset_refs: list[dict[str, Any]] = field(default_factory=list)
     skill_matches: list[Any] = field(default_factory=list)
+    effort: str | int | None = None
 
 
 @dataclass
@@ -2707,6 +2708,10 @@ async def _prepare_query_context(
         raise BudgetExceeded(_prompt_budget_error_message(prompt_budget))
     system_prompt = str(prompt_budget.get("compiled_prompt") or DEFAULT_SYSTEM_PROMPT)
 
+    from koda.services.agent_settings import get_agent_runtime_settings, resolve_effort
+
+    effort_value = resolve_effort(get_agent_runtime_settings(), provider, model)
+
     return QueryContext(
         task_id=task_id,
         provider=provider,
@@ -2718,6 +2723,7 @@ async def _prepare_query_context(
         agent_mode=agent_mode,
         permission_mode=permission_mode,
         max_turns=max_turns,
+        effort=effort_value,
         warnings=_query_warnings,
         cache_hit=_cache_hit,
         script_matches=_script_matches,
@@ -2839,6 +2845,7 @@ async def _run_streaming(
             turn_mode=cast(TurnMode, ctx.turn_mode),
             dry_run=ctx.dry_run,
             runtime_task_id=task_id if (RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None) else None,
+            effort=ctx.effort,
         ):
             chunks.append(chunk)
             raw_output += chunk
@@ -2975,6 +2982,7 @@ async def _run_fallback(
             turn_mode=cast(TurnMode, ctx.turn_mode),
             dry_run=ctx.dry_run,
             runtime_task_id=task_id if (RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None) else None,
+            effort=ctx.effort,
         )
         return RunResult(
             provider=ctx.provider,
@@ -3097,6 +3105,9 @@ async def _resolve_provider_context(
         auto_model=bool(context.user_data.get("auto_model")),
         has_images=bool(base_ctx.visual_paths or _filter_visual_paths(item.image_paths)),
     )
+    from koda.services.agent_settings import get_agent_runtime_settings, resolve_effort
+
+    effort_value = resolve_effort(get_agent_runtime_settings(), provider, model)
     return replace(
         base_ctx,
         provider=provider,
@@ -3107,6 +3118,7 @@ async def _resolve_provider_context(
         resume_requested=resume_requested,
         supports_native_resume=capabilities.supports_native_resume,
         provider_available=capabilities.can_execute,
+        effort=effort_value,
     )
 
 

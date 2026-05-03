@@ -14,9 +14,6 @@ type PanelPosition = {
   top: number;
   left: number;
   width: number;
-  right?: number | string;
-  transform?: string;
-  position?: "fixed";
 };
 
 type RectBounds = {
@@ -27,6 +24,8 @@ type RectBounds = {
   width: number;
   height: number;
 };
+
+const MOBILE_BREAKPOINT = 640;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -123,42 +122,37 @@ function getVariant(routeKey: string | undefined): TourVariant {
 function getPanelPosition(
   rect: DOMRect | null,
   placement: TourPlacement,
-  mobile: boolean,
   panel: HTMLDivElement | null,
-) {
-  const viewportPaddingX = mobile ? 18 : 28;
-  const viewportPaddingY = mobile ? 18 : 40;
-  const gap = mobile ? 16 : 24;
-  const panelWidth = mobile
-    ? Math.min(window.innerWidth - viewportPaddingX * 2, 420)
-    : Math.min(360, window.innerWidth - viewportPaddingX * 2);
-  const panelHeight = panel?.getBoundingClientRect().height ?? 244;
-  const maxLeft = window.innerWidth - panelWidth - viewportPaddingX;
-  const maxTop = window.innerHeight - panelHeight - viewportPaddingY;
+): PanelPosition {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const isNarrow = viewportWidth < MOBILE_BREAKPOINT;
+  const viewportPaddingX = isNarrow ? 12 : 24;
+  const viewportPaddingY = isNarrow ? 14 : 32;
+  const gap = isNarrow ? 12 : 18;
+  const panelWidth = Math.min(
+    isNarrow ? viewportWidth - viewportPaddingX * 2 : 340,
+    viewportWidth - viewportPaddingX * 2,
+  );
+  const panelHeight = panel?.getBoundingClientRect().height ?? 220;
+  const maxLeft = viewportWidth - panelWidth - viewportPaddingX;
+  const maxTop = viewportHeight - panelHeight - viewportPaddingY;
 
-  if (mobile || !rect || placement === "center") {
+  if (!rect || placement === "center") {
     return {
       width: panelWidth,
-      left: clamp(
-        (window.innerWidth - panelWidth) / 2,
-        viewportPaddingX,
-        maxLeft,
-      ),
-      top: clamp(
-        window.innerHeight - panelHeight - viewportPaddingY,
-        viewportPaddingY,
-        maxTop,
-      ),
+      left: clamp((viewportWidth - panelWidth) / 2, viewportPaddingX, maxLeft),
+      top: clamp(viewportHeight - panelHeight - viewportPaddingY, viewportPaddingY, maxTop),
     };
   }
 
   const centerX = rect.left + rect.width / 2;
   const centerY = rect.top + rect.height / 2;
-  const targetBounds = getExpandedBounds(rect, 16);
+  const targetBounds = getExpandedBounds(rect, 12);
   const placements = getPanelPlacementCandidates(placement);
 
-  let fallbackPosition: PanelPosition | null = null;
-  let fallbackScore = Number.POSITIVE_INFINITY;
+  let bestPosition: PanelPosition | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
 
   for (const [index, candidate] of placements.entries()) {
     const position = buildPanelPosition(
@@ -179,29 +173,18 @@ function getPanelPosition(
     );
     const bounds = getPanelBounds(position, panelHeight);
     const overlap = getOverlapArea(bounds, targetBounds);
-    const edgePenalty = getViewportEdgePenalty(
-      bounds,
-      viewportPaddingX,
-      viewportPaddingY,
-    );
-    const distancePenalty =
-      Math.abs(bounds.left + bounds.width / 2 - (targetBounds.left + targetBounds.width / 2)) * 0.2 +
-      Math.abs(bounds.top + bounds.height / 2 - (targetBounds.top + targetBounds.height / 2)) * 0.12;
-    const preferencePenalty = index * 18;
-    const score =
-      overlap * 2400 +
-      edgePenalty +
-      distancePenalty +
-      preferencePenalty;
+    const edgePenalty = getViewportEdgePenalty(bounds, viewportPaddingX, viewportPaddingY);
+    const preferencePenalty = index * 12;
+    const score = overlap * 2400 + edgePenalty + preferencePenalty;
 
-    if (score < fallbackScore) {
-      fallbackPosition = position;
-      fallbackScore = score;
+    if (score < bestScore) {
+      bestPosition = position;
+      bestScore = score;
     }
   }
 
-  if (fallbackPosition) {
-    return fallbackPosition;
+  if (bestPosition) {
+    return bestPosition;
   }
 
   return {
@@ -264,10 +247,10 @@ function resolveSidePlacementTop(
   maxTop: number,
 ) {
   const targetHeight = rect.bottom - rect.top;
-  const topAligned = rect.top + (targetHeight > 220 ? 20 : -8);
+  const topAligned = rect.top + (targetHeight > 220 ? 16 : -6);
   const centered = rect.centerY - panelHeight / 2;
   const preferred =
-    targetHeight > window.innerHeight * 0.4 || centered < viewportPaddingY + 18
+    targetHeight > window.innerHeight * 0.4 || centered < viewportPaddingY + 16
       ? topAligned
       : centered;
 
@@ -302,49 +285,24 @@ function getOverlapArea(a: RectBounds, b: RectBounds) {
   return width * height;
 }
 
-function getRectDelta(a: DOMRect | null, b: DOMRect | null) {
-  if (!a || !b) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  return (
-    Math.abs(a.top - b.top) +
-    Math.abs(a.left - b.left) +
-    Math.abs(a.width - b.width) +
-    Math.abs(a.height - b.height)
-  );
-}
-
 function getViewportEdgePenalty(
   bounds: RectBounds,
   viewportPaddingX: number,
   viewportPaddingY: number,
 ) {
-  const desiredInsetX = viewportPaddingX + 14;
-  const desiredInsetY = viewportPaddingY + 10;
-  const insets = [
-    bounds.left,
-    window.innerWidth - bounds.right,
-  ];
-  const verticalInsets = [
-    bounds.top,
-    window.innerHeight - bounds.bottom,
-  ];
+  const desiredInsetX = viewportPaddingX + 8;
+  const desiredInsetY = viewportPaddingY + 6;
+  const horizontalInsets = [bounds.left, window.innerWidth - bounds.right];
+  const verticalInsets = [bounds.top, window.innerHeight - bounds.bottom];
 
-  const horizontalPenalty = insets.reduce((penalty, inset) => {
-    if (inset >= desiredInsetX) {
-      return penalty;
-    }
-
-    return penalty + (desiredInsetX - inset) * 8;
+  const horizontalPenalty = horizontalInsets.reduce((penalty, inset) => {
+    if (inset >= desiredInsetX) return penalty;
+    return penalty + (desiredInsetX - inset) * 6;
   }, 0);
 
   return verticalInsets.reduce((penalty, inset) => {
-    if (inset >= desiredInsetY) {
-      return penalty;
-    }
-
-    return penalty + (desiredInsetY - inset) * 10;
+    if (inset >= desiredInsetY) return penalty;
+    return penalty + (desiredInsetY - inset) * 8;
   }, horizontalPenalty);
 }
 
@@ -365,9 +323,10 @@ function getPanelPlacementCandidates(
       ? ["right", "left"]
       : ["top", "bottom"];
 
-  return Array.from(
-    new Set([placement, opposite, ...crossAxis]),
-  ) as Exclude<TourPlacement, "center">[];
+  return Array.from(new Set([placement, opposite, ...crossAxis])) as Exclude<
+    TourPlacement,
+    "center"
+  >[];
 }
 
 export function TourHost() {
@@ -384,13 +343,12 @@ export function TourHost() {
   } = useAppTour();
   const { t } = useAppI18n();
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const previousPathnameRef = useRef(pathname);
-  const spotlightRevealAtRef = useRef(0);
+  const lastScrolledStepIdRef = useRef<string | null>(null);
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
-  const [spotlightTargetRect, setSpotlightTargetRect] = useState<DOMRect | null>(null);
-  const [panelPosition, setPanelPosition] = useState<{ top: number; left: number; width: number } | null>(null);
-  const [mobile, setMobile] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
+  const [resolvedStepId, setResolvedStepId] = useState<string | null>(null);
+  const [resolvedToPrimary, setResolvedToPrimary] = useState(false);
   const [stepDirection, setStepDirection] = useState(1);
   const isOpen = !booting && status === "running" && Boolean(currentStep);
   const variant = useMemo(
@@ -402,170 +360,235 @@ export function TourHost() {
     [currentStep, variant],
   );
   const isWelcomeStep = currentStep?.id === "tour.welcome";
-  const spotlightRect = useMemo(
-    () => {
-      if (!spotlightTargetRect) return null;
+  const spotlightRect = useMemo(() => {
+    if (!target || !targetRect) return null;
+    if (typeof window === "undefined") return null;
 
-      const radius =
-        target && typeof window !== "undefined"
-          ? Number.parseFloat(window.getComputedStyle(target).borderRadius || "0") || 18
-          : 18;
+    const radius =
+      Number.parseFloat(window.getComputedStyle(target).borderRadius || "0") || 14;
 
-      return getTourSpotlightFrame({
-        top: spotlightTargetRect.top,
-        left: spotlightTargetRect.left,
-        width: spotlightTargetRect.width,
-        height: spotlightTargetRect.height,
-        radius,
-      });
-    },
-    [spotlightTargetRect, target],
-  );
+    return getTourSpotlightFrame({
+      top: targetRect.top,
+      left: targetRect.left,
+      width: targetRect.width,
+      height: targetRect.height,
+      radius,
+    });
+  }, [targetRect, target]);
+
   const handleBack = useCallback(() => {
     setStepDirection(-1);
     back();
   }, [back]);
+
   const handleNext = useCallback(() => {
     setStepDirection(1);
     next();
   }, [next]);
+
+  const isCurrentStepResolved =
+    Boolean(currentStep) && resolvedStepId === currentStep?.id;
+  const isAnchorReady =
+    isCurrentStepResolved && Boolean(target) && Boolean(panelPosition) && resolvedToPrimary;
+  const useCenteredFrame =
+    !currentStep ||
+    currentStep.kind === "modal" ||
+    !isAnchorReady;
+
   const coachmarkStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!currentStep) {
       return undefined;
     }
 
-    if (currentStep.id === "tour.welcome") {
+    if (useCenteredFrame) {
       return {
-        position: "fixed",
-        top: "50%",
-        left: "50%",
-        width: mobile
-          ? "min(680px, calc(100vw - 1.5rem))"
-          : "min(860px, calc(100vw - 3.5rem))",
-        maxHeight: mobile ? "calc(100dvh - 1.5rem)" : "calc(100vh - 4rem)",
-        transform: "translate(-50%, -50%)",
-      };
-    }
-
-    if (currentStep.kind === "modal") {
-      return mobile
-        ? {
-            position: "fixed",
-            top: "max(1rem, env(safe-area-inset-top))",
-            left: "max(0.75rem, calc(env(safe-area-inset-left) + 0.75rem))",
-            right: "max(0.75rem, calc(env(safe-area-inset-right) + 0.75rem))",
-            width: "auto",
-            maxHeight: "calc(100dvh - max(1.5rem, env(safe-area-inset-top) + env(safe-area-inset-bottom) + 0.75rem))",
-          }
-        : {
-            position: "fixed",
-            top: "clamp(1.5rem, 8vh, 3rem)",
-            left: "50%",
-            width: "min(720px, calc(100vw - 3rem))",
-            transform: "translateX(-50%)",
-          };
-    }
-
-    if (mobile) {
-      return {
-        position: "fixed",
-        left: "max(0.75rem, calc(env(safe-area-inset-left) + 0.75rem))",
-        right: "max(0.75rem, calc(env(safe-area-inset-right) + 0.75rem))",
-        bottom: "max(0.75rem, calc(env(safe-area-inset-bottom) + 0.75rem))",
-        top: "auto",
-        width: "auto",
-        maxHeight: "min(26rem, calc(100dvh - max(6rem, env(safe-area-inset-top) + 5.25rem)))",
+        position: "relative",
+        width: "min(440px, 100%)",
+        maxHeight: "100%",
+        pointerEvents: "auto",
       };
     }
 
     return {
       position: "fixed",
-      ...(panelPosition ?? {}),
+      top: panelPosition!.top,
+      left: panelPosition!.left,
+      width: panelPosition!.width,
     };
-  }, [currentStep, mobile, panelPosition]);
+  }, [currentStep, panelPosition, useCenteredFrame]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === "undefined") return;
 
-    const updateViewport = () => setMobile(window.innerWidth < 1024);
-    updateViewport();
+    if (!isOpen || !currentStep || currentStep.kind === "modal") {
+      return;
+    }
 
-    window.addEventListener("resize", updateViewport);
-    return () => window.removeEventListener("resize", updateViewport);
-  }, []);
+    if (
+      currentStep.routePattern &&
+      !matchesTourRoutePattern(pathname, currentStep.routePattern)
+    ) {
+      return;
+    }
 
-  useEffect(() => {
+    const stepId = currentStep.id;
+    let lastResolved: HTMLElement | null = null;
     let frame = 0;
-    let timeout = 0;
-    const pathChanged = previousPathnameRef.current !== pathname;
-    previousPathnameRef.current = pathname;
-    spotlightRevealAtRef.current = performance.now() + (pathChanged ? 420 : 80);
+    let attempts = 0;
 
-    const scheduleTargetUpdate = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        if (!isOpen || !currentStep || currentStep.kind === "modal") {
-          setTarget(null);
-          setTargetRect(null);
-          setSpotlightTargetRect(null);
-          setPanelPosition(null);
-          return;
-        }
-
-        if (
-          currentStep.routePattern &&
-          !matchesTourRoutePattern(pathname, currentStep.routePattern)
-        ) {
-          setTarget(null);
-          setTargetRect(null);
-          setSpotlightTargetRect(null);
-          setPanelPosition(null);
-          return;
-        }
-
-        const nextTarget = resolveTargetElement(
-          currentStep.anchor,
-          currentStep.fallbackAnchor,
-          currentStep.routeKey,
-        );
-
-        setTarget(nextTarget);
-
-        if (!nextTarget) {
-          setTargetRect(null);
-          setSpotlightTargetRect(null);
-          setPanelPosition(null);
-        }
-      });
-    };
-
-    scheduleTargetUpdate();
-    timeout = window.setTimeout(scheduleTargetUpdate, 180);
-    const observer =
-      typeof MutationObserver !== "undefined"
-        ? new MutationObserver(() => {
-            scheduleTargetUpdate();
-          })
+    const tryResolve = (): boolean => {
+      attempts += 1;
+      const primaryEl = currentStep.anchor
+        ? document.querySelector<HTMLElement>(
+            `[data-tour-anchor="${currentStep.anchor}"]`,
+          )
         : null;
+      const primaryUsable = primaryEl ? isUsableTourTarget(primaryEl) : false;
 
-    observer?.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
-    });
-    window.addEventListener("resize", scheduleTargetUpdate);
+      // Prefer primary if it's now usable — even if we previously settled on
+      // a fallback (page may have just finished hydrating).
+      const nextTarget = primaryUsable
+        ? primaryEl
+        : resolveTargetElement(
+            currentStep.anchor,
+            currentStep.fallbackAnchor,
+            currentStep.routeKey,
+          );
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-      observer?.disconnect();
-      window.removeEventListener("resize", scheduleTargetUpdate);
+      if (!nextTarget) {
+        return false;
+      }
+
+      const isPrimaryAnchor = primaryUsable && nextTarget === primaryEl;
+      const lastIsPrimaryAnchor =
+        lastResolved && primaryEl && lastResolved === primaryEl;
+
+      // Never downgrade from primary to fallback.
+      if (lastIsPrimaryAnchor && !isPrimaryAnchor) {
+        return false;
+      }
+
+      // Skip redundant updates.
+      if (nextTarget === lastResolved) {
+        if (isPrimaryAnchor && !resolvedToPrimary) {
+          setResolvedToPrimary(true);
+        }
+        return isPrimaryAnchor;
+      }
+
+      lastResolved = nextTarget;
+      const rect = nextTarget.getBoundingClientRect();
+      setTarget(nextTarget);
+      setTargetRect(rect);
+      setPanelPosition(
+        getPanelPosition(rect, currentStep.placement ?? "bottom", panelRef.current),
+      );
+      setResolvedStepId(stepId);
+      setResolvedToPrimary(isPrimaryAnchor);
+      return isPrimaryAnchor;
     };
+
+    const settledOnPrimary = tryResolve();
+
+    if (settledOnPrimary) {
+      return;
+    }
+
+    let stopped = false;
+    let observer: MutationObserver | null = null;
+    let timer = 0;
+
+    const stop = () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      observer = null;
+    };
+
+    // Page may still be hydrating — keep re-resolving until we either land on
+    // the primary anchor, or we've exhausted reasonable attempts.
+    const scheduleResolve = (delay: number) => {
+      if (stopped) return;
+      timer = window.setTimeout(() => {
+        if (stopped) return;
+        frame = window.requestAnimationFrame(() => {
+          if (stopped) return;
+          const settled = tryResolve();
+          if (settled) {
+            stop();
+            return;
+          }
+          if (attempts < 8) {
+            scheduleResolve(Math.min(delay * 1.5, 600));
+          } else {
+            // Give up waiting for primary — accept whatever target we have so
+            // the user isn't stuck in centered mode forever (e.g., when the
+            // primary anchor genuinely doesn't render on this page).
+            if (lastResolved) {
+              setResolvedToPrimary(true);
+            }
+            observer?.disconnect();
+            observer = null;
+          }
+        });
+      }, delay);
+    };
+
+    scheduleResolve(80);
+
+    if (typeof MutationObserver !== "undefined") {
+      observer = new MutationObserver(() => {
+        if (stopped) return;
+        window.clearTimeout(timer);
+        scheduleResolve(40);
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    return stop;
+    // resolvedToPrimary is intentionally read inside tryResolve via the
+    // closure but is set BY this effect — including it would cause an
+    // infinite re-run loop on every resolution.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, isOpen, pathname]);
 
   useEffect(() => {
-    if (!target || typeof target.scrollIntoView !== "function") return;
+    if (typeof window === "undefined") return;
+    if (!target || !currentStep || currentStep.kind === "modal") return;
+
+    let frame = 0;
+
+    const remeasure = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (!target.isConnected) return;
+        const rect = target.getBoundingClientRect();
+        setTargetRect(rect);
+        setPanelPosition(
+          getPanelPosition(rect, currentStep.placement ?? "bottom", panelRef.current),
+        );
+      });
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(remeasure) : null;
+    resizeObserver?.observe(target);
+    window.addEventListener("resize", remeasure);
+    window.addEventListener("scroll", remeasure, true);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", remeasure);
+      window.removeEventListener("scroll", remeasure, true);
+    };
+  }, [target, currentStep]);
+
+  useEffect(() => {
+    if (!target || !currentStep || currentStep.kind === "modal") return;
+    if (lastScrolledStepIdRef.current === currentStep.id) return;
+    if (typeof target.scrollIntoView !== "function") return;
 
     const rect = target.getBoundingClientRect();
     const outOfView =
@@ -577,103 +600,9 @@ export function TourHost() {
     if (outOfView) {
       target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
     }
-  }, [target]);
 
-  useLayoutEffect(() => {
-    let resetFrame = 0;
-    const clearMeasuredState = () => {
-      window.cancelAnimationFrame(resetFrame);
-      resetFrame = window.requestAnimationFrame(() => {
-        setTargetRect(null);
-        setSpotlightTargetRect(null);
-        setPanelPosition(null);
-      });
-    };
-
-    if (!isOpen || !currentStep || currentStep.kind === "modal") {
-      clearMeasuredState();
-      return () => {
-        window.cancelAnimationFrame(resetFrame);
-      };
-    }
-
-    if (!target) {
-      clearMeasuredState();
-      return () => {
-        window.cancelAnimationFrame(resetFrame);
-      };
-    }
-
-    let lastMeasuredRect: DOMRect | null = null;
-    let settledMeasurements = 0;
-    let measureCount = 0;
-    const revealNotBefore = spotlightRevealAtRef.current;
-
-    const update = () => {
-      const nextRect = target.getBoundingClientRect();
-      setTargetRect(nextRect);
-      setPanelPosition(
-        getPanelPosition(
-          nextRect,
-          currentStep.placement ?? "bottom",
-          mobile,
-          panelRef.current,
-        ),
-      );
-
-      const delta = getRectDelta(lastMeasuredRect, nextRect);
-      settledMeasurements = delta <= 3 ? settledMeasurements + 1 : 0;
-      measureCount += 1;
-      lastMeasuredRect = nextRect;
-
-      if (
-        performance.now() >= revealNotBefore &&
-        (settledMeasurements >= 1 || measureCount >= 5)
-      ) {
-        setSpotlightTargetRect(nextRect);
-      }
-    };
-
-    update();
-    const frame = window.requestAnimationFrame(update);
-    const settleFrame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(update);
-    });
-    const settleTimeoutA = window.setTimeout(update, 120);
-    const settleTimeoutB = window.setTimeout(update, 280);
-    const settleTimeoutC = window.setTimeout(update, 520);
-    const settleTimeoutD = window.setTimeout(update, 760);
-    const revealTimeout = window.setTimeout(
-      update,
-      Math.max(0, revealNotBefore - performance.now() + 18),
-    );
-    const settleInterval = window.setInterval(update, 90);
-    const settleIntervalStop = window.setTimeout(() => {
-      window.clearInterval(settleInterval);
-    }, 900);
-    const resizeObserver =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
-
-    resizeObserver?.observe(target);
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-
-    return () => {
-      window.cancelAnimationFrame(resetFrame);
-      window.cancelAnimationFrame(frame);
-      window.cancelAnimationFrame(settleFrame);
-      window.clearTimeout(settleTimeoutA);
-      window.clearTimeout(settleTimeoutB);
-      window.clearTimeout(settleTimeoutC);
-      window.clearTimeout(settleTimeoutD);
-      window.clearTimeout(revealTimeout);
-      window.clearInterval(settleInterval);
-      window.clearTimeout(settleIntervalStop);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [currentStep, isOpen, mobile, target]);
+    lastScrolledStepIdRef.current = currentStep.id;
+  }, [currentStep, target]);
 
   useEffect(() => {
     if (!isOpen || !panelRef.current) return;
@@ -735,55 +664,87 @@ export function TourHost() {
         ? progressTotal
         : Math.max(currentStepIndex, 1);
 
-  const showAnchoredCoachmark =
+  const showSpotlight =
     currentStep.kind === "anchored" &&
     matchesTourRoutePattern(pathname, currentStep.routePattern) &&
-    (targetRect || mobile);
+    isAnchorReady &&
+    Boolean(targetRect);
+
+  const showCoachmark =
+    currentStep.kind === "modal" ||
+    (currentStep.kind === "anchored" &&
+      matchesTourRoutePattern(pathname, currentStep.routePattern));
 
   return (
-    <TourOverlay spotlightRect={showAnchoredCoachmark ? spotlightRect : null}>
+    <TourOverlay spotlightRect={showSpotlight ? spotlightRect : null}>
       <div className="sr-only" aria-live="polite">
         {t(copy.titleKey)}
       </div>
       <AnimatePresence initial={false}>
-        {showAnchoredCoachmark ? (
+        {showSpotlight ? (
           <TourSpotlight key="tour-spotlight" rect={spotlightRect} />
         ) : null}
       </AnimatePresence>
-      <AnimatePresence mode="wait" initial={false}>
-        <TourCoachmark
-          key={currentStep.id}
-          title={t(copy.titleKey)}
-          description={t(copy.descriptionKey)}
-          current={progressCurrent}
-          total={progressTotal}
-          onBack={handleBack}
-          onContinue={handleNext}
-          onSkip={skipAll}
-          backLabel={t("tour.actions.back")}
-          continueLabel={t(copy.continueLabelKey ?? "tour.actions.continue")}
-          skipLabel={t("tour.actions.skip")}
-          showBack={currentStepIndex > 0}
-          showSkip={currentStep.id !== "tour.complete"}
-          panelRef={panelRef}
-          stepKey={currentStep.id}
-          stepDirection={stepDirection}
-          mobile={mobile || (currentStep.kind !== "modal" && !targetRect)}
-          welcome={isWelcomeStep}
-          className={
-            currentStep.kind === "modal"
-              ? cn(
-                  "tour-coachmark--modal",
+      {useCenteredFrame ? (
+        <div className="tour-coachmark-frame" aria-hidden={!showCoachmark}>
+          <AnimatePresence mode="wait" initial={false}>
+            {showCoachmark ? (
+              <TourCoachmark
+                key={currentStep.id}
+                title={t(copy.titleKey)}
+                description={t(copy.descriptionKey)}
+                current={progressCurrent}
+                total={progressTotal}
+                onBack={handleBack}
+                onContinue={handleNext}
+                onSkip={skipAll}
+                backLabel={t("tour.actions.back")}
+                continueLabel={t(copy.continueLabelKey ?? "tour.actions.continue")}
+                skipLabel={t("tour.actions.skip")}
+                showBack={currentStepIndex > 0}
+                showSkip={currentStep.id !== "tour.complete"}
+                panelRef={panelRef}
+                stepKey={currentStep.id}
+                stepDirection={stepDirection}
+                welcome={isWelcomeStep}
+                className={cn(
+                  currentStep.kind === "modal"
+                    ? "tour-coachmark--modal"
+                    : "tour-coachmark--anchored",
                   isWelcomeStep && "tour-coachmark--welcome",
-                )
-              : cn(
-                  "tour-coachmark--anchored",
-                  mobile && "tour-coachmark--mobile-sheet",
-                )
-          }
-          style={coachmarkStyle}
-        />
-      </AnimatePresence>
+                )}
+                style={coachmarkStyle}
+              />
+            ) : null}
+          </AnimatePresence>
+        </div>
+      ) : (
+        <AnimatePresence mode="wait" initial={false}>
+          {showCoachmark ? (
+            <TourCoachmark
+              key={currentStep.id}
+              title={t(copy.titleKey)}
+              description={t(copy.descriptionKey)}
+              current={progressCurrent}
+              total={progressTotal}
+              onBack={handleBack}
+              onContinue={handleNext}
+              onSkip={skipAll}
+              backLabel={t("tour.actions.back")}
+              continueLabel={t(copy.continueLabelKey ?? "tour.actions.continue")}
+              skipLabel={t("tour.actions.skip")}
+              showBack={currentStepIndex > 0}
+              showSkip={currentStep.id !== "tour.complete"}
+              panelRef={panelRef}
+              stepKey={currentStep.id}
+              stepDirection={stepDirection}
+              welcome={isWelcomeStep}
+              className="tour-coachmark--anchored"
+              style={coachmarkStyle}
+            />
+          ) : null}
+        </AnimatePresence>
+      )}
     </TourOverlay>
   );
 }

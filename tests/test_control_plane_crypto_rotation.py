@@ -29,7 +29,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", ["new-token", "old-token"]),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):
@@ -42,7 +41,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", ["new-token", "old-token"]),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):
@@ -55,7 +53,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", ["new-token", "old-token"]),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):
@@ -69,7 +66,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", ["only-token"]),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):
@@ -82,7 +78,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", ["some-token"]),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):
@@ -96,7 +91,6 @@ class TestMultiTokenAuth:
         from koda.control_plane import api as control_plane_api
 
         with (
-            patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
             patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []),
             patch("koda.control_plane.operator_auth.fetch_one", return_value=None),
         ):

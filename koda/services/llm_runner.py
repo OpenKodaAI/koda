@@ -399,6 +399,7 @@ async def run_llm(
     turn_mode: TurnMode | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     """Run one non-streaming LLM turn through the selected provider."""
     normalized = normalize_provider(provider)
@@ -440,6 +441,7 @@ async def run_llm(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         )
         result = result_obj
     elif normalized == "ollama":
@@ -474,6 +476,7 @@ async def run_llm(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         )
     elif normalized == "codex":
         result = await run_codex(
@@ -491,6 +494,7 @@ async def run_llm(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         )
     else:
         result = await run_claude(
@@ -508,6 +512,7 @@ async def run_llm(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         )
     result["provider"] = normalized
     result["provider_session_id"] = result.get("session_id")
@@ -537,6 +542,7 @@ async def run_llm_streaming(
     turn_mode: TurnMode | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
     """Stream one LLM turn through the selected provider."""
     normalized = normalize_provider(provider)
@@ -584,6 +590,7 @@ async def run_llm_streaming(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         ):
             yield chunk
         return
@@ -627,6 +634,7 @@ async def run_llm_streaming(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         ):
             yield chunk
         return
@@ -648,6 +656,7 @@ async def run_llm_streaming(
             capabilities=capabilities,
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
+            effort=effort,
         ):
             yield chunk
         return
@@ -668,6 +677,7 @@ async def run_llm_streaming(
         capabilities=capabilities,
         dry_run=dry_run,
         runtime_task_id=runtime_task_id,
+        effort=effort,
     ):
         yield chunk
 

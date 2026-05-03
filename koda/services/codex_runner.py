@@ -161,12 +161,14 @@ async def _read_login_status() -> tuple[int, str, str]:
     return proc.returncode or 0, stdout.decode(), stderr.decode()
 
 
-def _build_codex_overrides(system_prompt: str | None) -> list[str]:
+def _build_codex_overrides(system_prompt: str | None, effort: str | int | None = None) -> list[str]:
     args: list[str] = []
     if system_prompt:
         args.extend(["-c", f"developer_instructions={json.dumps(system_prompt)}"])
     if CODEX_APPROVAL_POLICY:
         args.extend(["-c", f"approval_policy={json.dumps(CODEX_APPROVAL_POLICY)}"])
+    if isinstance(effort, str) and effort:
+        args.extend(["-c", f"model_reasoning_effort={json.dumps(effort)}"])
     return args
 
 
@@ -194,6 +196,17 @@ def _classify_embedded_result_error(result_text: str) -> tuple[str, bool] | None
     return None
 
 
+def _resolved_codex_effort(model: str, effort: str | int | None) -> str | None:
+    if not isinstance(effort, str) or not effort:
+        return None
+    from koda.provider_models import get_model_effort_capability
+
+    cap = get_model_effort_capability("codex", model)
+    if cap and cap["kind"] == "enum" and effort in cap["values"]:
+        return effort
+    return None
+
+
 def _build_new_turn_cmd(
     model: str,
     work_dir: str,
@@ -201,6 +214,7 @@ def _build_new_turn_cmd(
     image_paths: list[str] | None,
     *,
     sandbox: str | None = None,
+    effort: str | int | None = None,
 ) -> list[str]:
     resolved_sandbox = sandbox or CODEX_SANDBOX
     cmd = [
@@ -216,7 +230,7 @@ def _build_new_turn_cmd(
     ]
     if CODEX_SKIP_GIT_REPO_CHECK:
         cmd.append("--skip-git-repo-check")
-    cmd.extend(_build_codex_overrides(system_prompt))
+    cmd.extend(_build_codex_overrides(system_prompt, _resolved_codex_effort(model, effort)))
     if image_paths:
         cmd.extend(["--image", *image_paths])
     cmd.append("-")
@@ -228,13 +242,15 @@ def _build_resume_turn_cmd(
     session_id: str,
     system_prompt: str | None,
     image_paths: list[str] | None,
+    *,
+    effort: str | int | None = None,
 ) -> list[str]:
     cmd = [CODEX_BIN, "exec", "resume", "--json", "--model", model]
     if CODEX_SKIP_GIT_REPO_CHECK:
         cmd.append("--skip-git-repo-check")
     if CODEX_SANDBOX == "danger-full-access":
         cmd.append("--dangerously-bypass-approvals-and-sandbox")
-    cmd.extend(_build_codex_overrides(system_prompt))
+    cmd.extend(_build_codex_overrides(system_prompt, _resolved_codex_effort(model, effort)))
     if image_paths:
         cmd.extend(["--image", *image_paths])
     cmd.extend([session_id, "-"])
@@ -250,15 +266,16 @@ def _build_cmd(
     image_paths: list[str] | None,
     *,
     dry_run: bool = False,
+    effort: str | int | None = None,
 ) -> list[str]:
     if turn_mode == "resume_turn":
         if not session_id:
             raise ValueError("resume_turn requires a provider session id")
         if dry_run:
             raise ValueError("codex dry-run requires a fresh new_turn so read-only sandbox can be enforced")
-        return _build_resume_turn_cmd(model, session_id, system_prompt, image_paths)
+        return _build_resume_turn_cmd(model, session_id, system_prompt, image_paths, effort=effort)
     sandbox = "read-only" if dry_run else CODEX_SANDBOX
-    return _build_new_turn_cmd(model, work_dir, system_prompt, image_paths, sandbox=sandbox)
+    return _build_new_turn_cmd(model, work_dir, system_prompt, image_paths, sandbox=sandbox, effort=effort)
 
 
 def _capability_from_help(turn_mode: TurnMode, help_text: str) -> ProviderCapabilities:
@@ -528,6 +545,7 @@ async def run_codex(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     """Run Codex CLI and return a normalized result dict."""
     del max_budget, permission_mode, max_turns
@@ -560,6 +578,7 @@ async def run_codex(
             system_prompt,
             image_paths,
             dry_run=dry_run,
+            effort=effort,
         )
     except ValueError as exc:
         return {
@@ -794,6 +813,7 @@ async def run_codex_streaming(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
     """Run Codex CLI in JSONL streaming mode."""
     del max_budget, permission_mode, max_turns
@@ -831,6 +851,7 @@ async def run_codex_streaming(
             system_prompt,
             image_paths,
             dry_run=dry_run,
+            effort=effort,
         )
     except ValueError as exc:
         if metadata_collector is not None:

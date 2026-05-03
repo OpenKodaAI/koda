@@ -226,6 +226,7 @@ async def run_openai_compatible(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     """Single-turn chat completion against an OpenAI-compatible endpoint."""
     del work_dir, session_id, permission_mode, max_turns, runtime_task_id
@@ -276,6 +277,7 @@ async def run_openai_compatible(
         image_paths=image_paths,
         max_budget=max_budget,
         stream=False,
+        effort=effort,
     )
 
     started_at = time.monotonic()
@@ -384,6 +386,7 @@ async def run_openai_compatible_streaming(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
     """Stream one chat completion via SSE, yielding text deltas."""
     del work_dir, session_id, permission_mode, max_turns, runtime_task_id
@@ -443,6 +446,7 @@ async def run_openai_compatible_streaming(
         image_paths=image_paths,
         max_budget=max_budget,
         stream=True,
+        effort=effort,
     )
 
     chat_url = _join_with_base(base_url, profile.chat_path)
@@ -620,6 +624,7 @@ def _build_chat_payload(
     image_paths: list[str] | None,
     max_budget: float,
     stream: bool,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     if system_prompt and system_prompt.strip():
@@ -638,6 +643,20 @@ def _build_chat_payload(
         payload["stream_options"] = {"include_usage": True}
     for key, value in profile.extra_payload:
         payload[key] = value
+    if effort is not None:
+        from koda.provider_models import get_model_effort_capability
+
+        cap = get_model_effort_capability(profile.provider_id, model)
+        if cap is not None:
+            if cap["kind"] == "enum" and isinstance(effort, str) and effort in cap["values"]:
+                payload["reasoning_effort"] = effort
+            elif cap["kind"] == "tokens":
+                try:
+                    budget = int(effort)
+                except (TypeError, ValueError):
+                    budget = None
+                if budget is not None and cap["min"] <= budget <= cap["max"]:
+                    payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
     del max_budget  # cost is enforced via budget service, not at the request layer
     return payload
 

@@ -52,14 +52,6 @@ def test_strong_token_check_fails_for_default_placeholder(doctor_module, tmp_pat
     assert _by_name(checks, "control_plane_api_token_strong")["ok"] is False
 
 
-def test_auth_mode_must_be_token_in_strict(doctor_module, tmp_path: Path) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("CONTROL_PLANE_AUTH_MODE=development\n")
-    env = doctor_module.load_env_file(env_file)
-    checks = doctor_module.run_strict_hardening(env, env_file=env_file)
-    assert _by_name(checks, "control_plane_auth_mode_is_token")["ok"] is False
-
-
 def test_browser_private_network_disabled_by_default(doctor_module, tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("# no browser config\n")
@@ -116,7 +108,6 @@ def test_strict_emits_all_expected_check_names(doctor_module, tmp_path: Path) ->
         "state_root_owner_only_perms",
         "master_key_perms_0600",
         "env_file_perms_0600",
-        "control_plane_auth_mode_is_token",
         "control_plane_api_token_strong",
         "web_operator_session_secret_strong",
         "runtime_local_ui_token_strong",

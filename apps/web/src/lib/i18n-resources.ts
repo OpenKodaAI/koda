@@ -60,6 +60,23 @@ export const resources = {
         resolved: "Resolved",
         failed: "Failed",
       },
+      modelEffort: {
+        title: "Model effort",
+        descriptionEnum: "Higher effort means deeper reasoning and slower, costlier responses.",
+        descriptionTokens: "Thinking budget in tokens. Higher values let the model reason longer.",
+        inheritGlobal: "Inherit global default",
+        customValue: "Override",
+        tokensUnit: "tokens",
+        notSupported: "This model does not expose effort tuning.",
+        sectionTitle: "Effort defaults",
+        sectionDescription: "Pick the default effort level per model. Each agent can override.",
+        enumMinimal: "Minimal",
+        enumLow: "Low",
+        enumMedium: "Medium",
+        enumHigh: "High",
+        enumXHigh: "Extra-high",
+        enumMax: "Max",
+      },
       routeMeta: {
         system: {
           eyebrow: "Koda",
@@ -600,6 +617,8 @@ export const resources = {
           submitting: "Signing in...",
           forgot_link: "Lost my password or recovery code?",
           generic_error: "Invalid credentials. Please try again.",
+          service_unavailable:
+            "Sign-in service is temporarily unavailable. Please try again in a moment.",
         },
         forgot: {
           title: "Recover access",
@@ -616,6 +635,8 @@ export const resources = {
           password_too_short: "Password must be at least {{n}} characters long.",
           password_mismatch: "The passwords do not match.",
           generic_error: "The information provided is invalid or expired. Please try again.",
+          service_unavailable:
+            "Recovery service is temporarily unavailable. Please try again in a moment.",
         },
         setup: {
           create_account: {
@@ -636,6 +657,8 @@ export const resources = {
               password_too_short: "Password must be at least {{n}} characters long.",
               password_mismatch: "The passwords do not match.",
               generic: "We could not create the account. Please try again.",
+              service_unavailable:
+                "Setup service is temporarily unavailable. Please try again in a moment.",
             },
           },
           recovery_codes: {
@@ -659,6 +682,12 @@ export const resources = {
             regenerate_codes: "Regenerate recovery codes",
             codes_remaining: "{{count}} recovery codes remaining",
           },
+        },
+        session_expired: "Your session has expired. Sign in again to continue.",
+        account_menu: {
+          trigger_label: "Open account menu",
+          account: "Account",
+          sign_out: "Sign out",
         },
       },
     },
@@ -721,6 +750,23 @@ export const resources = {
         paused: "Pausado",
         resolved: "Resolvida",
         failed: "Falhou",
+      },
+      modelEffort: {
+        title: "Effort do modelo",
+        descriptionEnum: "Maior effort significa raciocínio mais profundo, respostas mais lentas e caras.",
+        descriptionTokens: "Budget de pensamento em tokens. Valores maiores deixam o modelo raciocinar mais.",
+        inheritGlobal: "Herdar default global",
+        customValue: "Sobrescrever",
+        tokensUnit: "tokens",
+        notSupported: "Este modelo não expõe ajuste de effort.",
+        sectionTitle: "Effort padrão",
+        sectionDescription: "Defina o effort padrão por modelo. Cada agente pode sobrescrever.",
+        enumMinimal: "Mínimo",
+        enumLow: "Baixo",
+        enumMedium: "Médio",
+        enumHigh: "Alto",
+        enumXHigh: "Muito alto",
+        enumMax: "Máximo",
       },
       routeMeta: {
         system: {
@@ -1260,6 +1306,8 @@ export const resources = {
           submitting: "Entrando...",
           forgot_link: "Esqueceu a senha ou o código de recuperação?",
           generic_error: "As credenciais informadas não conferem. Tente novamente.",
+          service_unavailable:
+            "O serviço de login está temporariamente indisponível. Tente novamente em instantes.",
         },
         forgot: {
           title: "Recuperar acesso",
@@ -1276,6 +1324,8 @@ export const resources = {
           password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
           password_mismatch: "As senhas não coincidem.",
           generic_error: "As informações fornecidas são inválidas ou expiraram. Tente novamente.",
+          service_unavailable:
+            "O serviço de recuperação está temporariamente indisponível. Tente novamente em instantes.",
         },
         setup: {
           create_account: {
@@ -1296,6 +1346,8 @@ export const resources = {
               password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
               password_mismatch: "As senhas não coincidem.",
               generic: "Não conseguimos criar a conta. Tente novamente.",
+              service_unavailable:
+                "O serviço de configuração está temporariamente indisponível. Tente novamente em instantes.",
             },
           },
           recovery_codes: {
@@ -1319,6 +1371,12 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperação",
             codes_remaining: "{{count}} códigos de recuperação restantes",
           },
+        },
+        session_expired: "Sua sessão expirou. Entre novamente para continuar.",
+        account_menu: {
+          trigger_label: "Abrir menu da conta",
+          account: "Conta",
+          sign_out: "Sair",
         },
       },
     },
@@ -1920,6 +1978,8 @@ export const resources = {
           submitting: "Iniciando sesión...",
           forgot_link: "¿Olvidaste la contraseña o el código de recuperación?",
           generic_error: "Las credenciales no coinciden. Inténtalo de nuevo.",
+          service_unavailable:
+            "El servicio de inicio de sesión está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
         },
         forgot: {
           title: "Recuperar acceso",
@@ -1936,6 +1996,8 @@ export const resources = {
           password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
           password_mismatch: "Las contraseñas no coinciden.",
           generic_error: "La información es inválida o ha caducado. Inténtalo de nuevo.",
+          service_unavailable:
+            "El servicio de recuperación está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
         },
         setup: {
           create_account: {
@@ -1956,6 +2018,8 @@ export const resources = {
               password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
               password_mismatch: "Las contraseñas no coinciden.",
               generic: "No pudimos crear la cuenta. Inténtalo de nuevo.",
+              service_unavailable:
+                "El servicio de configuración está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
             },
           },
           recovery_codes: {
@@ -1979,6 +2043,12 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperación",
             codes_remaining: "{{count}} códigos de recuperación restantes",
           },
+        },
+        session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
+        account_menu: {
+          trigger_label: "Abrir menú de cuenta",
+          account: "Cuenta",
+          sign_out: "Cerrar sesión",
         },
       },
     },
@@ -2582,6 +2652,8 @@ export const resources = {
           submitting: "Connexion...",
           forgot_link: "Mot de passe ou code de récupération oublié ?",
           generic_error: "Les identifiants fournis ne correspondent pas. Veuillez réessayer.",
+          service_unavailable:
+            "Le service de connexion est temporairement indisponible. Veuillez réessayer dans un instant.",
         },
         forgot: {
           title: "Récupérer l'accès",
@@ -2598,6 +2670,8 @@ export const resources = {
           password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
           password_mismatch: "Les mots de passe ne correspondent pas.",
           generic_error: "Les informations fournies sont invalides ou expirées. Veuillez réessayer.",
+          service_unavailable:
+            "Le service de récupération est temporairement indisponible. Veuillez réessayer dans un instant.",
         },
         setup: {
           create_account: {
@@ -2618,6 +2692,8 @@ export const resources = {
               password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
               password_mismatch: "Les mots de passe ne correspondent pas.",
               generic: "Nous n'avons pas pu créer le compte. Veuillez réessayer.",
+              service_unavailable:
+                "Le service de configuration est temporairement indisponible. Veuillez réessayer dans un instant.",
             },
           },
           recovery_codes: {
@@ -2641,6 +2717,12 @@ export const resources = {
             regenerate_codes: "Régénérer les codes de récupération",
             codes_remaining: "{{count}} codes de récupération restants",
           },
+        },
+        session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
+        account_menu: {
+          trigger_label: "Ouvrir le menu du compte",
+          account: "Compte",
+          sign_out: "Se déconnecter",
         },
       },
     },
@@ -3244,6 +3326,8 @@ export const resources = {
           submitting: "Anmeldung...",
           forgot_link: "Passwort oder Wiederherstellungscode vergessen?",
           generic_error: "Die angegebenen Zugangsdaten stimmen nicht überein. Bitte erneut versuchen.",
+          service_unavailable:
+            "Der Anmeldedienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
         },
         forgot: {
           title: "Zugriff wiederherstellen",
@@ -3260,6 +3344,8 @@ export const resources = {
           password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
           password_mismatch: "Die Passwörter stimmen nicht überein.",
           generic_error: "Die angegebenen Informationen sind ungültig oder abgelaufen. Bitte erneut versuchen.",
+          service_unavailable:
+            "Der Wiederherstellungsdienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
         },
         setup: {
           create_account: {
@@ -3280,6 +3366,8 @@ export const resources = {
               password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
               password_mismatch: "Die Passwörter stimmen nicht überein.",
               generic: "Das Konto konnte nicht erstellt werden. Bitte erneut versuchen.",
+              service_unavailable:
+                "Der Einrichtungsdienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             },
           },
           recovery_codes: {
@@ -3303,6 +3391,12 @@ export const resources = {
             regenerate_codes: "Wiederherstellungscodes neu generieren",
             codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
+        },
+        session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+        account_menu: {
+          trigger_label: "Kontomenü öffnen",
+          account: "Konto",
+          sign_out: "Abmelden",
         },
       },
     },
@@ -14599,6 +14693,23 @@ mutableResources["en-US"].translation.routines = {
     agentPlaceholder: "Pick an agent",
     messages: {
       createdPreview: "Routine drafted (UI preview — backend wiring pending).",
+      created: "Routine created.",
+      updated: "Routine updated.",
+      deleted: "Routine deleted.",
+      createFailed: "Could not create routine.",
+      updateFailed: "Could not update routine.",
+      deleteFailed: "Could not delete routine.",
+      networkError: "Network error. Please try again.",
+    },
+    errors: {
+      conflict: "Schedule changed elsewhere. Please review and retry.",
+      unauthorized: "You don't have permission to manage this routine.",
+      workDirInvalid: "Work directory is not allowed.",
+    },
+    delete: {
+      confirmTitle: "Delete routine?",
+      confirmDescription: "This action cannot be undone.",
+      confirmAction: "Delete",
     },
     validation: {
       nameRequired: "Name is required.",
@@ -14755,6 +14866,23 @@ mutableResources["pt-BR"].translation.routines = {
     agentPlaceholder: "Escolher agente",
     messages: {
       createdPreview: "Rotina rascunhada (prévia de UI — integração com backend pendente).",
+      created: "Rotina criada.",
+      updated: "Rotina atualizada.",
+      deleted: "Rotina excluída.",
+      createFailed: "Não foi possível criar a rotina.",
+      updateFailed: "Não foi possível atualizar a rotina.",
+      deleteFailed: "Não foi possível excluir a rotina.",
+      networkError: "Erro de rede. Tente novamente.",
+    },
+    errors: {
+      conflict: "A rotina foi alterada em outro lugar. Revise e tente novamente.",
+      unauthorized: "Você não tem permissão para gerenciar esta rotina.",
+      workDirInvalid: "Diretório de trabalho não permitido.",
+    },
+    delete: {
+      confirmTitle: "Excluir rotina?",
+      confirmDescription: "Esta ação não pode ser desfeita.",
+      confirmAction: "Excluir",
     },
     validation: {
       nameRequired: "O nome é obrigatório.",
@@ -14911,6 +15039,23 @@ mutableResources["es-ES"].translation.routines = {
     agentPlaceholder: "Elegir agente",
     messages: {
       createdPreview: "Rutina creada (vista previa de UI — integración pendiente).",
+      created: "Rutina creada.",
+      updated: "Rutina actualizada.",
+      deleted: "Rutina eliminada.",
+      createFailed: "No se pudo crear la rutina.",
+      updateFailed: "No se pudo actualizar la rutina.",
+      deleteFailed: "No se pudo eliminar la rutina.",
+      networkError: "Error de red. Vuelve a intentarlo.",
+    },
+    errors: {
+      conflict: "La rutina cambió en otro lugar. Revisa e intenta de nuevo.",
+      unauthorized: "No tienes permiso para gestionar esta rutina.",
+      workDirInvalid: "Directorio de trabajo no permitido.",
+    },
+    delete: {
+      confirmTitle: "¿Eliminar rutina?",
+      confirmDescription: "Esta acción no se puede deshacer.",
+      confirmAction: "Eliminar",
     },
     validation: {
       nameRequired: "El nombre es obligatorio.",
@@ -15067,6 +15212,23 @@ mutableResources["fr-FR"].translation.routines = {
     agentPlaceholder: "Choisir un agent",
     messages: {
       createdPreview: "Routine créée (aperçu UI — intégration backend en attente).",
+      created: "Routine créée.",
+      updated: "Routine mise à jour.",
+      deleted: "Routine supprimée.",
+      createFailed: "Impossible de créer la routine.",
+      updateFailed: "Impossible de mettre à jour la routine.",
+      deleteFailed: "Impossible de supprimer la routine.",
+      networkError: "Erreur réseau. Réessayez.",
+    },
+    errors: {
+      conflict: "La routine a été modifiée ailleurs. Vérifiez et réessayez.",
+      unauthorized: "Vous n'avez pas la permission de gérer cette routine.",
+      workDirInvalid: "Répertoire de travail non autorisé.",
+    },
+    delete: {
+      confirmTitle: "Supprimer la routine ?",
+      confirmDescription: "Cette action est irréversible.",
+      confirmAction: "Supprimer",
     },
     validation: {
       nameRequired: "Le nom est requis.",
@@ -15223,6 +15385,23 @@ mutableResources["de-DE"].translation.routines = {
     agentPlaceholder: "Agent wählen",
     messages: {
       createdPreview: "Routine entworfen (UI-Vorschau — Backend-Anbindung ausstehend).",
+      created: "Routine erstellt.",
+      updated: "Routine aktualisiert.",
+      deleted: "Routine gelöscht.",
+      createFailed: "Routine konnte nicht erstellt werden.",
+      updateFailed: "Routine konnte nicht aktualisiert werden.",
+      deleteFailed: "Routine konnte nicht gelöscht werden.",
+      networkError: "Netzwerkfehler. Bitte erneut versuchen.",
+    },
+    errors: {
+      conflict: "Die Routine wurde anderswo geändert. Bitte prüfen und erneut versuchen.",
+      unauthorized: "Du hast keine Berechtigung, diese Routine zu verwalten.",
+      workDirInvalid: "Arbeitsverzeichnis nicht erlaubt.",
+    },
+    delete: {
+      confirmTitle: "Routine löschen?",
+      confirmDescription: "Diese Aktion kann nicht rückgängig gemacht werden.",
+      confirmAction: "Löschen",
     },
     validation: {
       nameRequired: "Name ist erforderlich.",

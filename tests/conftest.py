@@ -15,7 +15,7 @@ import pytest
 # tests when no DSN is configured and testcontainers/Docker is
 # unreachable, so a contributor without Docker still gets a clean
 # pytest run.
-pytest_plugins = ["tests.postgres_fixtures"]
+pytest_plugins = ["tests.postgres_fixtures", "tests._provider_plugin"]
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 

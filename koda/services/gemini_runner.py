@@ -272,8 +272,9 @@ async def run_gemini(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
-    del session_id, max_budget, max_turns
+    del session_id, max_budget, max_turns, effort
     capabilities = capabilities or await get_gemini_capabilities(turn_mode)
     if not capabilities.can_execute:
         return {
@@ -444,8 +445,9 @@ async def run_gemini_streaming(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
-    del session_id, max_budget, max_turns
+    del session_id, max_budget, max_turns, effort
     capabilities = capabilities or await get_gemini_capabilities(turn_mode)
     if metadata_collector is not None:
         metadata_collector["turn_mode"] = turn_mode

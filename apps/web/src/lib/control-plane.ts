@@ -415,6 +415,11 @@ export type GeneralSystemSettings = {
           model_label?: string;
         }
       >;
+      /**
+       * Per-model default effort overrides keyed by `provider:model`.
+       * String values for enum-kind models, integers for tokens-kind models.
+       */
+      effort_defaults?: Record<string, string | number>;
     };
     resources: {
       global_tools: string[];
@@ -473,6 +478,11 @@ export type GeneralSystemSettings = {
         title: string;
         description?: string;
         status?: string;
+        effort_kind?: "enum" | "tokens";
+        effort_enum_values?: string[];
+        effort_token_min?: number;
+        effort_token_max?: number;
+        effort_default?: string | number;
       }>
     >;
     global_tools: Array<Record<string, unknown>>;
@@ -1245,6 +1255,13 @@ export function sanitizeControlPlanePayload<T>(
 type ControlPlaneFetchOptions = {
   tier?: ControlPlaneFetchTier;
   tags?: string[];
+  /**
+   * Override the default 6s timeout for this request. Use shorter values
+   * (1500–2500ms) for SSR probes that block page render — `/login` and
+   * `/setup` ask "is the user already authenticated?" and the operator
+   * shouldn't wait 6s for that probe to give up before seeing the form.
+   */
+  timeoutMs?: number;
 };
 
 function buildUrl(pathname: string) {
@@ -1254,6 +1271,26 @@ function buildUrl(pathname: string) {
     pathname,
     cleanBase.endsWith("/") ? cleanBase : `${cleanBase}/`,
   );
+}
+
+// Hard ceiling for SSR fetches against the control plane. Keeps the layout
+// from blocking when the backend is unreachable or hung — surfaces as a 503
+// `ControlPlaneRequestError` instead of letting Next sit on the request for
+// the full Node fetch default. Routes that need a longer budget (downloads,
+// SSE streams) bypass this helper entirely via `runtimeFetch`.
+const CONTROL_PLANE_FETCH_TIMEOUT_MS = 6_000;
+
+function combineSignals(
+  caller: AbortSignal | null | undefined,
+  timeout: AbortSignal,
+): AbortSignal {
+  if (!caller) return timeout;
+  // AbortSignal.any is widely available in Node 22+ and modern browsers; if a
+  // runtime lacks it, fall back to the caller's signal (timeout still applies
+  // via the underlying fetch when supported by the caller).
+  const factory = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal })
+    .any;
+  return typeof factory === "function" ? factory([caller, timeout]) : caller;
 }
 
 export async function controlPlaneFetch(
@@ -1271,6 +1308,10 @@ export async function controlPlaneFetch(
     headers.set("Content-Type", "application/json");
   }
 
+  const timeoutMs = options.timeoutMs ?? CONTROL_PLANE_FETCH_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = combineSignals(init.signal, timeoutSignal);
+
   try {
     const fetchConfig = getControlPlaneFetchConfig(
       options.tier ?? "live",
@@ -1280,8 +1321,15 @@ export async function controlPlaneFetch(
       ...init,
       ...fetchConfig,
       headers,
+      signal,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ControlPlaneRequestError(
+        `Control plane did not respond within ${timeoutMs}ms`,
+        503,
+      );
+    }
     const message =
       error instanceof Error
         ? error.message
@@ -1529,11 +1577,17 @@ export async function getControlPlaneOnboardingStatus() {
   );
 }
 
-export async function getControlPlaneAuthStatus() {
+export async function getControlPlaneAuthStatus(
+  options: { timeoutMs?: number } = {},
+) {
+  // Auth status is a lightweight probe; if the backend hangs we'd rather
+  // surface a 503 quickly than block the page render. SSR call sites pass
+  // a short timeout (1.5–2s); the default keeps the global 6s ceiling for
+  // anything else that ends up calling this helper.
   return controlPlaneFetchJson<ControlPlaneAuthStatus>(
     "/api/control-plane/auth/status",
     {},
-    { tier: "live" },
+    { tier: "live", timeoutMs: options.timeoutMs },
   );
 }
 

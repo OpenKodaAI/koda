@@ -3,7 +3,6 @@ import { config, proxy } from "./proxy";
 
 describe("web proxy auth gate", () => {
   afterEach(() => {
-    delete process.env.CONTROL_PLANE_AUTH_MODE;
     vi.unstubAllEnvs();
     vi.stubEnv("NODE_ENV", "test");
   });
@@ -54,9 +53,8 @@ describe("web proxy auth gate", () => {
     expect(response.status).toBe(200);
   });
 
-  it("allows development auth bypass only in development mode", () => {
+  it("requires the operator session cookie even in development mode", () => {
     vi.stubEnv("NODE_ENV", "development");
-    process.env.CONTROL_PLANE_AUTH_MODE = "development";
 
     const response = proxy({
       nextUrl: new URL("http://localhost/api/control-plane/agents"),
@@ -69,7 +67,7 @@ describe("web proxy auth gate", () => {
       },
     } as never);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
   });
 
   it("blocks cross-site mutations even when a session cookie exists", () => {

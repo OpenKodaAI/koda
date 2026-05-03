@@ -33,50 +33,28 @@ export function TourOverlay({
     return null;
   }
 
-  const paneStyles = spotlightRect ? getOverlayPaneStyles(spotlightRect) : [];
-
   return createPortal(
     <motion.div
       className="tour-layer"
-      initial={
-        reduceMotion
-          ? false
-          : {
-              opacity: 0,
-            }
-      }
-      animate={{
-        opacity: 1,
-      }}
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={reduceMotion ? undefined : { opacity: 0 }}
       transition={{
-        duration: reduceMotion ? 0 : 0.24,
+        duration: reduceMotion ? 0 : 0.2,
         ease: [0.22, 1, 0.36, 1],
       }}
     >
       {spotlightRect ? (
-        <>
-          {paneStyles.map((style, index) => (
-            <div
-              key={`tour-blur-pane-${index}`}
-              className="tour-layer__pane tour-layer__pane--blur"
-              aria-hidden="true"
-              style={style}
-            />
-          ))}
-          {paneStyles.map((style, index) => (
-            <div
-              key={`tour-backdrop-pane-${index}`}
-              className="tour-layer__pane tour-layer__pane--backdrop"
-              aria-hidden="true"
-              style={style}
-            />
-          ))}
-        </>
+        getOverlayPaneStyles(spotlightRect).map((style, index) => (
+          <div
+            key={`tour-pane-${index}`}
+            className="tour-layer__pane"
+            aria-hidden="true"
+            style={style}
+          />
+        ))
       ) : (
-        <>
-          <div className="tour-layer__blur" aria-hidden="true" />
-          <div className="tour-layer__backdrop" aria-hidden="true" />
-        </>
+        <div className="tour-layer__pane tour-layer__pane--full" aria-hidden="true" />
       )}
       {children}
     </motion.div>,

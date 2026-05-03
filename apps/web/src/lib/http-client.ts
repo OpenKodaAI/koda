@@ -2,6 +2,27 @@
 
 import { ApiError } from "@/lib/errors";
 
+const FORCE_SIGN_OUT_EVENT = "koda:force-sign-out";
+
+const PUBLIC_PATHS_PATTERN = /^\/(login|setup|forgot-password)(\/|$|\?)/;
+
+function dispatchForceSignOut(method: string | undefined, path: string): void {
+  if (typeof window === "undefined") return;
+  // Don't recurse: a 401 from /auth/login should be a normal form error,
+  // not a session-expired toast loop. Same for the auth flow itself.
+  if (path.startsWith("/api/control-plane/auth/")) return;
+  if (PUBLIC_PATHS_PATTERN.test(window.location.pathname)) return;
+  const isMutation = (method ?? "GET").toUpperCase() !== "GET";
+  window.dispatchEvent(
+    new CustomEvent(FORCE_SIGN_OUT_EVENT, {
+      detail: {
+        method: isMutation ? "MUTATION" : "GET",
+        pathname: window.location.pathname + window.location.search,
+      },
+    }),
+  );
+}
+
 export function isAbortError(error: unknown) {
   return (
     error instanceof DOMException && error.name === "AbortError"
@@ -43,6 +64,9 @@ export async function requestJson<T = unknown>(
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      dispatchForceSignOut(init.method, path);
+    }
     throw new ApiError(
       await parseResponseError(
         response,
@@ -111,6 +135,10 @@ export async function requestJsonAllowError<T = unknown>(
   });
 
   const data = await response.json().catch(() => null);
+
+  if (response.status === 401) {
+    dispatchForceSignOut(init.method, path);
+  }
 
   return {
     ok: response.ok,

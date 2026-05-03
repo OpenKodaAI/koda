@@ -12,7 +12,6 @@ Koda keeps infrastructure bootstrap and product configuration separate on purpos
 - `CONTROL_PLANE_ENABLED`
 - `CONTROL_PLANE_BIND`
 - `CONTROL_PLANE_PORT`
-- `CONTROL_PLANE_AUTH_MODE`
 - `CONTROL_PLANE_API_TOKEN`
 - `RUNTIME_LOCAL_UI_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
@@ -20,8 +19,7 @@ Koda keeps infrastructure bootstrap and product configuration separate on purpos
 
 ## Security-Sensitive Bootstrap Variables
 
-- `CONTROL_PLANE_AUTH_MODE` defaults to `token`. Use `development` only for the source/dev stack and treat `open` as a deliberate local-development override, not as a production setting.
-- `CONTROL_PLANE_API_TOKEN` is the backend break-glass and recovery credential. Normal browser auth should use setup code exchange, local owner login, and HTTP-only sessions instead of exposing this token in the UI.
+- `CONTROL_PLANE_API_TOKEN` is the backend break-glass and recovery credential. Normal browser auth should use setup code exchange, local owner login, and HTTP-only sessions instead of exposing this token in the UI. The control-plane backend always enforces an operator-session bearer token at the middleware layer (with a fixed public whitelist for onboarding, status, and login routes); there is no longer a "development" or "open" mode that disables this check.
 - `RUNTIME_LOCAL_UI_TOKEN` protects runtime inspection and attach access between the dashboard and the runtime.
 - `WEB_OPERATOR_SESSION_SECRET` is required for stable HTTP-only operator sessions in the web dashboard. Without it, operator sessions would be invalidated on web restarts.
 - `BROWSER_ALLOW_PRIVATE_NETWORK` should remain disabled unless runtime browser automation explicitly needs internal or localhost destinations.

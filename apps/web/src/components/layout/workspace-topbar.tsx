@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { AccountMenu } from "@/components/layout/account-menu";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
@@ -97,6 +98,7 @@ export function WorkspaceTopbar({
         <div className="flex items-center gap-2">
           <LanguageSwitcher className="shrink-0" />
           <ThemeSwitcher className="shrink-0" />
+          <AccountMenu className="shrink-0" />
         </div>
       </div>
     </header>

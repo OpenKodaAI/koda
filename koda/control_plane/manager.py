@@ -121,6 +121,7 @@ from .agent_spec import (
     merge_hierarchical_documents,
     normalize_agent_spec,
     normalize_autonomy_policy,
+    normalize_effort_overrides,
     normalize_knowledge_policy,
     normalize_memory_policy,
     parse_json_env_value,
@@ -382,6 +383,7 @@ def _build_runtime_prompt_preview_payload(
 _MODEL_POLICY_ENV_KEYS: tuple[str, ...] = (
     "AGENT_MODEL_POLICY_JSON",
     "MODEL_FUNCTION_DEFAULTS_JSON",
+    "MODEL_EFFORT_DEFAULTS_JSON",
     "DEFAULT_PROVIDER",
     "PROVIDER_FALLBACK_ORDER",
     "CLAUDE_ENABLED",
@@ -468,6 +470,7 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "providers": {
         "functional_defaults": ("MODEL_FUNCTION_DEFAULTS_JSON", "json"),
+        "effort_defaults": ("MODEL_EFFORT_DEFAULTS_JSON", "json"),
         "default_provider": ("DEFAULT_PROVIDER", "string"),
         "fallback_order": ("PROVIDER_FALLBACK_ORDER", "csv"),
         "max_budget_usd": ("MAX_BUDGET_USD", "float"),
@@ -734,6 +737,7 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "account.rate_limit_per_minute": "RATE_LIMIT_PER_MINUTE",
     "models.default_provider": "DEFAULT_PROVIDER",
     "models.functional_defaults": "MODEL_FUNCTION_DEFAULTS_JSON",
+    "models.effort_defaults": "MODEL_EFFORT_DEFAULTS_JSON",
     "models.max_budget_usd": "MAX_BUDGET_USD",
     "models.max_total_budget_usd": "MAX_TOTAL_BUDGET_USD",
     "models.elevenlabs_default_language": "ELEVENLABS_DEFAULT_LANGUAGE",
@@ -2803,6 +2807,11 @@ class ControlPlaneManager:
                 if kind == "bool":
                     if isinstance(value, bool):
                         env_rebuild[section_name][env_key] = _stringify_env_value(value)
+                    continue
+                if env_key == "MODEL_EFFORT_DEFAULTS_JSON":
+                    normalized_effort = normalize_effort_overrides(value)
+                    if normalized_effort:
+                        env_rebuild[section_name][env_key] = _stringify_env_value(normalized_effort)
                     continue
                 if value in (None, ""):
                     continue
@@ -9155,6 +9164,7 @@ class ControlPlaneManager:
                 providers_section=providers_section,
                 provider_catalog=provider_catalog,
             ),
+            "effort_defaults": normalize_effort_overrides(providers_section.get("effort_defaults")),
             # Apple Silicon Metal acceleration switch. Defaults to ``True``
             # so the Metal path stays opt-out rather than opt-in for Apple
             # users. Non-Apple hosts ignore the flag at runtime.
@@ -9823,6 +9833,13 @@ class ControlPlaneManager:
         functional_defaults_requested = _normalize_functional_model_defaults(models.get("functional_defaults"))
         if functional_defaults_requested:
             current_providers["functional_defaults"] = functional_defaults_requested
+
+        if "effort_defaults" in models:
+            normalized_effort_defaults = normalize_effort_overrides(models.get("effort_defaults"))
+            if normalized_effort_defaults:
+                current_providers["effort_defaults"] = normalized_effort_defaults
+            else:
+                current_providers.pop("effort_defaults", None)
 
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:

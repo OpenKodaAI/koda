@@ -22,7 +22,7 @@ from koda.agent_contract import (
 )
 from koda.control_plane.execution_policy import normalize_execution_policy, validate_execution_policy
 from koda.control_plane.settings import looks_like_secret_key
-from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog
+from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog, get_model_effort_capability
 
 _ALLOWED_MEMORY_EXTRACTION_FIELDS = frozenset({"query", "response", "max_items"})
 _ALLOWED_KNOWLEDGE_LAYERS = frozenset({"canonical_policy", "approved_runbook", "workspace_doc", "observed_pattern"})
@@ -645,6 +645,40 @@ def _normalize_functional_defaults(value: Any) -> dict[str, dict[str, str]]:
     return normalized
 
 
+def normalize_effort_overrides(value: Any) -> dict[str, Any]:
+    """Normalize per-model effort overrides keyed by ``provider:model``.
+
+    Accepts strings (enum kind) or ints (tokens kind). Silently drops entries
+    whose model has no effort capability or whose value is out of range, so
+    stale UI state cannot poison the runtime.
+    """
+    payload = _safe_json_object(value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in payload.items():
+        slug = _trimmed(raw_key).lower()
+        if not slug or ":" not in slug:
+            continue
+        provider_id, model_id = slug.split(":", 1)
+        provider_id = provider_id.strip()
+        model_id = model_id.strip()
+        if not provider_id or not model_id:
+            continue
+        cap = get_model_effort_capability(provider_id, model_id)
+        if cap is None:
+            continue
+        if cap["kind"] == "enum":
+            text_value = _trimmed(raw_value).lower()
+            if text_value and text_value in cap["values"]:
+                normalized[f"{provider_id}:{model_id}"] = text_value
+        elif cap["kind"] == "tokens":
+            int_value = _as_int(raw_value)
+            if int_value is None:
+                continue
+            if cap["min"] <= int_value <= cap["max"]:
+                normalized[f"{provider_id}:{model_id}"] = int_value
+    return normalized
+
+
 def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(_safe_json_object(policy))
     if not raw:
@@ -682,6 +716,11 @@ def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     max_total_budget = _as_float(raw.get("max_total_budget_usd"))
     if max_total_budget is not None:
         raw["max_total_budget_usd"] = max_total_budget
+    effort_overrides = normalize_effort_overrides(raw.get("effort_overrides"))
+    if effort_overrides:
+        raw["effort_overrides"] = effort_overrides
+    elif "effort_overrides" in raw:
+        raw.pop("effort_overrides")
     return _compact_mapping(raw)
 
 

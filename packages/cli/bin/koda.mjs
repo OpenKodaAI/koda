@@ -252,7 +252,7 @@ function commandExists(command) {
   return result.status === 0;
 }
 
-async function waitForHttp(url, label, installDir) {
+async function waitForHttp(url, label) {
   const timeoutAt = Date.now() + 120_000;
   while (Date.now() < timeoutAt) {
     try {
@@ -263,15 +263,7 @@ async function waitForHttp(url, label, installDir) {
     } catch {}
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
   }
-  const lines = [
-    `Timed out waiting for ${label} at ${url}.`,
-    "",
-    "The container may still be starting (cold start can take 30–60s on first install).",
-    "Inspect what compose says, then rerun `koda doctor`:",
-    `  docker compose --project-directory ${installDir} ps`,
-    `  docker compose --project-directory ${installDir} logs --tail 100`,
-  ];
-  throw new Error(lines.join("\n"));
+  throw new Error(`Timed out waiting for ${label} at ${url}.`);
 }
 
 function sha256(text) {
@@ -339,15 +331,6 @@ async function collectDoctorPayload(installDir) {
   };
 }
 
-const DOCTOR_FAILURE_HINTS = {
-  control_plane:
-    "Control plane HTTP did not respond. Inspect the `app` container with `docker compose logs app`.",
-  dashboard:
-    "Web dashboard did not respond. Inspect the `web` container with `docker compose logs web`.",
-  onboarding:
-    "Control plane is up but the onboarding endpoint failed (storage seeding may still be in progress). Re-run after a few seconds; if it persists, check `docker compose logs app` for seed errors.",
-};
-
 async function doctorCommand(args) {
   const jsonOutput = consumeFlag(args, "--json");
   const installDir = resolveInstallDir(args);
@@ -363,21 +346,9 @@ async function doctorCommand(args) {
   console.log(`Health:      ${payload.health_url}`);
   console.log("");
   for (const [name, result] of Object.entries(payload.checks)) {
-    if (result.ok) {
-      console.log(`OK   ${name} (${result.status})`);
-      continue;
-    }
-    console.log(`FAIL ${name} (${result.status})`);
-    const hint = DOCTOR_FAILURE_HINTS[name];
-    if (hint) {
-      console.log(`     → ${hint}`);
-    }
+    console.log(`${result.ok ? "OK" : "FAIL"} ${name} (${result.status})`);
   }
   if (!payload.ok) {
-    console.log("");
-    console.log("Containers may still be starting. Cold start can take 30–60s.");
-    console.log(`  docker compose --project-directory ${installDir} ps`);
-    console.log(`  docker compose --project-directory ${installDir} logs --tail 100`);
     throw new Error("Doctor checks failed.");
   }
 }
@@ -445,12 +416,8 @@ async function installCommand(args) {
   runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
 
   const env = await readInstallEnv(installDir);
-  await waitForHttp(
-    loopbackUrl(env.CONTROL_PLANE_PORT || "8090", "/health"),
-    "the control plane",
-    installDir,
-  );
-  await waitForHttp(loopbackUrl(env.WEB_PORT || "3000"), "the web dashboard", installDir);
+  await waitForHttp(loopbackUrl(env.CONTROL_PLANE_PORT || "8090", "/health"), "the control plane");
+  await waitForHttp(loopbackUrl(env.WEB_PORT || "3000"), "the web dashboard");
 
   await doctorCommand(["--dir", installDir]);
   const bootstrap = await issueBootstrapCode(installDir);

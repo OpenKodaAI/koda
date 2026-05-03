@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from aiohttp import WSMsgType, web
@@ -305,6 +305,144 @@ async def _runtime_schedule_update(request: web.Request) -> web.Response:
         detail = _schedule_detail_payload(int(request.match_info["job_id"]))
         result = {**result, **(detail or {})}
     return web.json_response(result, status=status)
+
+
+_IDEMPOTENCY_CACHE: dict[tuple[int, str], tuple[int, float]] = {}
+_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+
+
+def _idempotency_lookup(user_id: int, key: str) -> int | None:
+    if not key:
+        return None
+    import time as _time
+
+    now = _time.monotonic()
+    cached = _IDEMPOTENCY_CACHE.get((user_id, key))
+    if cached is None:
+        return None
+    job_id, expires_at = cached
+    if expires_at < now:
+        _IDEMPOTENCY_CACHE.pop((user_id, key), None)
+        return None
+    return job_id
+
+
+def _idempotency_remember(user_id: int, key: str, job_id: int) -> None:
+    if not key:
+        return
+    import time as _time
+
+    expires_at = _time.monotonic() + _IDEMPOTENCY_TTL_SECONDS
+    _IDEMPOTENCY_CACHE[(user_id, key)] = (job_id, expires_at)
+    if len(_IDEMPOTENCY_CACHE) > 4096:
+        # drop expired entries opportunistically
+        now = _time.monotonic()
+        for cache_key, (_, exp) in list(_IDEMPOTENCY_CACHE.items()):
+            if exp < now:
+                _IDEMPOTENCY_CACHE.pop(cache_key, None)
+
+
+async def _runtime_schedule_create(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    from koda.services import scheduled_jobs
+
+    body = await _json_payload(request)
+
+    idempotency_key = str(request.headers.get("X-Idempotency-Key", "")).strip()
+    user_id_raw = body.get("user_id")
+    user_id: int
+    if user_id_raw is None or user_id_raw == "" or user_id_raw == 0:
+        agent_default = AGENT_ID or "AGENT"
+        session_id_value = str(body.get("session_id") or agent_default).strip() or agent_default
+        user_id = _dashboard_actor_id(namespace="dashboard-user", session_id=session_id_value)
+    else:
+        try:
+            user_id = int(cast(int | str, user_id_raw))
+        except (TypeError, ValueError):
+            return web.json_response({"error": "user_id must be an integer", "field": "user_id"}, status=422)
+    chat_id_raw = body.get("chat_id")
+    if chat_id_raw is None or chat_id_raw == "":
+        chat_id = -user_id
+    else:
+        try:
+            chat_id = int(cast(int | str, chat_id_raw))
+        except (TypeError, ValueError):
+            chat_id = -user_id
+
+    cached_job_id = _idempotency_lookup(user_id, idempotency_key)
+    if cached_job_id is not None:
+        existing = _schedule_detail_payload(cached_job_id)
+        if existing is not None:
+            return web.json_response({"ok": True, "idempotent_replay": True, **existing})
+
+    raw_payload = body.get("payload") or {}
+    if not isinstance(raw_payload, dict):
+        return web.json_response({"error": "payload must be an object", "field": "payload"}, status=422)
+    job_payload = cast(dict[str, Any], dict(raw_payload))
+
+    read_only_flag = bool(job_payload.get("read_only", False))
+    auto_activate = bool(body.get("auto_activate", True))
+    job_type = str(body.get("job_type") or "agent_query").strip() or "agent_query"
+    trigger_type = str(body.get("trigger_type") or "").strip()
+    schedule_expr = str(body.get("schedule_expr") or "").strip()
+    timezone_name = str(body.get("timezone") or "UTC").strip() or "UTC"
+
+    if trigger_type not in {"one_shot", "cron", "interval"}:
+        return web.json_response(
+            {"error": "trigger_type must be one_shot, cron, or interval", "field": "trigger_type"},
+            status=422,
+        )
+    if not schedule_expr:
+        return web.json_response({"error": "schedule_expr is required", "field": "schedule_expr"}, status=422)
+
+    safety_mode = "dry_run_required" if read_only_flag else str(body.get("safety_mode") or "dry_run_required")
+    dry_run_required = True if read_only_flag else bool(body.get("dry_run_required", True))
+
+    try:
+        job_id = scheduled_jobs.create_job(
+            user_id=user_id,
+            chat_id=chat_id,
+            job_type=job_type,
+            trigger_type=trigger_type,
+            schedule_expr=schedule_expr,
+            payload=job_payload,
+            timezone_name=timezone_name,
+            status=scheduled_jobs.JOB_STATUS_VALIDATION_PENDING,
+            safety_mode=safety_mode,
+            dry_run_required=dry_run_required,
+            verification_policy=cast(dict[str, Any] | None, body.get("verification_policy")),
+            notification_policy=cast(dict[str, Any] | None, body.get("notification_policy")),
+            provider_preference=cast(str | None, body.get("provider_preference")),
+            model_preference=cast(str | None, body.get("model_preference")),
+            work_dir=cast(str | None, body.get("work_dir")),
+            migration_source="runtime_api",
+        )
+    except ValueError as exc:
+        message = str(exc)
+        field = None
+        lowered = message.lower()
+        if "cron" in lowered or "schedule" in lowered:
+            field = "schedule_expr"
+        elif "timezone" in lowered or "fuso" in lowered:
+            field = "timezone"
+        elif "work" in lowered or "dir" in lowered or "path" in lowered:
+            field = "work_dir"
+        return web.json_response({"error": message, "field": field}, status=422)
+    except Exception as exc:  # pragma: no cover - safety net
+        log.exception("runtime_schedule_create_failed")
+        return web.json_response({"error": str(exc) or "create failed"}, status=500)
+
+    if auto_activate:
+        try:
+            scheduled_jobs.activate_job(job_id, user_id)
+        except Exception:
+            log.exception("runtime_schedule_auto_activate_failed", extra={"job_id": job_id})
+
+    _idempotency_remember(user_id, idempotency_key, job_id)
+    detail = _schedule_detail_payload(job_id) or {}
+    return web.json_response({"ok": True, "idempotent_replay": False, **detail}, status=201)
 
 
 async def _runtime_schedule_action(request: web.Request) -> web.Response:
@@ -1195,6 +1333,7 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/queues", _runtime_queues)
     app.router.add_get("/api/runtime/environments", _runtime_environments)
     app.router.add_get("/api/runtime/schedules", _runtime_schedules)
+    app.router.add_post("/api/runtime/schedules", _runtime_schedule_create)
     app.router.add_get("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_detail)
     app.router.add_get("/api/runtime/environments/{env_id:\\d+}", _runtime_environment_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)

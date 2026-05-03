@@ -107,9 +107,20 @@ export function toAppError(
   }
 
   if (error instanceof Error) {
+    // Preserve a numeric `.status` carried by domain errors that don't
+    // extend AppError (e.g. ControlPlaneRequestError). Without this, a 503
+    // upstream-unavailable surfaced via raw fetch silently degrades to a
+    // generic 500 by the time it reaches the client — and the operator
+    // sees a misleading "internal error" instead of "service unavailable".
+    const statusOnError = (error as Error & { status?: unknown }).status;
+    const numericStatus =
+      typeof statusOnError === "number" && Number.isFinite(statusOnError)
+        ? statusOnError
+        : undefined;
     return new AppError(error.message || fallbackMessage, {
       cause: error,
-      retryable: false,
+      status: numericStatus,
+      retryable: numericStatus !== undefined && numericStatus >= 500,
       exposeMessage: true,
     });
   }

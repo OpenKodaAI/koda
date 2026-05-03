@@ -109,9 +109,16 @@ def test_claim_agents_runs_select_for_update_skip_locked() -> None:
     finally:
         _stop_patches()
     assert claimed == {"AGENT_A", "AGENT_B"}
-    select_sqls = [c for c in rec.calls if "SELECT a.agent_id" in c[0]]
+    # The query was rewritten as a UNION of two CTEs to satisfy PG's rule
+    # that FOR UPDATE cannot apply to the nullable side of an outer join.
+    # The lock now lives in the ``locked_existing`` CTE (existing rows
+    # only); the ``unowned`` CTE picks candidates with no row via NOT
+    # EXISTS. Both pieces must be present.
+    select_sqls = [c for c in rec.calls if "WITH locked_existing AS" in c[0]]
     assert len(select_sqls) == 1
-    assert "FOR UPDATE OF existing SKIP LOCKED" in select_sqls[0][0]
+    sql = select_sqls[0][0]
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "NOT EXISTS" in sql
     assert any("INSERT INTO cp_agent_assignments" in c[0] for c in rec.calls)
 
 

@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import signal
+import socket
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from aiohttp import ClientSession, ClientTimeout, web
 
@@ -143,6 +147,242 @@ async def _probe_sidecar(name: str, target: str) -> dict[str, Any]:
                 await channel.close()
 
 
+# --------------------------------------------------------------------------- #
+#  Pre-flight orphan worker cleanup                                             #
+# --------------------------------------------------------------------------- #
+#
+# A worker is `python -m koda --agent-id <X>`. It binds a per-agent health
+# port (default 8080, overridable via control_plane_runtime_endpoint).
+#
+# When the supervisor exits ungracefully (SIGKILL, host crash, OOM), workers
+# are NOT cleaned up — they keep running, holding their health ports. The
+# next supervisor start spawns a brand-new worker for the same agent; that
+# worker tries to bind the same port and crashes with `OSError: [Errno 48]
+# address already in use`. Without intervention this becomes a tight crash
+# loop: every reconcile cycle spawns + dies, the surrounding sync DB writes
+# (audit, mark_apply_started, mark_apply_finished) keep the asyncio loop
+# busy, and `/health` appears unresponsive even though the supervisor is
+# technically up.
+#
+# These helpers detect and resolve the situation BEFORE we spawn:
+#  1. `extract_health_port`: pull the port out of the runtime snapshot URL.
+#  2. `port_in_use`: best-effort bind probe, no PID needed.
+#  3. `pids_listening_on`: lsof-driven enumeration of LISTEN holders.
+#  4. `is_koda_agent_worker`: matches `python -m koda --agent-id <agent_id>`
+#     command lines exactly so we never touch unrelated processes.
+#  5. `kill_orphan_worker`: SIGTERM → wait → SIGKILL escalation, scoped to
+#     processes confirmed as our own agent's worker.
+
+# Worker command lines look like:
+#   /usr/bin/python -m koda --agent-id KODA
+#   /opt/.../python3.12 -m koda --agent-id MY_AGENT --extra=foo
+# Match ``-m koda <whitespace>`` (with whitespace required AFTER ``koda``)
+# so the supervisor itself (``-m koda.control_plane``) never matches —
+# the ``.`` makes the next char non-whitespace. Captures the agent id so
+# the caller can cross-check against the spawn target.
+_KODA_WORKER_CMD_RE = re.compile(
+    r"-m\s+koda\s+.*?--agent-id\s+(\S+)"
+)
+
+
+def _extract_health_port(health_url: str) -> int | None:
+    """Pull the TCP port out of ``health_url``. Returns ``None`` when the
+    URL is missing the explicit port (e.g. an https URL behind a reverse
+    proxy) — in that case the caller skips the orphan check, which is
+    safe because the worker won't try to bind a known port anyway.
+    """
+    try:
+        parsed = urlparse(health_url)
+    except Exception:
+        return None
+    return parsed.port
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """Return True when ``port`` is already bound on ``host``.
+
+    Tries to bind a fresh socket; the kernel raises ``EADDRINUSE`` /
+    ``EACCES`` when something already holds the address. We bind and
+    immediately close so this is a non-disruptive probe.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        with contextlib.suppress(Exception):
+            sock.close()
+
+
+def _pids_listening_on(host: str, port: int) -> list[int]:
+    """List PIDs holding a LISTEN socket on ``host:port``. Uses ``lsof``
+    in machine-readable mode (``-F p``) so the parser doesn't depend on
+    column widths. Returns an empty list when ``lsof`` is missing or the
+    command fails — the caller treats this as "couldn't identify" and
+    refuses to kill anything.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "lsof",
+                "-nP",
+                f"-iTCP@{host}:{port}",
+                "-sTCP:LISTEN",
+                "-Fp",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("p"):
+            try:
+                pids.append(int(line[1:]))
+            except ValueError:
+                continue
+    return pids
+
+
+def _is_koda_agent_worker(pid: int, agent_id: str) -> bool:
+    """Verify that ``pid`` is a koda agent worker for ``agent_id``.
+
+    Reads the full command line via ``ps -o command=`` and matches it
+    against a tight regex. Only matches lines that contain ``-m koda``
+    AND ``--agent-id <agent_id>`` — the supervisor itself
+    (``-m koda.control_plane``) and unrelated processes are excluded.
+    """
+    if pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    cmd = result.stdout.strip()
+    if not cmd:
+        return False
+    # Reject the control-plane supervisor itself; we never want to kill
+    # ourselves or a sibling supervisor on the same host.
+    if "koda.control_plane" in cmd:
+        return False
+    match = _KODA_WORKER_CMD_RE.search(cmd)
+    if not match:
+        return False
+    return match.group(1) == agent_id
+
+
+async def _kill_orphan_worker(pid: int, *, reason: str) -> bool:
+    """SIGTERM → up to 1.5s grace → SIGKILL. Returns True when the PID
+    is gone afterward, False if it survived (caller logs and aborts).
+    Logs both attempts so the audit trail captures the lifecycle.
+    """
+    log.warning(
+        "control_plane_killing_orphan_worker",
+        pid=pid,
+        reason=reason,
+        signal="SIGTERM",
+    )
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        log.error("control_plane_orphan_worker_kill_denied", pid=pid)
+        return False
+    for _ in range(15):
+        await asyncio.sleep(0.1)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+    log.warning(
+        "control_plane_killing_orphan_worker_escalating",
+        pid=pid,
+        signal="SIGKILL",
+    )
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.kill(pid, signal.SIGKILL)
+    await asyncio.sleep(0.2)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    log.error("control_plane_orphan_worker_kill_failed", pid=pid)
+    return False
+
+
+async def _ensure_health_port_free(
+    host: str,
+    port: int,
+    agent_id: str,
+) -> None:
+    """Make ``host:port`` available before the supervisor spawns a worker.
+
+    Strategy:
+      1. If the port is free, return immediately.
+      2. Enumerate LISTEN holders. If lsof can't tell us, abort the spawn
+         — better to skip than to clobber a process we can't identify.
+      3. For each holder confirmed as our agent's worker, terminate it.
+      4. If a holder is NOT a recognised koda worker (e.g. another app
+         grabbed 8080), raise so the operator gets a clear error instead
+         of an opaque crash loop.
+
+    Raises ``OrphanResolutionError`` when the port is held by something
+    we refuse to kill. The caller (``_start_worker``) treats this as a
+    fatal-for-this-spawn error and surfaces it; reconcile retries on the
+    next cycle once the operator clears the conflict manually.
+    """
+    if not _port_in_use(host, port):
+        return
+    pids = _pids_listening_on(host, port)
+    if not pids:
+        raise OrphanResolutionError(
+            f"Health port {host}:{port} is in use but lsof could not "
+            f"identify the holder; refusing to spawn agent {agent_id!r}."
+        )
+    for pid in pids:
+        if _is_koda_agent_worker(pid, agent_id):
+            killed = await _kill_orphan_worker(
+                pid,
+                reason=f"orphan_worker_blocking_{agent_id}_health_port_{port}",
+            )
+            if not killed:
+                raise OrphanResolutionError(
+                    f"Failed to terminate orphan worker pid={pid} for "
+                    f"{agent_id!r} on {host}:{port}."
+                )
+        else:
+            raise OrphanResolutionError(
+                f"Health port {host}:{port} is held by pid={pid}, which is "
+                f"not a koda worker for {agent_id!r}. Free the port before "
+                f"the supervisor can start this agent."
+            )
+    # Port should be free now, but verify before returning so we never spawn
+    # into a still-bound port.
+    if _port_in_use(host, port):
+        raise OrphanResolutionError(
+            f"Health port {host}:{port} remained in use after orphan "
+            f"cleanup for {agent_id!r}."
+        )
+
+
+class OrphanResolutionError(RuntimeError):
+    """Raised when the supervisor cannot free the health port required by
+    a worker. Caller skips the spawn for this reconcile cycle so the loop
+    doesn't crash-loop and the operator sees a clear log."""
+
+
 class ControlPlaneSupervisor:
     """Start and reconcile agent workers against desired control-plane state."""
 
@@ -177,6 +417,12 @@ class ControlPlaneSupervisor:
 
         init_tracing("koda-supervisor")
         self._manager.ensure_seeded()
+        # Sweep workers left over from a previous supervisor that exited
+        # ungracefully (SIGKILL, host crash, OOM). Without this the new
+        # spawn would crash on EADDRINUSE and the reconcile loop would
+        # busy-spin spawning crashing workers — see the docstring on
+        # ``_ensure_health_port_free`` for the full failure mode.
+        await self._sweep_orphan_workers()
         app = web.Application(
             middlewares=[
                 control_plane_rate_limit_middleware,
@@ -574,6 +820,38 @@ class ControlPlaneSupervisor:
         workspace_id = self._workspace_id_for_agent(agent_id)
         apply_workspace_limits(default_limits_from_env(workspace_id))
 
+        # Pre-flight: ensure the worker's health port isn't already held by
+        # an orphan from a previous supervisor incarnation. Without this the
+        # spawn enters a crash loop on `OSError: [Errno 48] address already
+        # in use`, the surrounding sync DB writes (audit, mark_apply_*) keep
+        # the asyncio loop busy, and `/health` appears to hang. See
+        # ``_ensure_health_port_free`` for the resolution policy.
+        health_port = _extract_health_port(runtime.health_url)
+        if health_port is not None:
+            try:
+                await _ensure_health_port_free("127.0.0.1", health_port, agent_id)
+            except OrphanResolutionError as exc:
+                log.error(
+                    "control_plane_health_port_unavailable",
+                    agent_id=agent_id,
+                    port=health_port,
+                    reason=str(exc),
+                )
+                # Mark this version as failed-to-apply so the dashboard sees
+                # the issue instead of silently retrying every reconcile.
+                with contextlib.suppress(Exception):
+                    self._manager.mark_apply_finished(
+                        agent_id,
+                        version,
+                        success=False,
+                        details={
+                            "event": "worker_spawn_blocked",
+                            "reason": "health_port_unavailable",
+                            "port": health_port,
+                        },
+                    )
+                return
+
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -591,6 +869,68 @@ class ControlPlaneSupervisor:
             agent_id, version, success=True, details={"event": "worker_started", "pid": proc.pid}
         )
         log.info("control_plane_worker_started", agent_id=agent_id, version=version, pid=proc.pid)
+
+    async def _sweep_orphan_workers(self) -> None:
+        """Best-effort cleanup of stale ``python -m koda --agent-id <X>``
+        processes inherited from a previous supervisor that exited
+        ungracefully.
+
+        Strategy:
+          1. Enumerate every koda agent worker on the host (via ``ps``).
+          2. For each worker whose parent PID is no longer alive, treat
+             it as an orphan and SIGTERM it (escalating to SIGKILL after
+             a short grace).
+
+        We deliberately keep the policy narrow: we DON'T kill workers
+        whose parent is alive (those belong to a sibling supervisor in
+        cluster mode) and we DON'T kill anything that doesn't match the
+        koda command-line shape. ``ps`` failures are non-fatal — the
+        per-spawn pre-flight in ``_start_worker`` is the second line of
+        defence.
+        """
+        try:
+            result = subprocess.run(
+                ["ps", "-A", "-o", "pid=,ppid=,command="],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return
+        if result.returncode != 0:
+            return
+        my_pid = os.getpid()
+        candidates: list[tuple[int, int, str]] = []
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(None, 2)
+            if len(parts) < 3:
+                continue
+            try:
+                pid = int(parts[0])
+                ppid = int(parts[1])
+            except ValueError:
+                continue
+            cmd = parts[2]
+            if pid == my_pid:
+                continue
+            if "koda.control_plane" in cmd:
+                continue
+            match = _KODA_WORKER_CMD_RE.search(cmd)
+            if not match:
+                continue
+            candidates.append((pid, ppid, match.group(1)))
+        for pid, ppid, agent_id in candidates:
+            # An orphaned worker has been re-parented to PID 1 (init/launchd).
+            # If the original supervisor is still alive (ppid != 1), leave the
+            # worker alone — that supervisor owns it.
+            if ppid not in (0, 1):
+                continue
+            with contextlib.suppress(Exception):
+                await _kill_orphan_worker(
+                    pid,
+                    reason=f"startup_sweep_agent_{agent_id}",
+                )
 
     def _workspace_id_for_agent(self, agent_id: str) -> str:
         """Resolve the workspace_id used for cgroup isolation.

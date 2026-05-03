@@ -36,10 +36,10 @@ describe("tour helpers", () => {
 
   it("recovers optional route gaps in the correct direction", () => {
     expect(
-      getOptionalTourRecoveryAction("tour.controlPlaneEditor.header", "auto", "/control-plane"),
+      getOptionalTourRecoveryAction("tour.controlPlaneEditor.header", "manual", "/control-plane"),
     ).toBe("next");
     expect(
-      getOptionalTourRecoveryAction("tour.controlPlaneEditor.publish", "auto", "/runtime"),
+      getOptionalTourRecoveryAction("tour.controlPlaneEditor.publish", "manual", "/runtime"),
     ).toBe("back");
   });
 
@@ -80,7 +80,7 @@ describe("tour helpers", () => {
 
   it("keeps step definitions aligned with the mounted anchors", () => {
     expect(getTourStepById("tour.shell.topbar")?.anchor).toBe("shell.topbar.actions");
-    expect(getTourStepById("tour.controlPlane.primaryAction")?.anchor).toBe("catalog.primary-actions");
+    expect(getTourStepById("tour.controlPlane.primaryAction")?.anchor).toBe("catalog.create-bot");
     expect(getTourStepById("tour.controlPlaneEditor.publish")?.anchor).toBe("editor.save");
     expect(getTourStepById("tour.executions.filters")?.anchor).toBe("executions.search");
     expect(getTourStepById("tour.executions.table")?.fallbackAnchor).toBe("executions.metrics");

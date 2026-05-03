@@ -1844,6 +1844,80 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         ),
         tier="recommended",
     ),
+    McpServerSpec(
+        server_key="superhuman",
+        display_name="Superhuman",
+        tagline="Mail e calendário com agente de produtividade",
+        description=(
+            "Servidor MCP remoto oficial da Superhuman Mail. Pesquisa, "
+            "responde, agenda e resume emails e eventos do calendário usando "
+            "seu tom de voz. Auth via OAuth."
+        ),
+        category="productivity",
+        documentation_url="https://help.superhuman.com/hc/en-us/articles/49810745762067-Superhuman-Mail-MCP-Server",
+        logo_key="superhuman",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.mail.superhuman.com/mcp"),
+        remote_url="https://mcp.mail.superhuman.com/mcp",
+        connection_profile=ConnectionProfile(
+            strategy="oauth_only",
+            oauth_provider="superhuman",
+        ),
+        tools=(
+            _r("query_email_and_calendar", "Busca semântica em email/calendário"),
+            _r("list_threads", "Listar threads com filtros estruturados"),
+            _r("get_thread", "Detalhes de thread"),
+            _r("get_message", "Detalhes de mensagem"),
+            _r("get_attachment", "Baixar anexo"),
+            _r("list_labels", "Listar labels"),
+            _r("list_splits", "Listar Split Inboxes"),
+            _r("get_read_statuses", "Status de leitura (quem abriu)"),
+            _r("get_availability", "Buscar horários disponíveis"),
+            _w("create_or_update_draft", "Criar/editar draft"),
+            _d("discard_draft", "Descartar draft"),
+            _w("send_draft", "Enviar email (Smart/Scheduled Send)"),
+            _w("undo_send", "Desfazer envio"),
+            _w("create_or_update_event", "Criar/atualizar evento"),
+            _w("update_thread", "Label/Star/Trash/Read em threads"),
+            _d("trash_thread", "Mover thread para Trash"),
+            _w("unsubscribe", "Desinscrever de mailing list"),
+            _w("update_personalization", "Atualizar tom/preferências"),
+        ),
+        tier="recommended",
+    ),
+    McpServerSpec(
+        server_key="miro",
+        display_name="Miro",
+        tagline="Boards, diagramas e code↔board",
+        description=(
+            "Servidor MCP remoto oficial da Miro em mcp.miro.com. Cria e "
+            "gerencia boards, gera diagramas a partir de código/texto e gera "
+            "código a partir de conteúdo do board. OAuth 2.1 com DCR."
+        ),
+        category="productivity",
+        documentation_url="https://developers.miro.com/docs/miro-mcp",
+        logo_key="miro",
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.miro.com/"),
+        remote_url="https://mcp.miro.com/",
+        connection_profile=ConnectionProfile(
+            strategy="oauth_only",
+            oauth_provider="miro",
+            oauth_scopes=("boards:read", "boards:write"),
+        ),
+        tools=(
+            _r("list_boards", "Listar boards"),
+            _r("get_board", "Detalhes de board"),
+            _w("create_board", "Criar board"),
+            _r("list_items", "Listar itens de um board"),
+            _w("create_item", "Criar item (sticky/shape/text)"),
+            _w("update_item", "Atualizar item"),
+            _d("delete_item", "Excluir item"),
+            _w("generate_diagram", "Gerar diagrama a partir de código/texto"),
+            _r("generate_code_from_board", "Gerar código a partir do board"),
+        ),
+        tier="recommended",
+    ),
 )
 
 

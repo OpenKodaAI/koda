@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { RoutinesContextProvider } from "@/components/routines/routines-context";
 import { RoutinesShell } from "@/components/routines/routines-shell";
+import { ToastNotification } from "@/components/ui/toast-notification";
+import { ToastProvider } from "@/hooks/use-toast";
 import { ControlPlaneRequestError, getGeneralSystemSettings } from "@/lib/control-plane";
 
 export default async function RoutinesLayout({ children }: { children: ReactNode }) {
@@ -16,8 +18,11 @@ export default async function RoutinesLayout({ children }: { children: ReactNode
   }
 
   return (
-    <RoutinesContextProvider defaultTimezone={defaultTimezone}>
-      <RoutinesShell>{children}</RoutinesShell>
-    </RoutinesContextProvider>
+    <ToastProvider>
+      <RoutinesContextProvider defaultTimezone={defaultTimezone}>
+        <RoutinesShell>{children}</RoutinesShell>
+      </RoutinesContextProvider>
+      <ToastNotification />
+    </ToastProvider>
   );
 }

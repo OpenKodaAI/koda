@@ -135,6 +135,78 @@ class TestPayloadBuilder:
         assert isinstance(user_content, str)
         assert user_content == "describe"
 
+    def test_effort_enum_injects_reasoning_effort(self):
+        from koda.services.deepseek_runner import DEEPSEEK_PROFILE
+        from koda.services.perplexity_runner import PERPLEXITY_PROFILE
+
+        payload = _build_chat_payload(
+            profile=PERPLEXITY_PROFILE,
+            model="sonar-reasoning",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="high",
+        )
+        assert payload["reasoning_effort"] == "high"
+        assert "thinking" not in payload
+
+        payload = _build_chat_payload(
+            profile=DEEPSEEK_PROFILE,
+            model="deepseek-v4-pro",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort=4000,
+        )
+        assert payload["thinking"] == {"type": "enabled", "budget_tokens": 4000}
+        assert "reasoning_effort" not in payload
+
+    def test_effort_skipped_when_model_has_no_capability(self, mistral_profile):
+        payload = _build_chat_payload(
+            profile=mistral_profile,
+            model="mistral-large-latest",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="high",
+        )
+        assert "reasoning_effort" not in payload
+        assert "thinking" not in payload
+
+    def test_effort_skipped_when_value_is_invalid(self):
+        from koda.services.deepseek_runner import DEEPSEEK_PROFILE
+        from koda.services.perplexity_runner import PERPLEXITY_PROFILE
+
+        payload = _build_chat_payload(
+            profile=PERPLEXITY_PROFILE,
+            model="sonar-reasoning",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="WRONG",
+        )
+        assert "reasoning_effort" not in payload
+
+        payload = _build_chat_payload(
+            profile=DEEPSEEK_PROFILE,
+            model="deepseek-v4-pro",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort=999_999,
+        )
+        assert "thinking" not in payload
+
 
 class TestUsageAndCost:
     def test_normalize_usage_with_openai_keys(self):

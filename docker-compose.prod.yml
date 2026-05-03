@@ -4,7 +4,6 @@ services:
       - "127.0.0.1:${CONTROL_PLANE_PORT:-8090}:8090"
     environment:
       CONTROL_PLANE_BIND: "0.0.0.0"
-      CONTROL_PLANE_AUTH_MODE: "token"
     restart: always
 
   web:

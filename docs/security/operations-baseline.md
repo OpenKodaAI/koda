@@ -38,7 +38,6 @@ This checklist is the minimum operational baseline for running Koda with a secur
 ## Release Checklist
 
 - Confirm the web tier is not receiving unnecessary privileged backend tokens.
-- Confirm `CONTROL_PLANE_AUTH_MODE` is not left open in production.
 - Confirm the reverse proxy sends HTTPS and secure cookie semantics end to end.
 - Confirm runtime attach flows expose only relays, never raw tokens or credential-bearing websocket URLs.
 - Confirm MCP/custom endpoint validation still blocks private or resolved-internal addresses.

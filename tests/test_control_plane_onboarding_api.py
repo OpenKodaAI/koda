@@ -44,10 +44,7 @@ async def test_setup_page_renders_token_free_ui() -> None:
 
 
 def test_control_plane_authorization_fails_closed_without_token() -> None:
-    with (
-        patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
-        patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []),
-    ):
+    with patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []):
         response = control_plane_api._authorize_request(_Request())
 
     assert response is not None

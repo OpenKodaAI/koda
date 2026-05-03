@@ -8,8 +8,11 @@ import { I18nProvider } from "@/components/providers/i18n-provider";
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
 
+const searchParamsGetMock = vi.fn<(name: string) => string | null>(() => null);
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock, refresh: refreshMock }),
+  useSearchParams: () => ({ get: searchParamsGetMock }),
 }));
 
 vi.mock("@/lib/http-client", async () => {

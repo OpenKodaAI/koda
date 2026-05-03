@@ -80,8 +80,9 @@ Adjust `WorkingDirectory`, install it as a real unit, and enable it after the co
 
 For any deploy reachable from the public internet:
 
-1. **`KODA_ENV=production`** — this blocks `CONTROL_PLANE_AUTH_MODE=development|open` and
-   `ALLOW_LOOPBACK_BOOTSTRAP=true` at boot. Both are rejected with a hard failure.
+1. **`KODA_ENV=production`** — this blocks `ALLOW_LOOPBACK_BOOTSTRAP=true` at boot
+   (rejected with a hard failure). The control-plane backend always enforces an
+   operator-session bearer token at the middleware layer regardless of environment.
 2. **`ALLOW_LOOPBACK_BOOTSTRAP=false`** — the first-owner flow then requires the bootstrap
    code. Do NOT enable loopback trust behind a reverse proxy that might forward an arbitrary
    `X-Forwarded-For`.

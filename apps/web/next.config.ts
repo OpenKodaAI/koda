@@ -95,7 +95,8 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
-      { source: "/dlq", destination: "/routines/dlq", permanent: true },
+      { source: "/dlq", destination: "/executions/dlq", permanent: true },
+      { source: "/routines/dlq", destination: "/executions/dlq", permanent: true },
       { source: "/schedules", destination: "/routines/schedules", permanent: true },
     ];
   },

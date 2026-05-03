@@ -360,6 +360,12 @@ export interface SessionMessage {
   session_id: string;
   error: boolean;
   linked_execution?: ExecutionSummary | null;
+  /**
+   * Generative-UI blocks attached to this message. Each entry is an opaque
+   * payload validated by `generativeBlockSchema` (see contracts/generative-ui).
+   * Older messages omit this field — UI must treat it as optional.
+   */
+  blocks?: unknown[];
 }
 
 export interface SessionHistoryPage {
@@ -385,6 +391,8 @@ export interface SessionDetail {
 export interface SessionSendRequest {
   text: string;
   session_id?: string | null;
+  mentions?: Array<{ kind: "skill" | "mcp"; slug: string }>;
+  command?: { id: string; payload?: Record<string, unknown> };
 }
 
 export interface SessionSendResponse {

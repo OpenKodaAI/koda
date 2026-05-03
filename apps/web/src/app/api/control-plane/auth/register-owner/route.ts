@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
+import {
+  jsonErrorResponse,
+  parseSchemaOrThrow,
+  upstreamFetch,
+} from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   setOwnerExistsHintCookie,
@@ -37,7 +41,7 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid registration payload.",
     );
-    const upstream = await fetch(
+    const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/register-owner`,
       {
         method: "POST",
@@ -45,6 +49,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(payload),
         cache: "no-store",
       },
+      { label: "Setup service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok || typeof data.session_token !== "string" || !data.session_token.trim()) {

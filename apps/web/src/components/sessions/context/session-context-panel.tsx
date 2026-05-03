@@ -119,6 +119,7 @@ interface SessionContextPanelProps {
   summary: SessionSummary | null;
   className?: string;
   onOpenExecution?: (taskId: number, agentId: string | null) => void;
+  onOpenArtifact?: (artifact: SessionArtifactItem) => void;
 }
 
 export function SessionContextPanel({
@@ -126,6 +127,7 @@ export function SessionContextPanel({
   summary,
   className,
   onOpenExecution,
+  onOpenArtifact,
 }: SessionContextPanelProps) {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
@@ -276,7 +278,11 @@ export function SessionContextPanel({
         executions={executions}
         onOpenExecution={onOpenExecution}
       />
-      <ContextArtifacts items={artifactItems} linkPreviewByUrl={linkPreviewByUrl} />
+      <ContextArtifacts
+        items={artifactItems}
+        linkPreviewByUrl={linkPreviewByUrl}
+        onArtifactClick={onOpenArtifact}
+      />
     </aside>
   );
 }

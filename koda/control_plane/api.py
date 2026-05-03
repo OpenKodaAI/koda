@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
-import os
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
@@ -36,7 +35,6 @@ from .onboarding import load_control_plane_openapi_spec, render_setup_page
 from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
 from .settings import (
     AGENT_SECTIONS,
-    CONTROL_PLANE_AUTH_MODE,
     DOCUMENT_KINDS,
 )
 
@@ -96,10 +94,6 @@ def _is_public_control_plane_api_path(path: str) -> bool:
     return any(path == candidate or path.startswith(f"{candidate}/") for candidate in _PUBLIC_CONTROL_PLANE_API_PATHS)
 
 
-def _development_auth_enabled() -> bool:
-    return CONTROL_PLANE_AUTH_MODE == "development" and os.environ.get("NODE_ENV", "").strip().lower() != "production"
-
-
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
     auth_header = request.headers.get("Authorization", "").strip()
     if not auth_header.startswith("Bearer "):
@@ -111,25 +105,11 @@ def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
 
 
 def _authorize_request(request: web.Request) -> web.Response | None:
-    if CONTROL_PLANE_AUTH_MODE == "open" or _development_auth_enabled():
-        request["operator_auth"] = OperatorAuthContext(
-            auth_kind="development",
-            subject_type="development",
-            user_id=None,
-            username="dev",
-            email=None,
-            display_name="Development Operator",
-        )
-        return None
-    if CONTROL_PLANE_AUTH_MODE == "token":
-        context = _optional_auth_context(request)
-        if context is None:
-            return web.json_response({"error": "operator session is required"}, status=401)
-        request["operator_auth"] = context
-        return None
-    # Unknown mode — fail closed. settings.py validates at boot, so this is a
-    # defence-in-depth check.
-    return web.json_response({"error": "operator session is required"}, status=401)
+    context = _optional_auth_context(request)
+    if context is None:
+        return web.json_response({"error": "operator session is required"}, status=401)
+    request["operator_auth"] = context
+    return None
 
 
 def _request_auth_context(request: web.Request) -> OperatorAuthContext | None:

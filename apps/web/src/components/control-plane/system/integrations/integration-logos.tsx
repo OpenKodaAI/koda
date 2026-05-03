@@ -277,6 +277,7 @@ const BRAND_IMAGE_LOGOS = {
   hubspot: createRemoteLogo("https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg"),
   linear: createRemoteLogo("https://cdn.simpleicons.org/linear/FFFFFF"),
   microsoft_365: createRemoteLogo("https://cdn.simpleicons.org/microsoft365/D83B01"),
+  miro: createRemoteLogo("https://cdn.simpleicons.org/miro/FFD02F"),
   mongodb: createRemoteLogo("https://www.vectorlogo.zone/logos/mongodb/mongodb-icon.svg"),
   n8n: createRemoteLogo("https://cdn.simpleicons.org/n8n/EA4B71"),
   netlify: createRemoteLogo("https://www.vectorlogo.zone/logos/netlify/netlify-icon.svg"),
@@ -288,6 +289,7 @@ const BRAND_IMAGE_LOGOS = {
   sentry: createRemoteLogo("https://cdn.simpleicons.org/sentry/FFFFFF"),
   slack: createRemoteLogo("https://www.vectorlogo.zone/logos/slack/slack-icon.svg"),
   stripe: createRemoteLogo("https://www.vectorlogo.zone/logos/stripe/stripe-icon.svg"),
+  superhuman: createRemoteLogo("https://cdn.simpleicons.org/superhuman/FFFFFF"),
   supabase: createRemoteLogo("https://www.vectorlogo.zone/logos/supabase/supabase-icon.svg"),
   todoist: createRemoteLogo("https://cdn.simpleicons.org/todoist/E44332"),
   twilio: createRemoteLogo("https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg"),
@@ -327,6 +329,7 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   mcp: McpLogo,
   memory: MemoryLogo,
   microsoft_365: BRAND_IMAGE_LOGOS.microsoft_365,
+  miro: BRAND_IMAGE_LOGOS.miro,
   mongodb: BRAND_IMAGE_LOGOS.mongodb,
   n8n: BRAND_IMAGE_LOGOS.n8n,
   netlify: BRAND_IMAGE_LOGOS.netlify,
@@ -339,6 +342,7 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   sentry: BRAND_IMAGE_LOGOS.sentry,
   slack: BRAND_IMAGE_LOGOS.slack,
   stripe: BRAND_IMAGE_LOGOS.stripe,
+  superhuman: BRAND_IMAGE_LOGOS.superhuman,
   supabase: BRAND_IMAGE_LOGOS.supabase,
   todoist: BRAND_IMAGE_LOGOS.todoist,
   twilio: BRAND_IMAGE_LOGOS.twilio,
@@ -380,6 +384,7 @@ export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   mcp: { from: "#7C9CFF", to: "#5168D9" },
   memory: { from: "#8D74FF", to: "#5A44C5" },
   microsoft_365: { from: "#D83B01", to: "#0078D4" },
+  miro: { from: "#FFD02F", to: "#FF8B00" },
   mongodb: { from: "#13AA52", to: "#00684A" },
   n8n: { from: "#EA4B71", to: "#FF6D9C" },
   netlify: { from: "#00C7B7", to: "#0E1E25" },
@@ -392,6 +397,7 @@ export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
   sentry: { from: "#A284FF", to: "#5B43AA" },
   slack: { from: "#36C5F0", to: "#E01E5A" },
   stripe: { from: "#635BFF", to: "#0A2540" },
+  superhuman: { from: "#000000", to: "#3F3F3F" },
   supabase: { from: "#3ECF8E", to: "#1E8C5F" },
   todoist: { from: "#E44332", to: "#C22D1C" },
   twilio: { from: "#F22F46", to: "#AA1630" },
@@ -415,7 +421,7 @@ export function getIntegrationLogo(
  * them with a class that the CSS layer flips to black via `filter: invert`
  * only when the active theme is light.
  */
-const MONO_WHITE_LOGO_KEYS = new Set(["linear", "notion", "sentry", "vercel"]);
+const MONO_WHITE_LOGO_KEYS = new Set(["linear", "notion", "sentry", "superhuman", "vercel"]);
 
 export function renderIntegrationLogo(
   key: string | null | undefined,

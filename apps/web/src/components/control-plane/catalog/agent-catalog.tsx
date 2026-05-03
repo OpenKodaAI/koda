@@ -302,6 +302,7 @@ function CreatePopover({
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
+        {...tourAnchor("catalog.create-bot")}
       >
         <Plus className="icon-sm" strokeWidth={1.75} />
       </button>

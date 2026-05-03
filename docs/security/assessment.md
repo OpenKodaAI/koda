@@ -43,9 +43,9 @@ Attach responses previously exposed raw websocket endpoints and bearer-like atta
 ### High
 
 3. Open authentication/authorization defaults
-Status: materially reduced in this round.
+Status: remediated.
 
-`CONTROL_PLANE_AUTH_MODE` now defaults to `token`, and empty `ALLOWED_USER_IDS` now deny access instead of allowing everyone. The quickstart also provisions a stable web operator session secret so operator cookies do not depend on ephemeral in-memory secrets.
+The control-plane backend (`127.0.0.1:8090`) now always enforces an operator-session bearer token at the middleware layer (with a fixed public whitelist for onboarding, status, and login routes). The previous `CONTROL_PLANE_AUTH_MODE=open|development` bypasses were removed so a local process (browser extension, neighbor container reaching `host.docker.internal`, ad-hoc script) cannot read or mutate settings without a valid session, even outside production. Empty `ALLOWED_USER_IDS` now deny access instead of allowing everyone, and the quickstart provisions a stable web operator session secret so operator cookies do not depend on ephemeral in-memory secrets.
 
 4. Cross-site dashboard mutations
 Status: remediated in this round.

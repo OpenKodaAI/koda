@@ -17,6 +17,7 @@ import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
 import { ModelSelector } from "@/components/control-plane/shared/model-selector";
+import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
 import {
   PROVIDER_LOGOS,
   PROVIDER_ICON_COMPONENTS,
@@ -231,6 +232,47 @@ export function TabRecursos() {
     (defaultModel
       ? generalModelLabelMap[`${effectiveDefaultProvider}:${defaultModel}`] || prettifyModelId(defaultModel)
       : "") || tl("Nenhum modelo selecionado");
+
+  const effortCapabilityLookup = useMemo(() => {
+    const lookup: Record<string, EffortCapability> = {};
+    for (const items of Object.values(functionalModelCatalog)) {
+      for (const item of items) {
+        if (!item.effort_kind) continue;
+        const slug = `${item.provider_id}:${item.model_id}`;
+        if (lookup[slug]) continue;
+        if (item.effort_kind === "enum") {
+          const values: string[] = Array.isArray(item.effort_enum_values)
+            ? item.effort_enum_values.map(String)
+            : [];
+          lookup[slug] = {
+            kind: "enum",
+            values,
+            defaultValue:
+              typeof item.effort_default === "string" ? item.effort_default : undefined,
+          };
+        } else {
+          lookup[slug] = {
+            kind: "tokens",
+            min: Number(item.effort_token_min ?? 0),
+            max: Number(item.effort_token_max ?? 0),
+            defaultValue:
+              typeof item.effort_default === "number" ? item.effort_default : undefined,
+          };
+        }
+      }
+    }
+    return lookup;
+  }, [functionalModelCatalog]);
+
+  function setEffortOverride(slug: string, next: string | number | null) {
+    const current = { ...modelPolicy.effort_overrides };
+    if (next === null) {
+      delete current[slug];
+    } else {
+      current[slug] = next;
+    }
+    updateModelPolicy({ effort_overrides: current });
+  }
   const currentProviderLabel =
     providerOptions.find((item) => item.value === effectiveDefaultProvider)?.label ??
     (effectiveDefaultProvider || tl("Nenhum provider selecionado"));
@@ -488,6 +530,25 @@ export function TabRecursos() {
               placeholder="US$ 0,00"
             />
           </div>
+
+          {(() => {
+            const slug = `${effectiveDefaultProvider}:${defaultModel}`;
+            const capability = effortCapabilityLookup[slug];
+            if (!capability) return null;
+            const stored = modelPolicy.effort_overrides[slug];
+            const value: string | number | null =
+              typeof stored === "string" || typeof stored === "number" ? stored : null;
+            return (
+              <div className="mt-4">
+                <EffortPicker
+                  capability={capability}
+                  value={value}
+                  onChange={(next) => setEffortOverride(slug, next)}
+                  context="agent"
+                />
+              </div>
+            );
+          })()}
         </motion.div>
 
         {modelFunctions.length > 0 ? (

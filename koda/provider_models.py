@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+EffortKind = Literal["enum", "tokens"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +216,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-opus-4-6"): {
         "description": "Geracao anterior de Opus, mantida para compatibilidade.",
@@ -222,6 +227,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-opus-4-5-20251101"): {
         "description": "Snapshot Opus 4.5 (1101).",
@@ -230,6 +238,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-5-20250929"): {
         "description": "Snapshot Sonnet 4.5 (0929).",
@@ -238,6 +249,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-6"): {
         "description": "Equilibrio entre velocidade e inteligencia para tarefas complexas.",
@@ -246,6 +260,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-haiku-4-5-20251001"): {
         "description": "Modelo rapido e economico para tarefas de alta vazao.",
@@ -263,6 +280,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-opus-4-1-20250805"): {
         "description": "Claude Opus 4.1 snapshot.",
@@ -271,6 +291,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-5"): {
         "description": "Claude Sonnet 4.5 com raciocinio forte.",
@@ -279,6 +302,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-20250514"): {
         "description": "Claude Sonnet 4 snapshot.",
@@ -287,6 +313,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-7-sonnet-latest"): {
         "description": "Claude 3.7 Sonnet com raciocinio estendido.",
@@ -295,6 +324,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-7-sonnet-20250219"): {
         "description": "Claude 3.7 Sonnet snapshot.",
@@ -303,6 +335,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-5-haiku-latest"): {
         "description": "Claude 3.5 Haiku rapido e eficiente.",
@@ -320,6 +355,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 18.00,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4"): {
         "description": "Geracao anterior de frontier, mantida para compatibilidade.",
@@ -328,6 +366,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-mini"): {
         "description": "Versao compacta e rapida do GPT-5.4.",
@@ -336,6 +377,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.50,
         "speed_tier": 5,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-nano"): {
         "description": "Versao ultrarapida para tarefas simples e alta vazao.",
@@ -344,6 +388,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 1.25,
         "speed_tier": 5,
         "intelligence_tier": 2,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-pro"): {
         "description": "Versao premium do GPT-5.4 com raciocinio estendido.",
@@ -352,6 +399,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5.3-codex"): {
         "description": "Especializado em codigo e raciocinio tecnico.",
@@ -360,6 +410,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.3-codex-spark"): {
         "description": "Versao agil do GPT-5.3 Codex para iteracao rapida.",
@@ -368,6 +421,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2-codex"): {
         "description": "Codex para tarefas de engenharia de software.",
@@ -376,6 +432,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2"): {
         "description": "Modelo GPT-5.2 de proposito geral.",
@@ -384,6 +443,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex-max"): {
         "description": "Codex 5.1 Max para projetos complexos e longos.",
@@ -392,6 +454,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex-mini"): {
         "description": "Codex 5.1 Mini para tarefas de codigo rapidas.",
@@ -400,6 +465,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.50,
         "speed_tier": 4,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5"): {
         "description": "Modelo GPT de quinta geracao com capacidades avancadas.",
@@ -408,6 +476,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-mini"): {
         "description": "Versao compacta e eficiente do GPT-5.",
@@ -416,6 +487,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 2.00,
         "speed_tier": 5,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-nano"): {
         "description": "Modelo ultrarapido para tarefas simples de alta vazao.",
@@ -424,6 +498,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.40,
         "speed_tier": 5,
         "intelligence_tier": 2,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-pro"): {
         "description": "GPT-5 Pro com raciocinio estendido e precisao maxima.",
@@ -432,6 +509,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5-codex"): {
         "description": "GPT-5 Codex para engenharia de software.",
@@ -440,6 +520,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2-pro"): {
         "description": "GPT-5.2 Pro com raciocinio avancado.",
@@ -448,6 +531,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5.1"): {
         "description": "Modelo GPT-5.1 de proposito geral.",
@@ -456,6 +542,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex"): {
         "description": "Codex 5.1 para engenharia de software.",
@@ -464,6 +553,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-4.1"): {
         "description": "GPT-4.1 com janela de contexto larga.",
@@ -496,6 +588,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.40,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3"): {
         "description": "Modelo de raciocinio avancado da OpenAI.",
@@ -504,6 +599,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3-mini"): {
         "description": "Versao compacta do o3 com bom custo-beneficio.",
@@ -512,6 +610,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.40,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3-pro"): {
         "description": "o3 Pro com raciocinio profundo e alta fidelidade.",
@@ -520,6 +621,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 80.00,
         "speed_tier": 1,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-4o"): {
         "description": "GPT-4o multimodal rapido.",
@@ -635,6 +739,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 5.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("perplexity", "sonar-reasoning-pro"): {
         "description": "Sonar Reasoning Pro para tarefas analiticas complexas.",
@@ -643,6 +750,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("perplexity", "sonar-deep-research"): {
         "description": "Sonar Deep Research executa multiplas buscas e produz relatorios densos.",
@@ -651,6 +761,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 1,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "high",
     },
     # ── Mistral La Plateforme (Q1 2026, plus pixtral-12b/saba added Q2 2026) ─
     ("mistral", "mistral-large-latest"): {
@@ -1076,6 +1189,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.99,
         "speed_tier": 5,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("groq", "openai/gpt-oss-120b"): {
         "description": "GPT-OSS 120B — flagship open-weight da OpenAI hospedado no Groq.",
@@ -1084,6 +1200,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.75,
         "speed_tier": 5,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("groq", "openai/gpt-oss-20b"): {
         "description": "GPT-OSS 20B — versao menor open-weight da OpenAI.",
@@ -1092,6 +1211,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.50,
         "speed_tier": 5,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("groq", "openai/gpt-oss-safeguard-20b"): {
         "description": "GPT-OSS Safeguard 20B — substitui llama-guard para policy-following e moderacao.",
@@ -1126,6 +1248,10 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "cached_input_cost_per_1m": 0.14,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 2_000,
     },
     ("deepseek", "deepseek-v4-flash"): {
         "description": "DeepSeek V4 Flash — barato e rapido, mesmos modos thinking/non-thinking.",
@@ -1135,6 +1261,10 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "cached_input_cost_per_1m": 0.07,
         "speed_tier": 5,
         "intelligence_tier": 4,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 1_000,
     },
     ("deepseek", "deepseek-chat"): {
         "description": "DeepSeek Chat — alias de compatibilidade (deprecado em 2026/07/24, mapeia para V4 Flash).",
@@ -1153,6 +1283,10 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "cached_input_cost_per_1m": 0.14,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 2_000,
     },
     # ── xAI Grok (Q1 2026, plus 4.3/4.1-fast/4-fast added Q2 2026) ───
     ("xai", "grok-4.3"): {
@@ -1597,6 +1731,38 @@ def resolve_known_general_model_ids(provider_id: str) -> list[str]:
     return list(_DYNAMIC_GENERAL_MODEL_LABELS.get(normalized_provider, {}).keys())
 
 
+def get_model_effort_capability(provider_id: str, model_id: str) -> dict[str, Any] | None:
+    """Return effort capability for a model, or None if it does not support effort.
+
+    Output shape:
+      enum  -> {"kind": "enum",   "values": tuple[str, ...], "default": str | None}
+      tokens-> {"kind": "tokens", "min": int, "max": int,    "default": int | None}
+    """
+    normalized_provider = provider_id.strip().lower()
+    normalized_model = model_id.strip()
+    meta = _GENERAL_MODEL_METADATA.get((normalized_provider, normalized_model))
+    if not meta:
+        return None
+    kind = meta.get("effort_kind")
+    if kind == "enum":
+        values = tuple(meta.get("effort_enum_values", ()))
+        if not values:
+            return None
+        return {
+            "kind": "enum",
+            "values": values,
+            "default": meta.get("effort_default"),
+        }
+    if kind == "tokens":
+        return {
+            "kind": "tokens",
+            "min": int(meta.get("effort_token_min", 0)),
+            "max": int(meta.get("effort_token_max", 0)),
+            "default": meta.get("effort_default"),
+        }
+    return None
+
+
 def _prettify_ollama_model_id(model_id: str) -> str:
     """Generate a human-readable display name from an Ollama model ID."""
     name = model_id.split(":")[0]
@@ -1769,6 +1935,17 @@ def resolve_provider_function_model_catalog(
             "speed_tier": meta.get("speed_tier", 3),
             "intelligence_tier": meta.get("intelligence_tier", 3),
         }
+
+        effort_capability = get_model_effort_capability(normalized_provider, normalized_model)
+        if effort_capability is not None:
+            entry["effort_kind"] = effort_capability["kind"]
+            if effort_capability["kind"] == "enum":
+                entry["effort_enum_values"] = list(effort_capability["values"])
+            else:
+                entry["effort_token_min"] = effort_capability["min"]
+                entry["effort_token_max"] = effort_capability["max"]
+            if effort_capability.get("default") is not None:
+                entry["effort_default"] = effort_capability["default"]
 
         # Pass Ollama-specific fields for the frontend tooltip
         if normalized_provider == "ollama":

@@ -160,21 +160,50 @@ class ClusterClient:
         # Build candidate list as ``ANY($1)`` so the IN clause stays
         # stable across batch sizes.
         candidates = list(candidates)
+        # Split the lookup into two CTEs because PostgreSQL forbids
+        # ``FOR UPDATE`` on the nullable side of an outer join. Existing
+        # rows that are stale or self-owned are locked with SKIP LOCKED so
+        # peers cannot double-claim; rows that don't yet exist are picked
+        # via NOT EXISTS (no row to lock — the subsequent UPSERT serializes
+        # via the agent_id PRIMARY KEY). NULLS FIRST in the original ORDER
+        # BY meant unowned candidates were preferred; we mirror that with
+        # an explicit priority column.
+        limit_clause = f"LIMIT {int(cap)}" if cap > 0 else ""
         try:
             rows = fetch_all(
                 f"""
-                SELECT a.agent_id
-                FROM unnest(?::text[]) AS a(agent_id)
-                LEFT JOIN cp_agent_assignments existing
-                    ON existing.agent_id = a.agent_id
-                WHERE existing.agent_id IS NULL
-                   OR existing.heartbeat_at < (NOW() - INTERVAL '1 second' * ?)
-                   OR existing.supervisor_id = ?
-                ORDER BY existing.heartbeat_at NULLS FIRST, a.agent_id
-                {f"LIMIT {int(cap)}" if cap > 0 else ""}
-                FOR UPDATE OF existing SKIP LOCKED
+                WITH locked_existing AS (
+                    SELECT existing.agent_id
+                    FROM cp_agent_assignments existing
+                    WHERE existing.agent_id = ANY(?::text[])
+                      AND (
+                        existing.heartbeat_at < (NOW() - INTERVAL '1 second' * ?)
+                        OR existing.supervisor_id = ?
+                      )
+                    FOR UPDATE SKIP LOCKED
+                ),
+                unowned AS (
+                    SELECT a.agent_id
+                    FROM unnest(?::text[]) AS a(agent_id)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM cp_agent_assignments existing
+                        WHERE existing.agent_id = a.agent_id
+                    )
+                )
+                SELECT agent_id FROM (
+                    SELECT agent_id, 0 AS priority FROM unowned
+                    UNION ALL
+                    SELECT agent_id, 1 AS priority FROM locked_existing
+                ) combined
+                ORDER BY priority, agent_id
+                {limit_clause}
                 """,
-                (candidates, int(self.config.heartbeat_stale_seconds), self.config.supervisor_id),
+                (
+                    candidates,
+                    int(self.config.heartbeat_stale_seconds),
+                    self.config.supervisor_id,
+                    candidates,
+                ),
             )
         except Exception:
             log.exception("cluster_claim_select_failed")

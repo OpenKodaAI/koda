@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NODE_ENV=development node server.mjs",
+    "dev": "NODE_ENV=development node --env-file-if-exists=.env.local server.mjs",
     "build": "next build",
-    "start": "NODE_ENV=production node server.mjs",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env.local server.mjs",
     "lint": "eslint .",
     "test": "vitest run"
   },

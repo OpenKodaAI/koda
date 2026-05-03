@@ -276,7 +276,7 @@ function buildPageCommands(ctx: CommandBarContext): Command[] {
     { id: "runtime", path: "/runtime", labelKey: "commandBar.pages.runtime", icon: Activity, keywords: ["runtime", "execution", "live"] },
     { id: "executions", path: "/executions", labelKey: "commandBar.pages.executions", icon: History, keywords: ["executions", "history", "historico", "execucoes"] },
     { id: "costs", path: "/costs", labelKey: "commandBar.pages.costs", icon: Coins, keywords: ["costs", "custos", "billing"] },
-    { id: "dlq", path: "/routines/dlq", labelKey: "commandBar.pages.dlq", icon: Inbox, keywords: ["dlq", "dead letter", "retry"] },
+    { id: "dlq", path: "/executions/dlq", labelKey: "commandBar.pages.dlq", icon: Inbox, keywords: ["dlq", "dead letter", "retry"] },
   ];
 
   return entries.map((entry) => ({

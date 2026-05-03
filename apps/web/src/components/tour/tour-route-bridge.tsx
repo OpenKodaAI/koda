@@ -102,27 +102,13 @@ export function TourRouteBridge({
   }, [pathname]);
 
   useEffect(() => {
-    if (!currentStep?.anchor) return;
-    if (typeof window === "undefined") return;
-    if (!currentStep.anchor.startsWith("shell.sidebar")) return;
-    if (window.innerWidth >= 1024 || mobileNavOpen) return;
-
-    onMobileNavOpenChange(true);
-  }, [currentStep?.anchor, mobileNavOpen, onMobileNavOpenChange]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.innerWidth >= 1024) return;
-    if (!mobileNavOpen) return;
-    if (currentStep?.anchor?.startsWith("shell.sidebar")) return;
 
-    const frame = window.requestAnimationFrame(() => onMobileNavOpenChange(false));
-    const timeout = window.setTimeout(() => onMobileNavOpenChange(false), 140);
+    const wantsSidebar = Boolean(currentStep?.anchor?.startsWith("shell.sidebar"));
+    if (wantsSidebar === mobileNavOpen) return;
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
+    onMobileNavOpenChange(wantsSidebar);
   }, [currentStep?.anchor, mobileNavOpen, onMobileNavOpenChange]);
 
   useEffect(() => {

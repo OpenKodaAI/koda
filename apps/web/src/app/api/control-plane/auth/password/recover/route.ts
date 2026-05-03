@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
+import {
+  jsonErrorResponse,
+  parseSchemaOrThrow,
+  upstreamFetch,
+} from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 
 const CONTROL_PLANE_BASE_URL = process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
@@ -27,7 +31,7 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid recovery payload.",
     );
-    const upstream = await fetch(
+    const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/password/recover`,
       {
         method: "POST",
@@ -35,11 +39,15 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(payload),
         cache: "no-store",
       },
+      { label: "Recovery service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {
+      // Generic message — recovery flow is also identifier-bearing and must
+      // stay indistinguishable across "unknown user" / "wrong code" / "rate
+      // limited" (CLAUDE.md auth contract).
       return NextResponse.json(
-        { error: String(data.error || "Unable to reset password.") },
+        { error: "Invalid recovery details." },
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
       );
     }

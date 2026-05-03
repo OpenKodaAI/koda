@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, DatabaseZap, Plus } from "lucide-react";
 import { CronTable } from "@/components/schedules/cron-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
@@ -18,6 +18,8 @@ import {
   type RoutineFormPayload,
 } from "@/components/routines/routine-editor";
 import { useRoutinesContext } from "@/components/routines/routines-context";
+import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
+import { useToast } from "@/hooks/use-toast";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import type { CronJob, ScheduleDetail } from "@/lib/types";
@@ -94,6 +96,31 @@ function buildPatch(detail: ScheduleDetail, draft: ScheduleEditDraft, name: stri
   return patch;
 }
 
+function buildCreateBody(payload: RoutineFormPayload) {
+  const jobType = "agent_query" as const;
+  const innerPayload: Record<string, unknown> = {
+    name: payload.name,
+    query: payload.instructions,
+    connectors: payload.connectors,
+    read_only: payload.readOnly,
+    allowed_paths: payload.allowedPaths,
+  };
+  return {
+    job_type: jobType,
+    trigger_type: payload.triggerType,
+    schedule_expr: payload.scheduleExpr,
+    timezone: payload.timezone || "UTC",
+    payload: innerPayload,
+    provider_preference: undefined,
+    model_preference: payload.modelPreference ?? undefined,
+    work_dir: undefined,
+    notification_policy: { mode: payload.notificationMode },
+    verification_policy: { mode: payload.verificationMode },
+    session_id: `dashboard:${payload.agentId}`,
+    auto_activate: true,
+  };
+}
+
 function payloadToDraft(payload: RoutineFormPayload, current: ScheduleEditDraft | null): ScheduleEditDraft {
   return {
     triggerType: payload.triggerType,
@@ -124,7 +151,22 @@ export default function SchedulesPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [pendingDeleteJob, setPendingDeleteJob] = useState<CronJob | null>(null);
   const { defaultTimezone } = useRoutinesContext();
+  const { showToast } = useToast();
+  const idempotencyKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    if (creatingRoutine && !idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `routine-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    if (!creatingRoutine) {
+      idempotencyKeyRef.current = "";
+    }
+  }, [creatingRoutine]);
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
@@ -239,10 +281,45 @@ export default function SchedulesPage() {
 
   async function applySchedulePayload(payload: RoutineFormPayload) {
     if (creatingRoutine) {
-      // TODO(api): wire create endpoint when contract is defined.
-      setStatusMessage(t("routines.editor.messages.createdPreview"));
-      setCreatingRoutine(false);
+      const targetAgentId = payload.agentId || agents[0]?.id;
+      if (!targetAgentId) {
+        setEditorError(t("routines.editor.errors.unauthorized"));
+        return;
+      }
+      setBusyJobId(-1);
+      setStatusMessage(null);
       setEditorError(null);
+      try {
+        const body = buildCreateBody(payload);
+        const response = await fetch(`/api/runtime/agents/${targetAgentId}/schedules`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Idempotency-Key": idempotencyKeyRef.current,
+          },
+          body: JSON.stringify(body),
+        });
+        const responseBody = (await response.json()) as
+          | ({ ok?: boolean; idempotent_replay?: boolean } & Partial<ScheduleDetail>)
+          | { error?: string; field?: string };
+        if (!response.ok) {
+          const fallback = t("routines.editor.messages.createFailed");
+          const errMessage =
+            "error" in responseBody ? responseBody.error || fallback : fallback;
+          showToast(errMessage, "error");
+          throw new Error(errMessage);
+        }
+        showToast(t("routines.editor.messages.created"), "success");
+        setStatusMessage(t("routines.editor.messages.created"));
+        setCreatingRoutine(false);
+        setRefreshNonce((value) => value + 1);
+      } catch (error) {
+        setEditorError(
+          error instanceof Error ? error.message : t("routines.editor.messages.createFailed"),
+        );
+      } finally {
+        setBusyJobId(null);
+      }
       return;
     }
 
@@ -270,11 +347,18 @@ export default function SchedulesPage() {
         | ({ message?: string } & Partial<ScheduleDetail>)
         | { error?: string };
       if (!response.ok) {
+        if (response.status === 409 && selectedJob) {
+          showToast(t("routines.editor.errors.conflict"), "error");
+          await loadDetail(selectedJob);
+          setEditorError(t("routines.editor.errors.conflict"));
+          return;
+        }
         const fallback = t("schedules.inspector.messages.updateFailed");
         throw new Error(
           "error" in responseBody ? responseBody.error || fallback : fallback,
         );
       }
+      showToast(t("routines.editor.messages.updated"), "success");
       setStatusMessage(
         (responseBody as { message?: string }).message || t("schedules.inspector.messages.updated"),
       );
@@ -496,9 +580,25 @@ export default function SchedulesPage() {
         onSubmit={applySchedulePayload}
         onDelete={
           editorMode === "edit" && selectedJob
-            ? () => void runAction(selectedJob, "delete")
+            ? () => setPendingDeleteJob(selectedJob)
             : undefined
         }
+      />
+
+      <ConfirmationDialog
+        open={Boolean(pendingDeleteJob)}
+        title={t("routines.editor.delete.confirmTitle")}
+        message={t("routines.editor.delete.confirmDescription")}
+        confirmLabel={t("routines.editor.delete.confirmAction")}
+        onCancel={() => setPendingDeleteJob(null)}
+        onConfirm={async () => {
+          const job = pendingDeleteJob;
+          setPendingDeleteJob(null);
+          if (!job) return;
+          await runAction(job, "delete");
+          showToast(t("routines.editor.messages.deleted"), "success");
+          closeEditor();
+        }}
       />
     </div>
   );

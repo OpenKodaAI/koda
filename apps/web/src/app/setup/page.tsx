@@ -10,7 +10,9 @@ export default async function SetupPage() {
   let authStatus;
 
   try {
-    authStatus = await getControlPlaneAuthStatus();
+    // Short timeout: same rationale as /login — paint the form quickly when
+    // the backend is napping.
+    authStatus = await getControlPlaneAuthStatus({ timeoutMs: 2000 });
   } catch (error) {
     if (error instanceof ControlPlaneRequestError && error.status === 401) {
       return <SetupScreen authStatus={null} />;

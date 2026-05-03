@@ -39,6 +39,12 @@ const ROUTE_META: Array<{
     match: (pathname) => pathname === "/",
     key: "overview",
   },
+  // DLQ is checked before the generic /executions match because it lives
+  // under /executions/dlq.
+  {
+    match: (pathname) => pathname.startsWith("/executions/dlq"),
+    key: "dlq",
+  },
   {
     match: (pathname) => pathname.startsWith("/executions"),
     key: "executions",
@@ -56,12 +62,8 @@ const ROUTE_META: Array<{
     key: "costs",
   },
   {
-    match: (pathname) => pathname.startsWith("/routines/schedules"),
+    match: (pathname) => pathname.startsWith("/routines"),
     key: "schedules",
-  },
-  {
-    match: (pathname) => pathname.startsWith("/routines/dlq"),
-    key: "dlq",
   },
 ];
 

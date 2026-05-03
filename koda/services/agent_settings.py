@@ -18,7 +18,7 @@ from koda.config import (
 )
 from koda.control_plane.agent_spec import normalize_model_policy
 from koda.control_plane.manager import ControlPlaneManager
-from koda.provider_models import MODEL_FUNCTION_IDS
+from koda.provider_models import MODEL_FUNCTION_IDS, get_model_effort_capability
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
@@ -80,6 +80,12 @@ def _functional_catalog_from_general_settings(settings: dict[str, Any]) -> dict[
     }
 
 
+def _effort_defaults_from_general_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    values = _safe_json_object(settings.get("values"))
+    models = _safe_json_object(values.get("models"))
+    return _safe_json_object(models.get("effort_defaults"))
+
+
 def _provider_catalog_map(provider_catalog: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(provider_id): _safe_json_object(payload)
@@ -124,6 +130,8 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     general_settings = _general_settings(manager)
     provider_connections = _provider_connections_from_general_settings(general_settings)
     functional_catalog = _functional_catalog_from_general_settings(general_settings)
+    effort_defaults_global = _effort_defaults_from_general_settings(general_settings)
+    effort_overrides = _safe_json_object(policy.get("effort_overrides"))
     provider_runtime_eligibility = _safe_json_object(snapshot.get("provider_runtime_eligibility"))
 
     default_provider = (
@@ -225,7 +233,50 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
         "tts_voice_label": voice_label,
         "tts_voice_language": voice_language,
         "selectable_function_options": selectable_function_options,
+        "effort_overrides": effort_overrides,
+        "effort_defaults_global": effort_defaults_global,
     }
+
+
+def resolve_effort(
+    settings: dict[str, Any] | None,
+    provider_id: str,
+    model_id: str,
+) -> str | int | None:
+    """Cascade per-model effort: agent override → global default → catalog default → None.
+
+    Returns None when the model has no effort capability. Also normalizes types
+    against the model's declared kind so corrupt cached values cannot leak
+    through (e.g. a stale string for a tokens-kind model).
+    """
+    cap = get_model_effort_capability(provider_id, model_id)
+    if cap is None:
+        return None
+
+    slug = f"{provider_id.strip().lower()}:{model_id.strip()}"
+    sources = []
+    if settings is not None:
+        sources.append(_safe_json_object(settings.get("effort_overrides")))
+        sources.append(_safe_json_object(settings.get("effort_defaults_global")))
+    for source in sources:
+        if not source:
+            continue
+        if slug not in source:
+            continue
+        candidate = source[slug]
+        if cap["kind"] == "enum":
+            if isinstance(candidate, str):
+                normalized = candidate.strip().lower()
+                if normalized in cap["values"]:
+                    return normalized
+        elif cap["kind"] == "tokens":
+            try:
+                value = int(candidate)
+            except (TypeError, ValueError):
+                continue
+            if cap["min"] <= value <= cap["max"]:
+                return value
+    return cap.get("default")
 
 
 def get_agent_runtime_settings(*, force_refresh: bool = False) -> dict[str, Any] | None:
