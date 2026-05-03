@@ -35,60 +35,50 @@ export const CostBreakdownCard = memo(function CostBreakdownCard({
     t("costs.page.emptyBreakdownShort", {
       defaultValue: "No data",
     });
-  const visibleItems = useMemo(() => items.slice(0, 6), [items]);
+  const visibleItems = useMemo(() => items.slice(0, 5), [items]);
   return (
-    <section className={cn("flex flex-col gap-3", className)}>
-      <header className="px-1">
-        <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+    <section className={cn("flex min-w-0 flex-col gap-2", className)}>
+      <header className="min-w-0 px-1">
+        <p className="m-0 truncate font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
           {title}
         </p>
         {subtitle ? (
-          <p className="m-0 mt-1.5 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-tertiary)]">
+          <p className="m-0 mt-1 truncate text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
             {subtitle}
           </p>
         ) : null}
       </header>
 
       {items.length === 0 ? (
-        <div className="flex min-h-[120px] items-center justify-center gap-2 px-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+        <div className="flex min-h-[96px] items-center justify-center gap-2 px-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
           <StatusDot color="var(--text-quaternary)" />
-          <span>{resolvedEmptyLabel}</span>
+          <span className="truncate">{resolvedEmptyLabel}</span>
         </div>
       ) : (
         <ol className="flex flex-col">
           {visibleItems.map((item, index) => (
             <li
               key={item.id}
-              className="flex flex-col gap-2 border-b border-[color:var(--divider-hair)] px-1 py-3 last:border-b-0"
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-[color:var(--divider-hair)] px-1 py-2.5 last:border-b-0"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <StatusDot color={item.color ?? "var(--tone-info-dot)"} />
-                  <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
-                    {truncateText(item.label, 34)}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="m-0 font-mono text-[0.8125rem] tabular-nums text-[var(--text-primary)]">
-                    {formatCost(item.value)}
-                  </p>
-                  <p className="m-0 font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
-                    {item.share.toFixed(1)}%
-                  </p>
-                </div>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <StatusDot color={item.color ?? "var(--tone-info-dot)"} />
+                <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                  {truncateText(item.label, 34)}
+                </p>
               </div>
 
-              {item.meta ? (
-                <p className="m-0 pl-[38px] text-[0.6875rem] leading-[1.45] text-[var(--text-quaternary)]">
-                  {item.meta}
+              <div className="shrink-0 text-right">
+                <p className="m-0 font-mono text-[0.8125rem] tabular-nums text-[var(--text-primary)]">
+                  {formatCost(item.value)}
                 </p>
-              ) : null}
+              </div>
 
-              <div className="pl-[38px]">
-                <div className="h-[3px] overflow-hidden rounded-full bg-[var(--panel-strong)]">
+              <div className="col-span-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 pl-[38px]">
+                <div className="h-0.5 overflow-hidden rounded-full bg-[var(--panel-strong)]">
                   <div
                     className="h-full rounded-full"
                     style={{
@@ -97,7 +87,16 @@ export const CostBreakdownCard = memo(function CostBreakdownCard({
                     }}
                   />
                 </div>
+                <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+                  {item.share.toFixed(1)}%
+                </span>
               </div>
+
+              {item.meta ? (
+                <p className="col-span-2 m-0 truncate pl-[38px] text-[0.6875rem] text-[var(--text-quaternary)]">
+                  {item.meta}
+                </p>
+              ) : null}
             </li>
           ))}
         </ol>

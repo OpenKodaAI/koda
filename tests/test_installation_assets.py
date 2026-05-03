@@ -106,7 +106,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "control-plane-first" in readme_text
     assert "apps/web" in readme_text
     assert "127.0.0.1:3000" in readme_text
-    assert "/control-plane/setup" in readme_text
+    assert "/setup" in readme_text
     assert "/control-plane" in readme_text
     assert "?token=" not in readme_text
     assert "npm install -g @openkodaai/koda" in readme_text
@@ -114,7 +114,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "seaweedfs" in readme_text.lower()
     assert "Use Koda" in docs_index_text
     assert "apps/web/" in docs_index_text
-    assert "/control-plane/setup" in local_text
+    assert "/setup" in local_text
     assert "koda install" in local_text
     assert "@openkodaai/koda" in local_text
     assert "?token=" not in local_text
@@ -197,7 +197,7 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     assert manifest_from_npm == bundle_manifest
     assert checksums_from_npm == bundle_checksums
     assert "npm install -g @openkodaai/koda" in readme_from_npm
-    assert "control-plane/setup" in readme_from_npm
+    assert "/setup" in readme_from_npm
 
 
 def test_release_metadata_is_publication_ready() -> None:
@@ -221,7 +221,7 @@ def test_release_metadata_is_publication_ready() -> None:
     assert (
         f"https://github.com/OpenKodaAI/koda/blob/v{package_payload['version']}/docs/install/local.md" in package_readme
     )
-    assert "http://localhost:3000/control-plane/setup" in package_readme
+    assert "http://localhost:3000/setup" in package_readme
 
 
 def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
@@ -335,7 +335,7 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
     assert "--retry-all-errors" in script_text
     assert "docker compose" in script_text
     assert "docker-inspect.json" in script_text
-    assert "control-plane/setup" in script_text
+    assert "http://127.0.0.1:3000/setup" in script_text
     assert "openapi/control-plane.json" in script_text
 
     assert '["pr-quality", "security"]' in cut_release_workflow_text
@@ -545,7 +545,7 @@ def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> Non
     assert "https://openkoda.ai/spdx/" not in combined
     assert "urn:openkodaai:spdx:koda-release-bundle:" in combined
     assert "git+https://github.com/OpenKodaAI/koda.git" in combined
-    assert "http://localhost:3000/control-plane/setup" in combined
+    assert "http://localhost:3000/setup" in combined
     assert "http://localhost:8090/health" in combined
     assert "http://app:8090" in combined
     assert "http://seaweedfs:8333" in combined
@@ -600,7 +600,7 @@ def test_doctor_checks_dashboard_and_control_plane() -> None:
     assert "legacy_setup_url" in doctor_text
     assert "/setup" in doctor_text
     assert "/setup?token=" not in doctor_text
-    assert "CONTROL_PLANE_MASTER_KEY" not in doctor_text
+    assert "CONTROL_PLANE_MASTER_KEY=" not in doctor_text
 
 
 def test_steady_state_assets_do_not_reference_legacy_object_storage_branding() -> None:

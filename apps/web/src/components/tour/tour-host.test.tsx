@@ -60,7 +60,8 @@ function HomeShell() {
         <div {...tourAnchor("overview.agent-switcher")}>Agent switcher</div>
         <div {...tourAnchor("overview.stats")}>Overview stats</div>
         <div {...tourAnchor("overview.runtime-control")}>Runtime control</div>
-        <div {...tourAnchor("overview.live-plan")}>Live plan</div>
+        <div {...tourAnchor("overview.activity")}>Activity</div>
+        <div {...tourAnchor("overview.history")}>History</div>
       </div>
       <aside {...tourRoute("shell.sidebar")} {...tourAnchor("shell.sidebar.brand")}>
         <span {...tourAnchor("shell.sidebar.nav.home")}>
@@ -183,27 +184,27 @@ describe("TourHost", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Start with a quick guided tour",
+        name: "Meet the workspace in 7 steps",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Start tour" }));
     expect(
       await screen.findByRole("heading", {
-        name: "This sidebar is your main map",
+        name: "Navigate from the sidebar",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(
       await screen.findByRole("heading", {
-        name: "Start with a quick guided tour",
+        name: "Meet the workspace in 7 steps",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Start tour" }));
     await screen.findByRole("heading", {
-      name: "This sidebar is your main map",
+      name: "Navigate from the sidebar",
     });
 
     await user.click(screen.getByRole("button", { name: "Skip tour" }));
@@ -211,7 +212,7 @@ describe("TourHost", () => {
     await waitFor(() => {
       expect(
         within(document.body).queryByRole("heading", {
-          name: "This sidebar is your main map",
+          name: "Navigate from the sidebar",
         }),
       ).not.toBeInTheDocument();
     });
@@ -226,16 +227,31 @@ describe("TourHost", () => {
     });
   });
 
-  it("navigates from sidebar to control-plane, then onward to runtime", async () => {
+  it("walks the seven-step onboarding path and navigates across core screens", async () => {
     const user = userEvent.setup();
     renderTour({ pathname: "/", shell: <HomeShell /> });
 
     await screen.findByRole("heading", {
-      name: "Start with a quick guided tour",
+      name: "Meet the workspace in 7 steps",
     });
     await user.click(screen.getByRole("button", { name: "Start tour" }));
     await screen.findByRole("heading", {
-      name: "This sidebar is your main map",
+      name: "Navigate from the sidebar",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Use the topbar for quick actions",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Read the workspace status first",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Follow recent activity from Home",
     });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -251,9 +267,14 @@ describe("TourHost", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "The catalog is your first stop on a fresh install",
+        name: "Start by creating your first agent",
       }),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "The catalog fills in as agents are added",
+    });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
@@ -282,7 +303,7 @@ describe("TourHost", () => {
     );
 
     await screen.findByRole("heading", {
-      name: "This sidebar is your main map",
+      name: "Navigate from the sidebar",
     });
 
     const dialog = screen.getByRole("dialog");

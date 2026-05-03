@@ -318,6 +318,7 @@ describe("SessionsPage chat redesign", () => {
 
     const railNewButton = screen.getAllByRole("button", { name: /New conversation/i })[0];
     await user.click(railNewButton);
+    await user.click(await screen.findByRole("button", { name: /^ATLAS$/i }));
 
     const composer = await screen.findByPlaceholderText(/Send a message/i);
     await user.type(composer, "Hello from web");

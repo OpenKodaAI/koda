@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -17,12 +18,38 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tokio::fs;
 use tokio::net::UnixListener;
-use tokio_postgres::NoTls;
+use tokio::sync::OnceCell;
+use tokio_postgres::{Client, NoTls};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 const SERVICE_NAME: &str = "koda-retrieval-engine";
+
+struct PostgresPool {
+    clients: Vec<Client>,
+    next: AtomicUsize,
+}
+
+impl PostgresPool {
+    fn new(clients: Vec<Client>) -> Self {
+        Self {
+            clients,
+            next: AtomicUsize::new(0),
+        }
+    }
+
+    fn client(&self) -> &Client {
+        let index = self.next.fetch_add(1, Ordering::Relaxed) % self.clients.len();
+        &self.clients[index]
+    }
+
+    fn size(&self) -> usize {
+        self.clients.len()
+    }
+}
+
+static KNOWLEDGE_POSTGRES_POOL: OnceCell<PostgresPool> = OnceCell::const_new();
 
 fn knowledge_postgres_dsn() -> String {
     std::env::var("KNOWLEDGE_V2_POSTGRES_DSN")
@@ -39,6 +66,58 @@ fn knowledge_postgres_schema() -> String {
         "knowledge_v2".to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+fn knowledge_postgres_pool_size() -> usize {
+    std::env::var("KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(6)
+}
+
+async fn connect_knowledge_postgres() -> Result<Client, Status> {
+    let dsn = knowledge_postgres_dsn();
+    if dsn.is_empty() {
+        return Err(Status::failed_precondition(
+            "knowledge postgres dsn is not configured",
+        ));
+    }
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls)
+        .await
+        .map_err(|error| {
+            Status::unavailable(format!("failed to connect to knowledge postgres: {error}"))
+        })?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
+}
+
+async fn connect_knowledge_postgres_pool() -> Result<PostgresPool, Status> {
+    let pool_size = knowledge_postgres_pool_size();
+    let mut clients = Vec::with_capacity(pool_size);
+    for _ in 0..pool_size {
+        clients.push(connect_knowledge_postgres().await?);
+    }
+    Ok(PostgresPool::new(clients))
+}
+
+async fn knowledge_postgres_pool() -> Result<&'static PostgresPool, Status> {
+    KNOWLEDGE_POSTGRES_POOL
+        .get_or_try_init(connect_knowledge_postgres_pool)
+        .await
+}
+
+async fn knowledge_postgres_client() -> Result<&'static Client, Status> {
+    Ok(knowledge_postgres_pool().await?.client())
+}
+
+async fn knowledge_postgres_ready() -> bool {
+    match knowledge_postgres_client().await {
+        Ok(client) => client.query_one("SELECT 1", &[]).await.is_ok(),
+        Err(_) => false,
     }
 }
 
@@ -246,67 +325,6 @@ fn uncertainty_level(has_authoritative: bool, has_conflict: bool) -> &'static st
         "medium"
     } else {
         "low"
-    }
-}
-
-fn synthetic_candidate(query: &str, envelope: &QueryEnvelopePayload) -> RankedCandidate {
-    let normalized_query = if !envelope.normalized_query.is_empty() {
-        envelope.normalized_query.clone()
-    } else {
-        query.to_string()
-    };
-    let identifier = if normalized_query.is_empty() {
-        "query-summary".to_string()
-    } else {
-        format!(
-            "query-{}",
-            normalized_query.to_ascii_lowercase().replace(' ', "-")
-        )
-    };
-    let candidate = CandidatePayload {
-        id: identifier,
-        title: if normalized_query.is_empty() {
-            "Query summary".to_string()
-        } else {
-            format!("Query summary: {}", normalized_query)
-        },
-        content: normalized_query.clone(),
-        layer: "workspace_doc".to_string(),
-        scope: if envelope.requires_write {
-            "operational_policy".to_string()
-        } else {
-            "repo_fact".to_string()
-        },
-        source_label: if normalized_query.is_empty() {
-            "query:summary".to_string()
-        } else {
-            format!("query:{}", normalized_query.to_ascii_lowercase())
-        },
-        source_path: envelope.workspace_dir.clone(),
-        source_type: "query".to_string(),
-        operable: false,
-        freshness: "fresh".to_string(),
-        similarity: 0.42,
-        lexical_rank: 0,
-        dense_rank: -1,
-        graph_rank: -1,
-        lexical_score: 0.42,
-        dense_score: 0.0,
-        graph_hops: 0,
-        graph_score: 0.0,
-        graph_relation_types: Vec::new(),
-        evidence_modalities: Vec::new(),
-        reasons: vec!["synthetic_query_summary".to_string()],
-        project_key: envelope.project_key.clone(),
-        environment: envelope.environment.clone(),
-        team: envelope.team.clone(),
-        ..CandidatePayload::default()
-    };
-    RankedCandidate {
-        candidate,
-        supporting_evidence: Vec::new(),
-        base_rank: 1,
-        score: 0.42,
     }
 }
 
@@ -572,23 +590,10 @@ fn build_retrieve_response(request: &RetrieveRequest, trace_id: String) -> Retri
     } else {
         request.query.clone()
     };
-    let candidates = vec![synthetic_candidate(&query, &envelope)]
-        .into_iter()
-        .filter(|item| {
-            envelope.allowed_source_labels.is_empty()
-                || envelope
-                    .allowed_source_labels
-                    .iter()
-                    .any(|label| label == &item.candidate.source_label)
-        })
-        .filter(|item| {
-            envelope.allowed_workspace_roots.is_empty()
-                || envelope
-                    .allowed_workspace_roots
-                    .iter()
-                    .any(|root| item.candidate.source_path.starts_with(root))
-        })
-        .collect::<Vec<RankedCandidate>>();
+    // Retrieval bundle assembly is intentionally not production-ready until
+    // it is backed by the real knowledge index. Returning an empty bundle is
+    // safer than fabricating "authoritative" evidence from the query text.
+    let candidates = Vec::<RankedCandidate>::new();
     let intent = classify_intent(&envelope, &candidates);
     let limit = usize::try_from(request.limit).unwrap_or(0).max(1);
     let selected = candidates
@@ -617,13 +622,20 @@ fn build_retrieve_response(request: &RetrieveRequest, trace_id: String) -> Retri
         round4((total / selected.len() as f64).min(1.0))
     };
     let route = route_for_intent(&intent);
+    let scope_filters_present = !envelope.project_key.is_empty()
+        || !envelope.environment.is_empty()
+        || !envelope.team.is_empty()
+        || !envelope.workspace_dir.is_empty()
+        || !envelope.allowed_source_labels.is_empty()
+        || !envelope.allowed_workspace_roots.is_empty();
     let explanation = format!(
-        "engine=rust_retrieval_engine; selected={}; authoritative={}; supporting={}; graph_relations={}; workspace_fingerprint_present={}",
+        "engine=rust_retrieval_engine; selected={}; authoritative={}; supporting={}; graph_relations={}; workspace_fingerprint_present={}; scope_filters_present={}",
         selected.len(),
         authoritative.len(),
         supporting.len(),
         graph_relations.len(),
         !envelope.workspace_fingerprint.is_empty(),
+        scope_filters_present,
     );
     let answer_plan = answer_plan(&intent, &selected, &authoritative, &supporting);
     let judge_result = judge_result(authoritative.len(), supporting.len());
@@ -678,7 +690,7 @@ fn build_retrieve_response(request: &RetrieveRequest, trace_id: String) -> Retri
         grounding_score,
         answer_plan: Some(answer_plan),
         judge_result: Some(judge_result),
-        effective_engine: "rust_grpc".to_string(),
+        effective_engine: "rust_grpc_unavailable".to_string(),
         fallback_used: false,
         explanation,
     }
@@ -689,21 +701,8 @@ async fn list_graph_payload(
     entity_type: &str,
     limit: u32,
 ) -> Result<(Vec<GraphEntity>, Vec<GraphRelation>), Status> {
-    let dsn = knowledge_postgres_dsn();
-    if dsn.is_empty() {
-        return Err(Status::failed_precondition(
-            "knowledge postgres dsn is not configured",
-        ));
-    }
     let schema = knowledge_postgres_schema();
-    let (client, connection) = tokio_postgres::connect(&dsn, NoTls)
-        .await
-        .map_err(|error| {
-            Status::unavailable(format!("failed to connect to knowledge postgres: {error}"))
-        })?;
-    tokio::spawn(async move {
-        let _ = connection.await;
-    });
+    let client = knowledge_postgres_client().await?;
     let capped_limit = i64::from(limit.max(1));
     let entity_rows = client
         .query(
@@ -825,19 +824,31 @@ impl RetrievalEngineService for RetrievalServer {
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
         let mut details = health_details(SERVICE_NAME);
-        let mut capabilities = vec![
-            "bundle-assembly",
-            "ranking",
-            "answer-plan",
-            "judge-core",
-            "typed-contract",
-        ];
-        if !knowledge_postgres_dsn().is_empty() {
+        let mut capabilities = vec!["typed-contract"];
+        let postgres_ready = knowledge_postgres_ready().await;
+        if postgres_ready {
             capabilities.push("graph_read");
         }
-        details.insert("authoritative".to_string(), "true".to_string());
-        details.insert("production_ready".to_string(), "true".to_string());
-        details.insert("maturity".to_string(), "ga".to_string());
+        details.insert("authoritative".to_string(), "false".to_string());
+        details.insert("production_ready".to_string(), "false".to_string());
+        details.insert("maturity".to_string(), "scaffold".to_string());
+        details.insert(
+            "bundle_assembly".to_string(),
+            "disabled_until_real_index".to_string(),
+        );
+        details.insert(
+            "postgres".to_string(),
+            if postgres_ready {
+                "ready".to_string()
+            } else if knowledge_postgres_dsn().is_empty() {
+                "unconfigured".to_string()
+            } else {
+                "unreachable".to_string()
+            },
+        );
+        if let Ok(pool) = knowledge_postgres_pool().await {
+            details.insert("postgres_pool_size".to_string(), pool.size().to_string());
+        }
         details.insert("capabilities".to_string(), capabilities.join(","));
         Ok(Response::new(HealthResponse {
             service: SERVICE_NAME.to_string(),
@@ -877,4 +888,60 @@ async fn main() -> Result<()> {
     let target =
         std::env::var("RETRIEVAL_GRPC_TARGET").unwrap_or_else(|_| "127.0.0.1:50062".to_string());
     serve_target(&target).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn health_does_not_allow_bundle_cutover_without_real_index() {
+        let response = RetrievalServer
+            .health(Request::new(HealthRequest {}))
+            .await
+            .expect("health response")
+            .into_inner();
+
+        assert!(response.ready);
+        assert_eq!(
+            response.details.get("authoritative").map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            response.details.get("production_ready").map(String::as_str),
+            Some("false")
+        );
+        assert!(!response
+            .details
+            .get("capabilities")
+            .unwrap_or(&String::new())
+            .contains("bundle-assembly"));
+    }
+
+    #[tokio::test]
+    async fn retrieve_returns_no_synthetic_authoritative_hits() {
+        let response = RetrievalServer
+            .retrieve(Request::new(RetrieveRequest {
+                agent_id: "agent-a".to_string(),
+                query: "deploy".to_string(),
+                limit: 3,
+                envelope: Some(RetrieveEnvelope {
+                    normalized_query: "deploy".to_string(),
+                    ..RetrieveEnvelope::default()
+                }),
+                ..RetrieveRequest::default()
+            }))
+            .await
+            .expect("retrieve response")
+            .into_inner();
+
+        assert!(response.selected_hits.is_empty());
+        assert!(response.candidate_hits.is_empty());
+        assert!(response.authoritative_evidence.is_empty());
+        assert_eq!(response.effective_engine, "rust_grpc_unavailable");
+        assert!(response
+            .uncertainty_notes
+            .iter()
+            .any(|note| note == "no candidate hits returned"));
+    }
 }

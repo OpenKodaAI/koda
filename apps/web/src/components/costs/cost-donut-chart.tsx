@@ -23,7 +23,14 @@ interface CostDonutChartProps {
   className?: string;
 }
 
-const FALLBACK_COLORS = ["#ff4328", "#ff7e2f", "#ffc349", "#ffe068", "#8fe376", "#7ccfff", "#6f7cff"];
+const FALLBACK_COLORS = [
+  "var(--tone-neutral-dot)",
+  "var(--tone-info-dot)",
+  "var(--tone-success-dot)",
+  "var(--tone-warning-dot)",
+  "var(--tone-retry-dot)",
+  "var(--text-quaternary)",
+];
 
 function buildChartItems(
   items: CostBreakdownItem[],
@@ -50,7 +57,7 @@ function buildChartItems(
       value: overflow.reduce((sum, item) => sum + item.value, 0),
       share: overflow.reduce((sum, item) => sum + item.share, 0),
       color: "color-mix(in srgb, var(--text-primary) 28%, transparent)",
-      meta: tl("{{count}} origens consolidadas", { count: overflow.length }),
+      meta: tl("{{count}} origens", { count: overflow.length }),
     });
   }
 
@@ -79,7 +86,7 @@ export function CostDonutChart({
 
   return (
     <CategoryBarChart
-      className={cn(compact ? "p-4 sm:p-5" : "p-5 sm:p-6", className)}
+      className={cn(compact ? "" : "p-5", className)}
       heading={t("costs.allocation.title")}
       controls={
         <SoftTabs
@@ -114,8 +121,7 @@ export function CostDonutChart({
       footer={
         activeItem
           ? t("costs.page.allocationFooter", {
-              defaultValue:
-                "{{label}} accounts for {{value}} of the current cut and leads the observed distribution.",
+              defaultValue: "{{label}} · {{value}}",
               label: activeItem.label,
               value: formatCost(activeItem.value),
             })

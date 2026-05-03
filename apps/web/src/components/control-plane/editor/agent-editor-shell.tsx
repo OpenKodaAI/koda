@@ -277,11 +277,12 @@ function EditorHeader({
                   "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm shadow-none transition-colors",
                   nextStep
                     ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
-                    : "font-semibold text-[var(--interactive-active-text)]",
+                    : "font-semibold text-[color:var(--interactive-active-text)]",
                 )}
                 style={nextStep ? undefined : {
                   background: "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
                   border: "1px solid var(--interactive-active-border)",
+                  color: "var(--interactive-active-text)",
                 }}
                 {...tourAnchor("editor.next-step")}
               >

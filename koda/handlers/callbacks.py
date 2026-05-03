@@ -457,11 +457,21 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
         return
 
     user_id = update.effective_user.id
-    agent_id = (os.environ.get("AGENT_ID") or "").strip().upper() or config.AGENT_ID
     episode = get_latest_execution_episode(task_id)
     if episode is None:
         await query.answer("No execution episode found for this task.", show_alert=True)
         return
+    agent_id = (
+        (
+            str(episode.get("agent_id") or "")
+            or str(episode.get("team") or "")
+            or (os.environ.get("AGENT_ID") or "")
+            or (config.AGENT_ID or "")
+            or "default"
+        )
+        .strip()
+        .upper()
+    )
 
     existing_feedback = get_correction_event(
         agent_id=agent_id,

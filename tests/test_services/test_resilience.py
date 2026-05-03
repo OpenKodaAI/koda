@@ -3,6 +3,7 @@
 from contextlib import suppress
 
 import pybreaker
+import pytest
 
 from koda.services.resilience import (
     ALL_BREAKERS,
@@ -12,6 +13,13 @@ from koda.services.resilience import (
     record_failure,
     record_success,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_shared_breakers():
+    for breaker in ALL_BREAKERS.values():
+        with suppress(Exception):
+            breaker.close()
 
 
 class TestCircuitBreakers:

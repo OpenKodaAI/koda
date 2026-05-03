@@ -157,7 +157,7 @@ def test_doctor_script_reports_expected_checks() -> None:
         )
 
     assert payload["ok"] is True
-    assert payload["setup_url"].endswith("/control-plane")
+    assert payload["setup_url"].endswith("/setup")
     assert payload["legacy_setup_url"].endswith("/setup")
 
 

@@ -5,14 +5,14 @@ agent and integration through the web dashboard. This document describes how tha
 created, how sessions work, and how password recovery is designed to be safe on a public
 deployment without a mail relay.
 
-_Last reviewed: 2026-05-02._
+_Last reviewed: 2026-05-03._
 
 ## Account creation (first boot)
 
 The first-run flow (`/setup`) authenticates the registration request with one of three
 mechanisms, checked in priority order:
 
-1. **Legacy registration token** — obtained via `koda bootstrap-code issue`, then
+1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
 2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
    `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints it to the
@@ -33,7 +33,7 @@ Passwords are hashed with **Argon2id** (`argon2-cffi` defaults). The password mu
 On successful registration the control plane:
 
 - creates the user row in `cp_operator_users`
-- issues **10 one-time recovery codes**, hashed with Argon2 in
+- issues **10 one-time recovery codes**, hashed before storage in
   `cp_operator_recovery_codes`, with a generation marker copied onto
   `cp_operator_users.recovery_generation`
 - opens a session
@@ -41,6 +41,10 @@ On successful registration the control plane:
 
 The web UI shows the codes on the second setup screen, requires an acknowledgement checkbox
 ("I saved my codes"), and never retrieves them again.
+
+Successful owner registration does not seed product data. A fresh control plane starts with no
+agents, workspaces, squads, provider connection rows, MCP catalog rows, or global settings rows;
+operators create those records explicitly after login.
 
 ## Backend enforcement (no dev/open bypass)
 
@@ -81,7 +85,7 @@ normal dashboard flow is unaffected.
 
 ## Recovery code lifecycle
 
-- Codes are 12 lowercase characters (`xxxx-xxxx-xxxx`) from the `BOOTSTRAP_ALPHABET`
+- Codes are 12 uppercase characters (`XXXX-XXXX-XXXX`) from the `BOOTSTRAP_ALPHABET`
   (no `I`, `O`, `0`, `1`).
 - Each code can be used exactly once, enforced by `consumed_at` and `generation` matching
   against `cp_operator_users.recovery_generation`.

@@ -30,7 +30,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
         "placeholder:text-[var(--text-quaternary)]",
         "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "border-[var(--border-subtle)] hover:border-[var(--border-strong)]",
-        "focus-visible:border-[var(--accent)]",
+        "focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--panel)]",
         "resize-y leading-[1.5]",
         invalid && "border-[var(--tone-danger-border)] focus-visible:border-[var(--tone-danger-border)]",
         disabled && "cursor-not-allowed opacity-60",

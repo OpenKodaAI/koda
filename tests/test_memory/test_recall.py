@@ -19,6 +19,13 @@ from koda.memory.recall import (
 from koda.memory.types import Memory, MemoryType, RecallResult
 
 
+@pytest.fixture(autouse=True)
+def _isolate_recall_cache():
+    clear_recall_cache()
+    yield
+    clear_recall_cache()
+
+
 def test_recency_factor_recent():
     """Recent memories have high recency factor."""
     factor = _recency_factor(datetime.now())

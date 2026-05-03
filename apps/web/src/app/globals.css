@@ -30,7 +30,7 @@
   --icon-primary: #101010;
   --icon-secondary: #45403b;
   --icon-tertiary: #615b54;
-  --focus-ring: #000000;
+  --focus-ring: #b9b2a6;
   --selection-bg: #eceae3;
   --table-header-bg: #f5f3eb;
   --table-row-hover: #eceae3;
@@ -250,7 +250,7 @@
     --icon-primary: #F5F5F5;
     --icon-secondary: #B8B8B8;
     --icon-tertiary: #9A9A9A;
-    --focus-ring: #FFFFFF;
+    --focus-ring: #3A3A3A;
     --selection-bg: rgba(255, 255, 255, 0.22);
     --table-header-bg: #141414;
     --table-row-hover: #1A1A1A;
@@ -259,7 +259,7 @@
     --interactive-active-top: #FFFFFF;
     --interactive-active-bottom: #FFFFFF;
     --interactive-active-border: #E5E5E5;
-    --interactive-active-text: #FFFFFF;
+    --interactive-active-text: #000000;
     --interactive-active-rgb: 255, 255, 255;
     --shadow-none: none;
     --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.25);
@@ -396,7 +396,7 @@ html.dark {
   --icon-primary: #F5F5F5;
   --icon-secondary: #B8B8B8;
   --icon-tertiary: #9A9A9A;
-  --focus-ring: #FFFFFF;
+  --focus-ring: #3A3A3A;
   --selection-bg: rgba(255, 255, 255, 0.22);
   --table-header-bg: #141414;
   --table-row-hover: #1A1A1A;
@@ -405,7 +405,7 @@ html.dark {
   --interactive-active-top: #FFFFFF;
   --interactive-active-bottom: #FFFFFF;
   --interactive-active-border: #E5E5E5;
-  --interactive-active-text: #FFFFFF;
+  --interactive-active-text: #000000;
   --interactive-active-rgb: 255, 255, 255;
   --shadow-none: none;
   --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.25);
@@ -1546,6 +1546,7 @@ button[aria-label="Open Next Dev Tools"] {
 
 .tour-coachmark--modal,
 .tour-coachmark--welcome {
+  --tour-welcome-padding-x: clamp(1rem, 2.8vw, 1.75rem);
   border-radius: var(--radius-shell);
   background: var(--overlay-modal-bg);
   box-shadow: var(--shadow-floating);
@@ -1555,7 +1556,31 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .tour-coachmark--welcome {
-  text-align: center;
+  padding: 0;
+  text-align: left;
+}
+
+.tour-coachmark--complete::before {
+  content: "";
+  position: absolute;
+  inset: -6% 44% 54% -8%;
+  z-index: 0;
+  background:
+    radial-gradient(
+      ellipse 56% 68% at 26% 48%,
+      color-mix(in srgb, #74D8FF 7%, transparent) 0%,
+      color-mix(in srgb, #7CFFB2 4%, transparent) 44%,
+      transparent 78%
+    );
+  filter: blur(18px);
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.tour-coachmark--complete .tour-coachmark__scene {
+  align-items: flex-start;
+  position: relative;
+  z-index: 1;
 }
 
 .tour-coachmark__scene {
@@ -1564,25 +1589,135 @@ button[aria-label="Open Next Dev Tools"] {
   gap: 0.65rem;
 }
 
+.tour-coachmark--welcome .tour-coachmark__scene {
+  gap: 0;
+}
+
 .tour-coachmark__brand {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 0.15rem;
+}
+
+.tour-coachmark__welcome-header {
+  display: flex;
+  justify-content: center;
+  padding: clamp(1.1rem, 2.4vw, 1.5rem) var(--tour-welcome-padding-x) 0.65rem;
 }
 
 .tour-coachmark__brand-mark {
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.35rem;
+  height: 1.35rem;
 }
 
 .tour-coachmark__brand-name {
   color: var(--text-primary);
-  font-size: 1.05rem;
+  font-size: 0.98rem;
   font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1;
+}
+
+.tour-coachmark__welcome-media {
+  position: relative;
+  width: 100%;
+  margin-inline: 0;
+  overflow: hidden;
+  background: var(--panel-soft);
+  aspect-ratio: 16 / 9;
+}
+
+.tour-coachmark__welcome-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tour-coachmark__complete-visual {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.7rem;
+  margin: -0.1rem 0 0.65rem;
+  position: relative;
+  width: auto;
+}
+
+.tour-coachmark__complete-visual::after {
+  content: "";
+  position: absolute;
+  inset: -28% -38% -36%;
+  z-index: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      ellipse 52% 56% at 28% 50%,
+      color-mix(in srgb, #7CFFB2 8%, transparent) 0%,
+      color-mix(in srgb, #74D8FF 5%, transparent) 45%,
+      transparent 82%
+    );
+  filter: blur(14px);
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.tour-coachmark__complete-orb {
+  height: 2.25rem;
+  width: 2.25rem;
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+}
+
+.tour-coachmark__complete-ready {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  width: 0;
+  max-width: max-content;
+  overflow: hidden;
+  border-right: 1px solid color-mix(in srgb, var(--text-primary) 70%, transparent);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation:
+    tour-ready-type 780ms steps(6, end) 260ms forwards,
+    tour-ready-caret 720ms step-end 260ms 3 forwards;
+}
+
+@keyframes tour-ready-type {
+  from {
+    width: 0;
+  }
+
+  to {
+    width: 6ch;
+  }
+}
+
+@keyframes tour-ready-caret {
+  0%,
+  100% {
+    border-color: transparent;
+  }
+
+  50% {
+    border-color: color-mix(in srgb, var(--text-primary) 70%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-coachmark__complete-ready {
+    width: 6ch;
+    border-color: transparent;
+    animation: none;
+  }
 }
 
 .tour-coachmark__header {
@@ -1593,7 +1728,9 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .tour-coachmark--welcome .tour-coachmark__header {
-  justify-content: center;
+  justify-content: flex-start;
+  margin-top: 0.9rem;
+  padding-inline: var(--tour-welcome-padding-x);
 }
 
 .tour-coachmark__progress {
@@ -1618,7 +1755,8 @@ button[aria-label="Open Next Dev Tools"] {
 
 .tour-coachmark--welcome .tour-coachmark__body {
   max-width: 28rem;
-  margin-inline: auto;
+  margin-inline: 0;
+  padding-inline: var(--tour-welcome-padding-x);
 }
 
 .tour-coachmark__title {
@@ -1661,8 +1799,11 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .tour-coachmark--welcome .tour-coachmark__actions {
-  justify-content: center;
+  box-sizing: border-box;
+  justify-content: flex-start;
   margin-top: 0.65rem;
+  padding: 0 var(--tour-welcome-padding-x) clamp(1rem, 2.4vw, 1.5rem);
+  width: 100%;
 }
 
 .tour-coachmark__actions-trailing {
@@ -3286,10 +3427,10 @@ button[aria-label="Open Next Dev Tools"] {
 
 .field-shell:focus,
 .field-shell:focus-visible {
-  border-color: var(--interactive-active-border);
+  border-color: var(--border-strong);
   outline: none;
   box-shadow:
-    0 0 0 1px rgba(var(--interactive-active-rgb), 0.22),
+    0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent),
     0 8px 18px rgba(0, 0, 0, 0.06);
 }
 
@@ -8720,5 +8861,3 @@ html body [contenteditable="true"]:focus-visible {
   opacity: 0.55;
   cursor: not-allowed;
 }
-
-

@@ -240,7 +240,7 @@ impl AgentWorkerRegistry {
 
         // Phase 1: terminate workers that are no longer desired.
         for agent_id in current_ids.difference(&desired_ids) {
-            if self.terminate_internal(agent_id, false).await {
+            if self.terminate_internal(agent_id, false).await.is_some() {
                 terminated += 1;
             }
         }
@@ -307,8 +307,7 @@ impl AgentWorkerRegistry {
     }
 
     pub async fn terminate(&self, agent_id: &str, force: bool) -> Option<WorkerSnapshot> {
-        self.terminate_internal(agent_id, force).await;
-        self.get(agent_id).await
+        self.terminate_internal(agent_id, force).await
     }
 
     /// Best-effort termination of every tracked worker. Used during
@@ -426,10 +425,10 @@ impl AgentWorkerRegistry {
             guard.insert(agent_id.clone(), entry.clone());
         }
 
-        // Reaper: awaits Child.wait() and flips state to Exited. Holds a
-        // weak handle (well, an Arc clone) to avoid keeping the kernel
-        // alive past shutdown.
-        let reaper = tokio::spawn(reaper_loop(entry.clone()));
+        // Reaper owns Child.wait(). It is intentionally detached instead
+        // of stored in monitors: termination must never abort the only task
+        // capable of reaping the child.
+        tokio::spawn(reaper_loop(entry.clone()));
         // Health monitor: probes the worker periodically.
         let health = if let Some(port) = port {
             let path = if spec.health_path.is_empty() {
@@ -448,23 +447,21 @@ impl AgentWorkerRegistry {
         };
 
         let mut guard = entry.lock().await;
-        guard.monitors.push(reaper);
         if let Some(h) = health {
             guard.monitors.push(h);
         }
     }
 
-    async fn terminate_internal(&self, agent_id: &str, force: bool) -> bool {
+    async fn terminate_internal(&self, agent_id: &str, force: bool) -> Option<WorkerSnapshot> {
         let entry = {
             let guard = self.inner.workers.read().await;
             guard.get(agent_id).cloned()
         };
-        let Some(entry) = entry else {
-            return false;
-        };
+        let entry = entry?;
 
-        // Take child + monitors under the lock; release the lock before
-        // we await child.wait() so the registry stays responsive.
+        // Take any still-owned child under the lock; the common path is
+        // that the detached reaper has already taken it, so we signal by
+        // pid/pgid below instead of relying on the Child handle.
         let (child_opt, pid, pgid) = {
             let mut worker = entry.lock().await;
             worker.shutdown_monitors();
@@ -473,37 +470,52 @@ impl AgentWorkerRegistry {
         };
 
         if let Some(mut child) = child_opt {
-            let _ = pgid; // pgid available if we want to log it
             if force {
                 // Force: skip the grace period, SIGKILL the whole pgid
                 // immediately. Used for shutdown-blocked workers and tests.
-                send_signal(&mut child, libc::SIGKILL);
+                send_signal(&mut child, pgid, libc::SIGKILL);
             } else {
                 // Graceful: SIGTERM, give the worker `TERMINATE_GRACE`
                 // to flush state, then SIGKILL if it's still alive.
-                send_signal(&mut child, libc::SIGTERM);
+                send_signal(&mut child, pgid, libc::SIGTERM);
                 if timeout(TERMINATE_GRACE, child.wait()).await.is_err() {
-                    send_signal(&mut child, libc::SIGKILL);
+                    send_signal(&mut child, pgid, libc::SIGKILL);
                 }
             }
             // Either way, reap the child so we don't leak a zombie.
             let _ = child.wait().await;
             debug!(agent_id, pid, "agent_worker_terminated");
+        } else if pid > 0 || pgid > 0 {
+            if force {
+                send_process_group_signal(pgid, pid, libc::SIGKILL);
+            } else {
+                send_process_group_signal(pgid, pid, libc::SIGTERM);
+                sleep(TERMINATE_GRACE).await;
+                let exited = {
+                    let worker = entry.lock().await;
+                    worker.snapshot.state == AgentWorkerState::Exited
+                };
+                if !exited {
+                    send_process_group_signal(pgid, pid, libc::SIGKILL);
+                }
+            }
+            debug!(agent_id, pid, pgid, "agent_worker_signalled");
         }
 
-        // Mark Terminated. The entry stays in the registry until the
-        // next ensure() removes it (so callers can read final state).
-        {
+        let snapshot = {
             let mut worker = entry.lock().await;
-            worker.snapshot.state = AgentWorkerState::Terminated;
-        }
+            if worker.snapshot.state != AgentWorkerState::Exited {
+                worker.snapshot.state = AgentWorkerState::Terminated;
+            }
+            worker.snapshot()
+        };
         // Now drop from the registry so the next ensure() doesn't see
         // it as "still there but Terminated" and skip respawn.
         {
             let mut guard = self.inner.workers.write().await;
             guard.remove(agent_id);
         }
-        true
+        Some(snapshot)
     }
 }
 
@@ -582,14 +594,21 @@ async fn health_monitor_loop(
     }
 }
 
-fn send_signal(child: &mut Child, sig: i32) {
+fn send_signal(child: &mut Child, pgid: i32, sig: i32) {
     if let Some(pid) = child.id() {
-        // Send to the process group so the whole tree dies (worker
-        // spawned grandchildren survive the parent otherwise).
-        let pgid = pid as i32;
-        unsafe {
-            libc::killpg(pgid, sig);
-        }
+        send_process_group_signal(pgid, pid as i32, sig);
+    }
+}
+
+fn send_process_group_signal(pgid: i32, fallback_pid: i32, sig: i32) {
+    let target_pgid = if pgid > 0 { pgid } else { fallback_pid };
+    if target_pgid <= 0 {
+        return;
+    }
+    // Send to the process group so the whole tree dies (worker spawned
+    // grandchildren survive the parent otherwise).
+    unsafe {
+        libc::killpg(target_pgid, sig);
     }
 }
 
@@ -738,6 +757,23 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use tokio::sync::Mutex as TokioMutex;
+
+    fn pid_is_running(pid: i32) -> bool {
+        if pid <= 0 {
+            return false;
+        }
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    async fn wait_until_pid_exits(pid: i32) -> bool {
+        for _ in 0..50 {
+            if !pid_is_running(pid) {
+                return true;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        false
+    }
 
     /// Test adapter: fully deterministic. Tests inject port-bound state,
     /// spawn outcomes, and health responses without ever touching the OS.
@@ -909,11 +945,36 @@ mod tests {
         let adapter = FakeAdapter::new();
         let registry = AgentWorkerRegistry::new(adapter.clone());
         registry.ensure(vec![spec("ALPHA", 1, 0)]).await;
-        registry.terminate("ALPHA", true).await;
+        let snapshot = registry.terminate("ALPHA", true).await;
+        assert!(snapshot.is_some());
         assert!(registry.get("ALPHA").await.is_none());
         let outcome = registry.ensure(vec![spec("ALPHA", 1, 0)]).await;
         assert_eq!(outcome.spawned, 1);
         registry.terminate_all().await;
+    }
+
+    #[tokio::test]
+    async fn terminate_force_kills_real_worker_process() {
+        let registry = AgentWorkerRegistry::new(Arc::new(RealRuntimeAdapter));
+        registry.ensure(vec![spec("REAL", 1, 0)]).await;
+        let snapshot = registry.get("REAL").await.expect("worker snapshot");
+        assert!(
+            pid_is_running(snapshot.pid),
+            "worker should be running before terminate"
+        );
+
+        let terminated = registry
+            .terminate("REAL", true)
+            .await
+            .expect("terminate should return final snapshot");
+
+        assert_eq!(terminated.agent_id, "REAL");
+        assert!(
+            wait_until_pid_exits(snapshot.pid).await,
+            "worker pid {} should exit after force terminate",
+            snapshot.pid
+        );
+        assert!(registry.get("REAL").await.is_none());
     }
 
     #[tokio::test]

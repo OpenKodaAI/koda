@@ -13,7 +13,6 @@ logic is caught immediately.
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -66,16 +65,15 @@ def test_postgres_url_resolves_to_a_dsn(postgres_url: str) -> None:
 
 
 @pytest.mark.postgres
-def test_db_connection_executes_simple_query(db_connection) -> None:
+@pytest.mark.asyncio
+async def test_db_connection_executes_simple_query(db_connection) -> None:
     """End-to-end: open a transaction, run a query, roll back. The
-    next test sees a clean slate. We use a synchronous wrapper so
-    pytest's marker filtering works regardless of asyncio_mode."""
+    next test sees a clean slate. Keep the query on pytest-asyncio's
+    fixture loop; asyncpg connections cannot safely hop through
+    ``asyncio.run``."""
 
-    async def _run() -> int:
-        result = await db_connection.fetchval("SELECT 42")
-        return int(result)
-
-    assert asyncio.run(_run()) == 42
+    result = await db_connection.fetchval("SELECT 42")
+    assert int(result) == 42
 
 
 def test_collection_hook_skips_postgres_when_unavailable(pytestconfig) -> None:

@@ -45,9 +45,3 @@ pub mod policy_engine {
         tonic::include_proto!("koda.policy_engine.v1");
     }
 }
-
-pub mod rpc_gateway {
-    pub mod v1 {
-        tonic::include_proto!("koda.rpc_gateway.v1");
-    }
-}

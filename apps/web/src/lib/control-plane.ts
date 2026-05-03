@@ -740,6 +740,8 @@ export type McpServerCatalogEntry = {
   auth_strategy?: string | null;
   oauth_enabled?: boolean;
   oauth_mode?: string | null;
+  auth_flow_kind?: string | null;
+  oauth_availability?: string | null;
   oauth_metadata_url?: string | null;
   vendor_notes?: string | null;
   default_policy?: McpToolPolicy | null;
@@ -795,6 +797,8 @@ export type ControlPlaneConnectionCatalogEntry = {
   auth_strategy_default?: string | null;
   official_support_level?: string | null;
   oauth_mode?: string | null;
+  auth_flow_kind?: string | null;
+  oauth_availability?: string | null;
   remote_url?: string | null;
   vendor_notes?: string | null;
   default_policy?: McpToolPolicy | null;

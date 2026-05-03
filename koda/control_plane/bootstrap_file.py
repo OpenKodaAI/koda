@@ -20,12 +20,14 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from koda.logging_config import get_logger
 
 from .settings import (
     CONTROL_PLANE_BOOTSTRAP_CODE_SEED,
+    CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS,
     STATE_ROOT_DIR,
 )
 
@@ -42,6 +44,31 @@ def bootstrap_file_path() -> Path:
 def _generate_code() -> str:
     chunks = ["".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)) for _ in range(3)]
     return "-".join(chunks)
+
+
+def _parse_expires_at(value: str) -> datetime | None:
+    if not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _render_bootstrap_file(code: str, expires_at: datetime) -> str:
+    instruction = "Paste the first line into the Koda setup screen. This file is removed after owner registration."
+    return "\n".join(
+        (
+            code,
+            f"expires_at={expires_at.isoformat()}",
+            "setup_url=/setup",
+            f"instruction={instruction}",
+            "",
+        )
+    )
 
 
 def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
@@ -68,6 +95,7 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
         return None
     _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
+    expires_at = datetime.now(UTC) + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
     try:
         fd = os.open(
             str(_BOOTSTRAP_FILE_PATH),
@@ -77,12 +105,12 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
     except FileExistsError:
         return None
     try:
-        os.write(fd, f"{code}\n".encode())
+        os.write(fd, _render_bootstrap_file(code, expires_at).encode())
     finally:
         os.close(fd)
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
-    log.info("bootstrap_file_written", path=str(_BOOTSTRAP_FILE_PATH))
+    log.info("bootstrap_file_written", path=str(_BOOTSTRAP_FILE_PATH), code=code, expires_at=expires_at.isoformat())
     return code
 
 
@@ -95,7 +123,20 @@ def read_bootstrap_file() -> str | None:
     except OSError as exc:
         log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
         return None
-    return content or None
+    if not content:
+        return None
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    code = ""
+    expires_at: datetime | None = None
+    for line in lines:
+        if line.startswith("expires_at="):
+            expires_at = _parse_expires_at(line.split("=", 1)[1])
+        elif not code and "=" not in line:
+            code = line
+    if expires_at is not None and expires_at <= datetime.now(UTC):
+        log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=expires_at.isoformat())
+        return None
+    return code or None
 
 
 def consume_bootstrap_file() -> None:

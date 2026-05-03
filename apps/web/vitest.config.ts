@@ -17,6 +17,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     fileParallelism: false,
     maxWorkers: 1,
+    exclude: ["tests/e2e/**", "node_modules/**", "dist/**", ".next/**"],
     testTimeout: 15_000,
     hookTimeout: 15_000,
   },

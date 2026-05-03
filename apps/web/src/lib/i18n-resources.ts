@@ -299,49 +299,49 @@ export const resources = {
           resumeDescription: "Jump back into the current walkthrough from the point where you stopped.",
         },
         welcome: {
-          title: "Start with a quick guided tour",
+          title: "Meet the workspace in 7 steps",
           description:
-            "Koda will walk you through the main screens, how to move between them and what each area means. The flow stays objective and you can leave at any time.",
+            "Koda will point to the controls you use first: navigation, Home, the agent catalog and Runtime. The tour stays short and you can leave at any time.",
         },
         steps: {
           shellSidebar: {
-            title: "This sidebar is your main map",
+            title: "Navigate from the sidebar",
             description:
-              "Use it to move between overview, runtime, catalog and operational views without losing context.",
+              "This is the stable map for the app. Use it to move between Home, Control Plane, Runtime and the operational areas without losing context.",
           },
           shellTopbar: {
-            title: "The topbar keeps route context close",
+            title: "Use the topbar for quick actions",
             description:
-              "Here you see the active page summary, quick tools, language switcher and the shortcut to reopen this tour later.",
+              "The topbar keeps workspace actions close: language, notifications, account controls and the shortcut to reopen this tour later.",
           },
           overviewMetrics: {
-            title: "Overview summarizes the operational pulse",
+            title: "Read the workspace status first",
             description:
-              "This first block condenses activity, demand and cost so you can understand what changed before drilling down.",
-            emptyTitle: "Overview starts as your empty operational pulse",
+              "These cards summarize agents, activity, executions and cost signals so you can decide whether to inspect setup or live operations.",
+            emptyTitle: "Home starts as your status surface",
             emptyDescription:
-              "Even before activity appears, this page is where you will return to get the fastest summary of the workspace state.",
+              "Before the workspace has activity, this area is still where the first health, execution and cost signals will appear.",
           },
           overviewLivePlan: {
-            title: "This section highlights the next live moves",
+            title: "Follow recent activity from Home",
             description:
-              "Use it to spot what is running now, what needs attention and where to continue the investigation.",
+              "The activity and history area shows what just happened and what may need attention, giving you a quick path from summary into investigation.",
           },
           controlPlanePrimaryAction: {
-            title: "The catalog is where setup starts",
+            title: "Create and manage agents here",
             description:
-              "Create bots and workspaces here, then open a bot to configure identity, behavior, resources and publication.",
-            emptyTitle: "The catalog is your first stop on a fresh install",
+              "Use the primary action to add a new agent. After creation, the editor lets you define identity, instructions, tools, channels and publishing.",
+            emptyTitle: "Start by creating your first agent",
             emptyDescription:
-              "If the instance is empty, start here by creating a workspace or a bot. The editor opens right after that.",
+              "On a fresh workspace, this is the first setup action. Create an agent, then use the editor to make it useful and publishable.",
           },
           controlPlaneBoard: {
-            title: "The board explains how the catalog is organized",
+            title: "Understand the agent catalog",
             description:
-              "Workspaces, squads and bots stay grouped here so governance and ownership are visible at a glance.",
-            emptyTitle: "The board grows with the catalog",
+              "The board groups agents and workspaces so you can scan ownership, status and configuration entry points without opening every agent.",
+            emptyTitle: "The catalog fills in as agents are added",
             emptyDescription:
-              "Once bots exist, this area becomes the visual map of teams, workspaces and operational ownership.",
+              "When agents exist, this area becomes the visual map for setup state, ownership and quick access to each agent editor.",
           },
           controlPlaneEditorHeader: {
             title: "The editor is the bot control center",
@@ -359,15 +359,15 @@ export const resources = {
               "Use these actions to persist draft changes and move toward the publication review when the bot is ready.",
           },
           runtimeHeader: {
-            title: "Runtime is the live control room",
+            title: "Watch live operations in Runtime",
             description:
-              "This screen concentrates execution health, live activity and filters to focus on the bots you care about now.",
-            emptyTitle: "Runtime becomes useful as soon as activity appears",
+              "Runtime is where published agents surface health, live work, queues and operational signals after they are connected.",
+            emptyTitle: "Runtime lights up after agents run",
             emptyDescription:
-              "When there are no live environments yet, treat this page as the place that will surface live activity first.",
-            unavailableTitle: "Runtime also signals availability problems quickly",
+              "If nothing is running yet, this page is still the place where live activity and health signals will appear first.",
+            unavailableTitle: "Runtime shows connection problems clearly",
             unavailableDescription:
-              "If runtime connectivity is degraded, this surface is where the app exposes that state before deeper inspection.",
+              "When runtime data cannot be reached, this screen should show the problem clearly before you inspect deeper details.",
           },
           runtimeLiveList: {
             title: "Metrics tell you how much attention runtime needs",
@@ -439,9 +439,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "You are ready to explore Koda",
+          title: "You are ready to use Koda",
           description:
-            "Reopen the tour anytime from Docs if you want a refresher or want to visit a secondary chapter.",
+            "You now know the first path through Koda: read Home, configure agents in Control Plane and monitor live work in Runtime. Reopen the tour from the topbar anytime.",
         },
       },
       agentSwitcher: {
@@ -656,6 +656,8 @@ export const resources = {
               email_invalid: "Enter a valid email address.",
               password_too_short: "Password must be at least {{n}} characters long.",
               password_mismatch: "The passwords do not match.",
+              recovery_codes_missing:
+                "Recovery codes were not issued. Please generate a new setup code and retry.",
               generic: "We could not create the account. Please try again.",
               service_unavailable:
                 "Setup service is temporarily unavailable. Please try again in a moment.",
@@ -672,6 +674,8 @@ export const resources = {
             saved_checkbox: "I saved the recovery codes in a safe place.",
             continue: "Continue to the workspace",
             already_shown_banner: "These codes will not be shown again.",
+            missing_codes_error:
+              "Recovery codes were not issued. Please generate a new setup code and create the owner account again.",
           },
         },
         settings: {
@@ -989,49 +993,49 @@ export const resources = {
           resumeDescription: "Volte para o walkthrough atual do ponto em que voce parou.",
         },
         welcome: {
-          title: "Comece com um tour rapido",
+          title: "Conheca o workspace em 7 passos",
           description:
-            "O Koda vai apresentar as telas principais, como navegar entre elas e o significado de cada area. O fluxo e objetivo e voce pode sair quando quiser.",
+            "O Koda vai apontar os controles que voce usa primeiro: navegacao, Home, catalogo de agentes e Runtime. O tour e curto e voce pode sair quando quiser.",
         },
         steps: {
           shellSidebar: {
-            title: "Esta sidebar e o seu mapa principal",
+            title: "Navegue pela sidebar",
             description:
-              "Use-a para circular entre overview, runtime, catalogo e superficies operacionais sem perder contexto.",
+              "Este e o mapa estavel do app. Use a sidebar para ir entre Home, Control Plane, Runtime e areas operacionais sem perder contexto.",
           },
           shellTopbar: {
-            title: "O topbar concentra o contexto da rota",
+            title: "Use o topbar para acoes rapidas",
             description:
-              "Aqui voce ve o resumo da tela ativa, ferramentas rapidas, seletor de idioma e o atalho para reabrir este tour depois.",
+              "O topbar deixa por perto acoes do workspace: idioma, notificacoes, conta e o atalho para reabrir este tour depois.",
           },
           overviewMetrics: {
-            title: "A overview resume o pulso operacional",
+            title: "Leia primeiro o estado do workspace",
             description:
-              "Este primeiro bloco condensa atividade, demanda e custo para voce entender o que mudou antes de aprofundar.",
-            emptyTitle: "A overview ja nasce como seu pulso operacional",
+              "Estes cards resumem agentes, atividade, execucoes e sinais de custo para voce decidir se deve olhar setup ou operacao ao vivo.",
+            emptyTitle: "A Home comeca como sua superficie de status",
             emptyDescription:
-              "Mesmo antes de existir atividade, e aqui que voce volta para ler o resumo mais rapido do estado do workspace.",
+              "Antes de existir atividade no workspace, esta area ainda e onde os primeiros sinais de saude, execucao e custo vao aparecer.",
           },
           overviewLivePlan: {
-            title: "Esta secao destaca os proximos movimentos ao vivo",
+            title: "Acompanhe a atividade recente pela Home",
             description:
-              "Use-a para enxergar o que esta rodando agora, o que pede atencao e por onde seguir a investigacao.",
+              "A area de atividade e historico mostra o que acabou de acontecer e o que pode pedir atencao, criando um caminho rapido do resumo para a investigacao.",
           },
           controlPlanePrimaryAction: {
-            title: "O catalogo e onde a configuracao comeca",
+            title: "Crie e gerencie agentes aqui",
             description:
-              "Crie bots e workspaces aqui e depois abra um bot para configurar identidade, comportamento, recursos e publicacao.",
-            emptyTitle: "O catalogo e o ponto de partida numa instalacao nova",
+              "Use a acao principal para criar um novo agente. Depois disso, o editor permite definir identidade, instrucoes, ferramentas, canais e publicacao.",
+            emptyTitle: "Comece criando seu primeiro agente",
             emptyDescription:
-              "Se a instancia estiver vazia, comece aqui criando um workspace ou um bot. O editor entra logo em seguida.",
+              "Em um workspace novo, esta e a primeira acao de setup. Crie um agente e use o editor para deixa-lo util e pronto para publicar.",
           },
           controlPlaneBoard: {
-            title: "O board explica como o catalogo esta organizado",
+            title: "Entenda o catalogo de agentes",
             description:
-              "Workspaces, squads e bots ficam agrupados aqui para que governanca e ownership aparecam de imediato.",
-            emptyTitle: "O board cresce junto com o catalogo",
+              "O board agrupa agentes e workspaces para voce ler ownership, status e pontos de configuracao sem abrir cada agente.",
+            emptyTitle: "O catalogo preenche conforme agentes entram",
             emptyDescription:
-              "Quando os bots existirem, esta area vira o mapa visual de times, workspaces e ownership operacional.",
+              "Quando existirem agentes, esta area vira o mapa visual do estado de setup, ownership e acesso rapido ao editor de cada agente.",
           },
           controlPlaneEditorHeader: {
             title: "O editor e o centro de controle do bot",
@@ -1049,15 +1053,15 @@ export const resources = {
               "Use estas acoes para persistir o rascunho e avancar para a revisao de publicacao quando o bot estiver pronto.",
           },
           runtimeHeader: {
-            title: "Runtime e a sala de controle ao vivo",
+            title: "Monitore a operacao ao vivo no Runtime",
             description:
-              "Esta tela concentra saude das execucoes, atividade ao vivo e filtros para focar nos bots que importam agora.",
-            emptyTitle: "Runtime fica util assim que a atividade aparece",
+              "Runtime e onde agentes publicados mostram saude, trabalho ao vivo, filas e sinais operacionais depois de conectados.",
+            emptyTitle: "Runtime acende quando agentes rodam",
             emptyDescription:
-              "Quando ainda nao existem ambientes vivos, trate esta pagina como a superficie que primeiro vai mostrar atividade.",
-            unavailableTitle: "Runtime tambem sinaliza indisponibilidade rapido",
+              "Se nada estiver rodando ainda, esta pagina continua sendo onde atividade ao vivo e sinais de saude vao aparecer primeiro.",
+            unavailableTitle: "Runtime mostra problemas de conexao com clareza",
             unavailableDescription:
-              "Se a conectividade do runtime degradar, e aqui que o app expoe esse estado antes da inspecao profunda.",
+              "Quando os dados do runtime nao puderem ser acessados, esta tela deve mostrar o problema antes de uma inspecao mais profunda.",
           },
           runtimeLiveList: {
             title: "As metricas mostram o quanto o runtime pede atencao",
@@ -1129,9 +1133,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Voce ja pode explorar o Koda",
+          title: "Voce ja pode usar o Koda",
           description:
-            "Reabra o tour a qualquer momento em Docs se quiser revisar o fluxo ou visitar um capitulo secundario.",
+            "Agora voce conhece o primeiro caminho no Koda: ler a Home, configurar agentes no Control Plane e monitorar trabalho ao vivo no Runtime. Reabra o tour pelo topbar quando quiser.",
         },
       },
       agentSwitcher: {
@@ -1345,6 +1349,8 @@ export const resources = {
               email_invalid: "Informe um endereço de e-mail válido.",
               password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
               password_mismatch: "As senhas não coincidem.",
+              recovery_codes_missing:
+                "Os códigos de recuperação não foram emitidos. Gere um novo código de configuração e tente novamente.",
               generic: "Não conseguimos criar a conta. Tente novamente.",
               service_unavailable:
                 "O serviço de configuração está temporariamente indisponível. Tente novamente em instantes.",
@@ -1361,6 +1367,8 @@ export const resources = {
             saved_checkbox: "Guardei os códigos de recuperação em local seguro.",
             continue: "Continuar para o espaço de trabalho",
             already_shown_banner: "Estes códigos não serão exibidos novamente.",
+            missing_codes_error:
+              "Os códigos de recuperação não foram emitidos. Gere um novo código de configuração e crie a conta novamente.",
           },
         },
         settings: {
@@ -1661,49 +1669,49 @@ export const resources = {
           resumeDescription: "Vuelve al walkthrough actual desde el punto en el que lo dejaste.",
         },
         welcome: {
-          title: "Comienza con un tour rapido",
+          title: "Conoce el workspace en 7 pasos",
           description:
-            "Koda te mostrara las pantallas principales, como navegar entre ellas y que significa cada superficie. El flujo es objetivo y puedes salir cuando quieras.",
+            "Koda señalara los controles que usas primero: navegacion, Home, catalogo de agentes y Runtime. El tour es breve y puedes salir cuando quieras.",
         },
         steps: {
           shellSidebar: {
-            title: "Esta barra lateral es tu mapa principal",
+            title: "Navega desde la barra lateral",
             description:
-              "Usala para moverte entre overview, runtime, catalogo y superficies operativas sin perder contexto.",
+              "Este es el mapa estable de la app. Usalo para moverte entre Home, Control Plane, Runtime y areas operativas sin perder contexto.",
           },
           shellTopbar: {
-            title: "La barra superior concentra el contexto de la ruta",
+            title: "Usa la barra superior para acciones rapidas",
             description:
-              "Aqui ves el resumen de la pantalla activa, herramientas rapidas, selector de idioma y el atajo para reabrir este tour despues.",
+              "La barra superior mantiene cerca acciones del workspace: idioma, notificaciones, cuenta y el atajo para reabrir este tour despues.",
           },
           overviewMetrics: {
-            title: "Overview resume el pulso operativo",
+            title: "Lee primero el estado del workspace",
             description:
-              "Este primer bloque condensa actividad, demanda y costo para entender que cambio antes de profundizar.",
-            emptyTitle: "Overview nace como tu pulso operativo",
+              "Estas tarjetas resumen agentes, actividad, ejecuciones y señales de costo para decidir si debes revisar setup u operacion en vivo.",
+            emptyTitle: "Home empieza como tu superficie de estado",
             emptyDescription:
-              "Incluso antes de que exista actividad, aqui volveras para leer el resumen mas rapido del estado del workspace.",
+              "Antes de que exista actividad en el workspace, esta area sigue siendo donde apareceran las primeras señales de salud, ejecucion y costo.",
           },
           overviewLivePlan: {
-            title: "Esta seccion destaca los proximos movimientos en vivo",
+            title: "Sigue la actividad reciente desde Home",
             description:
-              "Usala para ver que esta corriendo ahora, que requiere atencion y por donde continuar la investigacion.",
+              "El area de actividad e historial muestra lo que acaba de ocurrir y lo que puede requerir atencion, creando un camino rapido del resumen a la investigacion.",
           },
           controlPlanePrimaryAction: {
-            title: "El catalogo es donde empieza la configuracion",
+            title: "Crea y gestiona agentes aqui",
             description:
-              "Crea bots y workspaces aqui y despues abre un bot para configurar identidad, comportamiento, recursos y publicacion.",
-            emptyTitle: "El catalogo es el primer paso en una instalacion nueva",
+              "Usa la accion principal para crear un nuevo agente. Despues, el editor permite definir identidad, instrucciones, herramientas, canales y publicacion.",
+            emptyTitle: "Empieza creando tu primer agente",
             emptyDescription:
-              "Si la instancia esta vacia, comienza aqui creando un workspace o un bot. El editor se abre enseguida.",
+              "En un workspace nuevo, esta es la primera accion de setup. Crea un agente y usa el editor para hacerlo util y publicable.",
           },
           controlPlaneBoard: {
-            title: "El board explica como se organiza el catalogo",
+            title: "Entiende el catalogo de agentes",
             description:
-              "Workspaces, squads y bots se agrupan aqui para que gobernanza y ownership sean visibles de inmediato.",
-            emptyTitle: "El board crece junto con el catalogo",
+              "El board agrupa agentes y workspaces para leer ownership, estado y puntos de configuracion sin abrir cada agente.",
+            emptyTitle: "El catalogo se llena a medida que agregas agentes",
             emptyDescription:
-              "Cuando existan bots, esta area se convierte en el mapa visual de equipos, workspaces y ownership operativo.",
+              "Cuando existan agentes, esta area se convierte en el mapa visual del estado de setup, ownership y acceso rapido al editor de cada agente.",
           },
           controlPlaneEditorHeader: {
             title: "El editor es el centro de control del bot",
@@ -1721,15 +1729,15 @@ export const resources = {
               "Usa estas acciones para persistir el borrador y avanzar hacia la revision de publicacion cuando el bot este listo.",
           },
           runtimeHeader: {
-            title: "Runtime es la sala de control en vivo",
+            title: "Monitorea la operacion en vivo en Runtime",
             description:
-              "Esta pantalla concentra la salud de las ejecuciones, la actividad en vivo y filtros para enfocarte en los bots que importan ahora.",
-            emptyTitle: "Runtime se vuelve util apenas aparece actividad",
+              "Runtime es donde los agentes publicados muestran salud, trabajo en vivo, colas y señales operativas despues de conectarse.",
+            emptyTitle: "Runtime se activa cuando los agentes corren",
             emptyDescription:
-              "Cuando todavia no existen entornos vivos, toma esta pagina como la superficie que mostrara primero la actividad real.",
-            unavailableTitle: "Runtime tambien señala la indisponibilidad rapidamente",
+              "Si todavia no hay nada corriendo, esta pagina sigue siendo donde apareceran primero la actividad en vivo y las señales de salud.",
+            unavailableTitle: "Runtime muestra problemas de conexion con claridad",
             unavailableDescription:
-              "Si la conectividad del runtime se degrada, aqui es donde la app expone ese estado antes de una inspeccion profunda.",
+              "Cuando no se pueda acceder a los datos de runtime, esta pantalla debe mostrar el problema antes de una inspeccion mas profunda.",
           },
           runtimeLiveList: {
             title: "Las metricas muestran cuanta atencion necesita runtime",
@@ -1801,9 +1809,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Ya puedes explorar Koda",
+          title: "Ya puedes usar Koda",
           description:
-            "Reabre el tour en Docs cuando quieras repasar el flujo o visitar un capitulo secundario.",
+            "Ahora conoces el primer camino en Koda: leer Home, configurar agentes en Control Plane y monitorear trabajo en vivo en Runtime. Reabre el tour desde la barra superior cuando quieras.",
         },
       },
       agentSwitcher: {
@@ -2017,6 +2025,8 @@ export const resources = {
               email_invalid: "Introduce un correo válido.",
               password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
               password_mismatch: "Las contraseñas no coinciden.",
+              recovery_codes_missing:
+                "No se emitieron códigos de recuperación. Genera un nuevo código de configuración e inténtalo de nuevo.",
               generic: "No pudimos crear la cuenta. Inténtalo de nuevo.",
               service_unavailable:
                 "El servicio de configuración está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
@@ -2033,6 +2043,8 @@ export const resources = {
             saved_checkbox: "He guardado los códigos de recuperación en un lugar seguro.",
             continue: "Continuar al espacio de trabajo",
             already_shown_banner: "Estos códigos no se volverán a mostrar.",
+            missing_codes_error:
+              "No se emitieron códigos de recuperación. Genera un nuevo código de configuración y crea la cuenta de nuevo.",
           },
         },
         settings: {
@@ -2334,49 +2346,49 @@ export const resources = {
           resumeDescription: "Reprenez la visite en cours à partir de l'endroit où vous vous êtes arrêté.",
         },
         welcome: {
-          title: "Commencez par une visite guidée rapide",
+          title: "Découvrez l'espace de travail en 7 étapes",
           description:
-            "Koda vous présente les écrans principaux, comment passer de l'un à l'autre et ce que chaque zone signifie. Le parcours reste concis et vous pouvez quitter à tout moment.",
+            "Koda pointe les contrôles que vous utiliserez en premier : navigation, Home, catalogue d'agents et Runtime. La visite reste courte et vous pouvez quitter à tout moment.",
         },
         steps: {
           shellSidebar: {
-            title: "Cette barre latérale est votre carte principale",
+            title: "Naviguez depuis la barre latérale",
             description:
-              "Utilisez-la pour passer entre aperçu, runtime, catalogue et vues opérationnelles sans perdre le contexte.",
+              "C'est la carte stable de l'application. Utilisez-la pour passer entre Home, Control Plane, Runtime et les zones opérationnelles sans perdre le contexte.",
           },
           shellTopbar: {
-            title: "La barre supérieure garde le contexte d'itinéraire à proximité",
+            title: "Utilisez la barre supérieure pour les actions rapides",
             description:
-              "Ici s'affichent le résumé de la page active, les outils rapides, le sélecteur de langue et le raccourci pour rouvrir cette visite plus tard.",
+              "La barre supérieure garde à portée les actions de l'espace de travail : langue, notifications, compte et raccourci pour rouvrir cette visite plus tard.",
           },
           overviewMetrics: {
-            title: "Aperçu résume le pouls opérationnel",
+            title: "Lisez d'abord l'état de l'espace de travail",
             description:
-              "Ce premier bloc condense activité, demande et coût pour vous permettre de comprendre ce qui a changé avant d'analyser plus en détail.",
-            emptyTitle: "Aperçu démarre comme votre pouls opérationnel vide",
+              "Ces cartes résument agents, activité, exécutions et signaux de coût afin de décider s'il faut inspecter la configuration ou l'opération en direct.",
+            emptyTitle: "Home démarre comme votre surface d'état",
             emptyDescription:
-              "Même avant que l'activité n'apparaisse, cette page est l'endroit où vous reviendrez pour un résumé rapide de l'état de l'espace de travail.",
+              "Avant toute activité dans l'espace de travail, cette zone reste l'endroit où apparaîtront les premiers signaux de santé, d'exécution et de coût.",
           },
           overviewLivePlan: {
-            title: "Cette section met en avant les prochaines actions en direct",
+            title: "Suivez l'activité récente depuis Home",
             description:
-              "Utilisez-la pour repérer ce qui tourne maintenant, ce qui nécessite de l'attention et où continuer l'investigation.",
+              "La zone d'activité et d'historique montre ce qui vient de se passer et ce qui peut demander attention, pour passer vite du résumé à l'investigation.",
           },
           controlPlanePrimaryAction: {
-            title: "Le catalogue est le point de départ de la configuration",
+            title: "Créez et gérez les agents ici",
             description:
-              "Créez ici des bots et espaces de travail, puis ouvrez un bot pour configurer identité, comportement, ressources et publication.",
-            emptyTitle: "Le catalogue est votre premier arrêt sur une installation neuve",
+              "Utilisez l'action principale pour ajouter un agent. Ensuite, l'éditeur permet de définir identité, instructions, outils, canaux et publication.",
+            emptyTitle: "Commencez par créer votre premier agent",
             emptyDescription:
-              "Si l'instance est vide, commencez ici en créant un espace de travail ou un bot. L'éditeur s'ouvre juste après.",
+              "Dans un espace de travail neuf, c'est la première action de configuration. Créez un agent, puis utilisez l'éditeur pour le rendre utile et publiable.",
           },
           controlPlaneBoard: {
-            title: "Le tableau explique comment le catalogue est organisé",
+            title: "Comprenez le catalogue d'agents",
             description:
-              "Espaces de travail, escouades et bots restent groupés ici pour que gouvernance et responsabilité soient visibles d'un coup d'œil.",
-            emptyTitle: "Le tableau s'étoffe avec le catalogue",
+              "Le tableau groupe agents et espaces de travail pour lire ownership, état et points de configuration sans ouvrir chaque agent.",
+            emptyTitle: "Le catalogue se remplit à mesure que les agents arrivent",
             emptyDescription:
-              "Dès que des bots existent, cette zone devient la carte visuelle des équipes, espaces de travail et responsabilités opérationnelles.",
+              "Quand des agents existent, cette zone devient la carte visuelle de l'état de configuration, de l'ownership et de l'accès rapide à chaque éditeur.",
           },
           controlPlaneEditorHeader: {
             title: "L'éditeur est le centre de contrôle du bot",
@@ -2394,15 +2406,15 @@ export const resources = {
               "Utilisez ces actions pour enregistrer les modifications en brouillon et avancer vers la revue de publication quand le bot est prêt.",
           },
           runtimeHeader: {
-            title: "Runtime est la salle de contrôle en direct",
+            title: "Surveillez l'opération en direct dans Runtime",
             description:
-              "Cet écran concentre la santé des exécutions, l'activité en direct et les filtres pour vous concentrer sur les bots qui importent maintenant.",
-            emptyTitle: "Runtime devient utile dès que l'activité apparaît",
+              "Runtime est l'endroit où les agents publiés affichent santé, travail en direct, files et signaux opérationnels après connexion.",
+            emptyTitle: "Runtime s'allume quand les agents s'exécutent",
             emptyDescription:
-              "Quand aucun environnement n'est encore en direct, considérez cette page comme l'endroit où l'activité en direct apparaîtra en premier.",
-            unavailableTitle: "Runtime signale aussi rapidement les problèmes de disponibilité",
+              "Si rien ne tourne encore, cette page reste l'endroit où l'activité en direct et les signaux de santé apparaîtront en premier.",
+            unavailableTitle: "Runtime montre clairement les problèmes de connexion",
             unavailableDescription:
-              "Si la connectivité runtime est dégradée, cette surface est l'endroit où l'application expose cet état avant une inspection plus approfondie.",
+              "Quand les données runtime ne sont pas accessibles, cet écran doit afficher le problème avant une inspection plus approfondie.",
           },
           runtimeLiveList: {
             title: "Les métriques indiquent à quel point le runtime a besoin d'attention",
@@ -2474,9 +2486,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Vous êtes prêt à explorer Koda",
+          title: "Vous êtes prêt à utiliser Koda",
           description:
-            "Rouvrez la visite à tout moment depuis Docs si vous voulez un rappel ou visiter un chapitre secondaire.",
+            "Vous connaissez maintenant le premier parcours dans Koda : lire Home, configurer les agents dans Control Plane et surveiller le travail en direct dans Runtime. Rouvrez la visite depuis la barre supérieure à tout moment.",
         },
       },
       agentSwitcher: {
@@ -2691,6 +2703,8 @@ export const resources = {
               email_invalid: "Saisissez une adresse e-mail valide.",
               password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
               password_mismatch: "Les mots de passe ne correspondent pas.",
+              recovery_codes_missing:
+                "Les codes de récupération n'ont pas été émis. Générez un nouveau code de configuration et réessayez.",
               generic: "Nous n'avons pas pu créer le compte. Veuillez réessayer.",
               service_unavailable:
                 "Le service de configuration est temporairement indisponible. Veuillez réessayer dans un instant.",
@@ -2707,6 +2721,8 @@ export const resources = {
             saved_checkbox: "J'ai enregistré les codes de récupération dans un endroit sûr.",
             continue: "Continuer vers l'espace de travail",
             already_shown_banner: "Ces codes ne seront plus affichés.",
+            missing_codes_error:
+              "Les codes de récupération n'ont pas été émis. Générez un nouveau code de configuration et recréez le compte.",
           },
         },
         settings: {
@@ -3008,49 +3024,49 @@ export const resources = {
           resumeDescription: "Setzen Sie die aktuelle Tour an der Stelle fort, an der Sie aufgehört haben.",
         },
         welcome: {
-          title: "Beginnen Sie mit einer kurzen geführten Tour",
+          title: "Lernen Sie den Arbeitsbereich in 7 Schritten kennen",
           description:
-            "Koda führt Sie durch die Hauptbildschirme, wie Sie zwischen ihnen wechseln und was jeder Bereich bedeutet. Der Ablauf bleibt zielgerichtet und Sie können jederzeit abbrechen.",
+            "Koda zeigt die Steuerelemente, die Sie zuerst nutzen: Navigation, Home, Agentenkatalog und Runtime. Die Tour bleibt kurz und Sie können jederzeit aussteigen.",
         },
         steps: {
           shellSidebar: {
-            title: "Diese Seitenleiste ist Ihre Hauptkarte",
+            title: "Navigieren Sie über die Seitenleiste",
             description:
-              "Nutzen Sie sie, um zwischen Übersicht, Laufzeit, Katalog und operativen Ansichten zu wechseln, ohne den Kontext zu verlieren.",
+              "Dies ist die stabile Karte der App. Nutzen Sie sie, um zwischen Home, Control Plane, Runtime und operativen Bereichen zu wechseln, ohne den Kontext zu verlieren.",
           },
           shellTopbar: {
-            title: "Die obere Leiste hält den Routenkontext nah",
+            title: "Nutzen Sie die obere Leiste für Schnellaktionen",
             description:
-              "Hier sehen Sie die Zusammenfassung der aktiven Seite, Schnellwerkzeuge, den Sprachumschalter und die Verknüpfung, um diese Tour später erneut zu öffnen.",
+              "Die obere Leiste hält Arbeitsbereichsaktionen nah: Sprache, Benachrichtigungen, Konto und die Verknüpfung, um diese Tour später erneut zu öffnen.",
           },
           overviewMetrics: {
-            title: "Übersicht fasst den operativen Puls zusammen",
+            title: "Lesen Sie zuerst den Arbeitsbereichsstatus",
             description:
-              "Dieser erste Block verdichtet Aktivität, Nachfrage und Kosten, damit Sie verstehen, was sich geändert hat, bevor Sie tiefer einsteigen.",
-            emptyTitle: "Übersicht startet als Ihr leerer operativer Puls",
+              "Diese Karten fassen Agenten, Aktivität, Ausführungen und Kostensignale zusammen, damit Sie Setup oder Live-Betrieb gezielt prüfen können.",
+            emptyTitle: "Home startet als Ihre Statusfläche",
             emptyDescription:
-              "Schon bevor Aktivität erscheint, ist diese Seite der Ort, an den Sie für die schnellste Zusammenfassung des Arbeitsbereichs zurückkehren.",
+              "Bevor im Arbeitsbereich Aktivität entsteht, ist dieser Bereich weiterhin der Ort, an dem erste Gesundheits-, Ausführungs- und Kostensignale erscheinen.",
           },
           overviewLivePlan: {
-            title: "Dieser Abschnitt hebt die nächsten Live-Aktionen hervor",
+            title: "Verfolgen Sie aktuelle Aktivität über Home",
             description:
-              "Nutzen Sie ihn, um zu erkennen, was jetzt läuft, was Aufmerksamkeit braucht und wo die Untersuchung fortgesetzt werden sollte.",
+              "Der Aktivitäts- und Verlaufsbereich zeigt, was gerade passiert ist und was Aufmerksamkeit brauchen kann, damit Sie schnell vom Überblick zur Untersuchung wechseln.",
           },
           controlPlanePrimaryAction: {
-            title: "Der Katalog ist der Startpunkt der Einrichtung",
+            title: "Erstellen und verwalten Sie Agenten hier",
             description:
-              "Erstellen Sie hier Bots und Arbeitsbereiche und öffnen Sie dann einen Bot, um Identität, Verhalten, Ressourcen und Veröffentlichung zu konfigurieren.",
-            emptyTitle: "Der Katalog ist Ihr erster Halt bei einer neuen Installation",
+              "Nutzen Sie die primäre Aktion, um einen neuen Agenten anzulegen. Danach können Sie im Editor Identität, Anweisungen, Tools, Kanäle und Veröffentlichung definieren.",
+            emptyTitle: "Beginnen Sie mit Ihrem ersten Agenten",
             emptyDescription:
-              "Wenn die Instanz leer ist, beginnen Sie hier, indem Sie einen Arbeitsbereich oder einen Bot erstellen. Der Editor öffnet sich direkt danach.",
+              "In einem neuen Arbeitsbereich ist dies die erste Setup-Aktion. Erstellen Sie einen Agenten und nutzen Sie den Editor, um ihn nützlich und veröffentlichbar zu machen.",
           },
           controlPlaneBoard: {
-            title: "Das Board erklärt, wie der Katalog organisiert ist",
+            title: "Verstehen Sie den Agentenkatalog",
             description:
-              "Arbeitsbereiche, Squads und Bots bleiben hier gruppiert, damit Governance und Verantwortung auf einen Blick sichtbar sind.",
-            emptyTitle: "Das Board wächst mit dem Katalog",
+              "Das Board gruppiert Agenten und Arbeitsbereiche, damit Sie Ownership, Status und Konfigurationseinstiege sehen, ohne jeden Agenten zu öffnen.",
+            emptyTitle: "Der Katalog füllt sich, wenn Agenten hinzukommen",
             emptyDescription:
-              "Sobald Bots existieren, wird dieser Bereich zur visuellen Karte von Teams, Arbeitsbereichen und operativer Verantwortung.",
+              "Sobald Agenten existieren, wird dieser Bereich zur visuellen Karte für Setup-Status, Ownership und schnellen Zugriff auf jeden Agenteneditor.",
           },
           controlPlaneEditorHeader: {
             title: "Der Editor ist das Kontrollzentrum des Bots",
@@ -3068,15 +3084,15 @@ export const resources = {
               "Nutzen Sie diese Aktionen, um Entwurfsänderungen zu persistieren und zur Veröffentlichungsprüfung voranzuschreiten, wenn der Bot bereit ist.",
           },
           runtimeHeader: {
-            title: "Laufzeit ist der Live-Kontrollraum",
+            title: "Überwachen Sie Live-Betrieb in Runtime",
             description:
-              "Dieser Bildschirm bündelt Ausführungsgesundheit, Live-Aktivität und Filter, damit Sie sich auf die aktuell wichtigen Bots konzentrieren können.",
-            emptyTitle: "Laufzeit wird nützlich, sobald Aktivität erscheint",
+              "Runtime ist der Ort, an dem veröffentlichte Agenten nach der Verbindung Gesundheit, Live-Arbeit, Warteschlangen und operative Signale anzeigen.",
+            emptyTitle: "Runtime wird aktiv, sobald Agenten laufen",
             emptyDescription:
-              "Wenn es noch keine Live-Umgebungen gibt, betrachten Sie diese Seite als den Ort, an dem Live-Aktivität zuerst erscheint.",
-            unavailableTitle: "Laufzeit signalisiert auch Verfügbarkeitsprobleme schnell",
+              "Wenn noch nichts läuft, ist diese Seite weiterhin der Ort, an dem Live-Aktivität und Gesundheitssignale zuerst erscheinen.",
+            unavailableTitle: "Runtime zeigt Verbindungsprobleme klar",
             unavailableDescription:
-              "Wenn die Laufzeitkonnektivität beeinträchtigt ist, ist diese Oberfläche der Ort, an dem die App diesen Zustand vor tieferer Analyse offenlegt.",
+              "Wenn Runtime-Daten nicht erreichbar sind, sollte dieser Bildschirm das Problem zeigen, bevor Sie tiefer prüfen.",
           },
           runtimeLiveList: {
             title: "Metriken zeigen, wie viel Aufmerksamkeit die Laufzeit benötigt",
@@ -3148,9 +3164,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Sie sind bereit, Koda zu erkunden",
+          title: "Sie sind bereit, Koda zu nutzen",
           description:
-            "Öffnen Sie die Tour jederzeit aus Docs erneut, wenn Sie eine Auffrischung oder ein Nebenkapitel möchten.",
+            "Sie kennen jetzt den ersten Weg durch Koda: Home lesen, Agenten im Control Plane konfigurieren und Live-Arbeit in Runtime überwachen. Öffnen Sie die Tour jederzeit über die obere Leiste erneut.",
         },
       },
       agentSwitcher: {
@@ -3365,6 +3381,8 @@ export const resources = {
               email_invalid: "Geben Sie eine gültige E-Mail-Adresse ein.",
               password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
               password_mismatch: "Die Passwörter stimmen nicht überein.",
+              recovery_codes_missing:
+                "Es wurden keine Wiederherstellungscodes ausgegeben. Erzeugen Sie einen neuen Einrichtungscode und versuchen Sie es erneut.",
               generic: "Das Konto konnte nicht erstellt werden. Bitte erneut versuchen.",
               service_unavailable:
                 "Der Einrichtungsdienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
@@ -3381,6 +3399,8 @@ export const resources = {
             saved_checkbox: "Ich habe die Wiederherstellungscodes sicher aufbewahrt.",
             continue: "Weiter zum Arbeitsbereich",
             already_shown_banner: "Diese Codes werden nicht erneut angezeigt.",
+            missing_codes_error:
+              "Es wurden keine Wiederherstellungscodes ausgegeben. Erzeugen Sie einen neuen Einrichtungscode und erstellen Sie das Konto erneut.",
           },
         },
         settings: {
@@ -12669,7 +12689,7 @@ mutableResources["en-US"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Connect to a channel",
   title: "Getting started",
 };
 
@@ -13103,7 +13123,7 @@ mutableResources["pt-BR"].translation.dashboard.checklist = {
   dismiss: "Dispensar",
   provider: "Configure um provedor",
   subtitle: "Finalize a configuração do workspace para liberar automações.",
-  telegram: "Conectar Telegram",
+  telegram: "Conectar a um canal",
   title: "Primeiros passos",
 };
 
@@ -13537,7 +13557,7 @@ mutableResources["es-ES"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Conectar a un canal",
   title: "Getting started",
 };
 
@@ -13971,7 +13991,7 @@ mutableResources["fr-FR"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Connecter un canal",
   title: "Getting started",
 };
 
@@ -14405,7 +14425,7 @@ mutableResources["de-DE"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Kanal verbinden",
   title: "Getting started",
 };
 

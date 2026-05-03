@@ -75,29 +75,25 @@ export function CostConversationTable({ rows, className }: CostConversationTable
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]",
+        "overflow-hidden rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]",
         className
       )}
-      style={{
-        boxShadow:
-          "inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent), 0 18px 42px rgba(0,0,0,0.12)",
-      }}
     >
-      <div className="flex items-end justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
-        <div>
-          <p className="eyebrow">{t("costs.ledger.eyebrow")}</p>
-          <h3 className="mt-2 text-[1.1rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
+      <div className="flex min-w-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-4 py-3 sm:px-5">
+        <div className="min-w-0">
+          <p className="eyebrow truncate">{t("costs.ledger.eyebrow")}</p>
+          <h3 className="mt-1 truncate text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
             {t("costs.ledger.title")}
           </h3>
         </div>
-        <span className="text-[11px] text-[var(--text-tertiary)]">
+        <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
           {t("costs.ledger.count", { count: rows.length })}
         </span>
       </div>
 
       {rows.length === 0 ? (
         <div className="empty-state px-5 py-10">
-          <p className="empty-state-text">
+          <p className="empty-state-text truncate">
             {t("costs.page.noConversations", {
               defaultValue: "No conversations in the current filter.",
             })}
@@ -112,29 +108,28 @@ export function CostConversationTable({ rows, className }: CostConversationTable
             return (
               <article
                 key={`${row.agent_id}-${row.session_id}`}
-                className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_120px] lg:items-start"
+                className="grid min-w-0 gap-3 px-4 py-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_112px] lg:items-center"
               >
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <p className="truncate text-[15px] font-semibold text-[var(--text-primary)]">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <p className="min-w-0 truncate text-[0.875rem] font-medium text-[var(--text-primary)]">
                       {row.name || truncateText(row.session_id, 42)}
                     </p>
                     <span
-                      className="inline-flex items-center gap-2 text-[12px] font-medium"
+                      className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-medium"
                       style={{ color: getAgentColor(row.agent_id) }}
                     >
                       <span
-                        className="h-2.5 w-2.5 rounded-full"
+                        className="h-2 w-2 rounded-full"
                         style={{ backgroundColor: getAgentColor(row.agent_id) }}
                       />
-                      {getAgentLabel(row.agent_id)}
+                      <span className="max-w-[120px] truncate">{getAgentLabel(row.agent_id)}</span>
                     </span>
-                    <span className="inline-flex items-center gap-2 text-[12px]" style={getSemanticTextStyle(tone)}>
+                    <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px]" style={getSemanticTextStyle(tone)}>
                       <span
-                        className="h-2.5 w-2.5 rounded-full"
+                        className="h-2 w-2 rounded-full"
                         style={{
                           backgroundColor: toneVars.dot,
-                          boxShadow: `0 0 0 4px color-mix(in srgb, ${toneVars.dot} 16%, transparent)`,
                         }}
                       />
                       {t(`costs.page.conversationStatus.${row.status}`, {
@@ -143,43 +138,43 @@ export function CostConversationTable({ rows, className }: CostConversationTable
                     </span>
                   </div>
 
-                  <p className="mt-2 line-clamp-1 text-[13px] leading-5 text-[var(--text-secondary)]">
+                  <p className="mt-1 truncate text-[13px] text-[var(--text-secondary)]">
                     {row.latest_message_preview ||
                       t("costs.page.noRecentPreview", { defaultValue: "No recent preview" })}
                   </p>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-tertiary)]">
-                    <span>
+                  <div className="mt-2 flex min-w-0 items-center gap-3 overflow-hidden text-[12px] text-[var(--text-tertiary)]">
+                    <span className="shrink-0 truncate">
                       {row.dominant_model
                         ? truncateText(row.dominant_model, 24)
                         : t("costs.page.noModel", { defaultValue: "No model" })}
                     </span>
-                    <span>
+                    <span className="min-w-0 truncate">
                       {row.task_type_mix.length > 0
                         ? row.task_type_mix.map((taskType) => getTaskTypeText(taskType, tl)).join(" · ")
                         : t("costs.page.noDominantOrigin", { defaultValue: "No dominant origin" })}
                     </span>
-                    <span>
+                    <span className="shrink-0">
                       {t("costs.page.queriesCount", {
                         defaultValue: "{{count}} queries",
                         count: row.query_count,
                       })}
                     </span>
-                    <span>
+                    <span className="shrink-0">
                       {t("costs.page.executionsCount", {
                         defaultValue: "{{count}} executions",
                         count: row.execution_count,
                       })}
                     </span>
-                    <span>{formatRelativeTime(row.last_activity_at)}</span>
+                    <span className="shrink-0">{formatRelativeTime(row.last_activity_at)}</span>
                   </div>
                 </div>
 
-                <div className="text-left lg:text-right">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                <div className="flex items-center justify-between gap-3 text-left lg:block lg:text-right">
+                  <p className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)] lg:mb-1">
                     {t("common.cost")}
                   </p>
-                  <p className="mt-2 font-mono text-[1.2rem] font-medium text-[var(--text-primary)]">
+                  <p className="font-mono text-[0.9375rem] font-medium text-[var(--text-primary)]">
                     {formatCost(row.cost_usd)}
                   </p>
                 </div>

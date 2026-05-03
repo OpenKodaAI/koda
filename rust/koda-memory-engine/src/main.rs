@@ -17,8 +17,10 @@ use koda_proto::memory::v1::{
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::fs;
 use tokio::net::UnixListener;
+use tokio::sync::OnceCell;
 use tokio_postgres::{Client, NoTls, Row};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
@@ -81,6 +83,31 @@ const MEMORY_SELECT_SQL: &str = r#"
     FROM napkin_log n
 "#;
 
+struct PostgresPool {
+    clients: Vec<Client>,
+    next: AtomicUsize,
+}
+
+impl PostgresPool {
+    fn new(clients: Vec<Client>) -> Self {
+        Self {
+            clients,
+            next: AtomicUsize::new(0),
+        }
+    }
+
+    fn client(&self) -> &Client {
+        let index = self.next.fetch_add(1, Ordering::Relaxed) % self.clients.len();
+        &self.clients[index]
+    }
+
+    fn size(&self) -> usize {
+        self.clients.len()
+    }
+}
+
+static MEMORY_POSTGRES_POOL: OnceCell<PostgresPool> = OnceCell::const_new();
+
 fn memory_postgres_dsn() -> String {
     std::env::var("KNOWLEDGE_V2_POSTGRES_DSN").unwrap_or_default()
 }
@@ -89,7 +116,15 @@ fn memory_postgres_schema() -> String {
     std::env::var("KNOWLEDGE_V2_POSTGRES_SCHEMA").unwrap_or_else(|_| "knowledge_v2".to_string())
 }
 
-async fn memory_postgres_client() -> Result<Client, Status> {
+fn memory_postgres_pool_size() -> usize {
+    std::env::var("KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(6)
+}
+
+async fn connect_memory_postgres() -> Result<Client, Status> {
     let dsn = memory_postgres_dsn();
     if dsn.trim().is_empty() {
         return Err(Status::failed_precondition(
@@ -110,6 +145,32 @@ async fn memory_postgres_client() -> Result<Client, Status> {
         .await
         .map_err(|error| Status::internal(format!("failed to set memory search_path: {error}")))?;
     Ok(client)
+}
+
+async fn connect_memory_postgres_pool() -> Result<PostgresPool, Status> {
+    let pool_size = memory_postgres_pool_size();
+    let mut clients = Vec::with_capacity(pool_size);
+    for _ in 0..pool_size {
+        clients.push(connect_memory_postgres().await?);
+    }
+    Ok(PostgresPool::new(clients))
+}
+
+async fn memory_postgres_pool() -> Result<&'static PostgresPool, Status> {
+    MEMORY_POSTGRES_POOL
+        .get_or_try_init(connect_memory_postgres_pool)
+        .await
+}
+
+async fn memory_postgres_client() -> Result<&'static Client, Status> {
+    Ok(memory_postgres_pool().await?.client())
+}
+
+async fn memory_postgres_ready() -> bool {
+    match memory_postgres_client().await {
+        Ok(client) => client.query_one("SELECT 1", &[]).await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 fn pg_string(row: &Row, column: &str) -> String {
@@ -262,7 +323,7 @@ async fn load_list_curation_payload(agent_id: &str, filters: &Value) -> Result<V
         .await
         .map_err(|error| Status::internal(format!("failed to query curation total: {error}")))?;
     let rows = query_memory_rows(
-        &client,
+        client,
         &format!(
             "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC LIMIT 5000"
         ),
@@ -345,7 +406,7 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
         .await
         .map_err(|error| Status::internal(format!("failed to query memory clusters: {error}")))?;
     let rows = query_memory_rows(
-        &client,
+        client,
         &format!(
             "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC LIMIT 1200"
         ),
@@ -451,7 +512,7 @@ async fn load_curation_detail_payload(
             cluster_id.trim()
         };
         let cluster_rows = query_memory_rows(
-            &client,
+            client,
             &format!(
                 "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 AND COALESCE(n.conflict_key, '') = $2 ORDER BY n.created_at DESC, n.id DESC LIMIT 200"
             ),
@@ -505,7 +566,7 @@ async fn load_curation_detail_payload(
         .parse::<i64>()
         .map_err(|_| Status::invalid_argument("memory subject_id must be numeric"))?;
     let row = query_memory_rows(
-        &client,
+        client,
         &format!("{MEMORY_SELECT_SQL} WHERE n.id = $1 AND n.agent_id = $2"),
         &[&memory_id, &agent_id],
     )
@@ -527,7 +588,7 @@ async fn load_curation_detail_payload(
         Vec::new()
     } else {
         query_memory_rows(
-            &client,
+            client,
             &format!(
                 "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 AND COALESCE(n.conflict_key, '') = $2 ORDER BY n.created_at DESC, n.id DESC LIMIT 200"
             ),
@@ -536,7 +597,7 @@ async fn load_curation_detail_payload(
         .await?
     };
     let related_rows = query_memory_rows(
-        &client,
+        client,
         &format!(
             "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 AND n.id <> $2 AND COALESCE(n.session_id, '') = COALESCE($3, '') ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC LIMIT 12"
         ),
@@ -872,7 +933,7 @@ async fn load_recall_rows(
     }
     let scan_limit = i64::from(limit.max(1)).saturating_mul(8).clamp(40, 400);
     query_memory_rows(
-        &client,
+        client,
         &format!(
             r#"
             {MEMORY_SELECT_SQL}
@@ -2997,7 +3058,7 @@ impl MemoryEngineService for MemoryServer {
             } else {
                 let client = memory_postgres_client().await?;
                 query_memory_rows(
-                    &client,
+                    client,
                     &format!(
                         "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 AND COALESCE(n.conflict_key, '') = ANY($2::TEXT[]) ORDER BY n.created_at DESC, n.id DESC"
                     ),
@@ -3068,10 +3129,31 @@ impl MemoryEngineService for MemoryServer {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
+        let postgres_ready = memory_postgres_ready().await;
         let mut details = health_details("koda-memory-engine");
-        details.insert("authoritative".to_string(), "true".to_string());
-        details.insert("production_ready".to_string(), "true".to_string());
-        details.insert("maturity".to_string(), "authoritative".to_string());
+        details.insert("authoritative".to_string(), postgres_ready.to_string());
+        details.insert("production_ready".to_string(), postgres_ready.to_string());
+        details.insert(
+            "maturity".to_string(),
+            if postgres_ready {
+                "authoritative"
+            } else {
+                "config_required"
+            }
+            .to_string(),
+        );
+        details.insert(
+            "postgres".to_string(),
+            if postgres_ready {
+                "ready"
+            } else {
+                "unavailable"
+            }
+            .to_string(),
+        );
+        if let Ok(pool) = memory_postgres_pool().await {
+            details.insert("postgres_pool_size".to_string(), pool.size().to_string());
+        }
         details.insert(
             "projection_mode".to_string(),
             "kernel_authoritative".to_string(),
@@ -3087,8 +3169,13 @@ impl MemoryEngineService for MemoryServer {
         );
         Ok(Response::new(HealthResponse {
             service: "koda-memory-engine".to_string(),
-            ready: true,
-            status: "ready".to_string(),
+            ready: postgres_ready,
+            status: if postgres_ready {
+                "ready"
+            } else {
+                "postgres_unavailable"
+            }
+            .to_string(),
             details,
         }))
     }

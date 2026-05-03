@@ -68,6 +68,8 @@ export type McpSuggestedServer = {
   logo_key?: string;
   expected_tools: McpExpectedTool[];
   oauth_supported?: boolean;
+  auth_flow_kind?: string;
+  oauth_availability?: string;
   connection_profile?: ConnectionProfile;
   runtime_constraints?: RuntimeConstraintKey[];
   remote_url?: string;
@@ -128,6 +130,8 @@ export function projectApiCatalogEntry(item: Record<string, unknown>): McpSugges
     logo_key: (item.logo_key as string) ?? undefined,
     expected_tools: (item.expected_tools as McpExpectedTool[]) ?? [],
     oauth_supported: Boolean(item.oauth_supported),
+    auth_flow_kind: (item.auth_flow_kind as string) ?? undefined,
+    oauth_availability: (item.oauth_availability as string) ?? undefined,
     connection_profile: (item.connection_profile as ConnectionProfile) ?? undefined,
     runtime_constraints: (item.runtime_constraints as RuntimeConstraintKey[]) ?? undefined,
     remote_url: (item.remote_url as string) ?? undefined,
@@ -172,6 +176,9 @@ export function buildSuggestedMcpCatalogEntry(
     logo_key: suggested.logo_key ?? null,
     category: suggested.category,
     enabled: true,
+    oauth_enabled: Boolean(suggested.oauth_supported),
+    auth_flow_kind: suggested.auth_flow_kind ?? null,
+    oauth_availability: suggested.oauth_availability ?? null,
     metadata_json: JSON.stringify(metadata),
     connection_profile: suggested.connection_profile ?? null,
     runtime_constraints: suggested.runtime_constraints ?? undefined,

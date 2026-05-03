@@ -90,3 +90,54 @@ def test_remote_servers_declare_remote_url() -> None:
     for spec in MCP_CATALOG:
         if spec.transport_type == "http_sse":
             assert spec.remote_url, f"{spec.server_key} http_sse spec missing remote_url"
+
+
+def test_runtime_and_authoritative_transport_match() -> None:
+    authoritative_by_key = {entry["server_key"]: entry for entry in authoritative_mcp_catalog_entries()}
+    for spec in MCP_CATALOG:
+        entry = authoritative_by_key[spec.server_key]
+        assert entry["transport_type"] == spec.transport_type, (
+            f"{spec.server_key} transport mismatch: runtime={spec.transport_type} "
+            f"authoritative={entry['transport_type']}"
+        )
+        expected_remote_url = spec.remote_url or None
+        actual_remote_url = entry.get("remote_url") or entry.get("url") or None
+        assert actual_remote_url == expected_remote_url, (
+            f"{spec.server_key} remote_url mismatch: runtime={expected_remote_url} authoritative={actual_remote_url}"
+        )
+
+
+def test_auth_capabilities_declare_flow_kind() -> None:
+    valid_flow_kinds = {
+        "api_key",
+        "local_session",
+        "manual_header",
+        "mcp_remote_oauth_confidential",
+        "mcp_remote_oauth_dcr",
+        "none",
+        "provider_native_oauth",
+    }
+    for entry in authoritative_mcp_catalog_entries():
+        capabilities = entry.get("metadata", {}).get("auth_capabilities", {})
+        flow_kind = capabilities.get("auth_flow_kind")
+        assert flow_kind in valid_flow_kinds, f"{entry['server_key']} has invalid auth_flow_kind={flow_kind!r}"
+        if entry.get("oauth_enabled"):
+            assert flow_kind, f"{entry['server_key']} oauth_enabled without auth_flow_kind"
+
+
+def test_executable_oauth_is_remote_and_has_url() -> None:
+    for entry in authoritative_mcp_catalog_entries():
+        capabilities = entry.get("metadata", {}).get("auth_capabilities", {})
+        flow_kind = str(capabilities.get("auth_flow_kind") or "")
+        if flow_kind in {"mcp_remote_oauth_dcr", "mcp_remote_oauth_confidential"}:
+            assert entry["transport_kind"] == "remote", f"{entry['server_key']} executable OAuth must be remote"
+            assert entry.get("remote_url") or entry.get("url"), f"{entry['server_key']} OAuth remote missing URL"
+            assert entry.get("oauth_enabled") is True, f"{entry['server_key']} executable OAuth not enabled"
+
+
+def test_stdio_entries_do_not_use_generic_oauth_dcr() -> None:
+    for entry in authoritative_mcp_catalog_entries():
+        if entry["transport_kind"] == "local":
+            assert entry.get("oauth_mode") != "dcr", (
+                f"{entry['server_key']} is stdio/local and must not use generic MCP OAuth DCR"
+            )

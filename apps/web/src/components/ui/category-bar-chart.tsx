@@ -66,27 +66,33 @@ export function CategoryBarChart({
   return (
     <Card
       className={cn(
-        "flex h-full w-full flex-col gap-0 rounded-[18px] border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-5 shadow-none",
+        "flex h-full w-full flex-col gap-0 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-4 shadow-none sm:p-5",
         className
       )}
       {...props}
     >
-      <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[var(--border-subtle)] p-0 pb-4">
-        <CardTitle className="text-base font-medium text-[var(--text-secondary)]">{heading}</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[var(--border-subtle)] p-0 pb-3">
+        <CardTitle className="truncate text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          {heading}
+        </CardTitle>
         {controls ? <div className="shrink-0">{controls}</div> : null}
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4 p-0 pt-4">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <CardContent className="flex flex-col gap-3 p-0 pt-3">
+        <div className="flex min-w-0 flex-wrap items-end gap-x-3 gap-y-1">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {totalLabel}
             </p>
-            <div className="mt-1 text-[1.85rem] font-semibold leading-none tracking-[-0.05em] text-[var(--text-primary)]">
+            <div className="mt-1 truncate font-mono text-[1.5rem] font-medium leading-none tracking-[var(--tracking-display)] text-[var(--text-primary)]">
               {totalValue}
             </div>
           </div>
-          {deltaLabel ? <div className="pb-1 text-sm text-[var(--text-secondary)]">{deltaLabel}</div> : null}
+          {deltaLabel ? (
+            <div className="min-w-0 truncate pb-0.5 text-[0.8125rem] text-[var(--text-secondary)]">
+              {deltaLabel}
+            </div>
+          ) : null}
         </div>
 
         {startLabel || endLabel ? (
@@ -107,11 +113,10 @@ export function CategoryBarChart({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="h-[44px] rounded-sm transition-all focus:outline-none"
+                      className="h-8 rounded-[4px] transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
                       style={{
                         width: `${shareWidth}%`,
                         opacity: activeId && !active ? 0.45 : 1,
-                        transform: active ? "translateY(-1px)" : "none",
                       }}
                       onMouseEnter={() => onActiveChange?.(item.id)}
                       onMouseLeave={() => onActiveChange?.(null)}
@@ -120,11 +125,11 @@ export function CategoryBarChart({
                     >
                       <div
                         className={cn(
-                          "h-full rounded-sm transition-all",
-                          active ? "ring-1 ring-[color-mix(in_srgb,var(--text-primary)_18%,transparent)]" : ""
+                          "h-full rounded-[4px] transition-colors",
+                          active ? "ring-1 ring-[var(--border-strong)]" : ""
                         )}
                         style={{
-                          background: `linear-gradient(135deg, ${item.color} 0%, color-mix(in srgb, ${item.color} 75%, white 12%) 100%)`,
+                          background: item.color,
                         }}
                       />
                     </button>
@@ -133,13 +138,13 @@ export function CategoryBarChart({
                     sideOffset={6}
                     className="border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]"
                   >
-                    <p className="text-xs text-[var(--text-secondary)]">
+                    <p className="truncate text-xs text-[var(--text-secondary)]">
                       {item.label} ·{" "}
                       <span className="font-medium tracking-[-0.01em] text-[var(--text-primary)]">
                         {item.share.toFixed(1)}%
                       </span>
                     </p>
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    <p className="mt-1 truncate text-xs text-[var(--text-tertiary)]">
                       {item.meta ?? tl("Participação no recorte")}
                     </p>
                   </TooltipContent>
@@ -152,7 +157,7 @@ export function CategoryBarChart({
         {footer ? (
           <>
             <Separator className="bg-[var(--border-subtle)]" />
-            <p className="text-xs leading-5 text-[var(--text-tertiary)]">{footer}</p>
+            <p className="truncate text-xs text-[var(--text-tertiary)]">{footer}</p>
           </>
         ) : null}
       </CardContent>

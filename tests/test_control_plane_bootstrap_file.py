@@ -25,7 +25,10 @@ def test_ensure_writes_file_with_restricted_perms(isolated_bootstrap: Path) -> N
     assert isolated_bootstrap.exists()
     mode = os.stat(isolated_bootstrap).st_mode & 0o777
     assert mode == 0o600
-    assert isolated_bootstrap.read_text(encoding="utf-8").strip() == code
+    content = isolated_bootstrap.read_text(encoding="utf-8")
+    assert content.splitlines()[0] == code
+    assert "expires_at=" in content
+    assert "setup_url=/setup" in content
 
 
 def test_ensure_is_noop_when_owner_exists(isolated_bootstrap: Path) -> None:
@@ -40,7 +43,7 @@ def test_ensure_respects_env_seed(isolated_bootstrap: Path, monkeypatch: pytest.
     monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "CUST-OMSE-EDCD")
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
     assert code == "CUST-OMSE-EDCD"
-    assert isolated_bootstrap.read_text(encoding="utf-8").strip() == "CUST-OMSE-EDCD"
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == "CUST-OMSE-EDCD"
 
 
 def test_ensure_does_not_overwrite_existing(isolated_bootstrap: Path) -> None:
@@ -52,8 +55,17 @@ def test_ensure_does_not_overwrite_existing(isolated_bootstrap: Path) -> None:
 
 
 def test_read_bootstrap_file_returns_content(isolated_bootstrap: Path) -> None:
-    bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
-    assert bootstrap_file_mod.read_bootstrap_file() is not None
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+    assert bootstrap_file_mod.read_bootstrap_file() == code
+
+
+def test_read_bootstrap_file_rejects_expired_content(isolated_bootstrap: Path) -> None:
+    isolated_bootstrap.parent.mkdir(parents=True, exist_ok=True)
+    isolated_bootstrap.write_text(
+        "EXPI-REDC-ODEX\nexpires_at=2000-01-01T00:00:00+00:00\nsetup_url=/setup\n",
+        encoding="utf-8",
+    )
+    assert bootstrap_file_mod.read_bootstrap_file() is None
 
 
 def test_consume_removes_file(isolated_bootstrap: Path) -> None:

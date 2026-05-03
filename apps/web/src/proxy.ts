@@ -125,6 +125,7 @@ const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "/api/control-plane/auth/bootstrap/exchange",
   "/api/control-plane/auth/login",
   "/api/control-plane/auth/register-owner",
+  "/api/control-plane/auth/password/recover",
 ]);
 
 interface SlidingWindow {

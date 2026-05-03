@@ -825,9 +825,9 @@ export function ConnectionModalRouter({
                 disabled={!onOAuthStart || isOAuthLoading}
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-xl",
-                  "bg-[var(--surface-elevated)] border border-[var(--border-strong)]",
+                  "border border-[var(--text-primary)] bg-transparent",
                   "px-4 py-2 text-sm font-medium text-[var(--text-primary)]",
-                  "transition-colors hover:bg-[var(--surface-hover-strong)]",
+                  "transition-colors hover:bg-[var(--surface-hover)]",
                   (isOAuthLoading || !onOAuthStart) && "opacity-60 cursor-wait",
                 )}
               >

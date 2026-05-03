@@ -116,6 +116,10 @@ export function StepCreateAccount({
           }),
         },
       );
+      if (!Array.isArray(payload.recovery_codes) || payload.recovery_codes.length === 0) {
+        setError(t("auth.setup.create_account.errors.recovery_codes_missing"));
+        return;
+      }
       onRegistered(payload);
     } catch (submitError) {
       if (isUpstreamFailure(submitError)) {

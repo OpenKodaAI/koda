@@ -208,17 +208,14 @@ def test_memory_section_keeps_canonical_shape_across_round_trips(monkeypatch):
     `proactive_enabled`, `procedural_enabled`, `promotion_mode`,
     `require_freshness_provenance` used to live at the section root
     alongside the canonical `policy.*` and `env.*` maps. They were a
-    side-effect of older seeds and `_seed_default_world` re-introduced them
-    on every save, leaving the section data inconsistent with itself.
-    `_apply_*_policy_to_section` now strips them and the seed itself
-    writes the canonical shape, so the only keys allowed at the section
-    root are `env` and `policy` — anything else means a leak crept back
-    in."""
+    side-effect of older persisted defaults, leaving the section data
+    inconsistent with itself. `_apply_*_policy_to_section` now strips
+    them, so the only keys allowed at the section root are `env` and
+    `policy` — anything else means a leak crept back in."""
     manager = _mk_manager()
     store = _mock_storage(manager, monkeypatch)
 
-    # Drive a couple of toggles through the pipeline; this triggers the
-    # seed plus all the policy-application paths.
+    # Drive a couple of toggles through the policy-application paths.
     for state in (True, False, True):
         manager_mod.ControlPlaneManager.put_general_system_settings(
             manager,

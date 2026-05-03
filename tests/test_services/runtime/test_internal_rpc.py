@@ -347,7 +347,7 @@ async def test_grpc_retrieval_engine_client_probes_health_and_returns_remote_bun
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -484,7 +484,7 @@ async def test_grpc_retrieval_engine_client_lists_graph_when_capability_is_avail
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -550,7 +550,7 @@ async def test_grpc_retrieval_engine_client_requires_bundle_assembly_capability(
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -659,7 +659,7 @@ async def test_grpc_retrieval_engine_client_rejects_invalid_remote_bundle_contra
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -741,7 +741,7 @@ async def test_grpc_memory_engine_client_probes_health(
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
 
     fake_channel = _FakeChannel()
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: fake_channel)
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: fake_channel)
     monkeypatch.setattr(config, "MEMORY_GRPC_TARGET", "127.0.0.1:50063")
 
     client = GrpcMemoryEngineClient(
@@ -930,7 +930,7 @@ async def test_grpc_memory_engine_client_recall_sources_authoritative_rows(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1042,7 +1042,7 @@ async def test_grpc_memory_engine_client_sends_typed_cluster_and_dedupe_rows(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1365,7 +1365,7 @@ async def test_grpc_memory_engine_client_supports_projection_rpc_payloads(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1463,7 +1463,7 @@ async def test_grpc_artifact_engine_client_probes_health(
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2_grpc", generated_artifact_pb2_grpc)
 
     fake_channel = _FakeChannel()
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: fake_channel)
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: fake_channel)
     monkeypatch.setattr(config, "ARTIFACT_GRPC_TARGET", "/tmp/koda/artifact.sock")
 
     client = GrpcArtifactEngineClient(
@@ -1640,7 +1640,7 @@ async def test_grpc_artifact_engine_client_ingests_artifact(
     monkeypatch.setitem(sys.modules, "artifact.v1", generated_artifact_v1)
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2", generated_artifact_pb2)
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2_grpc", generated_artifact_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcArtifactEngineClient(
         selection=EngineSelection(
@@ -2133,7 +2133,7 @@ async def test_grpc_runtime_kernel_client_probes_health_and_forwards_pause(
     monkeypatch.setitem(sys.modules, "runtime.v1", generated_runtime_v1)
     monkeypatch.setitem(sys.modules, "runtime.v1.runtime_pb2", generated_runtime_pb2)
     monkeypatch.setitem(sys.modules, "runtime.v1.runtime_pb2_grpc", generated_runtime_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRuntimeKernelClient(runtime_root=tmp_path, store=_DummyStore(), mode="rust")
 

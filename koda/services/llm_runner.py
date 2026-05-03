@@ -10,7 +10,7 @@ import os
 import re
 from collections.abc import AsyncIterator
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from koda.config import (
     AGENT_ID,
@@ -270,7 +270,7 @@ async def get_provider_capabilities(provider: str, turn_mode: TurnMode) -> Provi
     native_provider = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
     runner = _native_runner(native_provider)
     capabilities_fn = getattr(runner, f"get_{native_provider}_capabilities")
-    return await capabilities_fn(turn_mode)
+    return cast("ProviderCapabilities", await capabilities_fn(turn_mode))
 
 
 async def get_provider_health_snapshot() -> dict[str, dict[str, Any]]:

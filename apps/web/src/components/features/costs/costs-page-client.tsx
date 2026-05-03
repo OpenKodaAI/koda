@@ -29,8 +29,22 @@ import { formatCost } from "@/lib/utils";
 
 const PERIOD_VALUES = ["7d", "30d", "90d"] as const;
 
-const MODEL_COLORS = ["#ff4d32", "#ff7f2e", "#ffbb40", "#ffe36a", "#8fe16e", "#79cfff"];
-const TASK_TYPE_COLORS = ["#ff6138", "#ff9652", "#ffbd52", "#e4e05f", "#9ce56f", "#76caff"];
+const MODEL_COLORS = [
+  "var(--tone-info-dot)",
+  "var(--tone-success-dot)",
+  "var(--tone-warning-dot)",
+  "var(--tone-neutral-dot)",
+  "var(--tone-retry-dot)",
+  "var(--text-quaternary)",
+];
+const TASK_TYPE_COLORS = [
+  "var(--tone-neutral-dot)",
+  "var(--tone-info-dot)",
+  "var(--tone-success-dot)",
+  "var(--tone-warning-dot)",
+  "var(--tone-retry-dot)",
+  "var(--text-quaternary)",
+];
 
 function buildModelItems(
   insights: CostInsightsResponse | null,
@@ -43,14 +57,10 @@ function buildModelItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: MODEL_COLORS[index % MODEL_COLORS.length],
-      meta: tl(
-        "{{queries}} consultas · {{executions}} execuções · {{resolved}} resolvidas",
-        {
-          queries: entry.query_count,
-          executions: entry.execution_count,
-          resolved: entry.resolved_conversations,
-        },
-      ),
+      meta: tl("{{queries}} consultas · {{executions}} execuções", {
+        queries: entry.query_count,
+        executions: entry.execution_count,
+      }),
     })) ?? []
   );
 }
@@ -66,7 +76,7 @@ function buildAgentItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: getAgentColor(entry.agent_id),
-      meta: tl("{{resolved}} resolvidas · {{cost}} por conversa", {
+      meta: tl("{{resolved}} resolvidas · {{cost}}/conv.", {
         resolved: entry.resolved_conversations,
         cost: formatCost(entry.avg_cost_per_resolved_conversation),
       }),
@@ -85,7 +95,7 @@ function buildTaskItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: TASK_TYPE_COLORS[index % TASK_TYPE_COLORS.length],
-      meta: tl("{{count}} ocorrências · {{cost}} em média", {
+      meta: tl("{{count}} eventos · {{cost}} méd.", {
         count: entry.count,
         cost: formatCost(entry.avg_cost_usd),
       }),
@@ -97,35 +107,35 @@ function PageSkeleton() {
   return (
     <div className="space-y-4">
       {/* Controls bar */}
-      <div className="flex flex-wrap items-start gap-4">
-        <div className="max-w-[350px] min-w-[200px]">
-          <div className="skeleton h-11 w-full rounded-xl" />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="w-full md:w-[220px]">
+          <div className="skeleton h-9 w-full rounded-[var(--radius-panel-sm)]" />
         </div>
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="skeleton h-9 w-32 rounded-lg" />
-          <div className="skeleton h-9 w-32 rounded-lg" />
-          <div className="skeleton h-9 w-32 rounded-lg" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="skeleton h-9 w-28 rounded-[var(--radius-panel-sm)]" />
+          <div className="skeleton h-9 w-32 rounded-[var(--radius-panel-sm)]" />
+          <div className="skeleton h-9 w-32 rounded-[var(--radius-panel-sm)]" />
         </div>
       </div>
 
       {/* KPI rail */}
-      <div className="glass-card-sm min-h-[80px] p-4" />
+      <div className="min-h-[80px] border-y border-[var(--divider-hair)]" />
 
       {/* Charts: time + donut */}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.92fr)]">
-        <div className="app-section min-h-[420px] p-5 sm:p-6" />
-        <div className="app-section min-h-[420px] p-5 sm:p-6" />
+        <div className="min-h-[360px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
+        <div className="min-h-[360px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
       </div>
 
       {/* Breakdown cards */}
       <div className="grid gap-4 xl:grid-cols-3">
-        <div className="app-section min-h-[280px] p-5 sm:p-6" />
-        <div className="app-section min-h-[280px] p-5 sm:p-6" />
-        <div className="app-section min-h-[280px] p-5 sm:p-6" />
+        <div className="min-h-[220px]" />
+        <div className="min-h-[220px]" />
+        <div className="min-h-[220px]" />
       </div>
 
       {/* Table */}
-      <div className="app-section min-h-[320px] p-5 sm:p-6" />
+      <div className="min-h-[300px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
     </div>
   );
 }
@@ -236,7 +246,7 @@ export default function CostsPage() {
   if (!insights || !overview) return null;
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
         <div className="w-full md:w-[220px] md:flex-none">
           <AgentSwitcher
@@ -259,7 +269,7 @@ export default function CostsPage() {
           <Select value={effectiveModelFilter} onValueChange={setModelFilter}>
             <SelectTrigger
               aria-label={t("costs.filters.model")}
-              className="min-w-[180px] md:w-auto"
+              className="h-9 min-w-[160px] rounded-[var(--radius-panel-sm)] md:w-auto"
             >
               <SelectValue />
             </SelectTrigger>
@@ -278,7 +288,7 @@ export default function CostsPage() {
           <Select value={effectiveTaskTypeFilter} onValueChange={setTaskTypeFilter}>
             <SelectTrigger
               aria-label={t("costs.filters.taskType")}
-              className="min-w-[180px] md:w-auto"
+              className="h-9 min-w-[160px] rounded-[var(--radius-panel-sm)] md:w-auto"
             >
               <SelectValue />
             </SelectTrigger>
@@ -301,7 +311,7 @@ export default function CostsPage() {
           peakBucket={insights.peak_bucket ?? null}
         />
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.92fr)] xl:items-start">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.9fr)] xl:items-start">
           <CostTimeChart
             points={insights.time_series ?? []}
             mode={timelineMode}
@@ -343,7 +353,7 @@ export default function CostsPage() {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          className="app-section border-[var(--tone-danger-border,rgba(255,120,120,0.18))] bg-[var(--tone-danger-bg,rgba(255,64,64,0.05))] px-4 py-3 text-sm text-[var(--tone-danger-text,rgba(255,214,214,0.88))]"
+          className="truncate rounded-[var(--radius-panel-sm)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-sm text-[var(--tone-danger-text)]"
         >
           {error}
         </motion.div>

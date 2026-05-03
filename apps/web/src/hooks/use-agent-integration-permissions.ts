@@ -173,13 +173,29 @@ function resolveMcpOAuthSupport(
   catalogEntry: ControlPlaneConnectionCatalogEntry | null,
 ): boolean {
   const authCapabilities = catalogEntry?.auth_capabilities;
+  const executableRemoteOAuthFlows = new Set([
+    "mcp_remote_oauth_dcr",
+    "mcp_remote_oauth_confidential",
+  ]);
   if (authCapabilities && typeof authCapabilities === "object" && !Array.isArray(authCapabilities)) {
-    const oauth = readBooleanFlag((authCapabilities as Record<string, unknown>).oauth);
-    if (typeof oauth === "boolean") return oauth;
+    const caps = authCapabilities as Record<string, unknown>;
+    const flowKind = String(caps.auth_flow_kind ?? catalogEntry?.auth_flow_kind ?? "").toLowerCase();
+    const oauth = readBooleanFlag(caps.oauth_enabled ?? caps.oauth);
+    if (typeof oauth === "boolean") {
+      return oauth && executableRemoteOAuthFlows.has(flowKind);
+    }
+    if (flowKind) return executableRemoteOAuthFlows.has(flowKind);
   }
+  const flowKind = String(catalogEntry?.auth_flow_kind || "").toLowerCase();
+  if (flowKind) return executableRemoteOAuthFlows.has(flowKind);
   const strategy = String(catalogEntry?.auth_strategy_default || "").toLowerCase();
   const oauthMode = String(catalogEntry?.oauth_mode || "").toLowerCase();
-  return strategy.includes("oauth") || oauthMode !== "" && oauthMode !== "none";
+  return (
+    catalogEntry?.transport_kind === "remote" &&
+    strategy.includes("oauth") &&
+    oauthMode !== "" &&
+    oauthMode !== "none"
+  );
 }
 
 function toMcpServerCatalogEntry(
@@ -205,6 +221,8 @@ function toMcpServerCatalogEntry(
     auth_strategy: item.auth_strategy_default ?? null,
     oauth_enabled: resolveMcpOAuthSupport(item),
     oauth_mode: item.oauth_mode ?? null,
+    auth_flow_kind: item.auth_flow_kind ?? null,
+    oauth_availability: item.oauth_availability ?? null,
     vendor_notes: item.vendor_notes ?? null,
     default_policy: item.default_policy ?? null,
     auth_capabilities: item.auth_capabilities ?? null,

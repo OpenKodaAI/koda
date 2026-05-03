@@ -130,8 +130,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         category="data",
         documentation_url="https://docs.stripe.com/mcp",
         logo_key="stripe",
-        transport_type="stdio",
-        command_template=("npx", "-y", _PINNED_STRIPE),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.stripe.com"),
         remote_url="https://mcp.stripe.com",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
@@ -268,16 +268,14 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", _PINNED_SENTRY),
         connection_profile=ConnectionProfile(
-            strategy="oauth_preferred",
-            oauth_provider="sentry",
-            oauth_scopes=("org:read", "project:read", "event:read"),
+            strategy="api_key",
             fields=(
                 ConnectionField(
                     key="SENTRY_ACCESS_TOKEN",
-                    label="Auth Token (fallback)",
-                    required=False,
+                    label="Auth Token",
+                    required=True,
                     input_type="password",
-                    help="Use preferencialmente OAuth; o token fica como fallback.",
+                    help="Crie em Sentry → Account → Auth Tokens.",
                 ),
             ),
             scope_fields=(
@@ -466,10 +464,11 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
             "monitore a infraestrutura Cloudflare."
         ),
         category="cloud",
-        documentation_url="https://github.com/cloudflare/mcp-server-cloudflare",
+        documentation_url="https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/",
         logo_key="cloudflare",
-        transport_type="stdio",
-        command_template=("npx", "-y", "@cloudflare/mcp-server-cloudflare"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.cloudflare.com/mcp"),
+        remote_url="https://mcp.cloudflare.com/mcp",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
             oauth_provider="cloudflare",
@@ -702,11 +701,12 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         description=(
             "Acesse arquivos de design, inspecione componentes, extraia design tokens e exporte assets do Figma."
         ),
-        category="development",
-        documentation_url="https://developers.figma.com/docs/figma-mcp-server/",
+        category="productivity",
+        documentation_url="https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server",
         logo_key="figma",
-        transport_type="stdio",
-        command_template=("npx", "-y", "figma-developer-mcp", "--stdio"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.figma.com/mcp"),
+        remote_url="https://mcp.figma.com/mcp",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
             oauth_provider="figma",
@@ -1016,13 +1016,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", "@gongrzhe/server-gmail-autoauth-mcp"),
         connection_profile=ConnectionProfile(
-            strategy="oauth_preferred",
-            oauth_provider="google",
-            oauth_scopes=(
-                "https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/gmail.send",
-                "https://www.googleapis.com/auth/gmail.modify",
-            ),
+            strategy="api_key",
             fields=(
                 ConnectionField(
                     key="GMAIL_OAUTH_CLIENT_ID",
@@ -1063,12 +1057,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", "@cocal/google-calendar-mcp"),
         connection_profile=ConnectionProfile(
-            strategy="oauth_preferred",
-            oauth_provider="google",
-            oauth_scopes=(
-                "https://www.googleapis.com/auth/calendar",
-                "https://www.googleapis.com/auth/calendar.events",
-            ),
+            strategy="api_key",
             fields=(
                 ConnectionField(
                     key="GOOGLE_OAUTH_CLIENT_ID",
@@ -1109,12 +1098,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", "@isaacphi/mcp-gdrive"),
         connection_profile=ConnectionProfile(
-            strategy="oauth_preferred",
-            oauth_provider="google",
-            oauth_scopes=(
-                "https://www.googleapis.com/auth/drive",
-                "https://www.googleapis.com/auth/drive.file",
-            ),
+            strategy="api_key",
             fields=(
                 ConnectionField(
                     key="GDRIVE_OAUTH_CLIENT_ID",
@@ -1231,15 +1215,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         transport_type="stdio",
         command_template=("npx", "-y", "@merill/lokka@0.3.0"),
         connection_profile=ConnectionProfile(
-            strategy="oauth_preferred",
-            oauth_provider="microsoft",
-            oauth_scopes=(
-                "Mail.ReadWrite",
-                "Calendars.ReadWrite",
-                "Files.ReadWrite",
-                "Team.ReadBasic.All",
-                "Chat.ReadWrite",
-            ),
+            strategy="api_key",
             fields=(
                 ConnectionField(
                     key="TENANT_ID",
@@ -1331,12 +1307,13 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.posthog.com/mcp"),
         remote_url="https://mcp.posthog.com/mcp",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
+            strategy="oauth_preferred",
+            oauth_provider="posthog",
             fields=(
                 ConnectionField(
                     key="POSTHOG_API_KEY",
-                    label="Personal API Key",
-                    required=True,
+                    label="Personal API Key (fallback)",
+                    required=False,
                     input_type="password",
                     help="Crie em app.posthog.com/settings/user-api-keys.",
                 ),
@@ -1487,19 +1464,19 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Box",
         tagline="Storage corporativo, files e sharing",
         description=(
-            "Servidor MCP comunitário para Box Cloud. Lista, baixa e faz upload "
-            "de arquivos, cria folders, compartilha links. Auth via OAuth 2.0 "
-            "do Box (preferencial) ou Developer Token."
+            "Servidor MCP remoto oficial para Box Cloud. Lista, baixa e faz upload "
+            "de arquivos, cria folders e compartilha links. OAuth remoto confidencial "
+            "ou Developer Token."
         ),
         category="productivity",
-        documentation_url="https://www.npmjs.com/package/box-mcp-server",
+        documentation_url="https://developer.box.com/",
         logo_key="box",
-        transport_type="stdio",
-        command_template=("npx", "-y", "box-mcp-server@0.3.1"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.box.com"),
+        remote_url="https://mcp.box.com",
         connection_profile=ConnectionProfile(
             strategy="oauth_preferred",
             oauth_provider="box",
-            oauth_scopes=("root_readwrite",),
             fields=(
                 ConnectionField(
                     key="BOX_DEVELOPER_TOKEN",
@@ -1646,21 +1623,24 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="Postman",
         tagline="Workspaces, collections e mock servers",
         description=(
-            "Servidor MCP para Postman API: gerenciar workspaces, collections, "
-            "requests, environments, folders e mock servers. Auth via API Key."
+            "Servidor MCP remoto oficial para Postman API: gerenciar workspaces, "
+            "collections, requests, environments, folders e mock servers. OAuth "
+            "remoto com fallback por API Key."
         ),
         category="development",
-        documentation_url="https://www.npmjs.com/package/postman-mcp-server",
+        documentation_url="https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/",
         logo_key="postman",
-        transport_type="stdio",
-        command_template=("npx", "-y", "postman-mcp-server@1.2.0"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.postman.com/mcp"),
+        remote_url="https://mcp.postman.com/mcp",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
+            strategy="oauth_preferred",
+            oauth_provider="postman",
             fields=(
                 ConnectionField(
                     key="POSTMAN_API_KEY",
-                    label="API Key",
-                    required=True,
+                    label="API Key (fallback)",
+                    required=False,
                     input_type="password",
                     help="Crie em postman.com → Profile → Settings → API Keys.",
                 ),
@@ -1687,8 +1667,7 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tagline="6.000+ apps via Zaps automatizados",
         description=(
             "Servidor MCP remoto oficial da Zapier. Execute Zaps e acesse as "
-            "ações de qualquer app conectado na sua conta Zapier. URL única "
-            "por usuário (com token embutido) — gere em mcp.zapier.com."
+            "ações de qualquer app conectado na sua conta Zapier via OAuth remoto."
         ),
         category="general",
         documentation_url="https://zapier.com/mcp",
@@ -1697,19 +1676,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.zapier.com/api/mcp/sse"),
         remote_url="https://mcp.zapier.com/api/mcp/sse",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(
-                    key="ZAPIER_MCP_URL",
-                    label="MCP URL (with embedded token)",
-                    required=True,
-                    input_type="password",
-                    help=(
-                        "Gere a URL personalizada em mcp.zapier.com — formato: "
-                        "https://mcp.zapier.com/api/mcp/<token>/sse"
-                    ),
-                ),
-            ),
+            strategy="oauth_only",
+            oauth_provider="zapier",
         ),
         tools=(
             _r("list_actions", "Listar ações disponíveis"),
@@ -1764,8 +1732,8 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         tagline="Models, datasets, Spaces e inference",
         description=(
             "Servidor MCP remoto oficial em huggingface.co/mcp. Acesso a "
-            "models, datasets, Spaces e inference API. Auth via Hugging Face "
-            "User Access Token."
+            "models, datasets, Spaces e inference API. OAuth remoto com fallback "
+            "por Hugging Face User Access Token."
         ),
         category="data",
         documentation_url="https://huggingface.co/docs/hub/mcp",
@@ -1774,12 +1742,13 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://huggingface.co/mcp"),
         remote_url="https://huggingface.co/mcp",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
+            strategy="oauth_preferred",
+            oauth_provider="huggingface",
             fields=(
                 ConnectionField(
                     key="HF_TOKEN",
-                    label="User Access Token",
-                    required=True,
+                    label="User Access Token (fallback)",
+                    required=False,
                     input_type="password",
                     help="Crie em huggingface.co/settings/tokens com escopo read.",
                 ),
@@ -1801,32 +1770,18 @@ MCP_CATALOG: tuple[McpServerSpec, ...] = (
         display_name="ClickUp",
         tagline="Tasks, lists, spaces e time tracking",
         description=(
-            "Servidor MCP comunitário (oficial-aligned) para ClickUp. Tasks, "
-            "lists, folders, spaces, comments, time tracking. Auth via API Key."
+            "Servidor MCP remoto oficial para ClickUp. Tasks, lists, folders, "
+            "spaces, comments e time tracking via OAuth remoto."
         ),
         category="productivity",
-        documentation_url="https://www.npmjs.com/package/clickup-mcp-server",
+        documentation_url="https://developer.clickup.com/",
         logo_key="clickup",
-        transport_type="stdio",
-        command_template=("npx", "-y", "clickup-mcp-server@1.12.0"),
+        transport_type="http_sse",
+        command_template=("npx", "-y", _PINNED_REMOTE_BRIDGE, "https://mcp.clickup.com/mcp"),
+        remote_url="https://mcp.clickup.com/mcp",
         connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(
-                    key="CLICKUP_API_KEY",
-                    label="API Key",
-                    required=True,
-                    input_type="password",
-                    help="Crie em ClickUp → Settings → Apps → API Token.",
-                ),
-                ConnectionField(
-                    key="CLICKUP_TEAM_ID",
-                    label="Team ID",
-                    required=True,
-                    input_type="text",
-                    help="Disponível na URL do workspace (ex.: app.clickup.com/<TEAM_ID>/...).",
-                ),
-            ),
+            strategy="oauth_only",
+            oauth_provider="clickup",
         ),
         tools=(
             _r("list_spaces", "Listar spaces"),

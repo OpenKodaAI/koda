@@ -1783,18 +1783,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "koda-rpc-gateway"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "koda-observability",
- "koda-proto",
- "tokio",
- "tonic",
- "tracing",
-]
-
-[[package]]
 name = "koda-runtime-kernel"
 version = "0.1.0"
 dependencies = [

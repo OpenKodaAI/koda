@@ -10,9 +10,9 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-[color:var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] hover:border-[color:var(--button-primary-hover)] hover:bg-[var(--button-primary-hover)] data-[state=open]:border-[color:var(--button-primary-hover)] data-[state=open]:bg-[var(--button-primary-hover)]",
+          "border-[color:var(--button-primary-bg)] bg-[var(--button-primary-bg)] text-[color:var(--button-primary-text)] hover:border-[color:var(--button-primary-hover)] hover:bg-[var(--button-primary-hover)] data-[state=open]:border-[color:var(--button-primary-hover)] data-[state=open]:bg-[var(--button-primary-hover)]",
         accent:
-          "border-[color:var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:border-[color:var(--accent-hover)] hover:bg-[var(--accent-hover)] data-[state=open]:border-[color:var(--accent-hover)] data-[state=open]:bg-[var(--accent-hover)]",
+          "border-[color:var(--accent)] bg-[var(--accent)] text-[color:var(--accent-text)] hover:border-[color:var(--accent-hover)] hover:bg-[var(--accent-hover)] data-[state=open]:border-[color:var(--accent-hover)] data-[state=open]:bg-[var(--accent-hover)]",
         mono:
           "border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         destructive:
@@ -60,8 +60,8 @@ const buttonVariants = cva(
       },
       mode: {
         default:
-          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
-        icon: "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
+          "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0",
+        icon: "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0",
         link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[var(--text-primary)] hover:bg-transparent",
         input:
           "justify-start font-normal focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-[var(--accent-muted)]",

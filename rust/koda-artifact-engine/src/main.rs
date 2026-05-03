@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -23,7 +24,8 @@ use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
-use tokio_postgres::NoTls;
+use tokio::sync::OnceCell;
+use tokio_postgres::{Client as PgClient, NoTls};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -31,6 +33,31 @@ use tonic::{Request, Response, Status};
 const SERVICE_NAME: &str = "koda-artifact-engine";
 const OBJECT_STORAGE_UPLOAD_OUTCOME: &str = "persisted_object_storage";
 const OBJECT_STORAGE_STORAGE_BACKING: &str = "object_storage_postgres";
+
+struct PostgresPool {
+    clients: Vec<PgClient>,
+    next: AtomicUsize,
+}
+
+impl PostgresPool {
+    fn new(clients: Vec<PgClient>) -> Self {
+        Self {
+            clients,
+            next: AtomicUsize::new(0),
+        }
+    }
+
+    fn client(&self) -> &PgClient {
+        let index = self.next.fetch_add(1, Ordering::Relaxed) % self.clients.len();
+        &self.clients[index]
+    }
+
+    fn size(&self) -> usize {
+        self.clients.len()
+    }
+}
+
+static ARTIFACT_POSTGRES_POOL: OnceCell<PostgresPool> = OnceCell::const_new();
 
 #[derive(Clone, Default)]
 struct ArtifactServer;
@@ -223,6 +250,14 @@ fn artifact_postgres_schema() -> String {
     }
 }
 
+fn artifact_postgres_pool_size() -> usize {
+    std::env::var("KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(6)
+}
+
 fn optional_env(key: &str) -> Option<String> {
     std::env::var(key)
         .ok()
@@ -379,7 +414,7 @@ async fn load_object_store_payload(
     Ok(payload.into_bytes().to_vec())
 }
 
-async fn artifact_postgres_client() -> Result<tokio_postgres::Client, Status> {
+async fn connect_artifact_postgres() -> Result<PgClient, Status> {
     let dsn = artifact_postgres_dsn();
     if dsn.is_empty() {
         return Err(Status::failed_precondition(
@@ -397,7 +432,33 @@ async fn artifact_postgres_client() -> Result<tokio_postgres::Client, Status> {
     Ok(client)
 }
 
-async fn ensure_artifact_tables(client: &tokio_postgres::Client) -> Result<String, Status> {
+async fn connect_artifact_postgres_pool() -> Result<PostgresPool, Status> {
+    let pool_size = artifact_postgres_pool_size();
+    let mut clients = Vec::with_capacity(pool_size);
+    for _ in 0..pool_size {
+        clients.push(connect_artifact_postgres().await?);
+    }
+    Ok(PostgresPool::new(clients))
+}
+
+async fn artifact_postgres_pool() -> Result<&'static PostgresPool, Status> {
+    ARTIFACT_POSTGRES_POOL
+        .get_or_try_init(connect_artifact_postgres_pool)
+        .await
+}
+
+async fn artifact_postgres_client() -> Result<&'static PgClient, Status> {
+    Ok(artifact_postgres_pool().await?.client())
+}
+
+async fn artifact_postgres_ready() -> bool {
+    match artifact_postgres_client().await {
+        Ok(client) => client.query_one("SELECT 1", &[]).await.is_ok(),
+        Err(_) => false,
+    }
+}
+
+async fn ensure_artifact_tables(client: &PgClient) -> Result<String, Status> {
     let schema = artifact_postgres_schema();
     client
         .batch_execute(&format!(r#"CREATE SCHEMA IF NOT EXISTS "{schema}";"#))
@@ -448,7 +509,7 @@ async fn load_record_by_artifact_id(
     artifact_id: &str,
 ) -> Result<StoredArtifact, Status> {
     let client = artifact_postgres_client().await?;
-    let schema = ensure_artifact_tables(&client).await?;
+    let schema = ensure_artifact_tables(client).await?;
     let row = client
         .query_opt(
             &format!(
@@ -523,7 +584,7 @@ async fn persist_uploaded_record(
     let client = artifact_postgres_client()
         .await
         .map_err(anyhow::Error::msg)?;
-    let schema = ensure_artifact_tables(&client)
+    let schema = ensure_artifact_tables(client)
         .await
         .map_err(anyhow::Error::msg)?;
     let descriptor = ArtifactDescriptor {
@@ -653,7 +714,7 @@ async fn persist_uploaded_record(
 
 async fn count_indexed_artifacts() -> Result<i64, Status> {
     let client = artifact_postgres_client().await?;
-    let schema = ensure_artifact_tables(&client).await?;
+    let schema = ensure_artifact_tables(client).await?;
     let row = client
         .query_one(
             &format!(r#"SELECT COUNT(*)::BIGINT AS count FROM "{schema}"."artifact_objects""#),
@@ -865,7 +926,7 @@ impl ArtifactEngineService for ArtifactServer {
         stored.record.evidence_json = evidence_json.clone();
         stored.record.updated_at_ms = now_ms();
         let client = artifact_postgres_client().await?;
-        let schema = ensure_artifact_tables(&client).await?;
+        let schema = ensure_artifact_tables(client).await?;
         client
             .execute(
                 &format!(
@@ -913,7 +974,7 @@ impl ArtifactEngineService for ArtifactServer {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
-        let postgres_ready = !artifact_postgres_dsn().is_empty();
+        let postgres_ready = artifact_postgres_ready().await;
         let object_store_config = artifact_object_store_config();
         let object_store_ready = if let Some(config) = object_store_config.as_ref() {
             artifact_object_store_ready(config).await.is_ok()
@@ -951,6 +1012,19 @@ impl ArtifactEngineService for ArtifactServer {
                 "required_unconfigured".to_string()
             },
         );
+        details.insert(
+            "postgres".to_string(),
+            if postgres_ready {
+                "ready".to_string()
+            } else if artifact_postgres_dsn().is_empty() {
+                "required_unconfigured".to_string()
+            } else {
+                "unreachable".to_string()
+            },
+        );
+        if let Ok(pool) = artifact_postgres_pool().await {
+            details.insert("postgres_pool_size".to_string(), pool.size().to_string());
+        }
         details.insert(
             "metadata_mode".to_string(),
             "canonical_descriptor".to_string(),

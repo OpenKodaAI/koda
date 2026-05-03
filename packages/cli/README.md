@@ -76,22 +76,21 @@ other environments, install those prerequisites yourself and use the npm CLI pat
 
 When the installer completes, start in the dashboard:
 
-- Dashboard setup: `http://localhost:3000/control-plane/setup`
+- Dashboard setup: `http://localhost:3000/setup`
 - Control-plane home: `http://localhost:3000/control-plane`
 - Dashboard overview: `http://localhost:3000`
 
 The first-run flow is intentionally linear:
 
-1. open `/control-plane/setup`
+1. open `/setup`
 2. paste the short-lived setup code printed by `koda install`
 3. create the local owner account
-4. sign in to open the HTTP-only operator session
-5. finish access policy and default provider setup
-6. optionally connect the first Telegram agent
+4. save the one-time recovery codes
+5. sign in to open the HTTP-only operator session
 
 If the setup code expires before you finish, run `koda auth issue-code` and continue from the same setup screen.
 
-From there you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
+Fresh installs do not create seeded agents, workspaces, squads, provider connections, MCP catalog rows, or default control-plane settings. From an empty control plane you can validate platform health, configure access, connect a provider, and create your first agent without editing per-agent `.env` values.
 From the control plane you can also connect and verify integrations, inspect `connection_status` and health, and then grant those integrations per bot through the agent contract instead of relying on ambient system-wide access.
 
 The scoped npm package ships the same product-only release bundle that is attached to GitHub Releases:
@@ -173,9 +172,9 @@ For a public architecture walkthrough, start with [Documentation Index](https://
 ## Public Interfaces
 
 - `/` for the main operations dashboard served by `apps/web`
-- `/control-plane/setup` in `apps/web` as the canonical first-boot configuration surface
+- `/setup` in `apps/web` as the canonical first-boot configuration surface
 - `/control-plane` in `apps/web` as the control-plane home and agent catalog after auth/setup
-- `/setup` as a compatibility bridge into the dashboard setup flow
+- `/control-plane/setup` as a compatibility redirect into the dashboard setup flow
 - `/api/control-plane/agents/*` for canonical agent-management operations
 - `/api/control-plane/dashboard/agents/*` for canonical operational dashboard data
 - `/api/runtime/*` for runtime inspection and control

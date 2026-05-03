@@ -39,6 +39,7 @@ services:
       ARTIFACT_GRPC_TARGET: "artifact:50064"
       RETRIEVAL_GRPC_TARGET: "retrieval:50062"
       RUNTIME_KERNEL_GRPC_TARGET: "runtime-kernel:50061"
+      RUNTIME_KERNEL_SOCKET: "runtime-kernel:50061"
       BOT_GATEWAY_GRPC_TARGET: "bot-gateway:50066"
       BOT_GATEWAY_ENABLED: "${BOT_GATEWAY_ENABLED:-false}"
       POLICY_ENGINE_GRPC_TARGET: "policy-engine:50067"
@@ -228,6 +229,7 @@ services:
     restart: unless-stopped
     environment:
       RUNTIME_KERNEL_GRPC_TARGET: "0.0.0.0:50061"
+      RUNTIME_KERNEL_SOCKET: "0.0.0.0:50061"
       RUNTIME_KERNEL_ROOT: "${RUNTIME_KERNEL_ROOT:-/tmp/koda-runtime/default/kernel}"
     tmpfs:
       - /tmp/koda-runtime
@@ -399,4 +401,3 @@ volumes:
   postgres-data:
   seaweedfs-data:
   tmp-images:
-

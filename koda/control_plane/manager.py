@@ -163,12 +163,10 @@ from .execution_policy import (
     evaluate_execution_policy,
     resolve_execution_policy,
 )
-from .mcp_catalog import authoritative_mcp_catalog_entries
 from .settings import (
     AGENT_SECTIONS,
     CONTROL_PLANE_AUTO_IMPORT,
     CONTROL_PLANE_RUNTIME_DIR,
-    CONTROL_PLANE_SKIP_DEFAULT_SEED,
     DASHBOARD_AGENT_CONSTANTS_PATH,
     DOCUMENT_KINDS,
     ROOT_DIR,
@@ -1560,182 +1558,53 @@ class ControlPlaneManager:
             return
         if CONTROL_PLANE_AUTO_IMPORT:
             self.import_legacy_state()
-        self._seed_authoritative_mcp_catalog()
-        self._seed_default_world()
+        self._repair_legacy_default_agent_id()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
         self._cleanup_provider_download_jobs()
 
-    def _seed_authoritative_mcp_catalog(self) -> None:
-        if not self._auto_seed_enabled():
+    def _repair_legacy_default_agent_id(self) -> None:
+        """Normalize legacy default-agent rows from `koda` to canonical `KODA`."""
+        legacy_id = "koda"
+        canonical_id = _normalize_agent_id(legacy_id)
+        legacy_row = fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
+        if legacy_row is None:
             return
-        if self._seeding_legacy_state:
-            return
-        self._seeding_legacy_state = True
-        try:
-            for entry in authoritative_mcp_catalog_entries():
-                server_key = str(entry.pop("server_key"))
-                try:
-                    self.upsert_mcp_catalog_entry(server_key, entry)
-                except Exception:
-                    log.debug("control_plane_mcp_seed_failed", server_key=server_key, exc_info=True)
-        finally:
-            self._seeding_legacy_state = False
-
-    def _seed_default_world(self) -> None:
-        """Seed sensible global defaults so a fresh install is immediately usable.
-
-        Runs idempotently after MCP catalog seeding and legacy import. Only writes
-        sections that are currently absent — never overwrites operator edits nor
-        values already populated by ``import_legacy_state``. Governed by
-        ``CONTROL_PLANE_SKIP_DEFAULT_SEED`` for tests and customized deploys.
-        """
-        if not self._auto_seed_enabled():
-            return
-        if self._seeding_legacy_state:
-            return
-        if CONTROL_PLANE_SKIP_DEFAULT_SEED:
-            return
-        existing_sections = self._load_global_sections()
-        defaults: dict[str, dict[str, Any]] = {
-            "general": {"rate_limit_per_minute": 30},
-            "providers": {
-                "max_budget_usd": 5.0,
-                "max_total_budget_usd": 50.0,
-                "fallback_order": [],
-                "usage_profile": "balanced",
-            },
-            "tools": {"default_agent_mode": "chat"},
-            "integrations": {},
-            # `policy` + `env` is the source of truth for memory and knowledge
-            # toggles. Top-level fields like `enabled`, `proactive_enabled`,
-            # `promotion_mode`, `require_freshness_provenance` were set here in
-            # earlier seeds and ended up shadowing the policy values, so the
-            # `_apply_*_policy_to_section` cleanup would silently drop them on
-            # the next save. Seed the canonical shape directly to avoid round-trip
-            # churn.
-            "memory": {
-                "policy": {
-                    "enabled": False,
-                    "proactive_enabled": False,
-                    "procedural_enabled": False,
-                },
-                "env": {
-                    "MEMORY_ENABLED": "false",
-                    "MEMORY_PROACTIVE_ENABLED": "false",
-                    "MEMORY_PROCEDURAL_ENABLED": "false",
-                },
-            },
-            "knowledge": {
-                "policy": {
-                    "enabled": False,
-                    "promotion_mode": "read_only",
-                    "require_freshness_provenance": True,
-                },
-                "env": {
-                    "KNOWLEDGE_ENABLED": "false",
-                    "KNOWLEDGE_PROMOTION_MODE": "read_only",
-                    "KNOWLEDGE_REQUIRE_FRESHNESS_PROVENANCE": "true",
-                },
-            },
-            "scheduler": {
-                "scheduler_enabled": True,
-                "scheduler_default_timezone": "America/Sao_Paulo",
-                "runbook_governance_enabled": False,
-            },
-            "runtime": {
-                "runtime_environments_enabled": True,
-                "runtime_event_stream_enabled": True,
-                "runtime_recovery_enabled": True,
-            },
-        }
-        sections_to_write: dict[str, dict[str, Any]] = {}
-        for section, default_values in defaults.items():
-            current = _safe_json_object(existing_sections.get(section))
-            merged = dict(current)
-            changed = False
-            for key, value in default_values.items():
-                if key not in merged:
-                    merged[key] = value
-                    changed = True
-            if changed:
-                sections_to_write[section] = merged
-        has_any_workspace = bool(fetch_one("SELECT 1 FROM cp_workspaces LIMIT 1"))
-        has_any_squad = bool(fetch_one("SELECT 1 FROM cp_workspace_squads LIMIT 1"))
-        has_any_agent = bool(fetch_one("SELECT 1 FROM cp_agent_definitions LIMIT 1"))
-        seed_workspace = not has_any_workspace
-        seed_squad = not has_any_squad and seed_workspace
-        seed_agent = not has_any_agent
-        if not sections_to_write and not seed_workspace and not seed_squad and not seed_agent:
-            return
-        self._seeding_legacy_state = True
-        try:
-            for section, value in sections_to_write.items():
-                execute(
-                    """
-                    INSERT INTO cp_global_sections (section, data_json, updated_at)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
-                    """,
-                    (section, json_dump(value), now_iso()),
-                )
-            now = now_iso()
-            if seed_workspace:
-                execute(
-                    """
-                    INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    ("ws_default", "Pessoal", "Workspace inicial.", now, now),
-                )
-            if seed_squad:
-                execute(
-                    """
-                    INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    ("sq_default", "ws_default", "Geral", "Squad inicial.", now, now),
-                )
-            if seed_agent:
-                starter_workspace = "ws_default" if seed_workspace or has_any_workspace else None
-                # Only link to the default squad if we also just created it, avoiding
-                # accidental coupling to a legacy squad the operator may not expect.
-                starter_squad = "sq_default" if seed_squad else None
-                appearance = {"label": "Koda", "color": "#FFFFFF", "color_rgb": "255, 255, 255"}
-                execute(
-                    """
-                    INSERT INTO cp_agent_definitions (
-                        id, display_name, status, appearance_json, storage_namespace,
-                        runtime_endpoint_json, applied_version, desired_version, metadata_json,
-                        workspace_id, squad_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (
-                        "koda",
-                        "Koda",
-                        "paused",
-                        json_dump(appearance),
-                        "koda",
-                        json_dump({}),
-                        json_dump({"origin": "default_seed"}),
-                        starter_workspace if has_any_workspace or seed_workspace else None,
-                        starter_squad,
-                        now,
-                        now,
-                    ),
-                )
-            log.info(
-                "control_plane_default_world_seeded",
-                sections=sorted(sections_to_write.keys()),
-                seeded_workspace=seed_workspace,
-                seeded_squad=seed_squad,
-                seeded_agent=seed_agent,
+        if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (canonical_id,)) is None:
+            execute(
+                "UPDATE cp_agent_definitions SET id = ?, updated_at = ? WHERE id = ?",
+                (canonical_id, now_iso(), legacy_id),
             )
-        finally:
-            self._seeding_legacy_state = False
+        else:
+            execute("DELETE FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
+        for table in (
+            "cp_agent_assignments",
+            "cp_agent_config_versions",
+            "cp_agent_connections",
+            "cp_agent_documents",
+            "cp_agent_sections",
+            "cp_apply_operations",
+            "cp_bot_gateway_tokens",
+            "cp_connection_discovery_runs",
+            "cp_knowledge_assets",
+            "cp_mcp_agent_connections",
+            "cp_mcp_capability_policies",
+            "cp_mcp_capability_snapshots",
+            "cp_mcp_discovered_prompts",
+            "cp_mcp_discovered_resources",
+            "cp_mcp_discovered_tools",
+            "cp_mcp_oauth_sessions",
+            "cp_mcp_oauth_tokens",
+            "cp_mcp_tool_policies",
+            "cp_mcp_user_servers",
+            "cp_policy_spend_ledger",
+            "cp_secret_values",
+            "cp_skill_assets",
+            "cp_telegram_offsets",
+            "cp_telegram_pending_updates",
+            "cp_template_assets",
+        ):
+            execute(f"UPDATE {table} SET agent_id = ? WHERE agent_id = ?", (canonical_id, legacy_id))
 
     def _require_agent_row(self, agent_id: str) -> tuple[str, Any]:
         normalized = _normalize_agent_id(agent_id)
@@ -2320,69 +2189,39 @@ class ControlPlaneManager:
             return True, mask_secret(env_value)
         return False, ""
 
-    def _ensure_provider_connections_seeded(self) -> None:
-        sections = self._system_settings_sections()
-        base_env = self._merged_global_env_base()
-        now = now_iso()
-        for provider_id in MANAGED_PROVIDER_IDS:
-            existing = fetch_one(
-                "SELECT provider_id FROM cp_provider_connections WHERE provider_id = ?",
-                (provider_id,),
-            )
-            if existing is not None:
-                continue
-            secret_present = bool(self._provider_api_key_secret_value(provider_id))
-            project_id = ""
-            project_key = PROVIDER_PROJECT_ENV_KEYS.get(provider_id)
-            if project_key:
-                project_id = (
-                    _trimmed_text(base_env.get(project_key))
-                    or _trimmed_text(os.environ.get(project_key))
-                    or _trimmed_text(
-                        self._access_meta_map("provider_connection_meta", sections=sections)
-                        .get(provider_id.upper(), {})
-                        .get("project_id")
-                    )
-                )
-            catalog_def = CORE_PROVIDER_CATALOG.get(provider_id)
-            supported_auth_modes = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
-            if "subscription_login" in supported_auth_modes and not secret_present:
-                auth_mode = "subscription_login"
-            else:
-                auth_mode = "api_key"
-            configured = 1 if secret_present else 0
-            if provider_id == "ollama":
-                auth_mode = "local"
-                configured = 1 if self._bool_from_env(base_env, "OLLAMA_ENABLED", False) else 0
-            execute(
-                """
-                INSERT OR IGNORE INTO cp_provider_connections (
-                    provider_id, auth_mode, configured, verified, account_label, plan_label,
-                    project_id, last_verified_at, last_error, created_at, updated_at
-                ) VALUES (?, ?, ?, 0, '', '', ?, NULL, '', ?, ?)
-                """,
-                (
-                    provider_id,
-                    auth_mode,
-                    configured,
-                    project_id,
-                    now,
-                    now,
-                ),
-            )
-
     def _provider_connection_row(self, provider_id: str) -> Any:
         normalized = provider_id.strip().lower()
         if normalized not in MANAGED_PROVIDER_IDS:
             raise ValueError(f"unsupported provider connection: {provider_id}")
-        self._ensure_provider_connections_seeded()
         row = fetch_one(
             "SELECT * FROM cp_provider_connections WHERE provider_id = ?",
             (normalized,),
         )
-        if row is None:
-            raise KeyError(normalized)
-        return row
+        return row or self._default_provider_connection_row(normalized)
+
+    def _default_provider_connection_row(self, provider_id: str) -> dict[str, Any]:
+        normalized = provider_id.strip().lower()
+        catalog_def = CORE_PROVIDER_CATALOG.get(normalized)
+        supported_auth_modes = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
+        if normalized in {"claude", "ollama"}:
+            auth_mode = "local"
+        elif "subscription_login" in supported_auth_modes:
+            auth_mode = "subscription_login"
+        else:
+            auth_mode = "api_key"
+        return {
+            "provider_id": normalized,
+            "auth_mode": auth_mode,
+            "configured": 0,
+            "verified": 0,
+            "account_label": "",
+            "plan_label": "",
+            "project_id": "",
+            "last_verified_at": "",
+            "last_error": "",
+            "created_at": "",
+            "updated_at": "",
+        }
 
     def _provider_connection_meta(self) -> dict[str, dict[str, Any]]:
         return self._access_meta_map("provider_connection_meta")
@@ -2418,7 +2257,6 @@ class ControlPlaneManager:
         *,
         env: dict[str, str] | None = None,
     ) -> tuple[str, str, str]:
-        self._ensure_provider_connections_seeded()
         row = fetch_one("SELECT auth_mode FROM cp_provider_connections WHERE provider_id = 'ollama'")
         auth_mode = _trimmed_text(row["auth_mode"] if row is not None else "") or "local"
         base_url = self._resolve_ollama_base_url(auth_mode=auth_mode, env=env)
@@ -2545,7 +2383,6 @@ class ControlPlaneManager:
         self._persist_global_sections(sections)
 
     def _provider_connection_env(self) -> dict[str, str]:
-        self._ensure_provider_connections_seeded()
         env: dict[str, str] = {}
         rows = fetch_all("SELECT * FROM cp_provider_connections ORDER BY provider_id ASC")
         for row in rows:
@@ -11835,6 +11672,31 @@ class ControlPlaneManager:
 
     def _serialize_mcp_catalog_row(self, row: Any) -> dict[str, Any]:
         metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+        auth_capabilities = _safe_json_object(metadata.get("auth_capabilities"))
+        auth_flow_kind = str(auth_capabilities.get("auth_flow_kind") or metadata.get("auth_flow_kind") or "")
+        if not auth_flow_kind:
+            oauth_enabled = bool(int(row.get("oauth_enabled") or 0))
+            oauth_mode = str(row.get("oauth_mode") or "none")
+            transport_kind = str(row.get("transport_kind") or "local")
+            auth_strategy = str(row.get("auth_strategy") or "no_auth")
+            if oauth_enabled and transport_kind == "remote" and oauth_mode == "dcr":
+                auth_flow_kind = "mcp_remote_oauth_dcr"
+            elif oauth_enabled and transport_kind == "remote" and oauth_mode == "confidential":
+                auth_flow_kind = "mcp_remote_oauth_confidential"
+            elif "oauth" in auth_strategy and transport_kind == "local":
+                auth_flow_kind = "provider_native_oauth"
+            elif auth_strategy in {"api_key", "api_token"}:
+                auth_flow_kind = "api_key"
+            elif auth_strategy == "local_session":
+                auth_flow_kind = "local_session"
+            elif auth_strategy in {"manual_header", "header"}:
+                auth_flow_kind = "manual_header"
+            else:
+                auth_flow_kind = "none"
+        oauth_available = auth_flow_kind in {"mcp_remote_oauth_dcr", "mcp_remote_oauth_confidential"}
+        oauth_availability = str(
+            auth_capabilities.get("oauth_availability") or ("available" if oauth_available else "not_available")
+        )
         return {
             "server_key": str(row["server_key"]),
             "display_name": str(row.get("display_name") or ""),
@@ -11859,7 +11721,9 @@ class ControlPlaneManager:
             "vendor_notes": str(row.get("vendor_notes") or ""),
             "default_policy": str(row.get("default_policy") or "always_ask"),
             "metadata": metadata,
-            "auth_capabilities": _safe_json_object(metadata.get("auth_capabilities")),
+            "auth_capabilities": auth_capabilities,
+            "auth_flow_kind": auth_flow_kind,
+            "oauth_availability": oauth_availability,
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
         }
@@ -11882,7 +11746,42 @@ class ControlPlaneManager:
         metadata = _safe_json_object(row.get("metadata"))
         tagline = str(metadata.get("tagline") or (spec.tagline if spec is not None else ""))
         auth_capabilities = _safe_json_object(row.get("auth_capabilities"))
-        oauth_supported = bool(auth_capabilities.get("oauth_enabled"))
+        auth_flow_kind = str(row.get("auth_flow_kind") or auth_capabilities.get("auth_flow_kind") or "")
+        if not auth_flow_kind:
+            oauth_mode_value = str(row.get("oauth_mode") or "none")
+            transport_kind_value = str(row.get("transport_kind") or "local")
+            strategy_value = str(row.get("auth_strategy") or "no_auth")
+            if (
+                bool(auth_capabilities.get("oauth_enabled"))
+                and transport_kind_value == "remote"
+                and oauth_mode_value == "dcr"
+            ):
+                auth_flow_kind = "mcp_remote_oauth_dcr"
+            elif (
+                bool(auth_capabilities.get("oauth_enabled"))
+                and transport_kind_value == "remote"
+                and oauth_mode_value == "confidential"
+            ):
+                auth_flow_kind = "mcp_remote_oauth_confidential"
+            elif "oauth" in strategy_value and transport_kind_value == "local":
+                auth_flow_kind = "provider_native_oauth"
+            elif strategy_value in {"api_key", "api_token"}:
+                auth_flow_kind = "api_key"
+            elif strategy_value == "local_session":
+                auth_flow_kind = "local_session"
+            elif strategy_value in {"manual_header", "header"}:
+                auth_flow_kind = "manual_header"
+            else:
+                auth_flow_kind = "none"
+        oauth_supported = bool(auth_capabilities.get("oauth_enabled")) and auth_flow_kind in {
+            "mcp_remote_oauth_dcr",
+            "mcp_remote_oauth_confidential",
+        }
+        oauth_availability = str(
+            row.get("oauth_availability")
+            or auth_capabilities.get("oauth_availability")
+            or ("available" if oauth_supported else "not_available")
+        )
 
         expected_tools: list[dict[str, Any]] = []
         if spec is not None:
@@ -11933,6 +11832,8 @@ class ControlPlaneManager:
             "official_support_level": str(row.get("official_support_level") or "community_manual"),
             "oauth_mode": str(row.get("oauth_mode") or "none"),
             "oauth_supported": oauth_supported,
+            "auth_flow_kind": auth_flow_kind,
+            "oauth_availability": oauth_availability,
             "remote_url": row.get("remote_url") or row.get("url") or None,
             "vendor_notes": str(row.get("vendor_notes") or ""),
             "default_policy": str(row.get("default_policy") or "always_ask"),

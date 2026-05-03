@@ -1,4 +1,4 @@
-export const APP_TOUR_VERSION = 1;
+export const APP_TOUR_VERSION = 2;
 export const APP_TOUR_STORAGE_KEY = "ui:onboarding-tour";
 
 export const TOUR_CHAPTER_IDS = [
@@ -160,7 +160,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "shell.topbar.actions",
     fallbackAnchor: "shell.topbar.language-switcher.trigger",
     placement: "bottom",
-    autoIncluded: false,
+    autoIncluded: true,
     copy: {
       default: {
         titleKey: "tour.steps.shellTopbar.title",
@@ -175,9 +175,9 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routeKey: "overview",
     kind: "anchored",
     anchor: "overview.stats",
-    fallbackAnchor: "overview.bot-switcher",
+    fallbackAnchor: "overview.agent-switcher",
     placement: "bottom",
-    autoIncluded: false,
+    autoIncluded: true,
     copy: {
       default: {
         titleKey: "tour.steps.overviewMetrics.title",
@@ -195,10 +195,10 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routePattern: "/",
     routeKey: "overview",
     kind: "anchored",
-    anchor: "overview.live-plan",
-    fallbackAnchor: "overview.runtime-control",
+    anchor: "overview.activity",
+    fallbackAnchor: "overview.history",
     placement: "top",
-    autoIncluded: false,
+    autoIncluded: true,
     copy: {
       default: {
         titleKey: "tour.steps.overviewLivePlan.title",
@@ -236,7 +236,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "catalog.board",
     fallbackAnchor: "catalog.empty",
     placement: "top",
-    autoIncluded: false,
+    autoIncluded: true,
     copy: {
       default: {
         titleKey: "tour.steps.controlPlaneBoard.title",
@@ -309,7 +309,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routeKey: "runtime",
     kind: "anchored",
     anchor: "runtime.header",
-    fallbackAnchor: "runtime.toolbar",
+    fallbackAnchor: "runtime.metrics",
     placement: "bottom",
     autoIncluded: true,
     copy: {
@@ -543,7 +543,7 @@ export const AUTO_TOUR_STEP_IDS = TOUR_STEPS.filter((step) => step.autoIncluded)
   (step) => step.id,
 );
 
-export const MANUAL_TOUR_STEP_IDS = TOUR_STEPS.map((step) => step.id);
+export const MANUAL_TOUR_STEP_IDS = AUTO_TOUR_STEP_IDS;
 
 export function isTourChapterId(value: string): value is TourChapterId {
   return (TOUR_CHAPTER_IDS as readonly string[]).includes(value);

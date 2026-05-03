@@ -58,12 +58,21 @@ export async function POST(request: NextRequest) {
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    const recoveryCodes = Array.isArray(data.recovery_codes)
+      ? data.recovery_codes.filter((code): code is string => typeof code === "string" && code.trim().length > 0)
+      : [];
+    if (recoveryCodes.length === 0) {
+      return NextResponse.json(
+        { error: "Owner account setup did not issue recovery codes. Please generate a new setup code and retry." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const response = NextResponse.json(
       {
         ok: true,
         auth: data.auth || null,
         operator: data.operator || null,
-        recovery_codes: Array.isArray(data.recovery_codes) ? data.recovery_codes : [],
+        recovery_codes: recoveryCodes,
       },
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );

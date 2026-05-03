@@ -127,6 +127,21 @@ def run_doctor(
     except Exception as exc:  # pragma: no cover - exercised via failure payload expectations
         checks.append({"name": "web_dashboard", "ok": False, "error": str(exc)})
 
+    onboarding_payload: dict[str, Any] = {}
+    try:
+        onboarding_payload = fetch_json(f"{base_url.rstrip('/')}/api/control-plane/onboarding/status")
+        checks.append(
+            {
+                "name": "onboarding_status",
+                "ok": True,
+                "has_owner": bool(onboarding_payload.get("has_owner")),
+                "bootstrap_required": bool(onboarding_payload.get("bootstrap_required")),
+                "bootstrap_file_path": onboarding_payload.get("bootstrap_file_path"),
+            }
+        )
+    except Exception as exc:  # pragma: no cover - exercised via failure payload expectations
+        checks.append({"name": "onboarding_status", "ok": False, "error": str(exc)})
+
     if provider_id:
         onboarding_url = f"{base_url.rstrip('/')}/api/control-plane/onboarding/status"
         try:
@@ -144,7 +159,8 @@ def run_doctor(
         "checks": checks,
         "base_url": base_url,
         "dashboard_url": dashboard_url,
-        "setup_url": f"{dashboard_url.rstrip('/')}/control-plane",
+        "dashboard_setup_url": f"{dashboard_url.rstrip('/')}/setup",
+        "setup_url": f"{dashboard_url.rstrip('/')}/setup",
         "legacy_setup_url": f"{base_url.rstrip('/')}/setup",
     }
 

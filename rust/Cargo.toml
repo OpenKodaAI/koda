@@ -7,7 +7,6 @@ members = [
   "koda-policy-engine",
   "koda-proto",
   "koda-retrieval-engine",
-  "koda-rpc-gateway",
   "koda-runtime-kernel",
   "koda-security-core",
   "koda-security-service",

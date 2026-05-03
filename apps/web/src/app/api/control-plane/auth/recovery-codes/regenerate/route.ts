@@ -57,10 +57,19 @@ export async function POST(request: NextRequest) {
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    const recoveryCodes = Array.isArray(data.recovery_codes)
+      ? data.recovery_codes.filter((code): code is string => typeof code === "string" && code.trim().length > 0)
+      : [];
+    if (recoveryCodes.length === 0) {
+      return NextResponse.json(
+        { error: "Recovery codes were not issued. Please retry." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     return NextResponse.json(
       {
         ok: true,
-        recovery_codes: Array.isArray(data.recovery_codes) ? data.recovery_codes : [],
+        recovery_codes: recoveryCodes,
         generated_at: typeof data.generated_at === "string" ? data.generated_at : null,
       },
       { status: 201, headers: { "Cache-Control": "no-store" } },

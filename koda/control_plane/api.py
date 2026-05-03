@@ -2063,12 +2063,17 @@ async def start_oauth_flow_route(request: web.Request) -> web.Response:
 
     frontend_callback_uri = str(payload.get("frontend_callback_uri") or payload.get("redirect_uri") or "")
     redirect_uri = str(payload.get("redirect_uri") or frontend_callback_uri)
-    result = await start_oauth_flow(
-        agent_id,
-        server_key,
-        frontend_callback_uri=frontend_callback_uri,
-        redirect_uri=redirect_uri,
-    )
+    try:
+        result = await start_oauth_flow(
+            agent_id,
+            server_key,
+            frontend_callback_uri=frontend_callback_uri,
+            redirect_uri=redirect_uri,
+        )
+    except KeyError:
+        return web.json_response({"error": "agent_not_found"}, status=404)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     return web.json_response(result, status=201)
 
 
