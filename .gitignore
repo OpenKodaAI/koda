@@ -73,3 +73,5 @@ oauth*.json
 *.keystore
 .koda-release/
 dist/release/
+*.tgz
+.playwright-cli/
