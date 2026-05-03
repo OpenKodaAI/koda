@@ -8,9 +8,9 @@ description: Modify the repository memory pipeline safely. Use when changing rec
 ## Workflow
 
 1. Read [`../../repo-map.yaml`](../../repo-map.yaml) first to confirm the memory module area and matching tests.
-2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `AGENTS.md`, `CLAUDE.md`, and provider-neutral docs aligned.
+2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `CLAUDE.md` and provider-neutral docs aligned.
 3. Read [`../../runtime-flows.md`](../../runtime-flows.md) for the memory lifecycle.
-4. Read [`../../../koda/memory/AGENTS.md`](../../../koda/memory/AGENTS.md) or [`../../../koda/memory/CLAUDE.md`](../../../koda/memory/CLAUDE.md).
+4. Read [`../../../koda/memory/CLAUDE.md`](../../../koda/memory/CLAUDE.md).
 5. Read [`../../configuration-and-prompts.md`](../../configuration-and-prompts.md) if the task changes memory settings.
 6. Inspect the relevant modules under [`../../../koda/memory`](../../../koda/memory).
 7. Inspect the matching tests under [`../../../tests/test_memory`](../../../tests/test_memory).

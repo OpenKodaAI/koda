@@ -1,6 +1,6 @@
 # Web App Design System & UI Principles
 
-This file is the canonical reference for the Koda web app's design language. Apply these principles to every change under `apps/web/`. The matching [`AGENTS.md`](AGENTS.md) mirrors this guidance for Codex-style tooling.
+This file is the canonical reference for the Koda web app's design language. Apply these principles to every change under `apps/web/`.
 
 ## Identity
 

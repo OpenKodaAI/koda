@@ -35,7 +35,7 @@ Use this index when you want to install, operate, evaluate, or contribute to Kod
 - [Contributing guide](../CONTRIBUTING.md)
 - [Security policy](../SECURITY.md)
 - [Code of conduct](../CODE_OF_CONDUCT.md)
-- [Repository agent guide](../AGENTS.md)
+- [Repository agent guide](../CLAUDE.md)
 
 ## Documentation Conventions
 

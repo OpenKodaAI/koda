@@ -14,15 +14,7 @@ OUTPUT_PATH = ROOT / "docs" / "ai" / "repo-map.yaml"
 
 ROOT_DOCS = [
     "README.md",
-    "AGENTS.md",
     "CLAUDE.md",
-]
-
-AGENT_SUBTREE_GUIDES = [
-    "koda/AGENTS.md",
-    "koda/services/AGENTS.md",
-    "koda/memory/AGENTS.md",
-    "tests/AGENTS.md",
 ]
 
 CLAUDE_SUBTREE_GUIDES = [
@@ -32,7 +24,7 @@ CLAUDE_SUBTREE_GUIDES = [
     "tests/CLAUDE.md",
 ]
 
-SUBTREE_GUIDES = AGENT_SUBTREE_GUIDES + CLAUDE_SUBTREE_GUIDES
+SUBTREE_GUIDES = CLAUDE_SUBTREE_GUIDES
 
 REFERENCE_DOCS = [
     "docs/ai/llm-compatibility.md",
@@ -150,11 +142,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "Public product and contributor documentation lives under docs/, while docs/ai "
                     "remains the repository guidance layer for humans and modern LLM tooling."
                 ),
-                (
-                    "AGENTS.md files are Codex-oriented entrypoints, while CLAUDE.md files "
-                    "mirror the same guidance for Claude Code."
-                ),
-                "agents/openai.yaml files add optional Codex metadata and do not replace canonical skill instructions.",
+                "CLAUDE.md files are the canonical entrypoints for repository guidance.",
                 "The committed YAML is expected to match generator output exactly.",
             ],
         },
@@ -164,7 +152,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "summary": "Package script entrypoint that resolves to the control-plane supervisor bootstrap.",
                 "paths": ["pyproject.toml", "koda/control_plane/__main__.py"],
                 "related_tests": ["tests/test_control_plane_dashboard_api.py"],
-                "related_docs": ["README.md", "AGENTS.md", "docs/ai/architecture-overview.md"],
+                "related_docs": ["README.md", "docs/ai/architecture-overview.md"],
             },
             {
                 "id": "web-dashboard",
@@ -193,7 +181,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ],
                 "related_docs": [
                     "README.md",
-                    "AGENTS.md",
                     "docs/ai/architecture-overview.md",
                     "docs/ai/runtime-flows.md",
                 ],
@@ -267,7 +254,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ],
                 "related_docs": [
                     "README.md",
-                    "AGENTS.md",
                     "docs/ai/architecture-overview.md",
                     "docs/ai/configuration-and-prompts.md",
                 ],
@@ -280,7 +266,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "paths": handlers,
                 "related_tests": handler_tests,
                 "related_docs": [
-                    "koda/AGENTS.md",
                     "docs/ai/runtime-flows.md",
                     "docs/ai/change-playbook.md",
                 ],
@@ -300,7 +285,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "paths": services,
                 "related_tests": service_tests,
                 "related_docs": [
-                    "koda/services/AGENTS.md",
                     "docs/ai/architecture-overview.md",
                     "docs/ai/runtime-flows.md",
                     "docs/ai/change-playbook.md",
@@ -318,7 +302,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "paths": memory,
                 "related_tests": memory_tests,
                 "related_docs": [
-                    "koda/memory/AGENTS.md",
                     "docs/ai/runtime-flows.md",
                     "docs/ai/configuration-and-prompts.md",
                 ],
@@ -358,8 +341,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "paths": utils,
                 "related_tests": util_tests,
                 "related_docs": [
-                    "koda/AGENTS.md",
-                    "tests/AGENTS.md",
                     "docs/ai/change-playbook.md",
                 ],
                 "related_skills": ["docs/ai/skills/repo-orientation/SKILL.md"],
@@ -587,7 +568,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ],
                 "related_docs": [
                     "README.md",
-                    "AGENTS.md",
                     "docs/ai/configuration-and-prompts.md",
                 ],
                 "related_tests": [
@@ -758,7 +738,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "summary": "Only explicitly allowed Telegram users can interact with the agent.",
                 "enforced_by": ["koda/auth.py", "koda/utils/command_helpers.py"],
                 "related_tests": ["tests/test_auth.py"],
-                "related_docs": ["AGENTS.md", "koda/AGENTS.md"],
+                "related_docs": ["koda/CLAUDE.md"],
             },
             {
                 "id": "safe-working-directory",
@@ -775,7 +755,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "tests/test_handlers/test_setdir_security.py",
                     "tests/test_handlers/test_commands_extended.py",
                 ],
-                "related_docs": ["AGENTS.md", "koda/AGENTS.md"],
+                "related_docs": ["koda/CLAUDE.md"],
             },
             {
                 "id": "supervised-write-approval",
@@ -791,8 +771,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "tests/test_services/test_tool_dispatcher.py",
                 ],
                 "related_docs": [
-                    "AGENTS.md",
-                    "koda/services/AGENTS.md",
                     "docs/ai/runtime-flows.md",
                 ],
             },
@@ -814,7 +792,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "tests/test_services/test_shell_runner.py",
                 ],
                 "related_docs": [
-                    "AGENTS.md",
                     "docs/ai/configuration-and-prompts.md",
                 ],
             },
@@ -827,7 +804,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "enforced_by": ["koda/services/db_manager.py"],
                 "related_tests": ["tests/test_services/test_db_manager.py"],
                 "related_docs": [
-                    "koda/services/AGENTS.md",
                     "docs/ai/change-playbook.md",
                 ],
             },
@@ -845,7 +821,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "tests/test_memory/test_types.py",
                 ],
                 "related_docs": [
-                    "koda/memory/AGENTS.md",
                     "docs/ai/runtime-flows.md",
                 ],
             },
@@ -856,9 +831,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "from repository guidance docs, provider entrypoints, and repo-local skills."
                 ),
                 "enforced_by": [
-                    "AGENTS.md",
                     "CLAUDE.md",
-                    "koda/AGENTS.md",
                     "koda/CLAUDE.md",
                     "docs/ai/configuration-and-prompts.md",
                     "docs/ai/llm-compatibility.md",
@@ -866,9 +839,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 "related_tests": ["tests/test_ai_docs.py", "tests/test_repo_map.py"],
                 "related_docs": [
                     "README.md",
-                    "AGENTS.md",
                     "CLAUDE.md",
-                    "koda/AGENTS.md",
                     "koda/CLAUDE.md",
                 ],
             },
@@ -995,7 +966,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 ),
                 "primary_paths": [
                     "README.md",
-                    "AGENTS.md",
                     "CLAUDE.md",
                     "docs/ai",
                     "scripts/generate_repo_map.py",
@@ -1021,35 +991,35 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                     "tests/test_services/test_health.py",
                     "tests/test_services/runtime/test_smoke.py",
                 ],
-                "related_docs": ["tests/AGENTS.md", "docs/ai/architecture-overview.md"],
+                "related_docs": ["docs/ai/architecture-overview.md"],
             },
             {
                 "id": "handlers",
                 "summary": "Telegram command, callback, and message behavior coverage.",
                 "source_paths": handlers,
                 "test_paths": handler_tests,
-                "related_docs": ["tests/AGENTS.md", "docs/ai/change-playbook.md"],
+                "related_docs": ["docs/ai/change-playbook.md"],
             },
             {
                 "id": "services",
                 "summary": "Queue orchestration, provider integrations, runtime tools, and safety-rule coverage.",
                 "source_paths": services,
                 "test_paths": service_tests,
-                "related_docs": ["tests/AGENTS.md", "docs/ai/runtime-flows.md"],
+                "related_docs": ["docs/ai/runtime-flows.md"],
             },
             {
                 "id": "memory",
                 "summary": "Recall, extraction, storage, maintenance, and digest behavior coverage.",
                 "source_paths": memory,
                 "test_paths": memory_tests,
-                "related_docs": ["tests/AGENTS.md", "koda/memory/AGENTS.md"],
+                "related_docs": ["tests/CLAUDE.md"],
             },
             {
                 "id": "utilities",
                 "summary": "Low-level helper coverage for media, files, formatting, parsing, and messaging.",
                 "source_paths": utils,
                 "test_paths": util_tests,
-                "related_docs": ["tests/AGENTS.md", "koda/AGENTS.md"],
+                "related_docs": ["tests/CLAUDE.md"],
             },
             {
                 "id": "ai-docs-and-repo-map",
@@ -1064,7 +1034,7 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
                 + REPO_SKILL_METADATA
                 + ["scripts/generate_repo_map.py", "docs/ai/repo-map.yaml"],
                 "test_paths": ai_doc_tests,
-                "related_docs": ["tests/AGENTS.md", "docs/ai/repo-map.yaml"],
+                "related_docs": ["docs/ai/repo-map.yaml"],
             },
         ],
         "ai_guides": {
@@ -1075,7 +1045,6 @@ def build_repo_map(root: Path | None = None) -> dict[str, Any]:
             "canonical_map": "docs/ai/repo-map.yaml",
             "generator_script": "scripts/generate_repo_map.py",
             "provider_neutral_docs": ["README.md", "docs/ai/repo-map.yaml"] + REFERENCE_DOCS + REPO_SKILL_FILES,
-            "codex_entrypoints": ["AGENTS.md"] + AGENT_SUBTREE_GUIDES + REPO_SKILL_METADATA,
             "claude_code_entrypoints": ["CLAUDE.md"] + CLAUDE_SUBTREE_GUIDES,
             "root_docs": ROOT_DOCS,
             "subtree_guides": SUBTREE_GUIDES,

@@ -44,7 +44,7 @@ Keep integrations narrow. Prefer one focused module per provider or capability.
 
 ## Change The Memory Pipeline
 
-1. Read [`../../koda/memory/AGENTS.md`](../../koda/memory/AGENTS.md).
+1. Read [`../../koda/memory/CLAUDE.md`](../../koda/memory/CLAUDE.md).
 2. Decide whether the change belongs in recall, extraction, storage, scheduling, or configuration.
 3. Preserve best-effort semantics. Memory should enrich the runtime, not become a hard blocker.
 4. Add or update tests in [`../../tests/test_memory`](../../tests/test_memory).
@@ -55,7 +55,7 @@ Keep integrations narrow. Prefer one focused module per provider or capability.
 1. Runtime agent prompt changes belong in the control-plane document layers and compiled prompt contract under [`../../koda/control_plane`](../../koda/control_plane).
 2. Runtime `/skill` prompt-template changes belong in [`../../koda/skills`](../../koda/skills).
 3. Repository guidance and repo-local skills belong in [`../`](../) and [`skills`](skills).
-4. Keep matching `AGENTS.md` and `CLAUDE.md` entrypoints aligned when local repository guidance changes.
+4. Update the closest subtree `CLAUDE.md` when local repository guidance changes.
 
 Do not merge these layers accidentally.
 
@@ -84,7 +84,7 @@ Run these extra checks when the change touches the Rust workspace:
 
 ## Change The Repo Map
 
-1. Update the relevant AI docs, `AGENTS.md` and `CLAUDE.md` entrypoints, repo-local skills, or tests.
+1. Update the relevant AI docs, `CLAUDE.md` entrypoints, repo-local skills, or tests.
 2. Regenerate the canonical map with `python3 ../../scripts/generate_repo_map.py --write`.
 3. Re-run `python3 ../../scripts/generate_repo_map.py --check`.
 4. Re-run [`../../tests/test_ai_docs.py`](../../tests/test_ai_docs.py), [`../../tests/test_repo_map.py`](../../tests/test_repo_map.py), and [`../../tests/test_open_source_hygiene.py`](../../tests/test_open_source_hygiene.py).

@@ -9,15 +9,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_AI_FILES = [
     "README.md",
-    "AGENTS.md",
     "CLAUDE.md",
-    "koda/AGENTS.md",
     "koda/CLAUDE.md",
-    "koda/services/AGENTS.md",
     "koda/services/CLAUDE.md",
-    "koda/memory/AGENTS.md",
     "koda/memory/CLAUDE.md",
-    "tests/AGENTS.md",
     "tests/CLAUDE.md",
     "docs/ai/llm-compatibility.md",
     "docs/ai/architecture-overview.md",
@@ -36,8 +31,8 @@ SKILL_NAMES = [
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
-ROOT_ENTRYPOINTS = ("README.md", "AGENTS.md", "CLAUDE.md")
-PROVIDER_ENTRYPOINTS = ("AGENTS.md", "CLAUDE.md")
+ROOT_ENTRYPOINTS = ("README.md", "CLAUDE.md")
+PROVIDER_ENTRYPOINTS = ("CLAUDE.md",)
 
 
 def test_required_ai_files_exist() -> None:

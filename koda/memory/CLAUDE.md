@@ -1,6 +1,6 @@
 # Memory Subsystem Guide
 
-The `memory` package is a best-effort enrichment layer. It should improve responses without becoming a hard dependency for normal agent execution. The matching [`AGENTS.md`](AGENTS.md) file mirrors the same local rules for `AGENTS.md`-aware tooling.
+The `memory` package is a best-effort enrichment layer. It should improve responses without becoming a hard dependency for normal agent execution.
 
 ## Responsibilities By Module
 

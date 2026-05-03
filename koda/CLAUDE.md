@@ -1,6 +1,6 @@
 # koda Package Guide
 
-This package contains the application runtime. Read this guide before editing anything under `koda`. The matching [`AGENTS.md`](AGENTS.md) file mirrors the same local rules for `AGENTS.md`-aware tooling.
+This package contains the application runtime. Read this guide before editing anything under `koda`.
 
 ## Responsibilities By Area
 

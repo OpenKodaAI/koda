@@ -10,15 +10,15 @@ description: Orient quickly in the Koda repository. Use when a task requires und
 1. Read [`../../repo-map.yaml`](../../repo-map.yaml) first when the task needs ownership, flow, or test targeting.
 2. Read [`../../../README.md`](../../../README.md).
 3. Read [`../../llm-compatibility.md`](../../llm-compatibility.md).
-4. Read the provider entrypoint you are using: [`../../../AGENTS.md`](../../../AGENTS.md) or [`../../../CLAUDE.md`](../../../CLAUDE.md).
+4. Read [`../../../CLAUDE.md`](../../../CLAUDE.md).
 5. Read [`../../architecture-overview.md`](../../architecture-overview.md).
 6. Read [`../../runtime-flows.md`](../../runtime-flows.md).
 7. If the task touches configuration or prompt behavior, read [`../../configuration-and-prompts.md`](../../configuration-and-prompts.md).
-8. Open the closest subtree entrypoint. `AGENTS.md` and `CLAUDE.md` mirrors carry the same local rules:
-   - [`../../../koda/AGENTS.md`](../../../koda/AGENTS.md) or [`../../../koda/CLAUDE.md`](../../../koda/CLAUDE.md)
-   - [`../../../koda/services/AGENTS.md`](../../../koda/services/AGENTS.md) or [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md)
-   - [`../../../koda/memory/AGENTS.md`](../../../koda/memory/AGENTS.md) or [`../../../koda/memory/CLAUDE.md`](../../../koda/memory/CLAUDE.md)
-   - [`../../../tests/AGENTS.md`](../../../tests/AGENTS.md) or [`../../../tests/CLAUDE.md`](../../../tests/CLAUDE.md)
+8. Open the closest subtree `CLAUDE.md` for local rules:
+   - [`../../../koda/CLAUDE.md`](../../../koda/CLAUDE.md)
+   - [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md)
+   - [`../../../koda/memory/CLAUDE.md`](../../../koda/memory/CLAUDE.md)
+   - [`../../../tests/CLAUDE.md`](../../../tests/CLAUDE.md)
 
 ## Produce Before Editing
 

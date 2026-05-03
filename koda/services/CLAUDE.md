@@ -1,6 +1,6 @@
 # Services Guide
 
-The `services` package holds orchestration logic and most cross-cutting runtime behavior. The matching [`AGENTS.md`](AGENTS.md) file mirrors the same local rules for `AGENTS.md`-aware tooling.
+The `services` package holds orchestration logic and most cross-cutting runtime behavior.
 
 ## High-Value Modules
 

@@ -1,6 +1,6 @@
 # Test Suite Guide
 
-The test suite mirrors the application structure and is the safety net for behavior changes. The matching [`AGENTS.md`](AGENTS.md) file mirrors the same local rules for `AGENTS.md`-aware tooling.
+The test suite mirrors the application structure and is the safety net for behavior changes.
 
 ## Layout
 

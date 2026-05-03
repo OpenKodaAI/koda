@@ -8,9 +8,9 @@ description: Change message-to-provider execution flows in this repository. Use 
 ## Workflow
 
 1. Read [`../../repo-map.yaml`](../../repo-map.yaml) first to confirm the owning flow, files, and tests.
-2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `AGENTS.md`, `CLAUDE.md`, and provider-neutral docs aligned.
+2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `CLAUDE.md` and provider-neutral docs aligned.
 3. Read [`../../runtime-flows.md`](../../runtime-flows.md).
-4. Read [`../../../koda/services/AGENTS.md`](../../../koda/services/AGENTS.md) or [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md).
+4. Read [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md).
 5. Inspect the exact orchestration path in [`../../../koda/services/queue_manager.py`](../../../koda/services/queue_manager.py).
 6. Inspect the Claude CLI wrapper in [`../../../koda/services/claude_runner.py`](../../../koda/services/claude_runner.py).
 7. If runtime agent tools are involved, inspect both [`../../../koda/services/tool_prompt.py`](../../../koda/services/tool_prompt.py) and [`../../../koda/services/tool_dispatcher.py`](../../../koda/services/tool_dispatcher.py).

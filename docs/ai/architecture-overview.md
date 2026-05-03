@@ -110,6 +110,5 @@ For the canonical machine-readable file, flow, and test index, start with [`repo
 - Compiled prompt contracts and agent document layers: [`../../koda/control_plane`](../../koda/control_plane) and [`configuration-and-prompts.md`](configuration-and-prompts.md)
 - Runtime expert skills exposed through `/skill`: [`../../koda/skills`](../../koda/skills)
 - Provider-neutral repository guidance: [`../../README.md`](../../README.md), [`repo-map.yaml`](repo-map.yaml), and the rest of [`../`](../)
-- Codex and other `AGENTS.md`-aware entrypoints: [`../../AGENTS.md`](../../AGENTS.md) and matching subtree `AGENTS.md` files
-- Claude Code entrypoints: [`../../CLAUDE.md`](../../CLAUDE.md) and matching subtree `CLAUDE.md` files
+- Coding-agent entrypoints: [`../../CLAUDE.md`](../../CLAUDE.md) and matching subtree `CLAUDE.md` files
 - Provider-neutral repo-local skills: [`skills`](skills)

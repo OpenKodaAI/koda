@@ -8,9 +8,9 @@ description: Add or modify repository integrations while preserving runtime guar
 ## Workflow
 
 1. Read [`../../repo-map.yaml`](../../repo-map.yaml) first to confirm the owning integration area, guardrails, and tests.
-2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `AGENTS.md`, `CLAUDE.md`, and provider-neutral docs aligned.
+2. Read [`../../llm-compatibility.md`](../../llm-compatibility.md) if you need to keep `CLAUDE.md` and provider-neutral docs aligned.
 3. Read [`../../configuration-and-prompts.md`](../../configuration-and-prompts.md).
-4. Read [`../../../koda/services/AGENTS.md`](../../../koda/services/AGENTS.md) or [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md).
+4. Read [`../../../koda/services/CLAUDE.md`](../../../koda/services/CLAUDE.md).
 5. Inspect the relevant service module under [`../../../koda/services`](../../../koda/services).
 6. If the integration is exposed through an agent tool, inspect both [`../../../koda/services/tool_prompt.py`](../../../koda/services/tool_prompt.py) and [`../../../koda/services/tool_dispatcher.py`](../../../koda/services/tool_dispatcher.py).
 7. Inspect the matching service and handler tests under [`../../../tests/test_services`](../../../tests/test_services) and [`../../../tests/test_handlers`](../../../tests/test_handlers).

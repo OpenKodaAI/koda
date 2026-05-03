@@ -153,7 +153,7 @@ The operator dashboard is part of the product itself. It proxies control-plane a
 
 **Community** — [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
-**For AI agents** — [AGENTS.md](AGENTS.md) · [CLAUDE.md](CLAUDE.md) · [repo map](docs/ai/repo-map.yaml) · [LLM compatibility](docs/ai/llm-compatibility.md)
+**For AI agents** — [CLAUDE.md](CLAUDE.md) · [repo map](docs/ai/repo-map.yaml) · [LLM compatibility](docs/ai/llm-compatibility.md)
 
 <br />
 

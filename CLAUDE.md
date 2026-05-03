@@ -1,6 +1,6 @@
 # Repository Agent Guide
 
-Use this file as the operational starting point for Claude Code working in this repository. The matching [`AGENTS.md`](AGENTS.md) file mirrors the same repository guidance for Codex and other `AGENTS.md`-aware tooling.
+Use this file as the operational starting point for Claude Code and other coding agents working in this repository.
 
 ## Read Order
 
@@ -20,7 +20,7 @@ Follow this order before making non-trivial changes:
    - [`tests/CLAUDE.md`](tests/CLAUDE.md)
    - [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md) — **UI design system & principles** (mandatory for any `apps/web/` change)
 
-If another tool expects `AGENTS.md`, the guidance is mirrored there. The provider-neutral content still lives in [`docs/ai`](docs/ai), [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml), and each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md).
+Provider-neutral content lives in [`docs/ai`](docs/ai), [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml), and each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md).
 
 Public product and contributor documentation lives in [`docs/README.md`](docs/README.md), [`docs/install`](docs/install), [`docs/architecture`](docs/architecture), and [`docs/reference`](docs/reference). Keep that layer distinct from the AI-oriented repository guidance in [`docs/ai`](docs/ai).
 
@@ -32,7 +32,6 @@ Public product and contributor documentation lives in [`docs/README.md`](docs/RE
 - Runtime prompt templates exposed to end users through `/skill` live in [`koda/skills`](koda/skills).
 - Repo-local guidance skills for working on this repository live in [`docs/ai/skills`](docs/ai/skills).
 - Each repo-local [`SKILL.md`](docs/ai/skills/repo-orientation/SKILL.md) is the canonical provider-neutral instruction file. [`docs/ai/skills/repo-orientation/agents/openai.yaml`](docs/ai/skills/repo-orientation/agents/openai.yaml) and its siblings add optional Codex metadata only.
-- [`AGENTS.md`](AGENTS.md) and the matching subtree `AGENTS.md` files mirror this guidance for `AGENTS.md`-aware tooling.
 - The canonical machine-readable repo index lives at [`docs/ai/repo-map.yaml`](docs/ai/repo-map.yaml) and must match [`scripts/generate_repo_map.py`](scripts/generate_repo_map.py).
 - Per-agent runtime prompt behavior is derived from control-plane documents and the compiled runtime prompt contract, not repository prompt files.
 - Setup / login / recovery contract is documented in [`docs/security/authentication.md`](docs/security/authentication.md). Changes to [`koda/control_plane/operator_auth.py`](koda/control_plane/operator_auth.py), [`koda/control_plane/password_policy.py`](koda/control_plane/password_policy.py), [`koda/control_plane/bootstrap_file.py`](koda/control_plane/bootstrap_file.py), or the web auth routes must update that document and the matching tests in the same change.
@@ -43,7 +42,6 @@ Public product and contributor documentation lives in [`docs/README.md`](docs/RE
 - Keep configuration changes centralized in [`koda/config.py`](koda/config.py). If you add a new setting, also update [`.env.example`](.env.example) and the relevant docs.
 - Treat security guardrails as first-class behavior. Command blocking, approval flow, safe path handling, and read-only database rules are not optional.
 - Keep runtime and repository-guidance layers separate. Do not move repository guidance into runtime skills or control-plane agent documents unless explicitly asked.
-- When you change repository guidance, keep the matching `CLAUDE.md` and `AGENTS.md` entrypoints aligned.
 - Do not translate existing PT-BR agent-facing prompt content unless the task explicitly requires it.
 
 ## Required Validation

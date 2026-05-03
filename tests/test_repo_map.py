@@ -53,7 +53,6 @@ PATH_KEYS = {
     "related_skills",
     "canonical_map",
     "provider_neutral_docs",
-    "codex_entrypoints",
     "claude_code_entrypoints",
     "root_docs",
     "subtree_guides",
@@ -152,7 +151,6 @@ def test_repo_map_declares_provider_compatibility() -> None:
     assert "README.md" in ai_guides["provider_neutral_docs"]
     assert "docs/ai/repo-map.yaml" in ai_guides["provider_neutral_docs"]
     assert "docs/ai/llm-compatibility.md" in ai_guides["provider_neutral_docs"]
-    assert "AGENTS.md" in ai_guides["codex_entrypoints"]
     assert "CLAUDE.md" in ai_guides["claude_code_entrypoints"]
 
 

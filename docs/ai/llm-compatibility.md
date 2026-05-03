@@ -13,14 +13,9 @@ These files are the source of truth for repository understanding:
 
 Any new repository guidance should live here first.
 
-## Provider-Specific Entry Points
+## Repository Entry Point
 
-These files expose the same guidance to provider-specific tooling:
-
-- [`../../AGENTS.md`](../../AGENTS.md) and matching subtree `AGENTS.md` files: entrypoints for Codex and other `AGENTS.md`-aware tooling
-- [`../../CLAUDE.md`](../../CLAUDE.md) and matching subtree `CLAUDE.md` files: entrypoints for Claude Code
-
-Keep both entrypoint families aligned. They should point back to the same provider-neutral docs instead of diverging.
+- [`../../CLAUDE.md`](../../CLAUDE.md) and matching subtree `CLAUDE.md` files are the canonical entrypoints for any agent working in this repository. Modern coding agents (Claude Code, Codex, Cursor, Copilot, etc.) all read `CLAUDE.md`.
 
 ## Skill Compatibility
 
@@ -32,7 +27,6 @@ Keep both entrypoint families aligned. They should point back to the same provid
 
 - Keep all new repository-guidance documents in English.
 - Put semantic structure in provider-neutral artifacts first.
-- Keep `AGENTS.md` and `CLAUDE.md` mirrors aligned when local rules change.
 - Keep [`repo-map.yaml`](repo-map.yaml) deterministic and provider-neutral.
 - Keep control-plane agent documents and runtime `/skill` templates in [`../../koda/skills`](../../koda/skills) separate from repository guidance.
 
@@ -40,6 +34,6 @@ Keep both entrypoint families aligned. They should point back to the same provid
 
 1. Read [`../../README.md`](../../README.md).
 2. Read [`repo-map.yaml`](repo-map.yaml).
-3. Read the closest provider entrypoint: [`../../AGENTS.md`](../../AGENTS.md) or [`../../CLAUDE.md`](../../CLAUDE.md).
+3. Read [`../../CLAUDE.md`](../../CLAUDE.md) and the closest subtree `CLAUDE.md`.
 4. Read the relevant reference docs in [`../ai`](../ai).
 5. Read the nearest repo-local [`SKILL.md`](skills/repo-orientation/SKILL.md) if the task matches a known workflow.
