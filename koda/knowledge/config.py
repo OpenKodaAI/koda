@@ -18,7 +18,7 @@ KNOWLEDGE_SOURCE_GLOBS: list[str] = [
     part.strip()
     for part in _env(
         "KNOWLEDGE_SOURCE_GLOBS",
-        "README.md,CLAUDE.md,docs/ai/*.md",
+        "README.md,CLAUDE.md,docs/**/*.md",
     ).split(",")
     if part.strip()
 ]

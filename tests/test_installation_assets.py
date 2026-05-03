@@ -155,7 +155,6 @@ def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> Non
     assert "bundle/sbom.spdx.json" in built_files
     assert "bundle/proxy/nginx.conf" in built_files
     assert not any(path.startswith("tests/") for path in built_files)
-    assert not any(path.startswith("docs/ai/") for path in built_files)
     assert not any(".next" in path for path in built_files)
     assert not any("node_modules" in path for path in built_files)
 

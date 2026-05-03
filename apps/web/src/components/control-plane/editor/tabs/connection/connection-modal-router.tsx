@@ -9,8 +9,6 @@
  * Handles both core integrations (Jira, AWS, gh, …) and MCP servers
  * (Supabase, Slack, Obsidian, …) in one component so the user experience
  * is consistent — shared header/footer shell, integration-aware body.
- *
- * See docs/ai/integrations/README.md for the strategy taxonomy.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";

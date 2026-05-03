@@ -206,5 +206,5 @@ Every change under `apps/web/` must pass:
 ## Related guidance
 
 - Root operational guide: [`../../CLAUDE.md`](../../CLAUDE.md).
-- Architecture overview: [`../../docs/ai/architecture-overview.md`](../../docs/ai/architecture-overview.md).
+- Architecture overview: [`../../docs/architecture/overview.md`](../../docs/architecture/overview.md).
 - Design primitives live in [`src/components/ui/`](src/components/ui/) — the source of truth; never fork a primitive inline.

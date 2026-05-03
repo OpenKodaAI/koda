@@ -230,14 +230,12 @@ For the application-security baseline, threat model, ASVS mapping, and operation
 
 Koda is published under the Apache-2.0 license.
 
-## Developer And AI-Friendly Entry Points
+## Developer Entry Points
 
-- [CLAUDE.md](CLAUDE.md)
-- [docs/ai/repo-map.yaml](docs/ai/repo-map.yaml)
-- [docs/ai/llm-compatibility.md](docs/ai/llm-compatibility.md)
-- [docs/ai/architecture-overview.md](docs/ai/architecture-overview.md)
-- [docs/ai/runtime-flows.md](docs/ai/runtime-flows.md)
-- [docs/ai/configuration-and-prompts.md](docs/ai/configuration-and-prompts.md)
+- [CLAUDE.md](CLAUDE.md) — operational guide for coding agents working in this repository
+- [docs/architecture/overview.md](docs/architecture/overview.md) — platform architecture
+- [docs/install/local.md](docs/install/local.md) — local install walkthrough
+- [docs/reference/api.md](docs/reference/api.md) — API reference
 
 ## Validation
 
@@ -249,8 +247,6 @@ pytest --cov=koda --cov-report=term-missing
 pnpm lint:web
 pnpm test:web
 pnpm build:web
-python3 scripts/generate_repo_map.py --check
-pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py
 ```
 
 If you touch the Rust workspace, also run:

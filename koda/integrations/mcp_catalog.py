@@ -10,7 +10,6 @@ Each entry declares:
 This is the SSoT consumed by:
 
 - `koda/services/mcp_bootstrap.py` (reads command + env for process launch)
-- `scripts/generate_integration_docs.py` (emits `docs/ai/integrations/mcp/*.md`)
 - `cp_mcp_server_catalog` seed (upserted on boot)
 """
 

@@ -16,7 +16,6 @@ pytest --cov=koda --cov-report=term-missing
 pnpm lint:web
 pnpm test:web
 pnpm build:web
-python3 scripts/generate_repo_map.py --check
 ```
 
 For product-facing local work, prefer the Docker-first stack documented in:
@@ -35,12 +34,7 @@ Run the standard validation commands before opening a pull request:
 - `pnpm lint:web`
 - `pnpm test:web`
 - `pnpm build:web`
-- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py`
-
-If your change touches the repository guidance layer, also run:
-
-- `python3 scripts/generate_repo_map.py --check`
-- `pytest -q tests/test_ai_docs.py tests/test_repo_map.py tests/test_open_source_hygiene.py`
+- `pytest -q tests/test_open_source_hygiene.py tests/test_public_docs.py tests/test_installation_assets.py`
 
 If your change touches the Rust workspace, also run:
 
@@ -87,18 +81,13 @@ When a CI failure happens:
 
 ## Documentation Policy
 
-Koda maintains two documentation layers:
-
-- `docs/` for public product, operator, and contributor documentation
-- `docs/ai/` for repository guidance aimed at LLM tooling and code assistants
-
-The application code is split between:
+Koda maintains a single documentation tree at `docs/` for public product, operator, and contributor documentation. The application code is split between:
 
 - the Python platform at the repository root
 - the web dashboard in `apps/web`
 
 When public behavior changes, update the relevant file under `docs/`.
-When repository guidance changes, keep `AGENTS.md`, `CLAUDE.md`, `docs/ai/*`, and the generated repo map aligned.
+When operational rules for coding agents change, update `CLAUDE.md`.
 
 ## Naming And Branding Rules
 

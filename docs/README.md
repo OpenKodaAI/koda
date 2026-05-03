@@ -28,7 +28,6 @@ Use this index when you want to install, operate, evaluate, or contribute to Kod
 - [Architecture overview](architecture/overview.md)
 - [Runtime architecture](architecture/runtime.md)
 - [Configuration reference](config/reference.md)
-- [AI guidance layer](ai/repo-map.yaml)
 
 ## Contribute To Koda
 
@@ -40,7 +39,6 @@ Use this index when you want to install, operate, evaluate, or contribute to Kod
 ## Documentation Conventions
 
 - Public product and operator documentation lives in `docs/`.
-- Repository guidance for agents, code assistants, and AI tooling lives in `docs/ai/`.
 - The Python platform lives at the repository root and the official web UI lives in `apps/web/`.
 - The maintained public HTTP contract lives in [`openapi/control-plane.json`](openapi/control-plane.json).
 - Screenshots and diagrams in `docs/assets/` reflect real current product surfaces or architecture that exists in this repository today.

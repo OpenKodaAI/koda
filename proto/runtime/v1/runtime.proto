@@ -278,6 +278,141 @@ message ReconcileResponse {
   uint32 reconciled_environments = 2;
 }
 
+// ========================================================================
+// Agent worker lifecycle
+// ========================================================================
+//
+// An agent worker is a long-running daemon process (`python -m koda
+// --agent-id <X>`) that owns Telegram polling, the queue manager, and the
+// tool dispatcher for one logical agent. Identity is the agent_id.
+//
+// Distinct from `Task` which is ephemeral and identified by task_id.
+// Workers persist across many tasks, restart on version bumps, and need
+// their own health probes and process-group ownership.
+//
+// The runtime-kernel is the SOLE process parent of agent workers. The
+// control-plane supervisor is a stateless declarative client: it sends
+// the desired set every reconcile cycle and the kernel diffs against
+// its registry, spawning what's missing and terminating what's extra.
+// This is the same model Kubernetes uses for replicaset reconciliation,
+// and it eliminates orphan workers by construction (workers cannot
+// outlive their parent group beyond a brief grace).
+
+message AgentWorkerSpec {
+  // Canonical agent identity. Case-sensitive; the kernel uses this as
+  // the registry key.
+  string agent_id = 1;
+  // Monotonic version from the agent_spec compiled by the control plane.
+  // A version mismatch between desired and current triggers a graceful
+  // restart on the next reconcile.
+  int32 version = 2;
+  // Executable to launch (typically the python interpreter path).
+  string command = 3;
+  // Argv for the worker (typically `["-m", "koda", "--agent-id", "<X>"]`).
+  repeated string args = 4;
+  // CWD for the worker. Empty means inherit from the kernel.
+  string working_directory = 5;
+  // Full env the worker receives. The kernel does NOT merge from its own
+  // environment — the supervisor passes the exact sanitized env it wants.
+  // This keeps the spawn contract explicit and auditable.
+  map<string, string> environment = 6;
+  // TCP port the worker exposes its /health endpoint on. The kernel does
+  // a pre-flight bind probe before spawning so a port collision surfaces
+  // as SPAWN_BLOCKED instead of an EADDRINUSE crash loop. 0 disables the
+  // probe AND the health monitor (rare; only for workers that don't run
+  // an HTTP health endpoint).
+  int32 health_port = 7;
+  // Path component for the health probe URL. Defaults to "/health".
+  string health_path = 8;
+  // cgroup workspace bucket for OS-level isolation (memory.max, cpu.max,
+  // pids.max). Empty falls back to the "default" cgroup so the directory
+  // still exists for ad-hoc tuning.
+  string workspace_id = 9;
+}
+
+message AgentWorkerStatus {
+  string agent_id = 1;
+  // Currently running version (may differ from desired during a graceful
+  // restart window).
+  int32 version = 2;
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    // Process spawned, kernel is waiting for the first successful health
+    // probe (or for the startup grace window to elapse if health_port=0).
+    STATE_STARTING = 1;
+    // Last health probe succeeded within the staleness budget.
+    STATE_RUNNING = 2;
+    // Process is alive but its health probe has failed N consecutive
+    // times. The kernel will restart it on the next reconcile if the
+    // operator hasn't paused the agent.
+    STATE_UNHEALTHY = 3;
+    // The OS process is gone. exit_code carries the wait4 status.
+    STATE_EXITED = 4;
+    // The kernel refused to spawn because the configured health_port is
+    // held by a foreign process (one that doesn't match our agent
+    // worker pattern). spawn_blocked_reason explains it; the operator
+    // must resolve it (kill the foreign holder or change the port) and
+    // the kernel will retry on the next reconcile cycle.
+    STATE_SPAWN_BLOCKED = 5;
+    // Worker terminated by an explicit TerminateAgentWorker call or
+    // because it was no longer in the desired set; not eligible for
+    // automatic restart.
+    STATE_TERMINATED = 6;
+  }
+  State state = 3;
+  int32 pid = 4;
+  // Process group id; useful for the supervisor's audit trail and for
+  // emergency operator intervention.
+  int32 pgid = 5;
+  int32 exit_code = 6;          // valid only when state == EXITED
+  uint64 started_at_ms = 7;
+  uint64 last_health_at_ms = 8; // 0 if never probed yet
+  uint32 restart_count = 9;     // bumped each time the kernel respawned
+  string spawn_blocked_reason = 10;
+}
+
+message EnsureAgentWorkersRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  // Full desired set. Workers in the registry that are NOT in this list
+  // will be terminated. Workers in the list that are NOT in the registry
+  // will be spawned. Workers with a version mismatch will be gracefully
+  // restarted (terminate old → wait for idle/timeout → spawn new).
+  repeated AgentWorkerSpec desired = 2;
+}
+
+message EnsureAgentWorkersResponse {
+  // Snapshot of every worker the kernel currently tracks AFTER applying
+  // the desired set. Includes workers that just transitioned to EXITED
+  // or SPAWN_BLOCKED so the supervisor can surface the state to operators.
+  repeated AgentWorkerStatus current = 1;
+  uint32 spawned = 2;     // count of agents transitioned None → Starting
+  uint32 terminated = 3;  // count of agents transitioned * → Terminated
+  uint32 restarted = 4;   // count of agents whose version was bumped
+  uint32 unchanged = 5;   // count of agents already in desired state
+}
+
+message GetAgentWorkerRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+}
+
+message GetAgentWorkerResponse {
+  AgentWorkerStatus status = 1;
+  bool found = 2;
+}
+
+message TerminateAgentWorkerRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  // When true, escalate to SIGKILL after the grace window.
+  bool force = 3;
+}
+
+message TerminateAgentWorkerResponse {
+  AgentWorkerStatus status = 1;
+  bool terminated = 2;
+}
+
 message CleanupEnvironmentRequest {
   koda.common.v1.RequestMetadata metadata = 1;
   string task_id = 2;
@@ -431,6 +566,13 @@ service RuntimeKernelService {
   rpc CollectSnapshot(CollectSnapshotRequest) returns (CollectSnapshotResponse);
   rpc Reconcile(ReconcileRequest) returns (ReconcileResponse);
   rpc CleanupEnvironment(CleanupEnvironmentRequest) returns (CleanupEnvironmentResponse);
+  // Agent worker lifecycle (declarative). The supervisor sends the full
+  // desired set; the kernel diffs against its registry and spawns/kills
+  // accordingly. Workers are children of the kernel process so they
+  // cannot become orphans.
+  rpc EnsureAgentWorkers(EnsureAgentWorkersRequest) returns (EnsureAgentWorkersResponse);
+  rpc GetAgentWorker(GetAgentWorkerRequest) returns (GetAgentWorkerResponse);
+  rpc TerminateAgentWorker(TerminateAgentWorkerRequest) returns (TerminateAgentWorkerResponse);
   rpc StartBrowserSession(StartBrowserSessionRequest) returns (StartBrowserSessionResponse);
   rpc StopBrowserSession(StopBrowserSessionRequest) returns (StopBrowserSessionResponse);
   rpc GetBrowserSession(GetBrowserSessionRequest) returns (GetBrowserSessionResponse);

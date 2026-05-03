@@ -100,6 +100,21 @@ class RuntimeKernelServiceStub(object):
                 request_serializer=runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentRequest.SerializeToString,
                 response_deserializer=runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentResponse.FromString,
                 _registered_method=True)
+        self.EnsureAgentWorkers = channel.unary_unary(
+                '/koda.runtime.v1.RuntimeKernelService/EnsureAgentWorkers',
+                request_serializer=runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersRequest.SerializeToString,
+                response_deserializer=runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersResponse.FromString,
+                _registered_method=True)
+        self.GetAgentWorker = channel.unary_unary(
+                '/koda.runtime.v1.RuntimeKernelService/GetAgentWorker',
+                request_serializer=runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerRequest.SerializeToString,
+                response_deserializer=runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerResponse.FromString,
+                _registered_method=True)
+        self.TerminateAgentWorker = channel.unary_unary(
+                '/koda.runtime.v1.RuntimeKernelService/TerminateAgentWorker',
+                request_serializer=runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerRequest.SerializeToString,
+                response_deserializer=runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerResponse.FromString,
+                _registered_method=True)
         self.StartBrowserSession = channel.unary_unary(
                 '/koda.runtime.v1.RuntimeKernelService/StartBrowserSession',
                 request_serializer=runtime_dot_v1_dot_runtime__pb2.StartBrowserSessionRequest.SerializeToString,
@@ -242,6 +257,28 @@ class RuntimeKernelServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def EnsureAgentWorkers(self, request, context):
+        """Agent worker lifecycle (declarative). The supervisor sends the full
+        desired set; the kernel diffs against its registry and spawns/kills
+        accordingly. Workers are children of the kernel process so they
+        cannot become orphans.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAgentWorker(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def TerminateAgentWorker(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def StartBrowserSession(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -371,6 +408,21 @@ def add_RuntimeKernelServiceServicer_to_server(servicer, server):
                     servicer.CleanupEnvironment,
                     request_deserializer=runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentRequest.FromString,
                     response_serializer=runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentResponse.SerializeToString,
+            ),
+            'EnsureAgentWorkers': grpc.unary_unary_rpc_method_handler(
+                    servicer.EnsureAgentWorkers,
+                    request_deserializer=runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersRequest.FromString,
+                    response_serializer=runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersResponse.SerializeToString,
+            ),
+            'GetAgentWorker': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAgentWorker,
+                    request_deserializer=runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerRequest.FromString,
+                    response_serializer=runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerResponse.SerializeToString,
+            ),
+            'TerminateAgentWorker': grpc.unary_unary_rpc_method_handler(
+                    servicer.TerminateAgentWorker,
+                    request_deserializer=runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerRequest.FromString,
+                    response_serializer=runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerResponse.SerializeToString,
             ),
             'StartBrowserSession': grpc.unary_unary_rpc_method_handler(
                     servicer.StartBrowserSession,
@@ -867,6 +919,87 @@ class RuntimeKernelService(object):
             '/koda.runtime.v1.RuntimeKernelService/CleanupEnvironment',
             runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentRequest.SerializeToString,
             runtime_dot_v1_dot_runtime__pb2.CleanupEnvironmentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EnsureAgentWorkers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/koda.runtime.v1.RuntimeKernelService/EnsureAgentWorkers',
+            runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersRequest.SerializeToString,
+            runtime_dot_v1_dot_runtime__pb2.EnsureAgentWorkersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAgentWorker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/koda.runtime.v1.RuntimeKernelService/GetAgentWorker',
+            runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerRequest.SerializeToString,
+            runtime_dot_v1_dot_runtime__pb2.GetAgentWorkerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TerminateAgentWorker(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/koda.runtime.v1.RuntimeKernelService/TerminateAgentWorker',
+            runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerRequest.SerializeToString,
+            runtime_dot_v1_dot_runtime__pb2.TerminateAgentWorkerResponse.FromString,
             options,
             channel_credentials,
             insecure,
