@@ -4,7 +4,7 @@ package koda.bot_gateway.v1;
 
 import "common/v1/metadata.proto";
 
-// koda-bot-gateway — Telegram fan-in service (P2-6 of production roadmap).
+// koda-bot-gateway — Telegram fan-in service.
 //
 // Today every agent worker holds its own long-poll TCP connection to
 // api.telegram.org. At 5k agents that is 5k persistent sockets and 5k

@@ -1,4 +1,4 @@
-"""Phase 2E — blue/green drain HTTP contract.
+"""Blue/green drain HTTP contract.
 
 The deploy pipeline POSTs to ``/cluster/drain`` on each old supervisor
 when the new version becomes healthy. The supervisor flips its

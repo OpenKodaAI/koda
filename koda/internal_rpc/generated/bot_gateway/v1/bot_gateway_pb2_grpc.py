@@ -6,7 +6,7 @@ from bot_gateway.v1 import bot_gateway_pb2 as bot__gateway_dot_v1_dot_bot__gatew
 
 
 class BotGatewayServiceStub(object):
-    """koda-bot-gateway — Telegram fan-in service (P2-6 of production roadmap).
+    """koda-bot-gateway — Telegram fan-in service.
 
     Today every agent worker holds its own long-poll TCP connection to
     api.telegram.org. At 5k agents that is 5k persistent sockets and 5k
@@ -56,7 +56,7 @@ class BotGatewayServiceStub(object):
 
 
 class BotGatewayServiceServicer(object):
-    """koda-bot-gateway — Telegram fan-in service (P2-6 of production roadmap).
+    """koda-bot-gateway — Telegram fan-in service.
 
     Today every agent worker holds its own long-poll TCP connection to
     api.telegram.org. At 5k agents that is 5k persistent sockets and 5k
@@ -154,7 +154,7 @@ def add_BotGatewayServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class BotGatewayService(object):
-    """koda-bot-gateway — Telegram fan-in service (P2-6 of production roadmap).
+    """koda-bot-gateway — Telegram fan-in service.
 
     Today every agent worker holds its own long-poll TCP connection to
     api.telegram.org. At 5k agents that is 5k persistent sockets and 5k

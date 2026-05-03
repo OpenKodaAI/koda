@@ -1,4 +1,4 @@
-"""Phase B.3 — formal benchmarks with regression gates.
+"""Formal benchmarks with regression gates.
 
 Each bench module measures a hot-path operation and compares the
 result against a JSON baseline in ``tests/benchmarks/baselines/``.

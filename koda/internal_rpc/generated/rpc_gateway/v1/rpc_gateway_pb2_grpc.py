@@ -6,7 +6,7 @@ from rpc_gateway.v1 import rpc_gateway_pb2 as rpc__gateway_dot_v1_dot_rpc__gatew
 
 
 class RpcGatewayServiceStub(object):
-    """koda-rpc-gateway — sidecar connection multiplexer (P0-3, P2-2, P2-3).
+    """koda-rpc-gateway — sidecar connection multiplexer.
 
     Workers connect to ONE local UDS hosted by this gateway instead of
     opening their own gRPC channels to every sidecar. The gateway:
@@ -43,7 +43,7 @@ class RpcGatewayServiceStub(object):
 
 
 class RpcGatewayServiceServicer(object):
-    """koda-rpc-gateway — sidecar connection multiplexer (P0-3, P2-2, P2-3).
+    """koda-rpc-gateway — sidecar connection multiplexer.
 
     Workers connect to ONE local UDS hosted by this gateway instead of
     opening their own gRPC channels to every sidecar. The gateway:
@@ -100,7 +100,7 @@ def add_RpcGatewayServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class RpcGatewayService(object):
-    """koda-rpc-gateway — sidecar connection multiplexer (P0-3, P2-2, P2-3).
+    """koda-rpc-gateway — sidecar connection multiplexer.
 
     Workers connect to ONE local UDS hosted by this gateway instead of
     opening their own gRPC channels to every sidecar. The gateway:

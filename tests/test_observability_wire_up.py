@@ -1,4 +1,4 @@
-"""Phase A.4 — verify OTel scaffold is actually invoked by the runtime.
+"""Verify OTel scaffold is actually invoked by the runtime.
 
 Without these tests the tracing scaffold could land but never be
 called (which is exactly the gap A.4 was created to close). The tests

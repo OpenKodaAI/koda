@@ -150,7 +150,7 @@ def make_internal_breaker(name: str) -> Any:
     ``koda.config.INTERNAL_RPC_BREAKER_*`` so an operator can widen
     or tighten them without code changes. The default values were
     picked to match the cascading-deadlock incident the breaker is
-    designed to break out of (P0-3 of the production roadmap).
+    designed to break out of.
     """
     from koda.internal_rpc.circuit_breaker import get_breaker
 

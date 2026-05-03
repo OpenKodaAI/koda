@@ -1,4 +1,4 @@
-"""Phase 2D — distributed tracing scaffold.
+"""Distributed tracing scaffold.
 
 Two invariants this scaffold MUST hold so the rest of the codebase
 can call into it freely:

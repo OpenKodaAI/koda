@@ -1,6 +1,6 @@
-"""Phase A.1 — verify policy_engine wired into queue_manager hot path.
+"""Verify policy_engine is wired into the queue_manager hot path.
 
-Without these tests the policy_engine wrappers from Phase 1C could
+Without these tests the policy_engine wrappers could
 land but never actually be called, leaving multi-team fairness
 unenforced even when a workspace policy exists. The tests are a
 mixture of grep gates (cheap, regression-proof) plus runtime checks

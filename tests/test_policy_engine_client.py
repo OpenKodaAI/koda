@@ -1,4 +1,4 @@
-"""Phase 1C policy-engine Python contract.
+"""Policy-engine Python contract.
 
 Pins the wrapper semantics queue_manager will rely on:
 

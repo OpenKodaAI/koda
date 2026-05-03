@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import grpc
 import pytest
 
-# Phase B.1 — pull in real-Postgres fixtures so any test marked
+# Pull in real-Postgres fixtures so any test marked
 # ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
 # ``db_connection`` fixtures. The module also auto-skips marked
 # tests when no DSN is configured and testcontainers/Docker is

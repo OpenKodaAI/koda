@@ -8,7 +8,7 @@ Pinned guarantees:
     other supervisors whose heartbeat is stale.
   * heartbeat() refreshes heartbeat_at on every active claim.
   * release_agent() / release_all_for_supervisor() drop ownership.
-  * set_draining(True) → next heartbeat releases all claims (Phase 2E
+  * set_draining(True) → next heartbeat releases all claims (blue/green
     blue/green protocol).
   * is_draining() reflects the persisted state.
   * Two supervisors race for the same candidate set → SKIP LOCKED partitions

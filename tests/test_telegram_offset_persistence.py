@@ -1,4 +1,4 @@
-"""Telegram polling resumes from a known offset across restarts (P1-2).
+"""Telegram polling resumes from a known offset across restarts.
 
 Before: ``app.run_polling(drop_pending_updates=True)`` discarded any
 queued user messages on every bot restart. Combined with the lazy
@@ -9,7 +9,7 @@ After:
 - ``TELEGRAM_DROP_PENDING_UPDATES`` defaults to ``False`` so Telegram's
   server-side offset replays pending updates on reconnect.
 - The supervisor records the last seen ``update_id`` per agent in
-  ``cp_telegram_offsets`` for observability + Phase 1 bot-pool
+  ``cp_telegram_offsets`` for observability + bot-pool
   groundwork.
 
 These tests pin both halves so a future refactor can't regress us back

@@ -1,4 +1,4 @@
-"""Phase 1B Python contract for koda-bot-gateway.
+"""Python contract for koda-bot-gateway.
 
 These tests pin three things so a future refactor cannot quietly drift:
 

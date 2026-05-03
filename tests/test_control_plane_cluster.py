@@ -1,4 +1,4 @@
-"""Phase 2A — supervisor cluster claim/heartbeat semantics.
+"""Supervisor cluster claim/heartbeat semantics.
 
 The cluster module is the spine of horizontal supervisor scaling. Two
 supervisor instances polling the same control-plane DB MUST NOT spawn
@@ -124,7 +124,7 @@ def test_claim_agents_runs_select_for_update_skip_locked() -> None:
 
 def test_claim_returns_empty_when_draining() -> None:
     """A supervisor that is draining must NOT claim more work — it is
-    on its way out and Phase 2E expects ownership to fall back to the
+    on its way out and the blue/green protocol expects ownership to fall back to the
     fresh version."""
     client, _rec = _make_client(enabled=True, draining_initial=True)
     try:

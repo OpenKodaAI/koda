@@ -86,7 +86,7 @@ def test_run_passes_schema_and_embedding_dimension_to_backend() -> None:
 
 
 def test_check_flag_returns_zero_when_no_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 2C — CI gate must exit 0 when the DSN is fully migrated
+    """CI gate must exit 0 when the DSN is fully migrated
     so the deploy continues."""
 
     async def _no_pending(dsn: str, schema: str, dim: int) -> list[str]:

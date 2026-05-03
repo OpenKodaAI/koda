@@ -64,5 +64,5 @@ async def test_breaker_open_fail_fast_within_baseline() -> None:
     baseline = load_baseline("circuit_breaker_open")
     assert measured < baseline["max_ns"], (
         f"breaker open fail-fast regressed: {measured:.0f}ns/op > {baseline['max_ns']}ns/op. "
-        f"This is the headline guarantee against P0-3 cascading deadlocks."
+        f"This is the headline guarantee against cascading deadlocks."
     )

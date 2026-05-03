@@ -1,4 +1,4 @@
-"""Phase F — verify the doctor.py --strict hardening gate.
+"""Verify the doctor.py --strict hardening gate.
 
 The strict gate matches ``docs/operations/hardening.md``. These tests
 pin the contract: each check fails loud when the expected condition

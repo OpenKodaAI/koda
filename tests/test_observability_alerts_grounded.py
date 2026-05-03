@@ -1,4 +1,4 @@
-"""Phase E correction — alerts.yml must reference real metrics only.
+"""Alerts.yml must reference real metrics only.
 
 Without this gate, an operator copy-pasting alerts from a tutorial
 ends up with rules that silently never fire because the metric they

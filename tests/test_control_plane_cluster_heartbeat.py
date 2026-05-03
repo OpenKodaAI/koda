@@ -1,4 +1,4 @@
-"""Phase A.5 — heartbeat runs as an independent asyncio task.
+"""Heartbeat runs as an independent asyncio task.
 
 Before this change ``cluster.heartbeat()`` was called inside
 ``_reconcile_once``. A reconcile cycle that took longer than
@@ -51,7 +51,7 @@ def test_heartbeat_loop_uses_bounded_interval() -> None:
 
 
 def test_reconcile_does_not_refresh_claims() -> None:
-    """Phase A.5 contract — heartbeat is the ONLY place that calls
+    """Contract: heartbeat is the ONLY place that calls
     ``self._cluster.heartbeat()``. The reconcile path may call
     ``claim_agents`` (to take ownership of new agents) but must NOT
     refresh existing claims."""
@@ -61,7 +61,7 @@ def test_reconcile_does_not_refresh_claims() -> None:
     next_def = src.index("async def ", reconcile_start + 1)
     reconcile_body = src[reconcile_start:next_def]
     assert "self._cluster.heartbeat(" not in reconcile_body, (
-        "_reconcile_once must NOT call cluster.heartbeat — that's the heartbeat task's job (Phase A.5)."
+        "_reconcile_once must NOT call cluster.heartbeat — that's the heartbeat task's job."
     )
 
 

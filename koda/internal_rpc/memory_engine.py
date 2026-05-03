@@ -619,7 +619,7 @@ class GrpcMemoryEngineClient:
         self._startup_error: str | None = None
         # every async RPC call goes through this breaker so
         # a hung memory-engine doesn't compound into worker-side
-        # deadlocks (P0-3 of the production roadmap).
+        # deadlocks.
         self._breaker = make_internal_breaker("memory_engine")
         self._last_health: dict[str, object] = {
             "service": "memory",

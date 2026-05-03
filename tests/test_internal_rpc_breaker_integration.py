@@ -1,7 +1,7 @@
-"""Phase A.2 — verify the circuit breaker is wired into internal_rpc.
+"""Verify the circuit breaker is wired into internal_rpc.
 
-Without these tests the breaker scaffold from Phase 1D could land but
-never actually wrap the gRPC calls, leaving P0-3 (a hung sidecar
+Without these tests the breaker scaffold could land but
+never actually wrap the gRPC calls, leaving the cascading-deadlock surface
 freezing every worker on ``INTERNAL_RPC_DEADLINE_MS``) unfixed in
 production. The grep gates pin the wire-up; the runtime test asserts
 fail-fast latency in microseconds vs the 1500ms deadline.

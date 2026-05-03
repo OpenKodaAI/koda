@@ -1,6 +1,6 @@
 """``koda.services.command_guard`` is the native-fast block-pattern shim.
 
-Phase 1A of ``docs/architecture/production-deployment-roadmap.md`` swapped
+The
 the per-tool ``BLOCKED_*_PATTERN.search(args)`` calls in
 ``koda/services/tool_dispatcher.py`` for a Rust DFA via PyO3. The shim
 keeps the Python regex as a transparent fallback so dev environments

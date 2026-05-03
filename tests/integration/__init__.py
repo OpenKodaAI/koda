@@ -1,4 +1,4 @@
-"""Phase B.2 — multi-language integration tests.
+"""Multi-language integration tests.
 
 Tests in this package spin up real Rust binaries via cargo and
 exercise them through the Python gRPC clients. They are the only

@@ -115,7 +115,7 @@ OWNER_GITHUB: str = _env("OWNER_GITHUB", "")
 # The control-plane supervisor must be able to boot before any agent runtime exists.
 AGENT_TOKEN: str = _env("AGENT_TOKEN", "") or ""
 AGENT_NAME: str = _env("AGENT_NAME", AGENT_ID or "Koda")
-# Telegram polling resumption (P1-2 of production-deployment-roadmap.md).
+# Telegram polling resumption.
 # Default ``false`` — restarts no longer drop queued user messages. Operators
 # who explicitly want the legacy "discard backlog on reboot" behavior can set
 # this to ``true`` per agent or globally.
@@ -123,7 +123,7 @@ TELEGRAM_DROP_PENDING_UPDATES: bool = _bool_env("TELEGRAM_DROP_PENDING_UPDATES",
 # koda-bot-gateway opt-in. When enabled, workers stop opening
 # their own long-poll TCP connection to api.telegram.org and subscribe to
 # a single Rust gateway process that polls every bot centrally (resolves
-# P2-6: 1 long-poll per agent → 1 process for all). Default off so
+# (1 long-poll per agent → 1 process for all). Default off so
 # existing single-host deployments keep their current behavior; flip to
 # ``true`` after `koda-bot-gateway` is deployed.
 BOT_GATEWAY_ENABLED: bool = _bool_env("BOT_GATEWAY_ENABLED", False)
@@ -1672,7 +1672,7 @@ INTERNAL_RPC_DEADLINE_MS: int = int(_env("INTERNAL_RPC_DEADLINE_MS", "1500"))
 # cool-down a single half-open probe is allowed; on success the
 # breaker closes, on failure it re-opens. Tunable per deployment but
 # the defaults match what we observed during the pause/activate
-# cascading-deadlock incident (P0-3 of the production roadmap).
+# cascading-deadlock incident.
 INTERNAL_RPC_BREAKER_THRESHOLD: int = int(_env("INTERNAL_RPC_BREAKER_THRESHOLD", "5"))
 INTERNAL_RPC_BREAKER_WINDOW_SECONDS: float = float(_env("INTERNAL_RPC_BREAKER_WINDOW_SECONDS", "30"))
 INTERNAL_RPC_BREAKER_OPEN_SECONDS: float = float(_env("INTERNAL_RPC_BREAKER_OPEN_SECONDS", "30"))

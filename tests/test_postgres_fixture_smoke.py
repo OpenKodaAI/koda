@@ -1,4 +1,4 @@
-"""Phase B.1 — smoke test for the real-Postgres fixture chain.
+"""Smoke test for the real-Postgres fixture chain.
 
 The ``@pytest.mark.postgres`` tests below auto-skip when no DSN is
 configured and testcontainers/Docker is unavailable. CI runners that

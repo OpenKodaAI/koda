@@ -6,7 +6,7 @@ from policy_engine.v1 import policy_engine_pb2 as policy__engine_dot_v1_dot_poli
 
 
 class PolicyEngineServiceStub(object):
-    """koda-policy-engine — quotas, rate limits, spend caps (P2-7/P2-8).
+    """koda-policy-engine — quotas, rate limits, spend caps.
 
     Sits on the message-ingest hot path: every queued user message hits
     CheckIngest before being enqueued; every LLM-billing event hits
@@ -57,7 +57,7 @@ class PolicyEngineServiceStub(object):
 
 
 class PolicyEngineServiceServicer(object):
-    """koda-policy-engine — quotas, rate limits, spend caps (P2-7/P2-8).
+    """koda-policy-engine — quotas, rate limits, spend caps.
 
     Sits on the message-ingest hot path: every queued user message hits
     CheckIngest before being enqueued; every LLM-billing event hits
@@ -155,7 +155,7 @@ def add_PolicyEngineServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class PolicyEngineService(object):
-    """koda-policy-engine — quotas, rate limits, spend caps (P2-7/P2-8).
+    """koda-policy-engine — quotas, rate limits, spend caps.
 
     Sits on the message-ingest hot path: every queued user message hits
     CheckIngest before being enqueued; every LLM-billing event hits

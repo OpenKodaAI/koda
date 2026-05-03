@@ -1,4 +1,4 @@
-"""Phase B.2 — bot-gateway end-to-end against the real Rust binary.
+"""Bot-gateway end-to-end against the real Rust binary.
 
 Exercises the full register → enqueue (via gateway store) → subscribe
 → acknowledge roundtrip with:

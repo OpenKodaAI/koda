@@ -1,4 +1,4 @@
-"""Phase B.1 — real-Postgres fixtures for tests marked ``@pytest.mark.postgres``.
+"""Real-Postgres fixtures for tests marked ``@pytest.mark.postgres``.
 
 Resolution order (cheapest first):
 

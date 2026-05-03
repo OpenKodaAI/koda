@@ -4,7 +4,7 @@ package koda.policy_engine.v1;
 
 import "common/v1/metadata.proto";
 
-// koda-policy-engine — quotas, rate limits, spend caps (P2-7/P2-8).
+// koda-policy-engine — quotas, rate limits, spend caps.
 //
 // Sits on the message-ingest hot path: every queued user message hits
 // CheckIngest before being enqueued; every LLM-billing event hits

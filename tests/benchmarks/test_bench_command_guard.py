@@ -1,7 +1,7 @@
 """Bench: blocked-pattern matcher hot path.
 
 The dispatcher checks every ``<agent_cmd>`` invocation against the
-shell guard. The Phase 1A native DFA replaced Python re.search; this
+shell guard. The native DFA replaces Python re.search; this
 test pins the speedup so a future refactor that loses the native
 backend (``koda_command_guard`` wheel missing → Python fallback) is
 caught at PR time."""

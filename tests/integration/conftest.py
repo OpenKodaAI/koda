@@ -1,4 +1,4 @@
-"""Shared fixtures for the Phase B.2 multi-language integration tests."""
+"""Shared fixtures for the multi-language integration tests."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-"""Phase 1D circuit-breaker contract for internal_rpc.
+"""Circuit-breaker contract for internal_rpc.
 
-Direct fix for P0-3 — a hung sidecar must not freeze every worker.
+A hung sidecar must not freeze every worker.
 The breaker:
 
 1. Stays closed under success and below the failure threshold.

@@ -1,6 +1,6 @@
-"""Phase A.3 — supervisor calls isolation primitives before/after spawn.
+"""Supervisor calls isolation primitives before/after spawn.
 
-Phase 1E shipped the cgroup v2 Linux body; Phase A.3 wires it into
+The cgroup v2 Linux body lives in the Rust runtime-kernel; this wires it into
 ``ControlPlaneSupervisor._start_worker`` so the limits are actually
 applied. Tests are a mixture of grep gates (regression-proof) plus
 runtime checks of the helper that builds default limits and the
@@ -135,7 +135,7 @@ def test_place_pid_rejects_invalid_pid() -> None:
 
 
 def test_supervisor_workspace_id_falls_back_to_default() -> None:
-    """When the agent row has no workspace_id (Phase 3 enforcement
+    """When the agent row has no workspace_id (enforcement
     not yet enabled), the helper returns ``"default"`` so the cgroup
     directory still exists for future operator tuning."""
     from koda.control_plane import supervisor as supervisor_mod

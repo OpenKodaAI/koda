@@ -1,11 +1,11 @@
-"""Phase 2B — sidecar service-discovery contract.
+"""Sidecar service-discovery contract.
 
 Workers used to talk to one sidecar replica via a hard-coded
-``host:port`` (or UDS path). Phase 2B lets operators point each
+``host:port`` (or UDS path). Operators may point each
 ``*_GRPC_TARGET`` at a comma-separated pool — the resolver translates
 that to gRPC's native ``ipv4:`` scheme and the channel is built with
 the round-robin LB policy enabled. A single hung sidecar replica then
-stops bringing every worker to a halt (P0-3 / P2-2).
+stops bringing every worker to a halt.
 
 These tests pin the resolver normalization and the channel options
 applied for pool targets. They do NOT exercise live gRPC round-robin
