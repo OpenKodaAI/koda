@@ -94,7 +94,7 @@ def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
 
         _log.info("grpc_tls_channel_created", extra={"target": target, "mtls": private_key is not None})
 
-        # Phase 2B — only pass ``options`` when the target is a multi-
+        # only pass ``options`` when the target is a multi-
         # endpoint pool. Keeping the single-target call signature
         # untouched preserves backward compatibility with test stubs
         # that mocked ``insecure_channel`` as ``lambda target, ...``

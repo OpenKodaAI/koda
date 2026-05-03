@@ -2,7 +2,7 @@
 
 Phase 0 of the production roadmap replaced ``drop_pending_updates=True``
 with the Telegram server-side offset. To make crashes diagnosable and
-to lay groundwork for the Phase 1 bot-pool, the supervisor records the
+to lay groundwork for the bot-pool, the supervisor records the
 last seen ``update_id`` per agent in ``cp_telegram_offsets``.
 
 The DB row is observability + recovery aid, not a hard ack: Telegram is

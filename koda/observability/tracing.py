@@ -1,4 +1,4 @@
-"""OpenTelemetry tracing scaffold (Phase 2D).
+"""OpenTelemetry tracing scaffold.
 
 Two contracts to honor:
 

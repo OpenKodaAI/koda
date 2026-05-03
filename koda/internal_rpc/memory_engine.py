@@ -617,7 +617,7 @@ class GrpcMemoryEngineClient:
         self._metadata_pb2: Any | None = None
         self._memory_pb2: Any | None = None
         self._startup_error: str | None = None
-        # Phase A.2 — every async RPC call goes through this breaker so
+        # every async RPC call goes through this breaker so
         # a hung memory-engine doesn't compound into worker-side
         # deadlocks (P0-3 of the production roadmap).
         self._breaker = make_internal_breaker("memory_engine")

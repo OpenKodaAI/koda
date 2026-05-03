@@ -54,7 +54,7 @@ class BotGatewayClient:
         self._channel: Any = None
         self._stub: Any = None
         self._pb2: Any = None
-        # Phase A.2 — fail-fast breaker for unary RPCs. Streams
+        # fail-fast breaker for unary RPCs. Streams
         # (SubscribeUpdates) bypass the breaker because their lifetime
         # exceeds the breaker window; an outage during a stream is
         # surfaced through the consumer's reconnect loop.

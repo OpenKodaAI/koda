@@ -391,11 +391,11 @@ class ControlPlaneSupervisor:
         # a crash-loop persists.
         self._crash_history: dict[str, list[float]] = {}
         self._crash_loop_alerted: set[str] = set()
-        # Phase 2A — cluster mode. ``ClusterConfig.from_env`` defaults to
+        # cluster mode. ``ClusterConfig.from_env`` defaults to
         # disabled so the legacy "I own everything" behavior is preserved
         # when KODA_CLUSTER_MODE != "cluster".
         self._cluster = ClusterClient(config=ClusterConfig.from_env())
-        # Phase A.5 — heartbeat runs in its own task at a tighter
+        # heartbeat runs in its own task at a tighter
         # cadence than reconcile so a slow reconcile cycle cannot
         # delay heartbeat past ``KODA_CLUSTER_HEARTBEAT_STALE_SECONDS``
         # and let a sibling supervisor steal claims from a healthy
@@ -403,7 +403,7 @@ class ControlPlaneSupervisor:
         self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        # Phase 2D — supervisor traces. Same opt-in semantics as the
+        # supervisor traces. Same opt-in semantics as the
         # worker (``OTEL_EXPORTER_OTLP_ENDPOINT`` env-driven). Calling
         # init_tracing in ``start`` so the supervisor's spans are
         # routed to the same OTLP collector the workers use.
@@ -426,7 +426,7 @@ class ControlPlaneSupervisor:
         )
         setup_control_plane_routes(app)
         app.router.add_get("/health", self._health)
-        # Phase 2E — blue/green drain hooks. The deploy pipeline POSTs
+        # blue/green drain hooks. The deploy pipeline POSTs
         # to ``/cluster/drain`` on the OLD supervisor pod when the NEW
         # version becomes healthy; the OLD pod releases its claims on
         # the next heartbeat instead of refreshing them, so the NEW
@@ -471,7 +471,7 @@ class ControlPlaneSupervisor:
             await self._stop_worker(agent_id)
         # Release every claim this supervisor still holds so a sibling
         # picks the work up immediately instead of waiting for the
-        # heartbeat to go stale (Phase 2A).
+        # heartbeat to go stale.
         if self._cluster.config.enabled:
             self._cluster.release_all_for_supervisor()
         if self._runner:
@@ -685,7 +685,7 @@ class ControlPlaneSupervisor:
         agents = self._manager.list_agents()
         active_ids = {str(agent["id"]) for agent in agents if str(agent["status"]) == "active"}
 
-        # Phase 2A — when the cluster mode flag is on, narrow ``agents``
+        # when the cluster mode flag is on, narrow ``agents``
         # down to the subset this supervisor has claimed in the database.
         # ``claim_agents`` runs the SELECT FOR UPDATE SKIP LOCKED batch
         # before returning so sibling supervisors race for the same
@@ -798,7 +798,7 @@ class ControlPlaneSupervisor:
         env["AGENT_ID"] = agent_id
         env["_KODA_RUNTIME_BOOTSTRAPPED"] = "1"
 
-        # Phase A.3 — materialize the workspace cgroup BEFORE spawn so
+        # materialize the workspace cgroup BEFORE spawn so
         # the limits are in place when the worker starts allocating;
         # ``place_pid`` moves the freshly-spawned PID into the cgroup
         # so OOM kills the offending workspace, not the supervisor.

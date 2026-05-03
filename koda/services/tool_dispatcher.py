@@ -77,7 +77,7 @@ def _coerce_int(value: object) -> int:
 _AGENT_CMD_RE = re.compile(r'<agent_cmd\s+tool="([^"]+)">(.*?)</agent_cmd>', re.DOTALL)
 _ACTION_PLAN_RE = re.compile(r"<action_plan>.*?</action_plan>", re.DOTALL | re.IGNORECASE)
 
-# Native-fast block-pattern matchers (Phase 1A + A.6 wire-up). Sourced
+# Native-fast block-pattern matchers. Sourced
 # from the central :mod:`koda.services.blocked_patterns` registry so
 # every site of the runtime — handlers, cli_runner, dispatcher — uses
 # the same compiled guard. Building once at module load: when the

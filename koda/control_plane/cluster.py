@@ -19,8 +19,7 @@ explicit claim recorded in ``cp_agent_assignments`` (migration 024):
   active claim. Concurrent supervisors that fail to heartbeat lose
   their claims to the next ``claim_agents`` call.
 - ``release_agent(...)`` and ``release_all_for_supervisor(...)``
-  explicitly drop ownership, used by the blue/green drain protocol
-  (Phase 2E) and clean shutdown.
+  explicitly drop ownership, used by the blue/green drain protocol and clean shutdown.
 - ``set_draining(supervisor_id, draining)`` flips the supervisor into
   drain mode so it releases on next heartbeat instead of refreshing.
 

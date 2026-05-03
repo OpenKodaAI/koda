@@ -120,7 +120,7 @@ AGENT_NAME: str = _env("AGENT_NAME", AGENT_ID or "Koda")
 # who explicitly want the legacy "discard backlog on reboot" behavior can set
 # this to ``true`` per agent or globally.
 TELEGRAM_DROP_PENDING_UPDATES: bool = _bool_env("TELEGRAM_DROP_PENDING_UPDATES", False)
-# Phase 1B — koda-bot-gateway opt-in. When enabled, workers stop opening
+# koda-bot-gateway opt-in. When enabled, workers stop opening
 # their own long-poll TCP connection to api.telegram.org and subscribe to
 # a single Rust gateway process that polls every bot centrally (resolves
 # P2-6: 1 long-poll per agent → 1 process for all). Default off so
@@ -128,7 +128,7 @@ TELEGRAM_DROP_PENDING_UPDATES: bool = _bool_env("TELEGRAM_DROP_PENDING_UPDATES",
 # ``true`` after `koda-bot-gateway` is deployed.
 BOT_GATEWAY_ENABLED: bool = _bool_env("BOT_GATEWAY_ENABLED", False)
 BOT_GATEWAY_GRPC_TARGET: str = (_env("BOT_GATEWAY_GRPC_TARGET", "127.0.0.1:50066") or "127.0.0.1:50066").strip()
-# Phase 1C — koda-policy-engine opt-in. When enabled, queue_manager
+# koda-policy-engine opt-in. When enabled, queue_manager
 # consults the policy engine before enqueuing each user message (rate,
 # concurrency, spend cap) and reports billed LLM cost back via
 # RecordSpend. Off by default so existing single-tenant deployments
@@ -464,20 +464,20 @@ LOCAL_MODEL_REGISTRY_PATH: str = _env("LOCAL_MODEL_REGISTRY_PATH", "") or ""
 # override. Resolution lives in koda/services/runtime_capabilities.py.
 LOCAL_AUTO_OPTIMIZE: bool = _env("LOCAL_AUTO_OPTIMIZE", "true").lower() == "true"
 
-# --- Constrained decoding (Phase 1 quality bolt-on) ---
+# --- Constrained decoding ---
 STRUCTURED_DECODING_ENABLED: bool = _env("STRUCTURED_DECODING_ENABLED", "true").lower() == "true"
 
-# --- Reranker (Phase 2 quality bolt-on) ---
+# --- Reranker ---
 RERANK_ENABLED: bool = _env("RERANK_ENABLED", "false").lower() == "true"
 RERANK_MODEL: str = _env("RERANK_MODEL", "BAAI/bge-reranker-v2-m3") or ""
 RERANK_TOP_K: int = int(_env("RERANK_TOP_K", "8"))
 RERANK_DEVICE: str = _env("RERANK_DEVICE", "auto") or "auto"
 
-# --- Semantic cache vector backend (Phase 2 quality bolt-on) ---
+# --- Semantic cache vector backend ---
 SEMANTIC_CACHE_BACKEND: str = (_env("SEMANTIC_CACHE_BACKEND", "lexical") or "lexical").lower()
 SEMANTIC_CACHE_THRESHOLD: float = float(_env("SEMANTIC_CACHE_THRESHOLD", "0.92"))
 
-# --- Cascade routing (Phase 4 quality bolt-on) ---
+# --- Cascade routing ---
 LOCAL_PREFER_BELOW_COMPLEXITY: float = float(_env("LOCAL_PREFER_BELOW_COMPLEXITY", "0.0"))
 
 # --- Provider selection / fallback ---
@@ -1667,7 +1667,7 @@ RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES: int = int(
 # Internal service kernels now run in Rust+gRPC only.
 INTERNAL_RPC_MODE: str = "rust"
 INTERNAL_RPC_DEADLINE_MS: int = int(_env("INTERNAL_RPC_DEADLINE_MS", "1500"))
-# Phase A.2 — process-local circuit breaker for internal gRPC clients.
+# process-local circuit breaker for internal gRPC clients.
 # Defaults: 5 failures within 30s open the breaker for 30s. After
 # cool-down a single half-open probe is allowed; on success the
 # breaker closes, on failure it re-opens. Tunable per deployment but

@@ -50,7 +50,7 @@ def main() -> None:
 
     ctx_agent_id.set(agent_id)
 
-    # Phase 2D — initialize OpenTelemetry tracing as early as possible
+    # initialize OpenTelemetry tracing as early as possible
     # so spans created during bootstrap (e.g. supervisor handshake,
     # provider auth probes) are exported. ``init_tracing`` is a no-op
     # when ``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset, so single-host
@@ -234,7 +234,7 @@ def main() -> None:
     app.add_error_handler(error_handler)
 
     # Persist the polling offset BEFORE any other handler runs (group=-1).
-    # This is observability + groundwork for the Phase 1 bot-pool gateway —
+    # This is observability + groundwork for the bot-pool gateway —
     # Telegram's server-side offset remains the actual source of truth, but
     # the DB row gives operators a "last update_id seen by agent X" record
     # that survives crashes and is queryable from monitoring.

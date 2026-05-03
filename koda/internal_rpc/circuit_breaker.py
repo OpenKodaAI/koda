@@ -1,4 +1,4 @@
-"""Circuit breaker for internal gRPC clients (Phase 1D).
+"""Circuit breaker for internal gRPC clients.
 
 Direct fix for P0-3 of the production roadmap: a single sidecar that
 hangs on a slow gRPC call must not freeze every worker on the host.

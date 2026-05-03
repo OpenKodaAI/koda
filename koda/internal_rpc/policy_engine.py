@@ -58,7 +58,7 @@ class PolicyEngineClient:
         self._channel: Any = None
         self._stub: Any = None
         self._pb2: Any = None
-        # Phase A.2 — every RPC call goes through this breaker so a
+        # every RPC call goes through this breaker so a
         # hung policy-engine fails fast in microseconds instead of
         # waiting on INTERNAL_RPC_DEADLINE_MS for every request.
         self._breaker = make_internal_breaker("policy_engine")

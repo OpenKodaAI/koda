@@ -4500,7 +4500,7 @@ async def _post_process(
         if ctx and getattr(ctx, "execution_episode_id", None) is not None:
             context.user_data["last_execution_episode_id"] = ctx.execution_episode_id
 
-        # Phase A.1 — record billed LLM spend with the workspace
+        # record billed LLM spend with the workspace
         # policy engine so the monthly cap + warning thresholds reflect
         # real-time consumption. Permissive on failure (spend-ledger
         # drift is preferable to losing a generated response).
@@ -6316,7 +6316,7 @@ async def enqueue(
         await update.message.reply_text(_queue_capacity_message(pending_count))
         return None
 
-    # Phase A.1 — workspace policy gate. When ``POLICY_ENGINE_ENABLED``
+    # workspace policy gate. When ``POLICY_ENGINE_ENABLED``
     # is False the helper short-circuits to allow with zero overhead;
     # when enabled it consults the engine for rate / concurrency /
     # spend-cap decisions. Failures fall through permissively (the

@@ -264,7 +264,7 @@ class GrpcRuntimeKernelClient:
         self._runtime_pb2: Any | None = None
         self._startup_error: str | None = None
         self._started = False
-        # Phase A.2 — fail-fast breaker shared across all 23 RPC sites.
+        # fail-fast breaker shared across all 23 RPC sites.
         # The runtime-kernel sees the heaviest call volume, so a hung
         # instance benefits the most from shedding load fast.
         self._breaker = make_internal_breaker("runtime_kernel")

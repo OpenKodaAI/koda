@@ -1,4 +1,4 @@
-"""Centralized block-pattern guards (Phase A.6 of the consolidation plan).
+"""Centralized block-pattern guards.
 
 The runtime has multiple sites that historically called
 ``BLOCKED_*_PATTERN.search(...)`` directly against the raw Python regex

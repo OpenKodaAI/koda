@@ -1171,7 +1171,7 @@ async def cmd_export(update: Update, context: BotContext) -> None:
         Path(tmp_path).unlink(missing_ok=True)
 
 
-# --- File commands (Sprint 4c) ---
+# --- File commands ---
 
 
 async def cmd_file(update: Update, context: BotContext) -> None:
@@ -1235,7 +1235,7 @@ async def cmd_ls(update: Update, context: BotContext) -> None:
         await update.message.reply_text(listing)
 
 
-# --- Template commands (Sprint 4d) ---
+# --- Template commands ---
 
 
 async def cmd_templates(update: Update, context: BotContext) -> None:
@@ -1385,7 +1385,7 @@ async def cmd_skill(update: Update, context: BotContext) -> None:
     await enqueue(user_id, update, context, query)
 
 
-# --- Bookmark commands (Sprint 4e) ---
+# --- Bookmark commands ---
 
 
 async def cmd_bookmarks(update: Update, context: BotContext) -> None:
@@ -1440,7 +1440,7 @@ async def cmd_delbookmark(update: Update, context: BotContext) -> None:
         await update.message.reply_text(f"Bookmark #{bk_id} not found.")
 
 
-# --- Session commands (Sprint 5b) ---
+# --- Session commands ---
 
 
 async def cmd_sessions(update: Update, context: BotContext) -> None:
@@ -1545,7 +1545,7 @@ async def cmd_name(update: Update, context: BotContext) -> None:
         await update.message.reply_text("Could not rename session (not found in database).")
 
 
-# --- Scheduling commands (Sprint 6c) ---
+# --- Scheduling commands ---
 
 
 async def cmd_remind(update: Update, context: BotContext) -> None:

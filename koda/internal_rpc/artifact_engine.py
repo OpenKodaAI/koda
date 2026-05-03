@@ -54,7 +54,7 @@ class GrpcArtifactEngineClient:
         self._metadata_pb2: Any | None = None
         self._artifact_pb2: Any | None = None
         self._startup_error: str | None = None
-        # Phase A.2 — fail-fast breaker shared across all RPC sites.
+        # fail-fast breaker shared across all RPC sites.
         self._breaker = make_internal_breaker("artifact_engine")
         self._last_health: dict[str, object] = {
             "service": "artifact",

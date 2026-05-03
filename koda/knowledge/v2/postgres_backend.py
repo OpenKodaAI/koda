@@ -2481,7 +2481,7 @@ class KnowledgeV2PostgresBackend:
             _Migration(
                 "024_supervisor_cluster",
                 (
-                    # Phase 2A — leader-elected agent placement so a fleet of
+                    # leader-elected agent placement so a fleet of
                     # supervisor instances can host the same active set without
                     # two of them spawning duplicate workers for the same
                     # agent. ``supervisor_id`` identifies the claiming process
@@ -2500,7 +2500,7 @@ class KnowledgeV2PostgresBackend:
                     f"""CREATE INDEX IF NOT EXISTS idx_agent_assignments_supervisor
                            ON "{schema}"."cp_agent_assignments"
                            (supervisor_id, heartbeat_at DESC)""",
-                    # Phase 2E — supervisor runtime registry. Used by the
+                    # supervisor runtime registry. Used by the
                     # blue/green drain protocol: setting ``draining=TRUE``
                     # for a supervisor causes the cluster module to release
                     # its claims on next heartbeat instead of refreshing
