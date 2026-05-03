@@ -476,23 +476,12 @@ def test_runtime_profile_and_verify_profile_share_base_url():
     (`provider_auth._HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES`) must agree on
     each provider's default base URL — otherwise verify says "OK" against one
     endpoint while runtime fails against another."""
-    from koda.services.deepseek_runner import DEEPSEEK_PROFILE
-    from koda.services.groq_runner import GROQ_PROFILE
-    from koda.services.kimi_runner import KIMI_PROFILE
-    from koda.services.mistral_runner import MISTRAL_PROFILE
-    from koda.services.perplexity_runner import PERPLEXITY_PROFILE
-    from koda.services.qwen_runner import QWEN_PROFILE
-    from koda.services.xai_runner import XAI_PROFILE
+    from koda.services.openai_compatible_runner import (
+        OPENAI_COMPATIBLE_PROVIDERS,
+        get_provider_profile,
+    )
 
-    runtime_profiles = {
-        "perplexity": PERPLEXITY_PROFILE,
-        "mistral": MISTRAL_PROFILE,
-        "qwen": QWEN_PROFILE,
-        "kimi": KIMI_PROFILE,
-        "groq": GROQ_PROFILE,
-        "deepseek": DEEPSEEK_PROFILE,
-        "xai": XAI_PROFILE,
-    }
+    runtime_profiles = {provider_id: get_provider_profile(provider_id) for provider_id in OPENAI_COMPATIBLE_PROVIDERS}
     for provider_id, runtime in runtime_profiles.items():
         verify_default = provider_auth._HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES[provider_id]["default_base_url"]
         assert runtime.base_url == verify_default, (

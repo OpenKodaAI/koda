@@ -136,11 +136,10 @@ class TestPayloadBuilder:
         assert user_content == "describe"
 
     def test_effort_enum_injects_reasoning_effort(self):
-        from koda.services.deepseek_runner import DEEPSEEK_PROFILE
-        from koda.services.perplexity_runner import PERPLEXITY_PROFILE
+        from koda.services.openai_compatible_runner import get_provider_profile
 
         payload = _build_chat_payload(
-            profile=PERPLEXITY_PROFILE,
+            profile=get_provider_profile("perplexity"),
             model="sonar-reasoning",
             query="hi",
             system_prompt=None,
@@ -153,7 +152,7 @@ class TestPayloadBuilder:
         assert "thinking" not in payload
 
         payload = _build_chat_payload(
-            profile=DEEPSEEK_PROFILE,
+            profile=get_provider_profile("deepseek"),
             model="deepseek-v4-pro",
             query="hi",
             system_prompt=None,
@@ -180,11 +179,10 @@ class TestPayloadBuilder:
         assert "thinking" not in payload
 
     def test_effort_skipped_when_value_is_invalid(self):
-        from koda.services.deepseek_runner import DEEPSEEK_PROFILE
-        from koda.services.perplexity_runner import PERPLEXITY_PROFILE
+        from koda.services.openai_compatible_runner import get_provider_profile
 
         payload = _build_chat_payload(
-            profile=PERPLEXITY_PROFILE,
+            profile=get_provider_profile("perplexity"),
             model="sonar-reasoning",
             query="hi",
             system_prompt=None,
@@ -196,7 +194,7 @@ class TestPayloadBuilder:
         assert "reasoning_effort" not in payload
 
         payload = _build_chat_payload(
-            profile=DEEPSEEK_PROFILE,
+            profile=get_provider_profile("deepseek"),
             model="deepseek-v4-pro",
             query="hi",
             system_prompt=None,

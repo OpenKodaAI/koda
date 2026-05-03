@@ -20,7 +20,7 @@ import json
 import mimetypes
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
 
 import aiohttp
@@ -933,3 +933,208 @@ def _record_metrics(provider_id: str, model: str, elapsed: float, *, streaming: 
         DEPENDENCY_REQUESTS.labels(agent_id=_agent_id_label, dependency=f"{provider_id}_api", status=status_label).inc()
     except Exception:
         pass
+
+
+# Profile registry for cloud OpenAI-compatible providers.
+#
+# Each builder reads its env-var override (and timeout config) on first lookup
+# rather than at import time. Adding a new OpenAI-compatible provider means
+# adding one builder + one registry entry — no new module file required.
+
+
+def _build_deepseek_profile() -> ProviderHttpProfile:
+    from koda.config import DEEPSEEK_FIRST_CHUNK_TIMEOUT, DEEPSEEK_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="deepseek",
+        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or "https://api.deepseek.com",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(DEEPSEEK_TIMEOUT),
+    )
+
+
+def _build_groq_profile() -> ProviderHttpProfile:
+    from koda.config import GROQ_FIRST_CHUNK_TIMEOUT, GROQ_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="groq",
+        base_url=os.environ.get("GROQ_API_BASE_URL") or "https://api.groq.com/openai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(GROQ_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(GROQ_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "llama-3.2-11b-vision-preview",
+                "llama-3.2-90b-vision-preview",
+            }
+        ),
+    )
+
+
+def _build_kimi_profile() -> ProviderHttpProfile:
+    from koda.config import KIMI_FIRST_CHUNK_TIMEOUT, KIMI_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="kimi",
+        base_url=os.environ.get("KIMI_API_BASE_URL") or "https://api.moonshot.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(KIMI_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(KIMI_TIMEOUT),
+        # Kimi K2 family is natively multimodal; the kimi-vision-* and
+        # moonshot-v1-vision-* SKUs are kept for operators pinned to those
+        # snapshots.
+        vision_models=frozenset(
+            {
+                "kimi-k2.6",
+                "kimi-k2.5",
+                "kimi-latest",
+                "kimi-latest-vision",
+                "kimi-vision-2024-12-09",
+                "moonshot-v1-vision-preview",
+            }
+        ),
+    )
+
+
+def _build_mistral_profile() -> ProviderHttpProfile:
+    from koda.config import MISTRAL_FIRST_CHUNK_TIMEOUT, MISTRAL_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="mistral",
+        base_url=os.environ.get("MISTRAL_API_BASE_URL") or "https://api.mistral.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(MISTRAL_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(MISTRAL_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "pixtral-large-latest",
+                "pixtral-large-2411",
+                "pixtral-12b-2409",
+                "pixtral-12b",
+                "pixtral-12b-latest",
+            }
+        ),
+    )
+
+
+def _build_perplexity_profile() -> ProviderHttpProfile:
+    from koda.config import PERPLEXITY_FIRST_CHUNK_TIMEOUT, PERPLEXITY_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="perplexity",
+        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or "https://api.perplexity.ai",
+        chat_path="/chat/completions",
+        models_path=None,
+        capability_probe="health_only",
+        health_path="/",
+        first_chunk_timeout_seconds=float(PERPLEXITY_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(PERPLEXITY_TIMEOUT),
+    )
+
+
+def _build_qwen_profile() -> ProviderHttpProfile:
+    from koda.config import QWEN_FIRST_CHUNK_TIMEOUT, QWEN_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="qwen",
+        base_url=os.environ.get("QWEN_API_BASE_URL") or "https://dashscope-intl.aliyuncs.com",
+        chat_path="/compatible-mode/v1/chat/completions",
+        models_path="/compatible-mode/v1/models",
+        first_chunk_timeout_seconds=float(QWEN_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(QWEN_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "qwen3-vl-max",
+                "qwen3-vl-plus",
+                "qwen3-vl-flash",
+                "qwen-vl-max",
+                "qwen-vl-max-latest",
+                "qwen-vl-plus",
+                "qwen-vl-plus-latest",
+                "qwen2-vl-72b-instruct",
+                "qwen2.5-vl-72b-instruct",
+                "qvq-72b-preview",
+            }
+        ),
+    )
+
+
+def _build_xai_profile() -> ProviderHttpProfile:
+    from koda.config import XAI_FIRST_CHUNK_TIMEOUT, XAI_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="xai",
+        base_url=os.environ.get("XAI_API_BASE_URL") or "https://api.x.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(XAI_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(XAI_TIMEOUT),
+        # Grok 4.x is multimodal end-to-end; older `*-vision` SKUs stay
+        # listed for operators still pinned to legacy snapshots.
+        vision_models=frozenset(
+            {
+                "grok-4.3",
+                "grok-4.1-fast",
+                "grok-4-fast",
+                "grok-4-0709",
+                "grok-4-vision-0709",
+                "grok-2-vision-1212",
+                "grok-vision-beta",
+            }
+        ),
+    )
+
+
+_PROFILE_BUILDERS: dict[str, Callable[[], ProviderHttpProfile]] = {
+    "deepseek": _build_deepseek_profile,
+    "groq": _build_groq_profile,
+    "kimi": _build_kimi_profile,
+    "mistral": _build_mistral_profile,
+    "perplexity": _build_perplexity_profile,
+    "qwen": _build_qwen_profile,
+    "xai": _build_xai_profile,
+}
+
+OPENAI_COMPATIBLE_PROVIDERS: frozenset[str] = frozenset(_PROFILE_BUILDERS)
+"""Provider IDs handled by the cloud OpenAI-compatible registry."""
+
+_PROFILE_CACHE: dict[str, ProviderHttpProfile] = {}
+
+
+def get_provider_profile(provider_id: str) -> ProviderHttpProfile:
+    """Return the cached :class:`ProviderHttpProfile` for an OpenAI-compatible provider."""
+    cached = _PROFILE_CACHE.get(provider_id)
+    if cached is not None:
+        return cached
+    builder = _PROFILE_BUILDERS.get(provider_id)
+    if builder is None:
+        raise KeyError(f"No OpenAI-compatible profile registered for provider {provider_id!r}")
+    profile = builder()
+    _PROFILE_CACHE[provider_id] = profile
+    return profile
+
+
+def reset_provider_profile_cache() -> None:
+    """Test hook — drop cached profiles so env-var overrides can be re-read."""
+    _PROFILE_CACHE.clear()
+
+
+async def get_capabilities_for_provider(provider_id: str, turn_mode: TurnMode) -> ProviderCapabilities:
+    """Probe runtime capabilities for a registered OpenAI-compatible provider."""
+    return await get_openai_compatible_capabilities(get_provider_profile(provider_id), turn_mode)
+
+
+async def run_for_provider(provider_id: str, **kwargs: Any) -> dict[str, Any]:
+    """Run one non-streaming turn against a registered OpenAI-compatible provider."""
+    return await run_openai_compatible(profile=get_provider_profile(provider_id), **kwargs)
+
+
+async def run_streaming_for_provider(provider_id: str, **kwargs: Any) -> AsyncIterator[str]:
+    """Run a streaming turn against a registered OpenAI-compatible provider."""
+    async for chunk in run_openai_compatible_streaming(profile=get_provider_profile(provider_id), **kwargs):
+        yield chunk

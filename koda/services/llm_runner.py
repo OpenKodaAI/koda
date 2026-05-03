@@ -3,71 +3,32 @@
 from __future__ import annotations
 
 import contextlib
+import functools
+import importlib
 import json
 import os
 import re
 from collections.abc import AsyncIterator
+from types import ModuleType
 from typing import Any
 
 from koda.config import (
     AGENT_ID,
     AVAILABLE_PROVIDERS,
     CODEX_FIRST_CHUNK_TIMEOUT,
-    DEEPSEEK_FIRST_CHUNK_TIMEOUT,
     FIRST_CHUNK_TIMEOUT,
     GEMINI_FIRST_CHUNK_TIMEOUT,
-    GROQ_FIRST_CHUNK_TIMEOUT,
-    KIMI_FIRST_CHUNK_TIMEOUT,
     LLAMACPP_FIRST_CHUNK_TIMEOUT,
-    MISTRAL_FIRST_CHUNK_TIMEOUT,
     MLX_FIRST_CHUNK_TIMEOUT,
-    PERPLEXITY_FIRST_CHUNK_TIMEOUT,
     PROVIDER_DEFAULT_MODELS,
     PROVIDER_FALLBACK_ORDER,
     PROVIDER_MODELS,
-    QWEN_FIRST_CHUNK_TIMEOUT,
     TRANSCRIPT_REPLAY_LIMIT,
-    XAI_FIRST_CHUNK_TIMEOUT,
-)
-from koda.services.claude_runner import (
-    get_claude_capabilities,
-    run_claude,
-    run_claude_streaming,
-)
-from koda.services.codex_runner import (
-    get_codex_capabilities,
-    run_codex,
-    run_codex_streaming,
-)
-from koda.services.deepseek_runner import (
-    get_deepseek_capabilities,
-    run_deepseek,
-    run_deepseek_streaming,
-)
-from koda.services.gemini_runner import (
-    get_gemini_capabilities,
-    run_gemini,
-    run_gemini_streaming,
-)
-from koda.services.groq_runner import (
-    get_groq_capabilities,
-    run_groq,
-    run_groq_streaming,
-)
-from koda.services.kimi_runner import (
-    get_kimi_capabilities,
-    run_kimi,
-    run_kimi_streaming,
 )
 from koda.services.llamacpp_runner import (
     get_llamacpp_capabilities,
     run_llamacpp,
     run_llamacpp_streaming,
-)
-from koda.services.mistral_runner import (
-    get_mistral_capabilities,
-    run_mistral,
-    run_mistral_streaming,
 )
 from koda.services.mlx_runner import (
     get_mlx_capabilities,
@@ -75,15 +36,11 @@ from koda.services.mlx_runner import (
     run_mlx_streaming,
 )
 from koda.services.model_router import estimate_model
-from koda.services.ollama_runner import (
-    get_ollama_capabilities,
-    run_ollama,
-    run_ollama_streaming,
-)
-from koda.services.perplexity_runner import (
-    get_perplexity_capabilities,
-    run_perplexity,
-    run_perplexity_streaming,
+from koda.services.openai_compatible_runner import (
+    OPENAI_COMPATIBLE_PROVIDERS,
+    get_capabilities_for_provider,
+    run_for_provider,
+    run_streaming_for_provider,
 )
 from koda.services.provider_runtime import (
     ProviderCapabilities,
@@ -91,18 +48,36 @@ from koda.services.provider_runtime import (
     infer_turn_mode,
     summarize_provider_health,
 )
-from koda.services.qwen_runner import (
-    get_qwen_capabilities,
-    run_qwen,
-    run_qwen_streaming,
-)
-from koda.services.xai_runner import (
-    get_xai_capabilities,
-    run_xai,
-    run_xai_streaming,
-)
 from koda.state.history_store import get_recent_session_transcript
 from koda.utils.command_helpers import normalize_provider
+
+# Native CLI / subprocess runners are loaded lazily. Each is a few hundred
+# to ~1k lines of process-management logic. Deferring the import means an
+# agent talking to a single provider (the common case) never pays the cost
+# of loading the others.
+
+_NATIVE_PROVIDER_MODULES: dict[str, str] = {
+    "claude": "koda.services.claude_runner",
+    "codex": "koda.services.codex_runner",
+    "gemini": "koda.services.gemini_runner",
+    "ollama": "koda.services.ollama_runner",
+}
+
+_NATIVE_FIRST_CHUNK_TIMEOUTS: dict[str, float] = {
+    "claude": float(FIRST_CHUNK_TIMEOUT),
+    "codex": float(CODEX_FIRST_CHUNK_TIMEOUT),
+    "gemini": float(GEMINI_FIRST_CHUNK_TIMEOUT),
+    "ollama": float(FIRST_CHUNK_TIMEOUT),
+}
+
+
+@functools.cache
+def _native_runner(provider: str) -> ModuleType:
+    """Return the lazily-loaded module for a native CLI/subprocess runner."""
+    module_path = _NATIVE_PROVIDER_MODULES.get(provider)
+    if module_path is None:
+        raise KeyError(f"No native runner registered for provider {provider!r}")
+    return importlib.import_module(module_path)
 
 _agent_id_label = AGENT_ID or "default"
 
@@ -139,62 +114,55 @@ _RETRYABLE_PATTERNS: dict[str, re.Pattern[str]] = {
     "xai": _COMMON_RETRY_PATTERN,
 }
 
-_HTTP_PROVIDER_RUNNERS: dict[str, dict[str, Any]] = {
-    "llamacpp": {
-        "run": run_llamacpp,
-        "stream": run_llamacpp_streaming,
-        "capabilities": get_llamacpp_capabilities,
-        "first_chunk_timeout": float(LLAMACPP_FIRST_CHUNK_TIMEOUT),
-    },
-    "mlx": {
-        "run": run_mlx,
-        "stream": run_mlx_streaming,
-        "capabilities": get_mlx_capabilities,
-        "first_chunk_timeout": float(MLX_FIRST_CHUNK_TIMEOUT),
-    },
-    "perplexity": {
-        "run": run_perplexity,
-        "stream": run_perplexity_streaming,
-        "capabilities": get_perplexity_capabilities,
-        "first_chunk_timeout": float(PERPLEXITY_FIRST_CHUNK_TIMEOUT),
-    },
-    "mistral": {
-        "run": run_mistral,
-        "stream": run_mistral_streaming,
-        "capabilities": get_mistral_capabilities,
-        "first_chunk_timeout": float(MISTRAL_FIRST_CHUNK_TIMEOUT),
-    },
-    "qwen": {
-        "run": run_qwen,
-        "stream": run_qwen_streaming,
-        "capabilities": get_qwen_capabilities,
-        "first_chunk_timeout": float(QWEN_FIRST_CHUNK_TIMEOUT),
-    },
-    "kimi": {
-        "run": run_kimi,
-        "stream": run_kimi_streaming,
-        "capabilities": get_kimi_capabilities,
-        "first_chunk_timeout": float(KIMI_FIRST_CHUNK_TIMEOUT),
-    },
-    "groq": {
-        "run": run_groq,
-        "stream": run_groq_streaming,
-        "capabilities": get_groq_capabilities,
-        "first_chunk_timeout": float(GROQ_FIRST_CHUNK_TIMEOUT),
-    },
-    "deepseek": {
-        "run": run_deepseek,
-        "stream": run_deepseek_streaming,
-        "capabilities": get_deepseek_capabilities,
-        "first_chunk_timeout": float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
-    },
-    "xai": {
-        "run": run_xai,
-        "stream": run_xai_streaming,
-        "capabilities": get_xai_capabilities,
-        "first_chunk_timeout": float(XAI_FIRST_CHUNK_TIMEOUT),
-    },
+_OPENAI_COMPATIBLE_TIMEOUT_CONSTS: dict[str, str] = {
+    "deepseek": "DEEPSEEK_FIRST_CHUNK_TIMEOUT",
+    "groq": "GROQ_FIRST_CHUNK_TIMEOUT",
+    "kimi": "KIMI_FIRST_CHUNK_TIMEOUT",
+    "mistral": "MISTRAL_FIRST_CHUNK_TIMEOUT",
+    "perplexity": "PERPLEXITY_FIRST_CHUNK_TIMEOUT",
+    "qwen": "QWEN_FIRST_CHUNK_TIMEOUT",
+    "xai": "XAI_FIRST_CHUNK_TIMEOUT",
 }
+
+
+def _build_http_provider_runners() -> dict[str, dict[str, Any]]:
+    """Assemble the dispatch table for HTTP-only providers.
+
+    Local OpenAI-compatible runtimes (llamacpp, mlx) keep their own modules
+    because they own extra logic (auto-spawn supervisors, structured-decoding
+    grammar plumbing). The seven cloud OpenAI-compatible providers are
+    served by a single shared adapter via the registry in
+    :mod:`koda.services.openai_compatible_runner` — bound here with
+    :func:`functools.partial` so each provider keeps a stable callable.
+    """
+    from koda import config as _config
+
+    runners: dict[str, dict[str, Any]] = {
+        "llamacpp": {
+            "run": run_llamacpp,
+            "stream": run_llamacpp_streaming,
+            "capabilities": get_llamacpp_capabilities,
+            "first_chunk_timeout": float(LLAMACPP_FIRST_CHUNK_TIMEOUT),
+        },
+        "mlx": {
+            "run": run_mlx,
+            "stream": run_mlx_streaming,
+            "capabilities": get_mlx_capabilities,
+            "first_chunk_timeout": float(MLX_FIRST_CHUNK_TIMEOUT),
+        },
+    }
+    for provider_id in OPENAI_COMPATIBLE_PROVIDERS:
+        timeout_value = float(getattr(_config, _OPENAI_COMPATIBLE_TIMEOUT_CONSTS[provider_id]))
+        runners[provider_id] = {
+            "run": functools.partial(run_for_provider, provider_id),
+            "stream": functools.partial(run_streaming_for_provider, provider_id),
+            "capabilities": functools.partial(get_capabilities_for_provider, provider_id),
+            "first_chunk_timeout": timeout_value,
+        }
+    return runners
+
+
+_HTTP_PROVIDER_RUNNERS: dict[str, dict[str, Any]] = _build_http_provider_runners()
 
 
 def get_provider_runtime_eligibility(
@@ -298,13 +266,10 @@ async def get_provider_capabilities(provider: str, turn_mode: TurnMode) -> Provi
     if http_runner is not None:
         capabilities: ProviderCapabilities = await http_runner["capabilities"](turn_mode)
         return capabilities
-    if normalized == "ollama":
-        return await get_ollama_capabilities(turn_mode)
-    if normalized == "gemini":
-        return await get_gemini_capabilities(turn_mode)
-    if normalized == "codex":
-        return await get_codex_capabilities(turn_mode)
-    return await get_claude_capabilities(turn_mode)
+    native_provider = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+    runner = _native_runner(native_provider)
+    capabilities_fn = getattr(runner, f"get_{native_provider}_capabilities")
+    return await capabilities_fn(turn_mode)
 
 
 async def get_provider_health_snapshot() -> dict[str, dict[str, Any]]:
@@ -444,60 +409,11 @@ async def run_llm(
             effort=effort,
         )
         result = result_obj
-    elif normalized == "ollama":
-        result = await run_ollama(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-        )
-    elif normalized == "gemini":
-        result = await run_gemini(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-            runtime_task_id=runtime_task_id,
-            effort=effort,
-        )
-    elif normalized == "codex":
-        result = await run_codex(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-            runtime_task_id=runtime_task_id,
-            effort=effort,
-        )
     else:
-        result = await run_claude(
+        target = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+        runner = _native_runner(target)
+        run_fn = getattr(runner, f"run_{target}")
+        kwargs: dict[str, Any] = dict(
             query=query,
             work_dir=work_dir,
             model=model,
@@ -511,9 +427,13 @@ async def run_llm(
             turn_mode=resolved_turn_mode,
             capabilities=capabilities,
             dry_run=dry_run,
-            runtime_task_id=runtime_task_id,
-            effort=effort,
         )
+        # ollama_runner predates the runtime_task_id / effort knobs and
+        # rejects them as unexpected keyword arguments.
+        if target != "ollama":
+            kwargs["runtime_task_id"] = runtime_task_id
+            kwargs["effort"] = effort
+        result = await run_fn(**kwargs)
     result["provider"] = normalized
     result["provider_session_id"] = result.get("session_id")
     result["turn_mode"] = result.get("_turn_mode", resolved_turn_mode)
@@ -594,73 +514,13 @@ async def run_llm_streaming(
         ):
             yield chunk
         return
-    if normalized == "ollama":
-        async for chunk in run_ollama_streaming(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            first_chunk_timeout=first_chunk_timeout if first_chunk_timeout is not None else FIRST_CHUNK_TIMEOUT,
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            metadata_collector=metadata_collector,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-        ):
-            yield chunk
-        return
-    if normalized == "gemini":
-        async for chunk in run_gemini_streaming(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            first_chunk_timeout=(
-                first_chunk_timeout if first_chunk_timeout is not None else GEMINI_FIRST_CHUNK_TIMEOUT
-            ),
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            metadata_collector=metadata_collector,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-            runtime_task_id=runtime_task_id,
-            effort=effort,
-        ):
-            yield chunk
-        return
-    if normalized == "codex":
-        async for chunk in run_codex_streaming(
-            query=query,
-            work_dir=work_dir,
-            model=model,
-            session_id=provider_session_id,
-            max_budget=max_budget,
-            process_holder=process_holder,
-            system_prompt=system_prompt,
-            image_paths=image_paths,
-            first_chunk_timeout=(first_chunk_timeout if first_chunk_timeout is not None else CODEX_FIRST_CHUNK_TIMEOUT),
-            permission_mode=permission_mode,
-            max_turns=max_turns,
-            metadata_collector=metadata_collector,
-            turn_mode=resolved_turn_mode,
-            capabilities=capabilities,
-            dry_run=dry_run,
-            runtime_task_id=runtime_task_id,
-            effort=effort,
-        ):
-            yield chunk
-        return
-    async for chunk in run_claude_streaming(
+    target = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+    runner = _native_runner(target)
+    stream_fn = getattr(runner, f"run_{target}_streaming")
+    effective_first_chunk = (
+        first_chunk_timeout if first_chunk_timeout is not None else _NATIVE_FIRST_CHUNK_TIMEOUTS[target]
+    )
+    kwargs: dict[str, Any] = dict(
         query=query,
         work_dir=work_dir,
         model=model,
@@ -669,16 +529,18 @@ async def run_llm_streaming(
         process_holder=process_holder,
         system_prompt=system_prompt,
         image_paths=image_paths,
-        first_chunk_timeout=first_chunk_timeout if first_chunk_timeout is not None else FIRST_CHUNK_TIMEOUT,
+        first_chunk_timeout=effective_first_chunk,
         permission_mode=permission_mode,
         max_turns=max_turns,
         metadata_collector=metadata_collector,
         turn_mode=resolved_turn_mode,
         capabilities=capabilities,
         dry_run=dry_run,
-        runtime_task_id=runtime_task_id,
-        effort=effort,
-    ):
+    )
+    if target != "ollama":
+        kwargs["runtime_task_id"] = runtime_task_id
+        kwargs["effort"] = effort
+    async for chunk in stream_fn(**kwargs):
         yield chunk
 
 
