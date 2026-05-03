@@ -306,12 +306,7 @@ export function IntegrationPermissionDetail({
               type="button"
               onClick={onConnectOAuth}
               disabled={isOAuthLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all disabled:opacity-60"
-              style={{
-                background:
-                  "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
-                border: "1px solid var(--interactive-active-border)",
-              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
             >
               {isOAuthLoading ? <Loader2 size={11} className="animate-spin" /> : null}
               {tl("Conectar")}
@@ -320,12 +315,7 @@ export function IntegrationPermissionDetail({
             <button
               type="button"
               onClick={() => setConnectModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
-              style={{
-                background:
-                  "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
-                border: "1px solid var(--interactive-active-border)",
-              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
               {tl("Conectar")}
             </button>
@@ -342,12 +332,7 @@ export function IntegrationPermissionDetail({
           <button
             type="button"
             onClick={() => setConnectModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
-            style={{
-              background:
-                "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
-              border: "1px solid var(--interactive-active-border)",
-            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
             {tl("Conectar")}
           </button>

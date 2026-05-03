@@ -49,6 +49,18 @@ def _grpc_pool_options() -> list[tuple[str, str]]:
     ]
 
 
+# When grpc-python connects to a ``unix://`` target it derives the HTTP/2
+# ``:authority`` header from the URL path, which url-encodes the slashes
+# and produces a header that tonic rejects with PROTOCOL_ERROR. Forcing a
+# benign authority sidesteps the validation. ``localhost`` is the canonical
+# choice — services on a UDS socket are by definition the local host.
+_UDS_AUTHORITY_OPTION: tuple[str, str] = ("grpc.default_authority", "localhost")
+
+
+def _uds_options() -> list[tuple[str, str]]:
+    return [_UDS_AUTHORITY_OPTION]
+
+
 def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
     """Create a gRPC channel, optionally secured with TLS/mTLS.
 
@@ -104,6 +116,11 @@ def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
             if async_channel:
                 return grpc_aio.secure_channel(target, credentials, options=options)
             return grpc.secure_channel(target, credentials, options=options)
+        if target.startswith("unix:"):
+            options = _uds_options()
+            if async_channel:
+                return grpc_aio.secure_channel(target, credentials, options=options)
+            return grpc.secure_channel(target, credentials, options=options)
         if async_channel:
             return grpc_aio.secure_channel(target, credentials)
         return grpc.secure_channel(target, credentials)
@@ -111,6 +128,15 @@ def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
     # TLS disabled — backward-compatible insecure channel.
     if target.startswith("ipv4:"):
         options = _grpc_pool_options()
+        if async_channel:
+            import grpc.aio as grpc_aio
+
+            return grpc_aio.insecure_channel(target, options=options)
+        import grpc
+
+        return grpc.insecure_channel(target, options=options)
+    if target.startswith("unix:"):
+        options = _uds_options()
         if async_channel:
             import grpc.aio as grpc_aio
 

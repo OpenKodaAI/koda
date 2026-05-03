@@ -112,12 +112,10 @@ function buildRunningState(
 export function AppTourProvider({
   children,
   pathname,
-  mobileNavOpen,
   onMobileNavOpenChange,
 }: {
   children: ReactNode;
   pathname: string;
-  mobileNavOpen: boolean;
   onMobileNavOpenChange: (open: boolean) => void;
 }) {
   const [state, setState] = useState<TourMachineState>({
@@ -362,7 +360,6 @@ export function AppTourProvider({
     <AppTourContext.Provider value={value}>
       <TourRouteBridge
         pathname={pathname}
-        mobileNavOpen={mobileNavOpen}
         onMobileNavOpenChange={onMobileNavOpenChange}
       />
       {children}

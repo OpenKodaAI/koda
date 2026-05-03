@@ -1262,7 +1262,13 @@ function buildUrl(pathname: string) {
 // `ControlPlaneRequestError` instead of letting Next sit on the request for
 // the full Node fetch default. Routes that need a longer budget (downloads,
 // SSE streams) bypass this helper entirely via `runtimeFetch`.
-const CONTROL_PLANE_FETCH_TIMEOUT_MS = 6_000;
+//
+// 10s, not 6s: the dashboard aggregation routes (`agents/summary`,
+// `executions`, `costs`) run ~10 sync queries per agent through
+// `run_coro_sync`, so a 4-agent fan-out genuinely takes 3-5s on a healthy
+// backend. 6s tipped them into "did not respond" the moment any cold query
+// added latency. 10s is still tight enough to flag a real hang.
+const CONTROL_PLANE_FETCH_TIMEOUT_MS = 10_000;
 
 function combineSignals(
   caller: AbortSignal | null | undefined,

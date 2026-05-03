@@ -47,7 +47,7 @@ function renderDelta(delta: number | null | undefined) {
 export function CostKpiRail({ overview, comparison, peakBucket, className }: CostKpiRailProps) {
   const { t } = useAppI18n();
   const peakContext = peakBucket
-    ? `${peakBucket.label} · ${getAgentLabel(peakBucket.top_bot ?? "—")} · ${peakBucket.top_model ?? t("costs.page.noDominantModel", { defaultValue: "No dominant model" })}`
+    ? `${peakBucket.label} · ${getAgentLabel(peakBucket.top_agent ?? "—")} · ${peakBucket.top_model ?? t("costs.page.noDominantModel", { defaultValue: "No dominant model" })}`
     : t("costs.page.noPeak", { defaultValue: "No highlighted peak in the period" });
 
   return (

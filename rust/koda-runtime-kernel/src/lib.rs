@@ -1,3 +1,4 @@
+pub mod agent_workers;
 pub mod isolation;
 
 use std::collections::{BTreeSet, HashMap};
@@ -24,15 +25,17 @@ use koda_proto::runtime::v1::{
     AttachTerminalRequest, AttachTerminalResponse, BrowserSessionRef, CheckpointRef,
     CleanupEnvironmentRequest, CleanupEnvironmentResponse, CloseTerminalRequest,
     CloseTerminalResponse, CollectSnapshotRequest, CollectSnapshotResponse,
-    CreateEnvironmentRequest, CreateEnvironmentResponse, EnvironmentRef, ExecuteCommandRequest,
-    ExecuteCommandResponse, FinalizeTaskRequest, FinalizeTaskResponse, GetBrowserSessionRequest,
-    GetBrowserSessionResponse, GetCheckpointRequest, GetCheckpointResponse, OpenTerminalRequest,
-    OpenTerminalResponse, PauseTaskRequest, PauseTaskResponse, ProcessRef, ReconcileRequest,
-    ReconcileResponse, ResizeTerminalRequest, ResizeTerminalResponse, RestoreCheckpointRequest,
-    RestoreCheckpointResponse, ResumeTaskRequest, ResumeTaskResponse, SaveCheckpointRequest,
-    SaveCheckpointResponse, StartBrowserSessionRequest, StartBrowserSessionResponse,
-    StartTaskRequest, StartTaskResponse, StopBrowserSessionRequest, StopBrowserSessionResponse,
-    StreamTerminalRequest, StreamTerminalSessionRequest, TerminalChunk, TerminalSessionRef,
+    CreateEnvironmentRequest, CreateEnvironmentResponse, EnsureAgentWorkersRequest,
+    EnsureAgentWorkersResponse, EnvironmentRef, ExecuteCommandRequest, ExecuteCommandResponse,
+    FinalizeTaskRequest, FinalizeTaskResponse, GetAgentWorkerRequest, GetAgentWorkerResponse,
+    GetBrowserSessionRequest, GetBrowserSessionResponse, GetCheckpointRequest,
+    GetCheckpointResponse, OpenTerminalRequest, OpenTerminalResponse, PauseTaskRequest,
+    PauseTaskResponse, ProcessRef, ReconcileRequest, ReconcileResponse, ResizeTerminalRequest,
+    ResizeTerminalResponse, RestoreCheckpointRequest, RestoreCheckpointResponse, ResumeTaskRequest,
+    ResumeTaskResponse, SaveCheckpointRequest, SaveCheckpointResponse, StartBrowserSessionRequest,
+    StartBrowserSessionResponse, StartTaskRequest, StartTaskResponse, StopBrowserSessionRequest,
+    StopBrowserSessionResponse, StreamTerminalRequest, StreamTerminalSessionRequest, TerminalChunk,
+    TerminalSessionRef, TerminateAgentWorkerRequest, TerminateAgentWorkerResponse,
     TerminateTaskRequest, TerminateTaskResponse, WriteTerminalRequest, WriteTerminalResponse,
 };
 use koda_security_core::{sanitize_env, validate_runtime_path, validate_shell_command};
@@ -272,10 +275,20 @@ pub struct RuntimeKernelServer {
     next_terminal_session_id: Arc<AtomicU64>,
     next_browser_session_id: Arc<AtomicU64>,
     next_checkpoint_id: Arc<AtomicU64>,
+    agent_workers: agent_workers::AgentWorkerRegistry,
 }
 
 impl RuntimeKernelServer {
     pub fn new(config: KernelConfig) -> Self {
+        Self::with_agent_worker_adapter(config, Arc::new(agent_workers::RealRuntimeAdapter))
+    }
+
+    /// Hook for tests that want to inject a deterministic spawn / port-probe
+    /// adapter without bringing up real processes.
+    pub fn with_agent_worker_adapter(
+        config: KernelConfig,
+        adapter: Arc<dyn agent_workers::RuntimeAdapter>,
+    ) -> Self {
         Self {
             config,
             state: Arc::new(RwLock::new(KernelState::new())),
@@ -286,7 +299,15 @@ impl RuntimeKernelServer {
             next_terminal_session_id: Arc::new(AtomicU64::new(1)),
             next_browser_session_id: Arc::new(AtomicU64::new(1)),
             next_checkpoint_id: Arc::new(AtomicU64::new(1)),
+            agent_workers: agent_workers::AgentWorkerRegistry::new(adapter),
         }
+    }
+
+    /// Best-effort cleanup of every tracked agent worker. Called by
+    /// the binary entrypoint on shutdown so the kernel never leaves
+    /// children running when it exits.
+    pub async fn shutdown_agent_workers(&self) {
+        self.agent_workers.terminate_all().await;
     }
 
     pub fn config(&self) -> &KernelConfig {
@@ -3405,6 +3426,59 @@ impl RuntimeKernelService for RuntimeKernelServer {
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
         Ok(Response::new(self.runtime_health_response()))
+    }
+
+    async fn ensure_agent_workers(
+        &self,
+        request: Request<EnsureAgentWorkersRequest>,
+    ) -> Result<Response<EnsureAgentWorkersResponse>, Status> {
+        let payload = request.into_inner();
+        let outcome = self.agent_workers.ensure(payload.desired).await;
+        Ok(Response::new(EnsureAgentWorkersResponse {
+            current: outcome.current_protos(),
+            spawned: outcome.spawned,
+            terminated: outcome.terminated,
+            restarted: outcome.restarted,
+            unchanged: outcome.unchanged,
+        }))
+    }
+
+    async fn get_agent_worker(
+        &self,
+        request: Request<GetAgentWorkerRequest>,
+    ) -> Result<Response<GetAgentWorkerResponse>, Status> {
+        let payload = request.into_inner();
+        if payload.agent_id.is_empty() {
+            return Err(Status::invalid_argument("agent_id is required"));
+        }
+        match self.agent_workers.get(&payload.agent_id).await {
+            Some(snap) => Ok(Response::new(GetAgentWorkerResponse {
+                status: Some(agent_workers::snapshot_to_proto(&snap)),
+                found: true,
+            })),
+            None => Ok(Response::new(GetAgentWorkerResponse {
+                status: None,
+                found: false,
+            })),
+        }
+    }
+
+    async fn terminate_agent_worker(
+        &self,
+        request: Request<TerminateAgentWorkerRequest>,
+    ) -> Result<Response<TerminateAgentWorkerResponse>, Status> {
+        let payload = request.into_inner();
+        if payload.agent_id.is_empty() {
+            return Err(Status::invalid_argument("agent_id is required"));
+        }
+        let snapshot = self
+            .agent_workers
+            .terminate(&payload.agent_id, payload.force)
+            .await;
+        Ok(Response::new(TerminateAgentWorkerResponse {
+            status: snapshot.as_ref().map(agent_workers::snapshot_to_proto),
+            terminated: snapshot.is_some(),
+        }))
     }
 }
 

@@ -60,12 +60,12 @@ function buildAgentItems(
   tl: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
-    insights?.by_bot?.map((entry) => ({
-      id: entry.bot_id,
-      label: getAgentLabel(entry.bot_id),
+    insights?.by_agent?.map((entry) => ({
+      id: entry.agent_id,
+      label: getAgentLabel(entry.agent_id),
       value: entry.cost_usd,
       share: entry.share_pct,
-      color: getAgentColor(entry.bot_id),
+      color: getAgentColor(entry.agent_id),
       meta: tl("{{resolved}} resolvidas · {{cost}} por conversa", {
         resolved: entry.resolved_conversations,
         cost: formatCost(entry.avg_cost_per_resolved_conversation),

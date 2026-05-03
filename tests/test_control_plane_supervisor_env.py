@@ -18,13 +18,22 @@ import inspect
 
 
 def test_supervisor_propagates_grpc_sidecar_targets() -> None:
-    """The _SYSTEM_ENV_KEYS whitelist must include every gRPC target."""
+    """The supervisor's spec-build path must force every gRPC sidecar target
+    from the parent env into each worker's spec.environment so the kernel
+    spawns workers that can reach the docker-compose-provided sidecars.
+
+    Post runtime-kernel migration the supervisor no longer spawns workers
+    itself — it builds an ``AgentWorkerSpec`` and hands it to the kernel
+    via ``RuntimeKernelLink.ensure_agent_workers``. The whitelist now lives
+    as the module-level ``_SYSTEM_ENV_KEYS`` constant, applied inside
+    ``ControlPlaneSupervisor._build_spec``.
+    """
     from koda.control_plane import supervisor as supervisor_mod
 
-    src = inspect.getsource(supervisor_mod.ControlPlaneSupervisor._start_worker)
-    # The whitelist is a local set literal inside _start_worker; assert
-    # textually so this test stays stable even if the set is refactored
-    # into a module-level constant.
+    system_keys = supervisor_mod._SYSTEM_ENV_KEYS
+    build_spec_src = inspect.getsource(
+        supervisor_mod.ControlPlaneSupervisor._build_spec
+    )
     for env_key in (
         "SECURITY_GRPC_TARGET",
         "MEMORY_GRPC_TARGET",
@@ -33,11 +42,16 @@ def test_supervisor_propagates_grpc_sidecar_targets() -> None:
         "RUNTIME_KERNEL_GRPC_TARGET",
         "PLAYWRIGHT_BROWSERS_PATH",
     ):
-        assert env_key in src, (
+        assert env_key in system_keys, (
             f"{env_key} must be in supervisor._SYSTEM_ENV_KEYS so spawned workers "
             "inherit the docker-compose-provided sidecar address. Without it the "
             "child falls back to 127.0.0.1:<port> and every RPC fails."
         )
+    # The keys must also actually be applied — guard against a future
+    # refactor that drops the parent-env override loop and reduces the
+    # constant to a static label.
+    assert "_SYSTEM_ENV_KEYS" in build_spec_src
+    assert "os.environ.get" in build_spec_src
 
 
 def test_security_guard_fallback_warning_is_gated_by_target_env(monkeypatch) -> None:

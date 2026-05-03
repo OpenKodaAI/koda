@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 async-stream = "0.3"
+async-trait = "0.1"
 anyhow.workspace = true
 koda-observability = { path = "../koda-observability" }
 koda-proto = { path = "../koda-proto" }

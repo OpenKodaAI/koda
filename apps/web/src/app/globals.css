@@ -2006,6 +2006,7 @@ button[aria-label="Open Next Dev Tools"] {
   box-shadow: none;
   transition:
     width 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
     border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
     background-color 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }

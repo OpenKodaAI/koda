@@ -60,11 +60,11 @@ function formatAxisValue(value: number) {
 }
 
 function getPointValue(point: CostTimePoint, key: string, mode: CostTimelineMode) {
-  return mode === "agent" ? (point.by_bot[key] ?? 0) : (point.by_model[key] ?? 0);
+  return mode === "agent" ? (point.by_agent[key] ?? 0) : (point.by_model[key] ?? 0);
 }
 
 function getTopDriver(point: CostTimePoint, mode: CostTimelineMode) {
-  const source = mode === "agent" ? point.by_bot : point.by_model;
+  const source = mode === "agent" ? point.by_agent : point.by_model;
   const winner = Object.entries(source).sort((left, right) => right[1] - left[1])[0]?.[0];
   if (!winner) return null;
   return mode === "agent" ? getAgentLabel(winner) : winner;
@@ -74,7 +74,7 @@ function buildSeries(points: CostTimePoint[], mode: CostTimelineMode) {
   const totals = new Map<string, number>();
 
   for (const point of points) {
-    const source = mode === "agent" ? point.by_bot : point.by_model;
+    const source = mode === "agent" ? point.by_agent : point.by_model;
     for (const [key, value] of Object.entries(source)) {
       totals.set(key, (totals.get(key) ?? 0) + value);
     }

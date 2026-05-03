@@ -135,7 +135,6 @@ export function AppShell({ children, serverPathname, initialAuth = null }: AppSh
       <AuthProvider initialAuth={initialAuth}>
         <AppTourProvider
           pathname={pathname}
-          mobileNavOpen={isMobileNavOpen}
           onMobileNavOpenChange={setIsMobileNavOpen}
         >
           <div

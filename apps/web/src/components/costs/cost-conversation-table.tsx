@@ -111,7 +111,7 @@ export function CostConversationTable({ rows, className }: CostConversationTable
 
             return (
               <article
-                key={`${row.bot_id}-${row.session_id}`}
+                key={`${row.agent_id}-${row.session_id}`}
                 className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_120px] lg:items-start"
               >
                 <div className="min-w-0">
@@ -121,13 +121,13 @@ export function CostConversationTable({ rows, className }: CostConversationTable
                     </p>
                     <span
                       className="inline-flex items-center gap-2 text-[12px] font-medium"
-                      style={{ color: getAgentColor(row.bot_id) }}
+                      style={{ color: getAgentColor(row.agent_id) }}
                     >
                       <span
                         className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: getAgentColor(row.bot_id) }}
+                        style={{ backgroundColor: getAgentColor(row.agent_id) }}
                       />
-                      {getAgentLabel(row.bot_id)}
+                      {getAgentLabel(row.agent_id)}
                     </span>
                     <span className="inline-flex items-center gap-2 text-[12px]" style={getSemanticTextStyle(tone)}>
                       <span

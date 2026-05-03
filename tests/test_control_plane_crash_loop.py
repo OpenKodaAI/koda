@@ -13,16 +13,30 @@ the window cools off without new crashes, the next loop alerts again.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from koda.control_plane import supervisor as supervisor_mod
+from koda.control_plane.runtime_kernel_link import (
+    AgentWorkerState,
+    AgentWorkerStatus,
+)
 from koda.control_plane.supervisor import ControlPlaneSupervisor
 
 
 def _make_supervisor() -> ControlPlaneSupervisor:
-    with patch("koda.control_plane.supervisor.get_control_plane_manager", return_value=object()):
-        return ControlPlaneSupervisor()
+    fake_link = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        ensure_agent_workers=AsyncMock(),
+        target="unix:///tmp/fake.sock",
+    )
+    with patch(
+        "koda.control_plane.supervisor.get_control_plane_manager",
+        return_value=object(),
+    ):
+        return ControlPlaneSupervisor(link=fake_link)  # type: ignore[arg-type]
 
 
 def _capture_audit_calls() -> tuple[list[dict[str, Any]], Any]:
@@ -103,9 +117,15 @@ def test_window_lapse_re_arms_alerting() -> None:
     assert len(captured) == 2
 
 
-def test_stop_worker_clears_crash_state() -> None:
-    """When the operator pauses or stops an agent, supervisor must wipe the
-    crash bookkeeping so a future activate starts fresh."""
+def test_terminated_state_clears_crash_state() -> None:
+    """When the operator pauses an agent the kernel terminates the worker;
+    the supervisor observes that transition (state=TERMINATED) on the next
+    reconcile and must wipe its crash bookkeeping so a future activate
+    starts fresh.
+
+    Post runtime-kernel migration the supervisor no longer owns
+    ``_stop_worker`` — termination is the kernel's job. The supervisor's
+    only responsibility on TERMINATED is to clean its own state."""
     supervisor = _make_supervisor()
     captured, fake_record = _capture_audit_calls()
     with patch("koda.control_plane.audit.record_audit_event", fake_record):
@@ -113,11 +133,19 @@ def test_stop_worker_clears_crash_state() -> None:
             supervisor._record_worker_crash("AGENT_PAUSED", exit_code=2)
         assert "AGENT_PAUSED" in supervisor._crash_loop_alerted
 
-    # _stop_worker normally interacts with the runtime; we just want the
-    # bookkeeping reset, so call it with no live state in the dict.
-    import asyncio
-
-    asyncio.run(supervisor._stop_worker("AGENT_PAUSED"))
+    terminated = AgentWorkerStatus(
+        agent_id="AGENT_PAUSED",
+        version=1,
+        state=AgentWorkerState.TERMINATED,
+        pid=0,
+        pgid=0,
+        exit_code=0,
+        started_at_ms=0,
+        last_health_at_ms=0,
+        restart_count=0,
+        spawn_blocked_reason="",
+    )
+    supervisor._observe_state_transition("AGENT_PAUSED", terminated)
 
     assert "AGENT_PAUSED" not in supervisor._crash_loop_alerted
     assert "AGENT_PAUSED" not in supervisor._crash_history

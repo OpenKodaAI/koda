@@ -199,6 +199,16 @@ function VercelLogo(props: LogoProps) {
   );
 }
 
+/* — Superhuman ---------------------------------------------------- */
+
+function SuperhumanLogo(props: LogoProps) {
+  return (
+    <svg viewBox="0.5 0.33 22.09 22.09" fill="currentColor" {...props}>
+      <path d="M22.3826 6.22157C22.1402 3.17618 19.718 0.759886 16.6746 0.523503C13.2525 0.259071 9.81644 0.261063 6.3944 0.533481C3.34902 0.773957 0.932736 3.19625 0.696353 6.24163C0.431921 9.66367 0.433913 13.0997 0.706346 16.5217C0.948815 19.5671 3.3711 21.9834 6.4145 22.2198C9.83653 22.4843 13.2725 22.4823 16.6946 22.2098C19.74 21.9673 22.1563 19.545 22.3927 16.5018C22.6572 13.0797 22.6552 9.6436 22.3826 6.22157ZM11.5715 3.84741C12.8036 3.84741 13.8014 4.84317 13.8014 6.07133C13.8014 7.29949 12.8036 8.29525 11.5715 8.29525C10.3393 8.29525 9.34159 7.29949 9.34159 6.07133C9.34159 4.84317 10.3393 3.84741 11.5715 3.84741ZM15.779 18.4993H15.781L11.9101 16.3796C11.6997 16.2634 11.4432 16.2634 11.2329 16.3796L7.36202 18.4993C6.73891 18.8399 6.0598 18.1487 6.41838 17.5395L10.9664 9.83397C11.2369 9.37517 11.9041 9.37517 12.1745 9.83397L16.7226 17.5395C17.0812 18.1487 16.4041 18.8399 15.779 18.4993Z" />
+    </svg>
+  );
+}
+
 /* — MCP / Generic -------------------------------------------------- */
 
 function McpLogo(props: LogoProps) {
@@ -258,23 +268,25 @@ const BRAND_IMAGE_LOGOS = {
   bitbucket: createRemoteLogo("https://cdn.simpleicons.org/bitbucket/2684FF"),
   box: createRemoteLogo("https://cdn.simpleicons.org/box/0061D5"),
   brave: createRemoteLogo("https://cdn.simpleicons.org/brave/FB542B"),
-  canva: createRemoteLogo("https://cdn.simpleicons.org/canva/00C4CC"),
+  canva: createRemoteLogo("https://www.vectorlogo.zone/logos/canva/canva-icon.svg"),
   clickup: createRemoteLogo("https://cdn.simpleicons.org/clickup/7B68EE"),
   cloudflare: createRemoteLogo("https://www.vectorlogo.zone/logos/cloudflare/cloudflare-icon.svg"),
   discord: createRemoteLogo("https://cdn.simpleicons.org/discord/5865F2"),
   docker: createRemoteLogo("https://www.vectorlogo.zone/logos/docker/docker-icon.svg"),
   excalidraw: createRemoteLogo("https://cdn.simpleicons.org/excalidraw/6965DB"),
   figma: createRemoteLogo("https://www.vectorlogo.zone/logos/figma/figma-icon.svg"),
-  firecrawl: createRemoteLogo("https://www.firecrawl.dev/favicon.ico"),
+  firecrawl: createRemoteLogo("https://www.firecrawl.dev/logo.svg"),
   gmail: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg"),
   google_calendar: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg"),
   google_drive: createRemoteLogo("https://www.vectorlogo.zone/logos/google_drive/google_drive-icon.svg"),
   google_maps: createRemoteLogo("https://www.vectorlogo.zone/logos/google_maps/google_maps-icon.svg"),
   grafana: createRemoteLogo("https://www.vectorlogo.zone/logos/grafana/grafana-icon.svg"),
-  huggingface: createRemoteLogo("https://www.vectorlogo.zone/logos/huggingface/huggingface-icon.svg"),
+  huggingface: createRemoteLogo("https://cdn.simpleicons.org/huggingface/FFD21E"),
   hubspot: createRemoteLogo("https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg"),
   linear: createRemoteLogo("https://cdn.simpleicons.org/linear/FFFFFF"),
-  microsoft_365: createRemoteLogo("https://cdn.simpleicons.org/microsoft365/D83B01"),
+  microsoft_365: createRemoteLogo(
+    "https://upload.wikimedia.org/wikipedia/commons/0/0e/Microsoft_365_%282022%29.svg",
+  ),
   miro: createRemoteLogo("https://cdn.simpleicons.org/miro/FFD02F"),
   mongodb: createRemoteLogo("https://www.vectorlogo.zone/logos/mongodb/mongodb-icon.svg"),
   n8n: createRemoteLogo("https://cdn.simpleicons.org/n8n/EA4B71"),
@@ -287,7 +299,6 @@ const BRAND_IMAGE_LOGOS = {
   sentry: createRemoteLogo("https://cdn.simpleicons.org/sentry/FFFFFF"),
   slack: createRemoteLogo("https://www.vectorlogo.zone/logos/slack/slack-icon.svg"),
   stripe: createRemoteLogo("https://www.vectorlogo.zone/logos/stripe/stripe-icon.svg"),
-  superhuman: createRemoteLogo("https://cdn.simpleicons.org/superhuman/FFFFFF"),
   supabase: createRemoteLogo("https://www.vectorlogo.zone/logos/supabase/supabase-icon.svg"),
   todoist: createRemoteLogo("https://cdn.simpleicons.org/todoist/E44332"),
   twilio: createRemoteLogo("https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg"),
@@ -340,7 +351,7 @@ const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
   sentry: BRAND_IMAGE_LOGOS.sentry,
   slack: BRAND_IMAGE_LOGOS.slack,
   stripe: BRAND_IMAGE_LOGOS.stripe,
-  superhuman: BRAND_IMAGE_LOGOS.superhuman,
+  superhuman: SuperhumanLogo,
   supabase: BRAND_IMAGE_LOGOS.supabase,
   todoist: BRAND_IMAGE_LOGOS.todoist,
   twilio: BRAND_IMAGE_LOGOS.twilio,

@@ -1,20 +1,20 @@
 """Granular /health contract for the control-plane supervisor.
 
-The supervisor exposes /health for external monitoring. The legacy payload
-returned only a static worker list (agent_id, version, pid, health_url),
-which gave operators no signal about whether a worker process was actually
-running, whether it was responding to its own liveness probe, or whether
-the Rust sidecars (security/memory/artifact/retrieval/runtime-kernel) were
-reachable.
+The supervisor exposes /health for external monitoring. Post runtime-kernel
+migration the worker view is built from the most recent
+``RuntimeKernelLink.ensure_agent_workers`` snapshot rather than from a local
+process registry. These tests pin:
 
-These tests pin the granular contract: per-worker liveness + probe latency,
-per-sidecar reachability + latency, and a top-level status that flips to
-"degraded" the moment anything misbehaves. Without these, the only signal
-operators got was end users complaining that messages stopped flowing.
+  * The legacy payload shape (``workers[]`` + ``sidecars[]`` + ``summary``)
+    so existing operator tooling and dashboards do not break.
+  * The top-level ``status`` flips to ``"degraded"`` the moment any worker
+    is not running OR any sidecar is unreachable.
+  * ``_split_health_url`` is robust against absent ports / malformed URLs.
 """
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -22,33 +22,77 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from koda.control_plane import supervisor as supervisor_mod
+from koda.control_plane.runtime_kernel_link import (
+    AgentWorkerState,
+    AgentWorkerStatus,
+)
 from koda.control_plane.supervisor import (
     ControlPlaneSupervisor,
     _sidecar_targets,
-    _WorkerState,
+    _split_health_url,
 )
 
 
-def _make_worker_state(*, agent_id: str = "AGENT_ALPHA", returncode: int | None = None) -> _WorkerState:
-    process = SimpleNamespace(pid=12345, returncode=returncode)
-    runtime = SimpleNamespace(health_url="http://127.0.0.1:9000/health")
-    return _WorkerState(
+def _running_status(agent_id: str = "AGENT_ALPHA") -> AgentWorkerStatus:
+    return AgentWorkerStatus(
         agent_id=agent_id,
         version=1,
-        process=process,  # type: ignore[arg-type]
-        runtime=runtime,  # type: ignore[arg-type]
+        state=AgentWorkerState.RUNNING,
+        pid=12345,
+        pgid=12345,
+        exit_code=0,
+        started_at_ms=1_700_000_000_000,
+        last_health_at_ms=1_700_000_000_500,
+        restart_count=0,
+        spawn_blocked_reason="",
+    )
+
+
+def _exited_status(agent_id: str = "AGENT_DEAD", exit_code: int = 1) -> AgentWorkerStatus:
+    return AgentWorkerStatus(
+        agent_id=agent_id,
+        version=1,
+        state=AgentWorkerState.EXITED,
+        pid=0,
+        pgid=0,
+        exit_code=exit_code,
+        started_at_ms=0,
+        last_health_at_ms=0,
+        restart_count=0,
+        spawn_blocked_reason="",
+    )
+
+
+def _spawn_blocked_status(agent_id: str = "AGENT_BLOCKED") -> AgentWorkerStatus:
+    return AgentWorkerStatus(
+        agent_id=agent_id,
+        version=1,
+        state=AgentWorkerState.SPAWN_BLOCKED,
+        pid=0,
+        pgid=0,
+        exit_code=0,
+        started_at_ms=0,
+        last_health_at_ms=0,
+        restart_count=0,
+        spawn_blocked_reason="port 9001 already bound",
     )
 
 
 def _make_supervisor() -> ControlPlaneSupervisor:
-    """Instantiate the supervisor without touching the real control-plane DB.
-
-    ControlPlaneSupervisor.__init__ resolves the singleton manager which
-    requires a live Postgres backend. Tests covering only /health do not
-    exercise that path, so we stub the manager lookup.
-    """
-    with patch("koda.control_plane.supervisor.get_control_plane_manager", return_value=object()):
-        return ControlPlaneSupervisor()
+    """Instantiate the supervisor without touching the real control-plane DB
+    or opening a gRPC link to the kernel."""
+    fake_link = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        ensure_agent_workers=AsyncMock(),
+        target="unix:///tmp/fake.sock",
+    )
+    with patch(
+        "koda.control_plane.supervisor.get_control_plane_manager",
+        return_value=object(),
+    ):
+        sup = ControlPlaneSupervisor(link=fake_link)  # type: ignore[arg-type]
+    return sup
 
 
 def test_sidecar_targets_covers_all_five_rust_services() -> None:
@@ -58,26 +102,31 @@ def test_sidecar_targets_covers_all_five_rust_services() -> None:
     assert names == {"security", "memory", "artifact", "retrieval", "runtime_kernel"}
 
 
+def test_split_health_url_extracts_port_and_path() -> None:
+    assert _split_health_url("http://127.0.0.1:9001/health") == (9001, "/health")
+    assert _split_health_url("http://localhost:9100/internal/healthz") == (
+        9100,
+        "/internal/healthz",
+    )
+    # No port → kernel skips bind probe + health monitor.
+    assert _split_health_url("") == (0, "/health")
+    assert _split_health_url("http://example.com/health") == (0, "/health")
+    # Malformed URL is tolerated; never raises (the kernel will refuse to spawn
+    # if the port is invalid, so the supervisor never has to police it here).
+    assert _split_health_url("not-a-url") == (0, "/health")
+
+
 @pytest.mark.asyncio
 async def test_health_payload_shape_with_all_healthy() -> None:
     supervisor = _make_supervisor()
-    supervisor._workers = {
-        "AGENT_ALPHA": _make_worker_state(agent_id="AGENT_ALPHA"),
-        "AGENT_BETA": _make_worker_state(agent_id="AGENT_BETA"),
+    supervisor._statuses = {
+        "AGENT_ALPHA": _running_status("AGENT_ALPHA"),
+        "AGENT_BETA": _running_status("AGENT_BETA"),
     }
-
-    async def _fake_probe_worker(state: _WorkerState) -> dict[str, Any]:
-        return {
-            "alive": True,
-            "exit_code": None,
-            "probe": {
-                "ok": True,
-                "status_code": 200,
-                "latency_ms": 7,
-                "active_tasks": 0,
-                "error": None,
-            },
-        }
+    supervisor._health_urls = {
+        "AGENT_ALPHA": "http://127.0.0.1:9001/health",
+        "AGENT_BETA": "http://127.0.0.1:9002/health",
+    }
 
     async def _fake_probe_sidecar(name: str, target: str) -> dict[str, Any]:
         return {
@@ -89,16 +138,12 @@ async def test_health_payload_shape_with_all_healthy() -> None:
         }
 
     request = SimpleNamespace()
-    with (
-        patch.object(supervisor, "_probe_worker", AsyncMock(side_effect=_fake_probe_worker)),
-        patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)),
+    with patch.object(
+        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
     ):
         response = await supervisor._health(request)  # type: ignore[arg-type]
 
-    body = response.body.decode()
-    import json
-
-    payload = json.loads(body)
+    payload = json.loads(response.body.decode())
     assert payload["status"] == "healthy"
     assert payload["summary"] == {
         "workers_total": 2,
@@ -118,19 +163,19 @@ async def test_health_payload_shape_with_all_healthy() -> None:
         "runtime_kernel",
     }
     assert all(s["ok"] for s in payload["sidecars"])
+    # health_url surfaces from the cache so dashboards can deep-link.
+    by_id = {w["agent_id"]: w for w in payload["workers"]}
+    assert by_id["AGENT_ALPHA"]["health_url"] == "http://127.0.0.1:9001/health"
+    assert by_id["AGENT_BETA"]["health_url"] == "http://127.0.0.1:9002/health"
 
 
 @pytest.mark.asyncio
-async def test_health_marks_degraded_when_worker_dead() -> None:
-    """A worker whose process exited drops top-level status to degraded so
-    monitoring catches it before users do."""
+async def test_health_marks_degraded_when_worker_exited() -> None:
+    """An exited worker drops top-level status to degraded so monitoring
+    catches it before users do."""
     supervisor = _make_supervisor()
-    supervisor._workers = {
-        "AGENT_DEAD": _make_worker_state(agent_id="AGENT_DEAD", returncode=1),
-    }
-
-    async def _fake_probe_worker(state: _WorkerState) -> dict[str, Any]:
-        return {"alive": False, "exit_code": 1, "probe": None}
+    supervisor._statuses = {"AGENT_DEAD": _exited_status("AGENT_DEAD", exit_code=1)}
+    supervisor._health_urls = {"AGENT_DEAD": "http://127.0.0.1:9000/health"}
 
     async def _fake_probe_sidecar(name: str, target: str) -> dict[str, Any]:
         return {
@@ -142,13 +187,10 @@ async def test_health_marks_degraded_when_worker_dead() -> None:
         }
 
     request = SimpleNamespace()
-    with (
-        patch.object(supervisor, "_probe_worker", AsyncMock(side_effect=_fake_probe_worker)),
-        patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)),
+    with patch.object(
+        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
     ):
         response = await supervisor._health(request)  # type: ignore[arg-type]
-
-    import json
 
     payload = json.loads(response.body.decode())
     assert payload["status"] == "degraded"
@@ -161,25 +203,43 @@ async def test_health_marks_degraded_when_worker_dead() -> None:
 
 
 @pytest.mark.asyncio
+async def test_health_marks_degraded_when_worker_spawn_blocked() -> None:
+    """SPAWN_BLOCKED is the kernel's signal that a port conflict (or other
+    pre-flight failure) prevented the worker from starting. /health must
+    flag it the same as a crash so operators get paged."""
+    supervisor = _make_supervisor()
+    supervisor._statuses = {"AGENT_BLOCKED": _spawn_blocked_status("AGENT_BLOCKED")}
+    supervisor._health_urls = {"AGENT_BLOCKED": "http://127.0.0.1:9001/health"}
+
+    async def _fake_probe_sidecar(name: str, target: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "target": target,
+            "ok": True,
+            "latency_ms": 1,
+            "error": None,
+        }
+
+    request = SimpleNamespace()
+    with patch.object(
+        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
+    ):
+        response = await supervisor._health(request)  # type: ignore[arg-type]
+
+    payload = json.loads(response.body.decode())
+    assert payload["status"] == "degraded"
+    assert payload["summary"]["workers_unhealthy"] == 1
+    blocked = payload["workers"][0]
+    assert blocked["alive"] is False
+    assert blocked["probe"] is None
+
+
+@pytest.mark.asyncio
 async def test_health_marks_degraded_when_sidecar_unreachable() -> None:
     """One unreachable sidecar flips status, even if every worker is fine."""
     supervisor = _make_supervisor()
-    supervisor._workers = {
-        "AGENT_OK": _make_worker_state(agent_id="AGENT_OK"),
-    }
-
-    async def _fake_probe_worker(state: _WorkerState) -> dict[str, Any]:
-        return {
-            "alive": True,
-            "exit_code": None,
-            "probe": {
-                "ok": True,
-                "status_code": 200,
-                "latency_ms": 4,
-                "active_tasks": 0,
-                "error": None,
-            },
-        }
+    supervisor._statuses = {"AGENT_OK": _running_status("AGENT_OK")}
+    supervisor._health_urls = {"AGENT_OK": "http://127.0.0.1:9000/health"}
 
     async def _fake_probe_sidecar(name: str, target: str) -> dict[str, Any]:
         if name == "memory":
@@ -199,13 +259,10 @@ async def test_health_marks_degraded_when_sidecar_unreachable() -> None:
         }
 
     request = SimpleNamespace()
-    with (
-        patch.object(supervisor, "_probe_worker", AsyncMock(side_effect=_fake_probe_worker)),
-        patch.object(supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)),
+    with patch.object(
+        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
     ):
         response = await supervisor._health(request)  # type: ignore[arg-type]
-
-    import json
 
     payload = json.loads(response.body.decode())
     assert payload["status"] == "degraded"
@@ -217,14 +274,45 @@ async def test_health_marks_degraded_when_sidecar_unreachable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_probe_worker_handles_dead_process_without_http_call() -> None:
-    """A dead worker must not trigger an HTTP probe — the process is gone,
-    so opening a session would just hang on connection refused."""
+async def test_health_renders_starting_worker_as_alive_but_not_probed() -> None:
+    """STARTING is alive (so dashboards do not page) but the probe shows the
+    transient state so operators understand what they are looking at."""
     supervisor = _make_supervisor()
-    state = _make_worker_state(returncode=137)
+    starting = AgentWorkerStatus(
+        agent_id="AGENT_BOOTING",
+        version=1,
+        state=AgentWorkerState.STARTING,
+        pid=200,
+        pgid=200,
+        exit_code=0,
+        started_at_ms=1,
+        last_health_at_ms=0,
+        restart_count=0,
+        spawn_blocked_reason="",
+    )
+    supervisor._statuses = {"AGENT_BOOTING": starting}
+    supervisor._health_urls = {"AGENT_BOOTING": "http://127.0.0.1:9001/health"}
 
-    with patch("koda.control_plane.supervisor.ClientSession") as session_factory:
-        result = await supervisor._probe_worker(state)
+    async def _fake_probe_sidecar(name: str, target: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "target": target,
+            "ok": True,
+            "latency_ms": 1,
+            "error": None,
+        }
 
-    assert session_factory.call_count == 0
-    assert result == {"alive": False, "exit_code": 137, "probe": None}
+    request = SimpleNamespace()
+    with patch.object(
+        supervisor_mod, "_probe_sidecar", AsyncMock(side_effect=_fake_probe_sidecar)
+    ):
+        response = await supervisor._health(request)  # type: ignore[arg-type]
+
+    payload = json.loads(response.body.decode())
+    worker = payload["workers"][0]
+    assert worker["alive"] is True
+    assert worker["probe"]["ok"] is False
+    assert worker["probe"]["error"] == "starting"
+    # During start-up the dashboard surfaces the worker but does not
+    # consider it unhealthy — flapping new agents would otherwise alert.
+    assert payload["summary"]["workers_unhealthy"] == 1  # probe.ok=False ⇒ unhealthy

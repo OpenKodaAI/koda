@@ -1150,6 +1150,8 @@ def get_dashboard_cost_insights(
             "resolved_at": item["resolved_at"],
             "dominant_model": item["dominant_model"],
             "latest_message_preview": item["latest_message_preview"],
+            "last_activity_at": item["last_activity_at"],
+            "created_at": item["created_at"],
         }
         for item in sorted(
             session_totals.values(),
