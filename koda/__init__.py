@@ -1,3 +1,3 @@
 """Koda — AI engineering companion for Telegram."""
 
-__version__ = "1.0.11"
+__version__ = "1.0.12"
