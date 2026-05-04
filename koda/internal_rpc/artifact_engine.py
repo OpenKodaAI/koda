@@ -11,6 +11,7 @@ from koda.internal_rpc.common import (
     EngineSelection,
     create_grpc_channel,
     ensure_generated_proto_path,
+    make_internal_breaker,
     normalize_internal_service_probe,
     resolve_grpc_target,
 )
@@ -53,6 +54,8 @@ class GrpcArtifactEngineClient:
         self._metadata_pb2: Any | None = None
         self._artifact_pb2: Any | None = None
         self._startup_error: str | None = None
+        # fail-fast breaker shared across all RPC sites.
+        self._breaker = make_internal_breaker("artifact_engine")
         self._last_health: dict[str, object] = {
             "service": "artifact",
             "mode": self.selection.mode,
@@ -104,7 +107,8 @@ class GrpcArtifactEngineClient:
     async def _probe_health(self) -> None:
         if self._stub is None or self._metadata_pb2 is None:
             return
-        response = await self._stub.Health(
+        response = await self._breaker.run(
+            self._stub.Health,
             self._metadata_pb2.HealthRequest(),
             timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
             metadata=self._rpc_metadata(),
@@ -187,7 +191,8 @@ class GrpcArtifactEngineClient:
                     yield artifact_pb2.PutArtifactRequest(**request_kwargs, data=chunk)
                     first_chunk = False
 
-        response = await self._stub.PutArtifact(
+        response = await self._breaker.run(
+            self._stub.PutArtifact,
             _requests(),
             timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
             metadata=self._rpc_metadata(),
@@ -205,7 +210,8 @@ class GrpcArtifactEngineClient:
     async def generate_evidence_by_artifact_id(self, *, artifact_id: str) -> dict[str, object]:
         if self._stub is None or self._artifact_pb2 is None:
             raise RuntimeError("grpc_artifact_engine_unavailable")
-        response = await self._stub.GenerateEvidenceByArtifactId(
+        response = await self._breaker.run(
+            self._stub.GenerateEvidenceByArtifactId,
             self._build_request(
                 self._artifact_pb2.GenerateEvidenceByArtifactIdRequest,
                 agent_id=self.selection.agent_id or "",
@@ -219,7 +225,8 @@ class GrpcArtifactEngineClient:
     async def get_artifact_metadata_by_artifact_id(self, *, artifact_id: str) -> dict[str, object]:
         if self._stub is None or self._artifact_pb2 is None:
             raise RuntimeError("grpc_artifact_engine_unavailable")
-        response = await self._stub.GetArtifactMetadataByArtifactId(
+        response = await self._breaker.run(
+            self._stub.GetArtifactMetadataByArtifactId,
             self._build_request(
                 self._artifact_pb2.GetArtifactMetadataByArtifactIdRequest,
                 agent_id=self.selection.agent_id or "",

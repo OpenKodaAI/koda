@@ -9,6 +9,10 @@ import {
   matchesTourRoutePattern,
 } from "@/lib/tour";
 
+function anchorWantsSidebar(anchor: string | undefined) {
+  return Boolean(anchor?.startsWith("shell.sidebar"));
+}
+
 function resolveNavigationHref(anchor: string | undefined) {
   if (!anchor || typeof document === "undefined") {
     return null;
@@ -73,11 +77,9 @@ function resolveEditorHref() {
 
 export function TourRouteBridge({
   pathname,
-  mobileNavOpen,
   onMobileNavOpenChange,
 }: {
   pathname: string;
-  mobileNavOpen: boolean;
   onMobileNavOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
@@ -101,29 +103,24 @@ export function TourRouteBridge({
     rememberedRouteHrefsRef.current["/control-plane/agents/:agentId"] = `${window.location.pathname}${window.location.search}`;
   }, [pathname]);
 
-  useEffect(() => {
-    if (!currentStep?.anchor) return;
-    if (typeof window === "undefined") return;
-    if (!currentStep.anchor.startsWith("shell.sidebar")) return;
-    if (window.innerWidth >= 1024 || mobileNavOpen) return;
-
-    onMobileNavOpenChange(true);
-  }, [currentStep?.anchor, mobileNavOpen, onMobileNavOpenChange]);
-
+  // Only react to tour-anchor TRANSITIONS — never to user-initiated menu
+  // state changes. Otherwise, when the user manually opens the mobile menu
+  // on a non-sidebar step, this effect would immediately force it closed.
+  const prevWantsSidebarRef = useRef(anchorWantsSidebar(currentStep?.anchor));
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.innerWidth >= 1024) return;
-    if (!mobileNavOpen) return;
-    if (currentStep?.anchor?.startsWith("shell.sidebar")) return;
+    if (window.innerWidth >= 1024) {
+      prevWantsSidebarRef.current = anchorWantsSidebar(currentStep?.anchor);
+      return;
+    }
 
-    const frame = window.requestAnimationFrame(() => onMobileNavOpenChange(false));
-    const timeout = window.setTimeout(() => onMobileNavOpenChange(false), 140);
+    const wantsSidebar = anchorWantsSidebar(currentStep?.anchor);
+    const prev = prevWantsSidebarRef.current;
+    prevWantsSidebarRef.current = wantsSidebar;
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
-  }, [currentStep?.anchor, mobileNavOpen, onMobileNavOpenChange]);
+    if (wantsSidebar === prev) return;
+    onMobileNavOpenChange(wantsSidebar);
+  }, [currentStep?.anchor, onMobileNavOpenChange]);
 
   useEffect(() => {
     if (booting || status !== "running" || !currentStep) {

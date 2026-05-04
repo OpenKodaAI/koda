@@ -32,6 +32,7 @@ function makeBaseSystemSettingsMock() {
           kokoro_default_language: "pt-br",
           kokoro_default_voice: "pf_dora",
           kokoro_default_voice_label: "",
+          metal_enabled: true,
         },
       },
     },
@@ -113,9 +114,16 @@ function makeBaseSystemSettingsMock() {
       provider_connected: true,
     },
     kokoroVoicesLoading: false,
-    kokoroDownloadJobForVoice: vi.fn(() => null),
+    kokoroModelStatus: null,
+    whisperCatalog: null,
+    isDownloadingKokoroAsset: vi.fn(() => false),
+    isDownloadingWhisperVariant: vi.fn(() => false),
     loadKokoroVoices: vi.fn(),
+    loadKokoroModelStatus: vi.fn(),
+    loadWhisperCatalog: vi.fn(),
     downloadKokoroVoice: vi.fn(),
+    downloadKokoroModel: vi.fn(),
+    downloadWhisperModel: vi.fn(),
     ollamaModelCatalog: {
       items: [],
       cached: false,
@@ -144,7 +152,7 @@ describe("ProviderGrid", () => {
     const providerCard = screen.getByRole("button", { name: /Anthropic/i });
     const providerGlyph = providerCard.querySelector('[data-provider-logo-glyph="claude"]');
 
-    expect(providerGlyph).toHaveStyle({ backgroundColor: "rgb(212, 120, 62)" });
+    expect(providerGlyph).toHaveStyle({ backgroundColor: "rgb(212, 164, 128)" });
 
     fireEvent.click(providerCard);
 
@@ -156,8 +164,8 @@ describe("ProviderGrid", () => {
     const detailBannerGlyph = document.querySelector('[data-provider-banner-glyph="claude"]');
 
     expect(detailGlyph).not.toBeNull();
-    expect(detailGlyph).toHaveStyle({ backgroundColor: "rgb(212, 120, 62)" });
-    expect(detailBannerGlyph).toHaveStyle({ backgroundColor: "rgb(212, 120, 62)" });
+    expect(detailGlyph).toHaveStyle({ backgroundColor: "rgb(212, 164, 128)" });
+    expect(detailBannerGlyph).toHaveStyle({ backgroundColor: "rgb(212, 164, 128)" });
     expect(screen.queryByText("Conexão")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Claude Code CLI" })).toBeInTheDocument();
     expect(
@@ -231,7 +239,7 @@ describe("ProviderGrid", () => {
     const providerCard = screen.getByRole("button", { name: /OpenAI/i });
     const providerGlyph = providerCard.querySelector('[data-provider-logo-glyph="codex"]');
 
-    expect(providerGlyph).toHaveStyle({ backgroundColor: "rgb(255, 255, 255)" });
+    expect(providerGlyph).toHaveStyle({ backgroundColor: "var(--text-primary)" });
 
     fireEvent.click(providerCard);
 
@@ -241,8 +249,8 @@ describe("ProviderGrid", () => {
     );
     const detailBannerGlyph = document.querySelector('[data-provider-banner-glyph="codex"]');
 
-    expect(detailGlyph).toHaveStyle({ backgroundColor: "rgb(255, 255, 255)" });
-    expect(detailBannerGlyph).toHaveStyle({ backgroundColor: "rgb(255, 255, 255)" });
+    expect(detailGlyph).toHaveStyle({ backgroundColor: "var(--text-primary)" });
+    expect(detailBannerGlyph).toHaveStyle({ backgroundColor: "var(--text-primary)" });
   });
 
   it("shows connection state only through the primary action button in detail view", async () => {

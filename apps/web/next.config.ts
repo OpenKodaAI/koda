@@ -75,6 +75,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   async headers() {
     return [
       {
@@ -91,6 +92,13 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+    ];
+  },
+  async redirects() {
+    return [
+      { source: "/dlq", destination: "/executions/dlq", permanent: true },
+      { source: "/routines/dlq", destination: "/executions/dlq", permanent: true },
+      { source: "/schedules", destination: "/routines/schedules", permanent: true },
     ];
   },
 };

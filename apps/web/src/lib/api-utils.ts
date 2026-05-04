@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import type { z } from "zod";
-import { ValidationError, toAppError, toPublicErrorMessage } from "@/lib/errors";
+import {
+  UpstreamUnavailableError,
+  ValidationError,
+  toAppError,
+  toPublicErrorMessage,
+} from "@/lib/errors";
 
 /** Parse a numeric query param with validation and default. */
 export function parseIntParam(
@@ -64,4 +69,53 @@ export function jsonErrorResponse(
       "Cache-Control": "no-store",
     },
   });
+}
+
+/**
+ * Hard ceiling for any direct upstream fetch from a route handler. Mirrors
+ * the timeout in `controlPlaneFetch` so routes that need raw `Response`
+ * (auth/login, register-owner, recovery flows…) get the same fast-fail
+ * semantics: a missing or hung backend turns into `UpstreamUnavailableError`
+ * (503) instead of leaking `TypeError: fetch failed` to the browser.
+ */
+const UPSTREAM_FETCH_TIMEOUT_MS = 6_000;
+
+function combineSignals(
+  caller: AbortSignal | null | undefined,
+  timeout: AbortSignal,
+): AbortSignal {
+  if (!caller) return timeout;
+  const factory = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal })
+    .any;
+  return typeof factory === "function" ? factory([caller, timeout]) : caller;
+}
+
+export async function upstreamFetch(
+  url: string | URL,
+  init: RequestInit = {},
+  options: { timeoutMs?: number; label?: string } = {},
+): Promise<Response> {
+  const timeoutMs = options.timeoutMs ?? UPSTREAM_FETCH_TIMEOUT_MS;
+  const label = options.label ?? "Backend";
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = combineSignals(init.signal, timeoutSignal);
+
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new UpstreamUnavailableError(
+        `${label} did not respond within ${timeoutMs}ms`,
+        { cause: error },
+      );
+    }
+    if (error instanceof DOMException && error.name === "AbortError") {
+      // Caller-initiated abort — re-throw so the route can handle it.
+      throw error;
+    }
+    throw new UpstreamUnavailableError(
+      `${label} is unavailable`,
+      { cause: error },
+    );
+  }
 }

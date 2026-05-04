@@ -110,7 +110,6 @@ def _find_provider_in_text(text: str, candidates: list[str], *, feature: bool = 
         "whisper": "whispercpp",
         "whispercpp": "whispercpp",
         "whisper-cpp": "whispercpp",
-        "sora": "codex",
     }
     normalized_candidates = {
         normalize_feature_provider(item) if feature else normalize_provider(item)

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
+import {
+  jsonErrorResponse,
+  parseSchemaOrThrow,
+  upstreamFetch,
+} from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   setOwnerExistsHintCookie,
@@ -29,7 +33,7 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid login payload.",
     );
-    const upstream = await fetch(
+    const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/login`,
       {
         method: "POST",
@@ -37,11 +41,16 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(payload),
         cache: "no-store",
       },
+      { label: "Login service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok || typeof data.session_token !== "string" || !data.session_token.trim()) {
+      // Generic message so the response is indistinguishable across
+      // wrong-password / unknown-user / rate-limited (CLAUDE.md auth contract).
+      // Upstream networking failures are caught above by `upstreamFetch` and
+      // surface as a 503 — they do NOT land here.
       return NextResponse.json(
-        { error: String(data.error || "Unable to sign in.") },
+        { error: "Invalid credentials." },
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -53,6 +62,6 @@ export async function POST(request: NextRequest) {
     setOwnerExistsHintCookie(response, true);
     return response;
   } catch (error) {
-    return jsonErrorResponse(error, "Unable to sign in.");
+    return jsonErrorResponse(error, String((error as { message?: string })?.message || error));
   }
 }

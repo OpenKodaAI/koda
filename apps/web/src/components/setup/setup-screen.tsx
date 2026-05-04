@@ -1,12 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { SetupFrame } from "@/components/setup/setup-frame";
 import { StepCreateAccount, type RegisterOwnerResponse } from "@/components/setup/step-create-account";
 import { StepRecoveryCodes } from "@/components/setup/step-recovery-codes";
 import type { ControlPlaneAuthStatus } from "@/lib/control-plane";
 import { requestJson } from "@/lib/http-client";
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 export interface SetupScreenProps {
   authStatus: ControlPlaneAuthStatus | null;
@@ -90,6 +91,7 @@ function recoveryCodesServerSnapshot(): string | null {
 
 export function SetupScreen({ authStatus }: SetupScreenProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const persistedRaw = useSyncExternalStore(
     subscribeToRecoveryStorage,
     recoveryCodesRawSnapshot,
@@ -139,9 +141,9 @@ export function SetupScreen({ authStatus }: SetupScreenProps) {
     } catch {
       // Best-effort — the cookie will expire on its own if the POST failed.
     }
-    router.replace("/");
+    router.replace(safeRedirectTarget(searchParams.get("next")));
     router.refresh();
-  }, [router]);
+  }, [router, searchParams]);
 
   return (
     <SetupFrame>

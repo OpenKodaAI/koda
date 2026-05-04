@@ -1,5 +1,6 @@
 """Tests for new command handlers (Sprints 4-6)."""
 
+import json
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,6 +19,7 @@ from koda.handlers.commands import (
     cmd_remind,
     cmd_session,
     cmd_sessions,
+    cmd_skill,
     cmd_template,
     cmd_templates,
     init_user_data,
@@ -104,7 +106,8 @@ class TestCmdTemplates:
         with patch("koda.handlers.commands.list_template_names", return_value=(["code-review"], ["debug"], [])):
             await cmd_templates(mock_update, mock_context)
         call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "code-review" in call_text
+        assert "code-review" not in call_text
+        assert "debug" in call_text
 
 
 class TestCmdTemplate:
@@ -115,7 +118,8 @@ class TestCmdTemplate:
         with patch("koda.handlers.commands.list_template_names", return_value=(["code-review"], ["debug"], [])):
             await cmd_template(mock_update, mock_context)
         call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "code-review" in call_text
+        assert "code-review" not in call_text
+        assert "debug" in call_text
 
     @pytest.mark.asyncio
     async def test_add_template(self, mock_update, mock_context):
@@ -157,6 +161,116 @@ class TestCmdTemplate:
             await cmd_template(mock_update, mock_context)
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "not found" in call_text
+
+
+class TestCmdSkill:
+    def _set_agent_skills(self, monkeypatch, skills, skill_policy=None):
+        monkeypatch.setenv(
+            "AGENT_SPEC_JSON",
+            json.dumps({"custom_skills": skills, "skill_policy": skill_policy or {}}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_skills_lists_empty_agent_message(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = []
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(monkeypatch, [])
+
+        await cmd_skill(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "No expert skills configured for this agent" in call_text
+
+    @pytest.mark.asyncio
+    async def test_lists_agent_skills_only(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = []
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(
+            monkeypatch,
+            [
+                {"id": "review", "name": "Review", "content": "# Review"},
+                {"id": "hidden", "name": "Hidden", "content": "# Hidden", "enabled": False},
+            ],
+        )
+
+        await cmd_skill(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "review" in call_text
+        assert "hidden" not in call_text
+
+    @pytest.mark.asyncio
+    async def test_uses_agent_skill(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = ["review", "Check", "this"]
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(
+            monkeypatch,
+            [{"id": "review", "name": "Review", "content": "# Review", "instruction": "Review carefully"}],
+        )
+
+        with (
+            patch("koda.handlers.commands.acquire_rate_limit", return_value=True),
+            patch("koda.handlers.commands.enqueue") as mock_enqueue,
+            patch("koda.skills._telemetry.emit_skill_invocation"),
+        ):
+            await cmd_skill(mock_update, mock_context)
+
+        mock_enqueue.assert_called_once()
+        query = mock_enqueue.call_args[0][3]
+        assert "<instruction>Review carefully</instruction>" in query
+        assert "# Review" in query
+        assert "Check this" in query
+
+    @pytest.mark.asyncio
+    async def test_uses_agent_skill_by_display_name(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = ["Deploy", "Review", "Check", "this"]
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(
+            monkeypatch,
+            [{"id": "deploy-review", "name": "Deploy Review", "content": "# Deploy Review"}],
+        )
+
+        with (
+            patch("koda.handlers.commands.acquire_rate_limit", return_value=True),
+            patch("koda.handlers.commands.enqueue") as mock_enqueue,
+            patch("koda.skills._telemetry.emit_skill_invocation"),
+        ):
+            await cmd_skill(mock_update, mock_context)
+
+        mock_enqueue.assert_called_once()
+        query = mock_enqueue.call_args[0][3]
+        assert "# Deploy Review" in query
+        assert "Check this" in query
+
+    @pytest.mark.asyncio
+    async def test_missing_skill_does_not_fallback_to_global(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = ["security"]
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(monkeypatch, [])
+
+        await cmd_skill(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "Skill 'security' not found" in call_text
+
+    @pytest.mark.asyncio
+    async def test_skill_policy_filters_list(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = []
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(
+            monkeypatch,
+            [
+                {"id": "review", "name": "Review", "content": "# Review"},
+                {"id": "security", "name": "Security", "content": "# Security"},
+            ],
+            {"enabled_skills": ["review"]},
+        )
+
+        await cmd_skill(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "review" in call_text
+        assert "security" not in call_text
 
 
 class TestCmdBookmarks:

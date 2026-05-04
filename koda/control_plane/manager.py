@@ -8,14 +8,10 @@ import hashlib
 import json
 import os
 import re
-import subprocess
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,6 +27,7 @@ from koda.agent_contract import (
     resolve_core_integration_catalog,
     resolve_core_provider_catalog,
     resolve_feature_filtered_tools,
+    serialize_connection_profile,
 )
 from koda.config import SHARED_PLATFORM_PROMPT, STATE_BACKEND
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
@@ -48,12 +45,35 @@ from koda.provider_models import (
     resolve_model_function_catalog,
     resolve_provider_function_model_catalog,
 )
+from koda.services.embedding_catalog import (
+    CATALOG as _EMBEDDING_CATALOG,
+)
+from koda.services.embedding_catalog import (
+    DEFAULT_MODEL_ID as _DEFAULT_EMBEDDING_MODEL_ID,
+)
+from koda.services.embedding_catalog import (
+    catalog_payload as _embedding_catalog_payload,
+)
+from koda.services.embedding_catalog import (
+    delete_model as _delete_embedding_model,
+)
+from koda.services.embedding_catalog import (
+    is_model_installed as _embedding_model_installed,
+)
+from koda.services.embedding_catalog import (
+    model_disk_bytes as _embedding_model_disk_bytes,
+)
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
+    delete_kokoro_model,
+    delete_kokoro_voice,
+    ensure_kokoro_model,
     ensure_kokoro_voice_downloaded,
     kokoro_catalog_payload,
     kokoro_managed_voices_storage_path,
+    kokoro_model_path,
+    kokoro_model_status,
     kokoro_voice_file_path,
     kokoro_voice_metadata,
 )
@@ -80,6 +100,14 @@ from koda.services.provider_auth import (
     verify_provider_subscription_login,
 )
 from koda.services.tool_prompt import build_agent_tools_prompt
+from koda.services.whisper_manager import (
+    KNOWN_WHISPER_VARIANTS,
+    WHISPER_DEFAULT_VARIANT,
+    delete_whisper_model,
+    ensure_whisper_model_downloaded,
+    whisper_catalog_payload,
+    whisper_model_path,
+)
 
 from .agent_spec import (
     _normalize_markdown_block,
@@ -90,7 +118,10 @@ from .agent_spec import (
     normalize_agent_spec,
     normalize_autonomy_policy,
     normalize_knowledge_policy,
+    normalize_legacy_effort_selection,
     normalize_memory_policy,
+    normalize_model_effort_selection,
+    normalize_resource_access_policy,
     parse_json_env_value,
     render_markdown_documents_from_agent_spec,
     resolve_agent_documents,
@@ -130,12 +161,10 @@ from .execution_policy import (
     evaluate_execution_policy,
     resolve_execution_policy,
 )
-from .mcp_catalog import authoritative_mcp_catalog_entries
 from .settings import (
     AGENT_SECTIONS,
     CONTROL_PLANE_AUTO_IMPORT,
     CONTROL_PLANE_RUNTIME_DIR,
-    CONTROL_PLANE_SKIP_DEFAULT_SEED,
     DASHBOARD_AGENT_CONSTANTS_PATH,
     DOCUMENT_KINDS,
     ROOT_DIR,
@@ -143,6 +172,11 @@ from .settings import (
 )
 
 log = get_logger(__name__)
+
+
+def _embedding_catalog_keys() -> set[str]:
+    return set(_EMBEDDING_CATALOG.keys())
+
 
 _AGENT_PREFIX_RE = re.compile(r"^([A-Z0-9_]+)_(.+)$")
 _TELEGRAM_AGENT_TOKEN_RE = re.compile(r"^([A-Z0-9_]+)_AGENT_TOKEN$")
@@ -192,6 +226,11 @@ _ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
 _ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
 _ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
 _ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
+_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "whispercpp", "embedding"})
+
+
+class _ProviderDownloadCancelled(RuntimeError):
+    """Internal signal used to stop provider downloads cooperatively."""
 
 
 class GeneralPayloadValidationError(ValueError):
@@ -216,6 +255,49 @@ def _is_reserved_mcp_server_key(server_key: Any) -> bool:
 
 def _mcp_connection_key(server_key: Any) -> str:
     return f"mcp:{_normalize_mcp_server_key(server_key)}"
+
+
+def _validate_mcp_connection_command_override(command: Any) -> list[str]:
+    from koda.integrations.custom_mcp_registry import ValidationError, validate_stdio_command
+
+    if not isinstance(command, list):
+        raise ValueError("MCP command_override must be a list of argv strings.")
+    try:
+        return validate_stdio_command(command)
+    except ValidationError as exc:
+        raise ValueError(f"Invalid MCP command_override: {exc}") from exc
+
+
+def _validate_mcp_connection_url_override(url: Any) -> str:
+    from koda.services.mcp_client import validate_mcp_http_url
+
+    normalized = str(url or "").strip()
+    if not normalized:
+        return ""
+    try:
+        validate_mcp_http_url(normalized)
+    except Exception as exc:
+        raise ValueError(f"Invalid MCP url_override: {exc}") from exc
+    return normalized
+
+
+def _validate_mcp_connection_env_values(env_values: Any) -> dict[str, str]:
+    from koda.integrations.custom_mcp_registry import ValidationError, validate_env_name
+
+    if not isinstance(env_values, dict):
+        raise ValueError("MCP env_values must be an object.")
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in env_values.items():
+        try:
+            key = validate_env_name(str(raw_key))
+        except ValidationError as exc:
+            raise ValueError(f"Invalid MCP env key: {exc}") from exc
+        if raw_value in (None, ""):
+            continue
+        if not isinstance(raw_value, str):
+            raise ValueError(f"MCP env value for {key!r} must be a string.")
+        normalized[key] = raw_value
+    return normalized
 
 
 def _core_connection_key(integration_id: Any) -> str:
@@ -345,6 +427,8 @@ def _build_runtime_prompt_preview_payload(
 _MODEL_POLICY_ENV_KEYS: tuple[str, ...] = (
     "AGENT_MODEL_POLICY_JSON",
     "MODEL_FUNCTION_DEFAULTS_JSON",
+    "MODEL_EFFORT_DEFAULT_JSON",
+    "MODEL_EFFORT_DEFAULTS_JSON",
     "DEFAULT_PROVIDER",
     "PROVIDER_FALLBACK_ORDER",
     "CLAUDE_ENABLED",
@@ -416,6 +500,10 @@ _KNOWLEDGE_POLICY_ENV_KEYS: tuple[str, ...] = (
     "KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED",
     "KNOWLEDGE_EVALUATION_SAMPLING_RATE",
     "KNOWLEDGE_CITATION_POLICY",
+    "KNOWLEDGE_RETRIEVAL_MIN_QUALITY_TIER",
+    "KNOWLEDGE_RETRIEVAL_DENSE_WINDOW",
+    "KNOWLEDGE_RETRIEVAL_RERANK_TOP_K",
+    "KNOWLEDGE_RETRIEVAL_VECTOR_COVERAGE_MIN",
 )
 _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     "general": {
@@ -431,10 +519,15 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "providers": {
         "functional_defaults": ("MODEL_FUNCTION_DEFAULTS_JSON", "json"),
+        "effort_default": ("MODEL_EFFORT_DEFAULT_JSON", "json"),
         "default_provider": ("DEFAULT_PROVIDER", "string"),
         "fallback_order": ("PROVIDER_FALLBACK_ORDER", "csv"),
         "max_budget_usd": ("MAX_BUDGET_USD", "float"),
         "max_total_budget_usd": ("MAX_TOTAL_BUDGET_USD", "float"),
+        # Apple Silicon Metal acceleration toggle. Drives the
+        # ``is_metal_path_active`` runtime gate; only takes effect on
+        # Apple Silicon hardware (no-op on Linux/x86 macOS).
+        "metal_enabled": ("METAL_ENABLED", "bool"),
         "elevenlabs_default_language": ("ELEVENLABS_DEFAULT_LANGUAGE", "string"),
         "elevenlabs_default_voice": ("TTS_DEFAULT_VOICE", "string"),
         "kokoro_default_language": ("KOKORO_DEFAULT_LANGUAGE", "string"),
@@ -492,15 +585,9 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "integrations": {
         "browser_enabled": ("BROWSER_ENABLED", "bool"),
-        "gws_enabled": ("GWS_ENABLED", "bool"),
-        "jira_enabled": ("JIRA_ENABLED", "bool"),
-        "confluence_enabled": ("CONFLUENCE_ENABLED", "bool"),
-        "aws_enabled": ("AWS_ENABLED", "bool"),
         "whisper_enabled": ("WHISPER_ENABLED", "bool"),
         "tts_enabled": ("TTS_ENABLED", "bool"),
         "link_analysis_enabled": ("LINK_ANALYSIS_ENABLED", "bool"),
-        "gh_enabled": ("GH_ENABLED", "bool"),
-        "glab_enabled": ("GLAB_ENABLED", "bool"),
         "docker_enabled": ("DOCKER_ENABLED", "bool"),
     },
     "memory": {
@@ -612,7 +699,6 @@ _CORE_PROVIDER_ENABLED_DEFAULTS: dict[str, bool] = {
     "elevenlabs": False,
     "kokoro": True,
     "whispercpp": True,
-    "sora": False,
 }
 _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
     "AGENT_",
@@ -651,8 +737,6 @@ _SHARED_ENV_BLOCKED_KEYS: frozenset[str] = frozenset(
         "MEMORY_PROFILE_TOML",
         "MODEL_PRICING_USD",
         "RUNTIME_LOCAL_UI_TOKEN",
-        "SKILLS_JSON",
-        "SKILLS_DIR",
         "TEMPLATES_JSON",
         "TEMPLATES_PATH",
         "VOICE_ACTIVE_PROMPT_TEXT",
@@ -667,7 +751,8 @@ _NON_SECRET_SYSTEM_ENV_KEYS: frozenset[str] = frozenset(
     | set(_KNOWLEDGE_POLICY_ENV_KEYS)
     | {"DEFAULT_MODEL", "MODEL_PRICING_USD"}
 )
-_CORE_ONLY_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_LOCAL_UI_TOKEN", "RUNTIME_TOKEN"})
+_CORE_ONLY_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_LOCAL_UI_TOKEN"})
+_REMOVED_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_TOKEN"})
 _HIDDEN_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"POSTGRES_URL"})
 _GENERAL_ALLOWED_USAGE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
 _GENERAL_ALLOWED_VALUE_TYPES: frozenset[str] = frozenset({"text", "secret"})
@@ -694,6 +779,7 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "account.rate_limit_per_minute": "RATE_LIMIT_PER_MINUTE",
     "models.default_provider": "DEFAULT_PROVIDER",
     "models.functional_defaults": "MODEL_FUNCTION_DEFAULTS_JSON",
+    "models.effort_default": "MODEL_EFFORT_DEFAULT_JSON",
     "models.max_budget_usd": "MAX_BUDGET_USD",
     "models.max_total_budget_usd": "MAX_TOTAL_BUDGET_USD",
     "models.elevenlabs_default_language": "ELEVENLABS_DEFAULT_LANGUAGE",
@@ -701,6 +787,7 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "models.kokoro_default_language": "KOKORO_DEFAULT_LANGUAGE",
     "models.kokoro_default_voice": "KOKORO_DEFAULT_VOICE",
     "models.elevenlabs_model": "ELEVENLABS_MODEL",
+    "models.metal_enabled": "METAL_ENABLED",
     "memory.memory_enabled": "MEMORY_ENABLED",
     "memory.procedural_enabled": "MEMORY_PROCEDURAL_ENABLED",
     "memory.proactive_enabled": "MEMORY_PROACTIVE_ENABLED",
@@ -867,177 +954,7 @@ _GENERAL_KNOWLEDGE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "allowed_workspace_roots",
     "storage_mode",
 )
-_GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
-    "jira": {
-        "title": "Jira",
-        "description": "Credenciais globais para busca, deep context e operacoes governadas no Jira.",
-        "fields": (
-            {
-                "key": "JIRA_URL",
-                "label": "Instance URL",
-                "input_type": "url",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "JIRA_USERNAME",
-                "label": "Username or email",
-                "input_type": "email",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "JIRA_API_TOKEN",
-                "label": "API token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": True,
-            },
-        ),
-    },
-    "confluence": {
-        "title": "Confluence",
-        "description": "Global credentials for governed reading of Confluence pages and spaces.",
-        "fields": (
-            {
-                "key": "CONFLUENCE_URL",
-                "label": "Instance URL",
-                "input_type": "url",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "CONFLUENCE_USERNAME",
-                "label": "Username or email",
-                "input_type": "email",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "CONFLUENCE_API_TOKEN",
-                "label": "API token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": True,
-            },
-        ),
-    },
-    "gws": {
-        "title": "Google Workspace",
-        "description": "Service credential used for approved Google Workspace operations.",
-        "fields": (
-            {
-                "key": "GWS_CREDENTIALS_FILE",
-                "label": "Arquivo de credenciais",
-                "input_type": "path",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "GWS_SERVICE_ACCOUNT_KEY",
-                "label": "JSON da service account",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "aws": {
-        "title": "AWS",
-        "description": "Perfis e regiao padrao usados pelo sistema quando integracoes AWS estiverem habilitadas.",
-        "fields": (
-            {
-                "key": "AWS_DEFAULT_REGION",
-                "label": "Default region",
-                "input_type": "text",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "AWS_PROFILE_DEV",
-                "label": "Perfil dev",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_PROFILE_PROD",
-                "label": "Perfil prod",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ROLE_ARN",
-                "label": "Role ARN",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ROLE_SESSION_NAME",
-                "label": "Role session name",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_EXTERNAL_ID",
-                "label": "External ID",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ACCESS_KEY_ID",
-                "label": "Access key ID",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-            {
-                "key": "AWS_SECRET_ACCESS_KEY",
-                "label": "Secret access key",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-            {
-                "key": "AWS_SESSION_TOKEN",
-                "label": "Session token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "gh": {
-        "title": "GitHub CLI",
-        "description": "Token opcional para uso governado do GitHub CLI quando a sessao local nao for usada.",
-        "fields": (
-            {
-                "key": "GH_TOKEN",
-                "label": "GitHub token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "glab": {
-        "title": "GitLab CLI",
-        "description": "Token opcional para uso governado do GitLab CLI quando a sessao local nao for usada.",
-        "fields": (
-            {
-                "key": "GITLAB_TOKEN",
-                "label": "GitLab token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-}
+_GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {}
 _CORE_CONNECTION_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
     {
         str(field.get("key") or "").strip().upper()
@@ -1064,26 +981,6 @@ class RuntimeSnapshot:
     @property
     def env(self) -> dict[str, str]:
         return self.process_env
-
-
-class _VerificationTimeout(RuntimeError):
-    """Raised when an integration verification probe exceeds its time budget."""
-
-
-def _run_with_timeout(func: Any, timeout_seconds: int = 10) -> Any:
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError as exc:
-            future.cancel()
-            raise _VerificationTimeout(f"Verification timed out after {timeout_seconds}s") from exc
-
-
-def _mint_google_service_account_token(credentials_path: str) -> dict[str, Any]:
-    from koda.services.provider_auth import _mint_google_service_account_token as mint_service_account_token
-
-    return cast(dict[str, Any], mint_service_account_token(credentials_path))
 
 
 def _normalize_agent_id(agent_id: str) -> str:
@@ -1262,7 +1159,11 @@ def _local_env_key_is_reserved(key: str) -> bool:
 
 def _global_secret_is_grantable(secret_key: str) -> bool:
     normalized = str(secret_key or "").strip().upper()
-    if normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS or normalized in _HIDDEN_GLOBAL_SECRET_KEYS:
+    if (
+        normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS
+        or normalized in _REMOVED_GLOBAL_SECRET_KEYS
+        or normalized in _HIDDEN_GLOBAL_SECRET_KEYS
+    ):
         return False
     return not normalized.startswith("CONTROL_PLANE_")
 
@@ -1503,6 +1404,7 @@ class ControlPlaneManager:
         self._provider_login_processes: dict[str, Any] = {}
         self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
         self._provider_download_threads: dict[str, threading.Thread] = {}
+        self._provider_download_cancel_events: dict[str, threading.Event] = {}
 
     def _auto_seed_enabled(self) -> bool:
         """Skip auto-seeding for tests that instantiate via ``object.__new__``."""
@@ -1515,182 +1417,53 @@ class ControlPlaneManager:
             return
         if CONTROL_PLANE_AUTO_IMPORT:
             self.import_legacy_state()
-        self._seed_authoritative_mcp_catalog()
-        self._seed_default_world()
+        self._repair_legacy_default_agent_id()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
         self._cleanup_provider_download_jobs()
 
-    def _seed_authoritative_mcp_catalog(self) -> None:
-        if not self._auto_seed_enabled():
+    def _repair_legacy_default_agent_id(self) -> None:
+        """Normalize legacy default-agent rows from `koda` to canonical `KODA`."""
+        legacy_id = "koda"
+        canonical_id = _normalize_agent_id(legacy_id)
+        legacy_row = fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
+        if legacy_row is None:
             return
-        if self._seeding_legacy_state:
-            return
-        self._seeding_legacy_state = True
-        try:
-            for entry in authoritative_mcp_catalog_entries():
-                server_key = str(entry.pop("server_key"))
-                try:
-                    self.upsert_mcp_catalog_entry(server_key, entry)
-                except Exception:
-                    log.debug("control_plane_mcp_seed_failed", server_key=server_key, exc_info=True)
-        finally:
-            self._seeding_legacy_state = False
-
-    def _seed_default_world(self) -> None:
-        """Seed sensible global defaults so a fresh install is immediately usable.
-
-        Runs idempotently after MCP catalog seeding and legacy import. Only writes
-        sections that are currently absent — never overwrites operator edits nor
-        values already populated by ``import_legacy_state``. Governed by
-        ``CONTROL_PLANE_SKIP_DEFAULT_SEED`` for tests and customized deploys.
-        """
-        if not self._auto_seed_enabled():
-            return
-        if self._seeding_legacy_state:
-            return
-        if CONTROL_PLANE_SKIP_DEFAULT_SEED:
-            return
-        existing_sections = self._load_global_sections()
-        defaults: dict[str, dict[str, Any]] = {
-            "general": {"rate_limit_per_minute": 30},
-            "providers": {
-                "max_budget_usd": 5.0,
-                "max_total_budget_usd": 50.0,
-                "fallback_order": [],
-                "usage_profile": "balanced",
-            },
-            "tools": {"default_agent_mode": "chat"},
-            "integrations": {},
-            # `policy` + `env` is the source of truth for memory and knowledge
-            # toggles. Top-level fields like `enabled`, `proactive_enabled`,
-            # `promotion_mode`, `require_freshness_provenance` were set here in
-            # earlier seeds and ended up shadowing the policy values, so the
-            # `_apply_*_policy_to_section` cleanup would silently drop them on
-            # the next save. Seed the canonical shape directly to avoid round-trip
-            # churn.
-            "memory": {
-                "policy": {
-                    "enabled": False,
-                    "proactive_enabled": False,
-                    "procedural_enabled": False,
-                },
-                "env": {
-                    "MEMORY_ENABLED": "false",
-                    "MEMORY_PROACTIVE_ENABLED": "false",
-                    "MEMORY_PROCEDURAL_ENABLED": "false",
-                },
-            },
-            "knowledge": {
-                "policy": {
-                    "enabled": False,
-                    "promotion_mode": "read_only",
-                    "require_freshness_provenance": True,
-                },
-                "env": {
-                    "KNOWLEDGE_ENABLED": "false",
-                    "KNOWLEDGE_PROMOTION_MODE": "read_only",
-                    "KNOWLEDGE_REQUIRE_FRESHNESS_PROVENANCE": "true",
-                },
-            },
-            "scheduler": {
-                "scheduler_enabled": True,
-                "scheduler_default_timezone": "America/Sao_Paulo",
-                "runbook_governance_enabled": False,
-            },
-            "runtime": {
-                "runtime_environments_enabled": True,
-                "runtime_event_stream_enabled": True,
-                "runtime_recovery_enabled": True,
-            },
-        }
-        sections_to_write: dict[str, dict[str, Any]] = {}
-        for section, default_values in defaults.items():
-            current = _safe_json_object(existing_sections.get(section))
-            merged = dict(current)
-            changed = False
-            for key, value in default_values.items():
-                if key not in merged:
-                    merged[key] = value
-                    changed = True
-            if changed:
-                sections_to_write[section] = merged
-        has_any_workspace = bool(fetch_one("SELECT 1 FROM cp_workspaces LIMIT 1"))
-        has_any_squad = bool(fetch_one("SELECT 1 FROM cp_workspace_squads LIMIT 1"))
-        has_any_agent = bool(fetch_one("SELECT 1 FROM cp_agent_definitions LIMIT 1"))
-        seed_workspace = not has_any_workspace
-        seed_squad = not has_any_squad and seed_workspace
-        seed_agent = not has_any_agent
-        if not sections_to_write and not seed_workspace and not seed_squad and not seed_agent:
-            return
-        self._seeding_legacy_state = True
-        try:
-            for section, value in sections_to_write.items():
-                execute(
-                    """
-                    INSERT INTO cp_global_sections (section, data_json, updated_at)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
-                    """,
-                    (section, json_dump(value), now_iso()),
-                )
-            now = now_iso()
-            if seed_workspace:
-                execute(
-                    """
-                    INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    ("ws_default", "Pessoal", "Workspace inicial.", now, now),
-                )
-            if seed_squad:
-                execute(
-                    """
-                    INSERT INTO cp_workspace_squads (id, workspace_id, name, description, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    ("sq_default", "ws_default", "Geral", "Squad inicial.", now, now),
-                )
-            if seed_agent:
-                starter_workspace = "ws_default" if seed_workspace or has_any_workspace else None
-                # Only link to the default squad if we also just created it, avoiding
-                # accidental coupling to a legacy squad the operator may not expect.
-                starter_squad = "sq_default" if seed_squad else None
-                appearance = {"label": "Koda", "color": "#D97757", "color_rgb": "217, 119, 87"}
-                execute(
-                    """
-                    INSERT INTO cp_agent_definitions (
-                        id, display_name, status, appearance_json, storage_namespace,
-                        runtime_endpoint_json, applied_version, desired_version, metadata_json,
-                        workspace_id, squad_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (
-                        "koda",
-                        "Koda",
-                        "paused",
-                        json_dump(appearance),
-                        "koda",
-                        json_dump({}),
-                        json_dump({"origin": "default_seed"}),
-                        starter_workspace if has_any_workspace or seed_workspace else None,
-                        starter_squad,
-                        now,
-                        now,
-                    ),
-                )
-            log.info(
-                "control_plane_default_world_seeded",
-                sections=sorted(sections_to_write.keys()),
-                seeded_workspace=seed_workspace,
-                seeded_squad=seed_squad,
-                seeded_agent=seed_agent,
+        if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (canonical_id,)) is None:
+            execute(
+                "UPDATE cp_agent_definitions SET id = ?, updated_at = ? WHERE id = ?",
+                (canonical_id, now_iso(), legacy_id),
             )
-        finally:
-            self._seeding_legacy_state = False
+        else:
+            execute("DELETE FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
+        for table in (
+            "cp_agent_assignments",
+            "cp_agent_config_versions",
+            "cp_agent_connections",
+            "cp_agent_documents",
+            "cp_agent_sections",
+            "cp_apply_operations",
+            "cp_bot_gateway_tokens",
+            "cp_connection_discovery_runs",
+            "cp_knowledge_assets",
+            "cp_mcp_agent_connections",
+            "cp_mcp_capability_policies",
+            "cp_mcp_capability_snapshots",
+            "cp_mcp_discovered_prompts",
+            "cp_mcp_discovered_resources",
+            "cp_mcp_discovered_tools",
+            "cp_mcp_oauth_sessions",
+            "cp_mcp_oauth_tokens",
+            "cp_mcp_tool_policies",
+            "cp_mcp_user_servers",
+            "cp_policy_spend_ledger",
+            "cp_secret_values",
+            "cp_skill_assets",
+            "cp_telegram_offsets",
+            "cp_telegram_pending_updates",
+            "cp_template_assets",
+        ):
+            execute(f"UPDATE {table} SET agent_id = ? WHERE agent_id = ?", (canonical_id, legacy_id))
 
     def _require_agent_row(self, agent_id: str) -> tuple[str, Any]:
         normalized = _normalize_agent_id(agent_id)
@@ -2275,69 +2048,39 @@ class ControlPlaneManager:
             return True, mask_secret(env_value)
         return False, ""
 
-    def _ensure_provider_connections_seeded(self) -> None:
-        sections = self._system_settings_sections()
-        base_env = self._merged_global_env_base()
-        now = now_iso()
-        for provider_id in MANAGED_PROVIDER_IDS:
-            existing = fetch_one(
-                "SELECT provider_id FROM cp_provider_connections WHERE provider_id = ?",
-                (provider_id,),
-            )
-            if existing is not None:
-                continue
-            secret_present = bool(self._provider_api_key_secret_value(provider_id))
-            project_id = ""
-            project_key = PROVIDER_PROJECT_ENV_KEYS.get(provider_id)
-            if project_key:
-                project_id = (
-                    _trimmed_text(base_env.get(project_key))
-                    or _trimmed_text(os.environ.get(project_key))
-                    or _trimmed_text(
-                        self._access_meta_map("provider_connection_meta", sections=sections)
-                        .get(provider_id.upper(), {})
-                        .get("project_id")
-                    )
-                )
-            catalog_def = CORE_PROVIDER_CATALOG.get(provider_id)
-            supported_auth_modes = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
-            if "subscription_login" in supported_auth_modes and not secret_present:
-                auth_mode = "subscription_login"
-            else:
-                auth_mode = "api_key"
-            configured = 1 if secret_present else 0
-            if provider_id == "ollama":
-                auth_mode = "local"
-                configured = 1 if self._bool_from_env(base_env, "OLLAMA_ENABLED", False) else 0
-            execute(
-                """
-                INSERT OR IGNORE INTO cp_provider_connections (
-                    provider_id, auth_mode, configured, verified, account_label, plan_label,
-                    project_id, last_verified_at, last_error, created_at, updated_at
-                ) VALUES (?, ?, ?, 0, '', '', ?, NULL, '', ?, ?)
-                """,
-                (
-                    provider_id,
-                    auth_mode,
-                    configured,
-                    project_id,
-                    now,
-                    now,
-                ),
-            )
-
     def _provider_connection_row(self, provider_id: str) -> Any:
         normalized = provider_id.strip().lower()
         if normalized not in MANAGED_PROVIDER_IDS:
             raise ValueError(f"unsupported provider connection: {provider_id}")
-        self._ensure_provider_connections_seeded()
         row = fetch_one(
             "SELECT * FROM cp_provider_connections WHERE provider_id = ?",
             (normalized,),
         )
-        if row is None:
-            raise KeyError(normalized)
-        return row
+        return row or self._default_provider_connection_row(normalized)
+
+    def _default_provider_connection_row(self, provider_id: str) -> dict[str, Any]:
+        normalized = provider_id.strip().lower()
+        catalog_def = CORE_PROVIDER_CATALOG.get(normalized)
+        supported_auth_modes = tuple(catalog_def.supported_auth_modes) if catalog_def else ("api_key",)
+        if normalized in {"claude", "ollama"}:
+            auth_mode = "local"
+        elif "subscription_login" in supported_auth_modes:
+            auth_mode = "subscription_login"
+        else:
+            auth_mode = "api_key"
+        return {
+            "provider_id": normalized,
+            "auth_mode": auth_mode,
+            "configured": 0,
+            "verified": 0,
+            "account_label": "",
+            "plan_label": "",
+            "project_id": "",
+            "last_verified_at": "",
+            "last_error": "",
+            "created_at": "",
+            "updated_at": "",
+        }
 
     def _provider_connection_meta(self) -> dict[str, dict[str, Any]]:
         return self._access_meta_map("provider_connection_meta")
@@ -2349,6 +2092,14 @@ class ControlPlaneManager:
         env: dict[str, str] | None = None,
         sections: dict[str, dict[str, Any]] | None = None,
     ) -> str:
+        # API key mode targets Ollama Cloud, which is a fixed endpoint. We
+        # ignore every override source (per-env arg, persisted meta, OS env)
+        # because they can carry local URLs from a previous local-mode setup
+        # or from a stray OLLAMA_BASE_URL=http://localhost:... in the host
+        # environment, both of which would make the cloud verify hit the
+        # local daemon and fail with `Connection refused`.
+        if auth_mode == "api_key":
+            return provider_default_base_url("ollama", "api_key")
         source_env = env or {}
         meta = self._access_meta_map("provider_connection_meta", sections=sections).get("OLLAMA", {})
         configured = (
@@ -2365,7 +2116,6 @@ class ControlPlaneManager:
         *,
         env: dict[str, str] | None = None,
     ) -> tuple[str, str, str]:
-        self._ensure_provider_connections_seeded()
         row = fetch_one("SELECT auth_mode FROM cp_provider_connections WHERE provider_id = 'ollama'")
         auth_mode = _trimmed_text(row["auth_mode"] if row is not None else "") or "local"
         base_url = self._resolve_ollama_base_url(auth_mode=auth_mode, env=env)
@@ -2464,22 +2214,33 @@ class ControlPlaneManager:
         self,
         provider_id: str,
         *,
-        project_id: str = "",
-        base_url: str = "",
+        project_id: str | None = None,
+        base_url: str | None = None,
+        detected_models: list[str] | None = None,
     ) -> None:
         sections = self._system_settings_sections()
         access_section = dict(self._access_section(sections))
         meta_map = dict(self._provider_connection_meta())
         normalized = provider_id.strip().upper()
         payload = dict(_safe_json_object(meta_map.get(normalized)))
-        if project_id.strip():
-            payload["project_id"] = project_id.strip()
-        elif "project_id" in payload:
-            payload.pop("project_id", None)
-        if base_url.strip():
-            payload["base_url"] = base_url.strip()
-        elif "base_url" in payload:
-            payload.pop("base_url", None)
+        if project_id is not None:
+            if project_id.strip():
+                payload["project_id"] = project_id.strip()
+            elif "project_id" in payload:
+                payload.pop("project_id", None)
+        if base_url is not None:
+            if base_url.strip():
+                payload["base_url"] = base_url.strip()
+            elif "base_url" in payload:
+                payload.pop("base_url", None)
+        if detected_models is not None:
+            normalized_models = list(
+                dict.fromkeys(str(model).strip() for model in detected_models if str(model).strip())
+            )
+            if normalized_models:
+                payload["detected_models"] = normalized_models
+            else:
+                payload.pop("detected_models", None)
         if payload:
             meta_map[normalized] = payload
         else:
@@ -2491,8 +2252,11 @@ class ControlPlaneManager:
         sections["access"] = access_section
         self._persist_global_sections(sections)
 
+    def _provider_detected_model_ids(self, provider_id: str) -> list[str]:
+        meta = self._provider_connection_meta().get(provider_id.strip().upper(), {})
+        return normalize_string_list(_safe_json_object(meta).get("detected_models"))
+
     def _provider_connection_env(self) -> dict[str, str]:
-        self._ensure_provider_connections_seeded()
         env: dict[str, str] = {}
         rows = fetch_all("SELECT * FROM cp_provider_connections ORDER BY provider_id ASC")
         for row in rows:
@@ -2637,6 +2401,7 @@ class ControlPlaneManager:
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
+            if str(row["secret_key"] or "").strip().upper() not in _REMOVED_GLOBAL_SECRET_KEYS
         ]
         if include_hidden:
             return secrets
@@ -2650,9 +2415,14 @@ class ControlPlaneManager:
         sections = self._system_settings_sections()
         sections_changed = False
         secret_ids_to_delete: list[int] = []
+        removed_secret_keys: set[str] = set()
 
         for row in rows:
             secret_key = str(row["secret_key"] or "").strip().upper()
+            if secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+                secret_ids_to_delete.append(int(row["id"]))
+                removed_secret_keys.add(secret_key)
+                continue
             if secret_key not in _NON_SECRET_SYSTEM_ENV_KEYS or looks_like_secret_key(secret_key):
                 continue
             target_section = self._infer_section_from_env_key(secret_key)
@@ -2666,6 +2436,18 @@ class ControlPlaneManager:
                     sections[target_section] = section_payload
                     sections_changed = True
             secret_ids_to_delete.append(int(row["id"]))
+
+        if removed_secret_keys:
+            access_section = dict(self._access_section(sections))
+            secret_meta = dict(self._access_meta_map("global_secret_meta", sections=sections))
+            for secret_key in removed_secret_keys:
+                secret_meta.pop(secret_key, None)
+            if secret_meta:
+                access_section["global_secret_meta"] = secret_meta
+            else:
+                access_section.pop("global_secret_meta", None)
+            sections["access"] = access_section
+            sections_changed = True
 
         if sections_changed:
             for section_name, payload in sections.items():
@@ -2755,6 +2537,11 @@ class ControlPlaneManager:
                     if isinstance(value, bool):
                         env_rebuild[section_name][env_key] = _stringify_env_value(value)
                     continue
+                if env_key == "MODEL_EFFORT_DEFAULT_JSON":
+                    normalized_effort = normalize_model_effort_selection(value)
+                    if normalized_effort:
+                        env_rebuild[section_name][env_key] = _stringify_env_value(normalized_effort)
+                    continue
                 if value in (None, ""):
                     continue
                 env_rebuild[section_name][env_key] = _stringify_env_value(value)
@@ -2784,9 +2571,6 @@ class ControlPlaneManager:
             "browser": self._bool_from_env(env, "BROWSER_FEATURES_ENABLED")
             or self._bool_from_env(env, "BROWSER_ENABLED")
             or self._bool_from_env(env, "RUNTIME_BROWSER_LIVE_ENABLED"),
-            "jira": self._bool_from_env(env, "JIRA_ENABLED"),
-            "confluence": self._bool_from_env(env, "CONFLUENCE_ENABLED"),
-            "gws": self._bool_from_env(env, "GWS_ENABLED"),
         }
 
     def _provider_catalog_from_env(self, env: dict[str, str]) -> dict[str, Any]:
@@ -2804,7 +2588,13 @@ class ControlPlaneManager:
             if not available_models:
                 ambient = os.environ.get(f"{prefix}_AVAILABLE_MODELS", "")
                 available_models = [item.strip() for item in ambient.split(",") if item.strip()]
-            available_models = list(dict.fromkeys(available_models + resolve_known_general_model_ids(provider)))
+            available_models = list(
+                dict.fromkeys(
+                    available_models
+                    + self._provider_detected_model_ids(provider)
+                    + resolve_known_general_model_ids(provider)
+                )
+            )
             default_model = _trimmed_text(
                 env.get(f"{prefix}_DEFAULT_MODEL") or os.environ.get(f"{prefix}_DEFAULT_MODEL")
             )
@@ -3656,6 +3446,12 @@ class ControlPlaneManager:
                 "supports_persistence": bool(definition.get("supports_persistence")),
                 "health_probe": str(definition.get("health_probe") or ""),
             },
+            # Pass through the declarative connection profile and runtime
+            # constraints so the UI can render the right form (URL+email+
+            # token for Atlassian, OAuth-only for hosted servers, etc.)
+            # rather than falling back to a meaningless "Activate" button.
+            "connection_profile": definition.get("connection_profile"),
+            "runtime_constraints": list(definition.get("runtime_constraints") or []),
         }
 
     def _serialize_core_connection_payload(self, integration_id: str) -> dict[str, Any]:
@@ -4458,26 +4254,7 @@ class ControlPlaneManager:
         config = self._agent_core_connection_config(agent_id, normalized)
         if normalized == "browser":
             return "none"
-        if normalized == "gws":
-            if self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"):
-                return "service_account_key"
-            return "service_account"
-        if normalized in {"jira", "confluence"}:
-            return "api_token"
-        if normalized in {"gh", "glab"}:
-            if persisted in supported_modes:
-                return persisted
-            return "local_session"
-        if normalized == "aws":
-            if persisted in supported_modes:
-                return persisted
-            if _nonempty_text(config.get("AWS_ROLE_ARN")):
-                return "assume_role"
-            if self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID") and self.get_secret_asset(
-                agent_id, "AWS_SECRET_ACCESS_KEY"
-            ):
-                return "access_key"
-            return "local_session"
+        _ = config
         if persisted in supported_modes:
             return persisted
         return definition.auth_modes[0] if definition.auth_modes else "none"
@@ -4492,37 +4269,7 @@ class ControlPlaneManager:
             return bool(row and int(row.get("configured") or 0))
         config = self._agent_core_connection_config(agent_id, normalized)
         auth_method = self._resolve_agent_core_auth_method(agent_id, normalized)
-        if normalized == "gws":
-            if auth_method == "service_account_key":
-                return bool(self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"))
-            return bool(_nonempty_text(config.get("GWS_CREDENTIALS_FILE")))
-        if normalized in {"jira", "confluence"}:
-            required_secret = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
-            required_env = (
-                ("JIRA_URL", "JIRA_USERNAME") if normalized == "jira" else ("CONFLUENCE_URL", "CONFLUENCE_USERNAME")
-            )
-            return bool(self.get_secret_asset(agent_id, required_secret)) and all(
-                _nonempty_text(config.get(key)) for key in required_env
-            )
-        if normalized in {"gh", "glab"}:
-            if auth_method == "local_session":
-                return bool(row)
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            return bool(self.get_secret_asset(agent_id, secret_key))
-        if normalized == "aws":
-            if not _nonempty_text(config.get("AWS_DEFAULT_REGION")):
-                return False
-            if auth_method == "local_session":
-                return bool(row)
-            if auth_method == "assume_role":
-                return (
-                    bool(_nonempty_text(config.get("AWS_ROLE_ARN")))
-                    and bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID"))
-                    and bool(self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY"))
-                )
-            return bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID")) and bool(
-                self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY")
-            )
+        _ = (config, auth_method)
         return bool(row)
 
     def _resolve_integration_auth_mode(
@@ -4553,40 +4300,7 @@ class ControlPlaneManager:
         config = self._system_default_connection_config(normalized)
         if normalized == "browser":
             return "none"
-        if normalized == "gws":
-            if self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"):
-                return "service_account_key"
-            return "service_account"
-        if normalized in {"jira", "confluence"}:
-            return "api_token"
-        if normalized == "aws":
-            if self._stored_global_secret_value("AWS_ACCESS_KEY_ID") and self._stored_global_secret_value(
-                "AWS_SECRET_ACCESS_KEY"
-            ):
-                return "access_key"
-            if _nonempty_text(config.get("AWS_ROLE_ARN")):
-                return "assume_role"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "assume_role" in supported_modes:
-                return "assume_role"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
-        if normalized == "gh":
-            if self._stored_global_secret_value("GH_TOKEN"):
-                return "token"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "token" in supported_modes:
-                return "token"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
-        if normalized == "glab":
-            if self._stored_global_secret_value("GITLAB_TOKEN"):
-                return "token"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "token" in supported_modes:
-                return "token"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
+        _ = config
         if persisted_auth_mode in supported_modes:
             return persisted_auth_mode
         return definition.auth_modes[0] if definition.auth_modes else "none"
@@ -4680,14 +4394,6 @@ class ControlPlaneManager:
         fields = {
             str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
         }
-        if normalized in {"gh", "glab"}:
-            if row is not None:
-                return bool(int(row["configured"] or 0))
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            return bool(self._stored_global_secret_value(secret_key))
-        if normalized == "gws":
-            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
-            return bool(credentials_file or self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"))
         template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
         if template is None:
             if normalized == "browser":
@@ -4806,10 +4512,6 @@ class ControlPlaneManager:
                 "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
             }
 
-        from koda.services.core_connection_broker import get_core_connection_broker
-
-        broker = get_core_connection_broker()
-
         if normalized == "browser":
             return {
                 "verified": self._agent_core_connection_configured(normalized_agent, normalized),
@@ -4819,192 +4521,6 @@ class ControlPlaneManager:
                 "auth_expired": False,
                 "details": {"auth_method": "none"},
             }
-
-        if normalized == "aws":
-            region = _nonempty_text(
-                self._agent_core_connection_config(normalized_agent, normalized).get("AWS_DEFAULT_REGION")
-            )
-            if not region:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "AWS missing default region.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            try:
-                import boto3  # type: ignore
-            except ImportError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "boto3 not installed.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            try:
-                resolved, session_kwargs = broker.build_boto3_session_kwargs(agent_id=normalized_agent)
-                session = boto3.Session(**session_kwargs)
-                identity = session.client("sts").get_caller_identity()
-                return {
-                    "verified": True,
-                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
-                    "last_error": "",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {
-                        "auth_method": resolved.auth_method,
-                        "region": region,
-                        "account": str(identity.get("Account") or ""),
-                        "arn": str(identity.get("Arn") or ""),
-                        "user_id": str(identity.get("UserId") or ""),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-
-        if normalized in {"gh", "glab"}:
-            cli = "gh" if normalized == "gh" else "glab"
-            checked_via = f"{cli}_api_user"
-            try:
-                from koda.services.provider_env import build_tool_subprocess_env
-
-                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
-                    proc_env = build_tool_subprocess_env(env_overrides=env)
-                    result = subprocess.run(
-                        [cli, "api", "user"],
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        env=proc_env,
-                    )
-            except FileNotFoundError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": f"{cli} CLI not found.",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            if result.returncode != 0:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": (
-                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
-                    ),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": resolved.auth_method},
-                }
-            try:
-                payload = _safe_json_object(json.loads(result.stdout or "{}"))
-            except json.JSONDecodeError:
-                payload = {}
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
-                "last_error": "",
-                "checked_via": checked_via,
-                "auth_expired": False,
-                "details": {"auth_method": resolved.auth_method, **payload},
-            }
-
-        if normalized == "gws":
-            try:
-                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
-                    credentials_file = _nonempty_text(
-                        env.get("GWS_CREDENTIALS_FILE") or env.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    )
-                    token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(token_info.get("client_email")),
-                "last_error": "",
-                "checked_via": "service_account_token",
-                "auth_expired": False,
-                "details": {
-                    "auth_method": resolved.auth_method,
-                    "client_email": _nonempty_text(token_info.get("client_email")),
-                    "project_id": _nonempty_text(token_info.get("project_id")),
-                    "token_uri": _nonempty_text(token_info.get("token_uri")),
-                },
-            }
-
-        if normalized in {"jira", "confluence"}:
-            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
-            try:
-                kwargs = broker.atlassian_client_kwargs(normalized, agent_id=normalized_agent)
-                if normalized == "jira":
-                    from atlassian import Jira  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Jira(**kwargs, api_version="3")
-                        return client.myself()
-                else:
-                    from atlassian import Confluence  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Confluence(**kwargs)
-                        return client.get_all_spaces(limit=1)
-
-                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
-                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(payload.get("displayName"))
-                    or _nonempty_text(payload.get("emailAddress")),
-                    "last_error": "",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": payload,
-                }
-            except _VerificationTimeout as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
 
         return {
             "verified": self._agent_core_connection_configured(normalized_agent, normalized),
@@ -5062,261 +4578,6 @@ class ControlPlaneManager:
 
     def _verify_integration_configuration(self, integration_id: str) -> dict[str, Any]:
         normalized = integration_id.strip().lower()
-        fields = {
-            str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
-        }
-
-        if normalized == "aws":
-            region = _nonempty_text(fields.get("AWS_DEFAULT_REGION", {}).get("value"))
-            if not region:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "AWS missing default region.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": "unknown", "region": region},
-                }
-            try:
-                import boto3  # type: ignore
-            except ImportError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "boto3 not installed.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": "unknown", "region": region},
-                }
-
-            access_key_id = self._global_secret_value("AWS_ACCESS_KEY_ID")
-            secret_access_key = self._global_secret_value("AWS_SECRET_ACCESS_KEY")
-            session_token = self._global_secret_value("AWS_SESSION_TOKEN")
-            profile_name = _nonempty_text(fields.get("AWS_PROFILE_PROD", {}).get("value")) or _nonempty_text(
-                fields.get("AWS_PROFILE_DEV", {}).get("value")
-            )
-            auth_mode = self._resolve_integration_auth_mode(normalized)
-            session_kwargs: dict[str, Any] = {"region_name": region}
-            if auth_mode == "access_key" and access_key_id and secret_access_key:
-                session_kwargs["aws_access_key_id"] = access_key_id
-                session_kwargs["aws_secret_access_key"] = secret_access_key
-                if session_token:
-                    session_kwargs["aws_session_token"] = session_token
-            elif profile_name:
-                session_kwargs["profile_name"] = profile_name
-            try:
-                session = boto3.Session(**session_kwargs)
-                identity = session.client("sts").get_caller_identity()
-                return {
-                    "verified": True,
-                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
-                    "last_error": "",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {
-                        "auth_mode": auth_mode,
-                        "region": region,
-                        "account": str(identity.get("Account") or ""),
-                        "arn": str(identity.get("Arn") or ""),
-                        "user_id": str(identity.get("UserId") or ""),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode, "region": region},
-                }
-
-        if normalized in {"gh", "glab"}:
-            cli = "gh" if normalized == "gh" else "glab"
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            auth_mode = self._resolve_integration_auth_mode(normalized)
-            command_env = dict(os.environ)
-            token_value = self._global_secret_value(secret_key)
-            if auth_mode == "token":
-                if not token_value:
-                    return {
-                        "verified": False,
-                        "account_label": "",
-                        "last_error": f"{cli} token missing.",
-                        "checked_via": f"{cli}_api_user",
-                        "auth_expired": False,
-                        "details": {"auth_mode": auth_mode},
-                    }
-                command_env[secret_key] = token_value
-            try:
-                result = subprocess.run(
-                    [cli, "api", "user"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=command_env,
-                )
-            except FileNotFoundError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": f"{cli} CLI not found.",
-                    "checked_via": f"{cli}_api_user",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode},
-                }
-            if result.returncode != 0:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": (
-                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
-                    ),
-                    "checked_via": f"{cli}_api_user",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode},
-                }
-            try:
-                payload = _safe_json_object(json.loads(result.stdout or "{}"))
-            except json.JSONDecodeError:
-                payload = {}
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
-                "last_error": "",
-                "checked_via": f"{cli}_api_user",
-                "auth_expired": False,
-                "details": {"auth_mode": auth_mode, **payload},
-            }
-
-        if normalized == "gws":
-            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
-            service_account_key = self._global_secret_value("GWS_SERVICE_ACCOUNT_KEY")
-            if not credentials_file and not service_account_key:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "GWS credentials missing.",
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"credentials_source": "missing"},
-                }
-            credentials_source = "file" if credentials_file else "secret"
-            temp_path = ""
-            try:
-                if not credentials_file:
-                    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
-                        handle.write(service_account_key)
-                        temp_path = handle.name
-                    credentials_file = temp_path
-                token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(token_info.get("client_email")),
-                    "last_error": "",
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {
-                        "credentials_source": credentials_source,
-                        "client_email": _nonempty_text(token_info.get("client_email")),
-                        "project_id": _nonempty_text(token_info.get("project_id")),
-                        "token_uri": _nonempty_text(token_info.get("token_uri")),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"credentials_source": credentials_source},
-                }
-            finally:
-                if temp_path:
-                    with contextlib.suppress(OSError):
-                        os.unlink(temp_path)
-
-        if normalized in {"jira", "confluence"}:
-            template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized, {})
-            for field in template.get("fields", ()):
-                key = str(field["key"])
-                if str(field.get("storage") or "env") == "secret":
-                    if not self._global_secret_value(key):
-                        return {
-                            "verified": False,
-                            "account_label": "",
-                            "last_error": f"{normalized} credentials missing.",
-                            "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
-                            "auth_expired": False,
-                            "details": {},
-                        }
-                    continue
-                if not _nonempty_text(fields.get(key, {}).get("value")):
-                    return {
-                        "verified": False,
-                        "account_label": "",
-                        "last_error": f"{normalized} credentials missing.",
-                        "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
-                        "auth_expired": False,
-                        "details": {},
-                    }
-            url_key = "JIRA_URL" if normalized == "jira" else "CONFLUENCE_URL"
-            user_key = "JIRA_USERNAME" if normalized == "jira" else "CONFLUENCE_USERNAME"
-            token_key = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
-            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
-            try:
-                if normalized == "jira":
-                    from atlassian import Jira  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Jira(
-                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
-                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
-                            password=self._global_secret_value(token_key),
-                        )
-                        return client.myself()
-                else:
-                    from atlassian import Confluence  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Confluence(
-                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
-                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
-                            password=self._global_secret_value(token_key),
-                        )
-                        return client.get_all_spaces(limit=1)
-
-                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
-                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(payload.get("displayName"))
-                    or _nonempty_text(payload.get("emailAddress")),
-                    "last_error": "",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": payload,
-                }
-            except _VerificationTimeout as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-
         return {
             "verified": self._integration_configured(normalized),
             "account_label": "",
@@ -5397,11 +4658,7 @@ class ControlPlaneManager:
                         payload["available_models"] = list(dict.fromkeys(current + extra))
             payload["functional_models"] = resolve_provider_function_model_catalog(
                 provider_id,
-                available_models=[
-                    str(item)
-                    for item in _safe_json_object(catalog.get("providers")).get(provider_id, {}).get("available_models")
-                    or []
-                ],
+                available_models=[str(item) for item in _safe_json_object(payload).get("available_models") or []],
             )
         catalog["model_functions"] = resolve_model_function_catalog()
         catalog["functional_model_catalog"] = self._functional_model_catalog(catalog)
@@ -5984,9 +5241,39 @@ class ControlPlaneManager:
             "created_at": _trimmed_text(row["created_at"]),
             "updated_at": _trimmed_text(row["updated_at"]),
             "completed_at": _trimmed_text(row["completed_at"]),
+            "details": details,
         }
         payload.update(details)
         return payload
+
+    def _provider_download_cancel_events_ref(self) -> dict[str, threading.Event]:
+        events = getattr(self, "_provider_download_cancel_events", None)
+        if events is None:
+            events = {}
+            self._provider_download_cancel_events = events
+        return events
+
+    def _provider_download_cancel_requested(self, job_id: str) -> bool:
+        event = self._provider_download_cancel_events_ref().get(job_id)
+        return bool(event and event.is_set())
+
+    def _raise_if_provider_download_cancelled(self, job_id: str) -> None:
+        if self._provider_download_cancel_requested(job_id):
+            raise _ProviderDownloadCancelled("download cancelled")
+
+    def _register_provider_download_thread(self, job_id: str, thread: threading.Thread) -> None:
+        threads = getattr(self, "_provider_download_threads", None)
+        if threads is None:
+            threads = {}
+            self._provider_download_threads = threads
+        threads[job_id] = thread
+        self._provider_download_cancel_events_ref()[job_id] = threading.Event()
+
+    def _clear_provider_download_tracking(self, job_id: str) -> None:
+        threads = getattr(self, "_provider_download_threads", None)
+        if threads is not None:
+            threads.pop(job_id, None)
+        self._provider_download_cancel_events_ref().pop(job_id, None)
 
     def _persist_provider_download_job(
         self,
@@ -6066,15 +5353,9 @@ class ControlPlaneManager:
             "language_id": str(metadata["language_id"]),
             "language_label": str(metadata["language_label"]),
         }
-        self._persist_provider_download_job(
-            job_id,
-            provider_id="kokoro",
-            asset_id=voice_id,
-            status="running",
-            details={**base_details, "message": "Baixando voz do catalogo oficial do Kokoro."},
-        )
 
         def _on_progress(downloaded_bytes: int, total_bytes: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -6086,8 +5367,17 @@ class ControlPlaneManager:
             )
 
         try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id=voice_id,
+                status="running",
+                details={**base_details, "message": "Baixando voz do catalogo oficial do Kokoro."},
+            )
             result = ensure_kokoro_voice_downloaded(voice_id, progress_callback=_on_progress)
             downloaded_bytes = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -6101,6 +5391,14 @@ class ControlPlaneManager:
                     "message": "Voz baixada com sucesso.",
                 },
             )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id=voice_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
         except Exception as exc:
             self._persist_provider_download_job(
                 job_id,
@@ -6110,7 +5408,7 @@ class ControlPlaneManager:
                 details={**base_details, "last_error": str(exc)},
             )
         finally:
-            self._provider_download_threads.pop(job_id, None)
+            self._clear_provider_download_tracking(job_id)
 
     def get_kokoro_voice_catalog(self, language: str = "") -> dict[str, Any]:
         sections = self._system_settings_sections()
@@ -6195,16 +5493,678 @@ class ControlPlaneManager:
             name=f"kokoro-download-{normalized_voice}",
             daemon=True,
         )
-        self._provider_download_threads[job_id] = thread
+        self._register_provider_download_thread(job_id, thread)
         thread.start()
         row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
         if row is None:
             raise RuntimeError("failed to persist kokoro download job")
         return self._provider_download_job_payload(row)
 
+    # ------------------------------------------------------------------
+    # Kokoro base model download — independent of voice downloads. The
+    # base ONNX file is required before any voice can be loaded; the UI
+    # exposes this as a separate first-time download so operators see
+    # exactly what's happening rather than triggering an opaque
+    # synchronous fetch the first time they pick a voice.
+    # ------------------------------------------------------------------
+
+    def get_kokoro_model_status(self) -> dict[str, Any]:
+        status = kokoro_model_status()
+        active = self._active_provider_download_job("kokoro", "model")
+        return {**status, "active_job": active}
+
+    def _run_kokoro_model_download(self, job_id: str) -> None:
+        base_details = {
+            "asset": "model",
+            "filename": kokoro_model_path().name,
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando modelo base do Kokoro."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="running",
+                details={**base_details, "message": "Baixando modelo base do Kokoro."},
+            )
+            ensure_kokoro_model(progress_callback=_on_progress)
+            bytes_on_disk = int(kokoro_model_path().stat().st_size)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": str(kokoro_model_path()),
+                    "message": "Modelo Kokoro pronto.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_kokoro_model_download(self) -> dict[str, Any]:
+        active = self._active_provider_download_job("kokoro", "model")
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        target = kokoro_model_path()
+        if target.exists() and target.stat().st_size > 0:
+            bytes_on_disk = int(target.stat().st_size)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "asset": "model",
+                    "filename": target.name,
+                    "local_path": str(target),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist kokoro model download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="kokoro",
+            asset_id="model",
+            status="pending",
+            details={
+                "asset": "model",
+                "filename": target.name,
+                "message": "Preparando download do modelo base do Kokoro.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_kokoro_model_download,
+            args=(job_id,),
+            name="kokoro-model-download",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist kokoro model download job")
+        return self._provider_download_job_payload(row)
+
+    # ------------------------------------------------------------------
+    # Embedding model catalog & background download. Mirrors the Kokoro
+    # provider download pattern (cp_provider_download_jobs row + threading)
+    # but talks to the Hugging Face Hub via ``huggingface_hub.snapshot_download``
+    # because embedding models are multi-file repos (config + tokenizer +
+    # weights + sentence-transformers metadata).
+    # ------------------------------------------------------------------
+
+    def _selected_embedding_model_id(self) -> str:
+        sections = self._system_settings_sections()
+        memory_section = _safe_json_object(sections.get("memory"))
+        candidate = _nonempty_text(memory_section.get("embedding_model"))
+        if candidate and candidate in _EMBEDDING_CATALOG:
+            return candidate
+        env_repo = _nonempty_text(os.environ.get("MEMORY_EMBEDDING_MODEL"))
+        if env_repo:
+            for model_id, definition in _EMBEDDING_CATALOG.items():
+                if definition.repo_id == env_repo:
+                    return model_id
+        return _DEFAULT_EMBEDDING_MODEL_ID
+
+    def get_embedding_model_catalog(self) -> dict[str, Any]:
+        active = self._selected_embedding_model_id()
+        payload = _embedding_catalog_payload(active_model_id=active)
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            model_id = str(item.get("id") or "")
+            try:
+                item["active_job"] = self._active_provider_download_job("embedding", model_id)
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning(
+                    "embedding_catalog_active_job_probe_failed",
+                    model_id=model_id,
+                    error=str(exc),
+                )
+                item["active_job"] = None
+            items.append(item)
+        return {**payload, "items": items}
+
+    def _run_embedding_model_download(self, job_id: str, model_id: str) -> None:
+        definition = _EMBEDDING_CATALOG.get(model_id)
+        if definition is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=model_id,
+                status="error",
+                details={"last_error": f"unknown embedding model: {model_id}"},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+
+        base_details = {
+            "model_id": definition.id,
+            "repo_id": definition.repo_id,
+            "title": definition.title,
+            "expected_size_mb": definition.size_mb,
+        }
+        expected_total = int(definition.size_mb) * 1024 * 1024
+        if self._provider_download_cancel_requested(job_id):
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="cancelled",
+                total_bytes=expected_total,
+                details={**base_details, "message": "Download cancelado."},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="running",
+            total_bytes=expected_total,
+            details={**base_details, "message": "Baixando modelo de embedding do Hugging Face."},
+        )
+
+        # huggingface_hub.snapshot_download exposes no progress callback,
+        # so we poll the cache dir from this thread while a sibling worker
+        # downloads. Errors are propagated through a holder dict.
+        download_error: dict[str, Any] = {}
+
+        def _download() -> None:
+            try:
+                from huggingface_hub import snapshot_download  # noqa: PLC0415
+
+                snapshot_download(
+                    repo_id=definition.repo_id,
+                    allow_patterns=[
+                        "*.json",
+                        "*.txt",
+                        "*.md",
+                        "*.safetensors",
+                        "*.bin",
+                        "tokenizer*",
+                        "sentencepiece*",
+                        "1_Pooling/*",
+                        "modules.json",
+                        "config_sentence_transformers.json",
+                    ],
+                )
+            except Exception as exc:  # noqa: BLE001
+                download_error["exc"] = exc
+
+        worker = threading.Thread(
+            target=_download,
+            name=f"embedding-download-{definition.id}",
+            daemon=True,
+        )
+        worker.start()
+
+        last_persist = 0.0
+        while worker.is_alive():
+            downloaded = _embedding_model_disk_bytes(definition.id)
+            if self._provider_download_cancel_requested(job_id):
+                self._persist_provider_download_job(
+                    job_id,
+                    provider_id="embedding",
+                    asset_id=definition.id,
+                    status="cancelled",
+                    downloaded_bytes=downloaded,
+                    total_bytes=expected_total,
+                    details={**base_details, "message": "Download cancelado."},
+                )
+                self._clear_provider_download_tracking(job_id)
+                return
+            now = time.monotonic()
+            if now - last_persist >= 0.75:
+                self._persist_provider_download_job(
+                    job_id,
+                    provider_id="embedding",
+                    asset_id=definition.id,
+                    status="running",
+                    downloaded_bytes=downloaded,
+                    total_bytes=expected_total,
+                    details={**base_details, "message": "Baixando modelo de embedding."},
+                )
+                last_persist = now
+            time.sleep(0.5)
+        worker.join()
+
+        if self._provider_download_cancel_requested(job_id):
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="cancelled",
+                downloaded_bytes=_embedding_model_disk_bytes(definition.id),
+                total_bytes=expected_total,
+                details={**base_details, "message": "Download cancelado."},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+
+        if download_error:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="error",
+                details={**base_details, "last_error": str(download_error.get("exc"))},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+
+        final_bytes = _embedding_model_disk_bytes(definition.id)
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="completed",
+            downloaded_bytes=final_bytes,
+            total_bytes=final_bytes,
+            details={**base_details, "message": "Modelo baixado com sucesso."},
+        )
+        # Drop any stale "this model failed to load" entries the runtime
+        # cached before the user explicitly downloaded the weights — without
+        # this, embed_text() keeps returning the hash-fallback even though
+        # the model is now on disk.
+        from koda.utils.embeddings import reset_embedding_load_cache  # noqa: PLC0415
+
+        reset_embedding_load_cache(definition.repo_id)
+        bare_name = definition.repo_id.split("/", 1)[-1]
+        if bare_name != definition.repo_id:
+            reset_embedding_load_cache(bare_name)
+        self._clear_provider_download_tracking(job_id)
+
+    def start_embedding_model_download(self, model_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+
+        active = self._active_provider_download_job("embedding", definition.id)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        if _embedding_model_installed(definition.id):
+            bytes_on_disk = _embedding_model_disk_bytes(definition.id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "model_id": definition.id,
+                    "repo_id": definition.repo_id,
+                    "title": definition.title,
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist embedding download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="embedding",
+            asset_id=definition.id,
+            status="pending",
+            details={
+                "model_id": definition.id,
+                "repo_id": definition.repo_id,
+                "title": definition.title,
+                "expected_size_mb": definition.size_mb,
+                "message": "Preparando download do modelo de embedding.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_embedding_model_download,
+            args=(job_id, definition.id),
+            name=f"embedding-download-{definition.id}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist embedding download job")
+        return self._provider_download_job_payload(row)
+
+    def select_embedding_model(self, model_id: str) -> dict[str, Any]:
+        """Persist the operator's choice in ``cp_global_sections.memory.embedding_model``.
+
+        Refuses selection of a model that hasn't been downloaded yet so the
+        runtime never points at a missing weights file. Returns the refreshed
+        catalog payload so the UI updates state in one round-trip.
+        """
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+        if not _embedding_model_installed(definition.id):
+            raise ValueError(f"embedding model not installed: {model_id}")
+        sections = self._system_settings_sections()
+        memory_section = dict(_safe_json_object(sections.get("memory")))
+        memory_section["embedding_model"] = definition.id
+        execute(
+            """
+            INSERT INTO cp_global_sections (section, data_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+            """,
+            ("memory", json_dump(memory_section), now_iso()),
+        )
+        return self.get_embedding_model_catalog()
+
+    def delete_embedding_model_asset(self, model_id: str) -> dict[str, Any]:
+        """Wipe the cache directory for a downloaded embedding model.
+
+        Refuses to delete:
+          - an unknown model_id;
+          - a model with an in-flight download (cancel/wait first).
+
+        The currently-active model *can* be deleted. If it is, we auto-pick
+        another installed model as the new active to keep retrieval going;
+        if no other model is on disk we clear the operator selection so the
+        resolver falls back to env/default (and the runtime falls back to
+        the hash-based vector until the operator downloads again).
+
+        Returns the refreshed catalog payload so the UI re-renders without an
+        extra round trip.
+        """
+        normalized = _nonempty_text(model_id)
+        definition = _EMBEDDING_CATALOG.get(normalized)
+        if definition is None:
+            raise ValueError(f"unknown embedding model: {model_id}")
+        active = self._active_provider_download_job("embedding", definition.id)
+        if active is not None:
+            raise ValueError("embedding model download in progress; cancel or wait before deleting")
+
+        was_active = self._selected_embedding_model_id() == definition.id
+        _delete_embedding_model(definition.id)
+
+        if was_active:
+            replacement: str | None = None
+            for other_id in _EMBEDDING_CATALOG:
+                if other_id == definition.id:
+                    continue
+                if _embedding_model_installed(other_id):
+                    replacement = other_id
+                    break
+            sections = self._system_settings_sections()
+            memory_section = dict(_safe_json_object(sections.get("memory")))
+            if replacement is not None:
+                memory_section["embedding_model"] = replacement
+            else:
+                memory_section.pop("embedding_model", None)
+            execute(
+                """
+                INSERT INTO cp_global_sections (section, data_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(section) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+                """,
+                ("memory", json_dump(memory_section), now_iso()),
+            )
+
+        # Drop runtime caches so a future ``embed_text`` call doesn't keep
+        # using a SentenceTransformer instance backed by files we just wiped.
+        from koda.utils.embeddings import reset_embedding_load_cache  # noqa: PLC0415
+
+        reset_embedding_load_cache(definition.repo_id)
+        bare_name = definition.repo_id.split("/", 1)[-1]
+        if bare_name != definition.repo_id:
+            reset_embedding_load_cache(bare_name)
+
+        return self.get_embedding_model_catalog()
+
+    # ------------------------------------------------------------------
+    # Whisper.cpp GGML model download. Mirrors the Kokoro pattern: a
+    # single-shot job that streams the file to disk with a throttled
+    # progress callback. The variant id is the asset_id so the same
+    # job table row tracks one specific GGML variant at a time.
+    # ------------------------------------------------------------------
+
+    def get_whisper_catalog(self) -> dict[str, Any]:
+        payload = whisper_catalog_payload()
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            variant_id = str(item.get("variant_id") or "")
+            active = self._active_provider_download_job("whispercpp", variant_id)
+            items.append({**item, "active_job": active})
+        return {**payload, "items": items}
+
+    def _run_whisper_model_download(self, job_id: str, variant_id: str) -> None:
+        descriptor = KNOWN_WHISPER_VARIANTS.get(variant_id)
+        if descriptor is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="error",
+                details={"variant_id": variant_id, "last_error": f"unknown whisper variant: {variant_id}"},
+            )
+            return
+
+        base_details = {
+            "variant_id": variant_id,
+            "filename": str(descriptor["filename"]),
+            "label": str(descriptor["label"]),
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando modelo Whisper."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="running",
+                details={**base_details, "message": "Baixando modelo Whisper."},
+            )
+            result = ensure_whisper_model_downloaded(variant_id, progress_callback=_on_progress)
+            bytes_on_disk = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": str(result.get("local_path") or ""),
+                    "message": "Modelo Whisper pronto.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_whisper_model_download(self, variant_id: str = WHISPER_DEFAULT_VARIANT) -> dict[str, Any]:
+        normalized = _nonempty_text(variant_id)
+        if normalized not in KNOWN_WHISPER_VARIANTS:
+            raise ValueError(f"unknown whisper variant: {variant_id}")
+
+        active = self._active_provider_download_job("whispercpp", normalized)
+        if active is not None:
+            return active
+
+        descriptor = KNOWN_WHISPER_VARIANTS[normalized]
+        target = whisper_model_path(normalized)
+        job_id = str(uuid4())
+        if target.exists() and target.stat().st_size > 0:
+            bytes_on_disk = int(target.stat().st_size)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=normalized,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "variant_id": normalized,
+                    "filename": str(descriptor["filename"]),
+                    "label": str(descriptor["label"]),
+                    "local_path": str(target),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist whisper download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="whispercpp",
+            asset_id=normalized,
+            status="pending",
+            details={
+                "variant_id": normalized,
+                "filename": str(descriptor["filename"]),
+                "label": str(descriptor["label"]),
+                "message": "Preparando download do modelo Whisper.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_whisper_model_download,
+            args=(job_id, normalized),
+            name=f"whisper-download-{normalized}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist whisper download job")
+        return self._provider_download_job_payload(row)
+
+    # ------------------------------------------------------------------
+    # Asset removal — counterpart to the download flows. Each helper is
+    # idempotent (already-missing == success) so the UI can call it twice
+    # without surfacing a confusing error to the operator.
+    # ------------------------------------------------------------------
+
+    def delete_kokoro_model_asset(self) -> dict[str, Any]:
+        # Refuse while a download for the same asset is in flight — otherwise
+        # we'd race the download thread's atomic .tmp → replace.
+        active = self._active_provider_download_job("kokoro", "model")
+        if active is not None:
+            raise ValueError("kokoro model download in progress; cancel or wait before deleting")
+        result = delete_kokoro_model()
+        return {**result, **kokoro_model_status()}
+
+    def delete_kokoro_voice_asset(self, voice_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(voice_id).lower()
+        if not normalized:
+            raise ValueError("voice_id is required")
+        active = self._active_provider_download_job("kokoro", normalized)
+        if active is not None:
+            raise ValueError("voice download in progress; cancel or wait before deleting")
+        return delete_kokoro_voice(normalized)
+
+    def delete_whisper_model_asset(self, variant_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(variant_id)
+        if normalized not in KNOWN_WHISPER_VARIANTS:
+            raise ValueError(f"unknown whisper variant: {variant_id}")
+        active = self._active_provider_download_job("whispercpp", normalized)
+        if active is not None:
+            raise ValueError("whisper download in progress; cancel or wait before deleting")
+        return delete_whisper_model(normalized)
+
+    def list_active_provider_downloads(self) -> list[dict[str, Any]]:
+        """Return jobs in pending/running state across all known providers.
+
+        Used by the frontend to rebind sticky toasts on page load — without
+        this, a hard refresh during a long Whisper download would lose the
+        progress UI even though the backend job is still running.
+        """
+        self._cleanup_provider_download_jobs()
+        rows = fetch_all(
+            """
+            SELECT * FROM cp_provider_download_jobs
+            WHERE status IN ('pending', 'running')
+            ORDER BY created_at DESC
+            """
+        )
+        return [self._provider_download_job_payload(row) for row in rows]
+
     def get_provider_download_job(self, provider_id: str, job_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
-        if normalized != "kokoro":
+        if normalized not in _PROVIDER_DOWNLOAD_PROVIDER_IDS:
             raise ValueError(f"unsupported provider download: {provider_id}")
         self._cleanup_provider_download_jobs()
         row = fetch_one(
@@ -6214,6 +6174,49 @@ class ControlPlaneManager:
         if row is None:
             raise KeyError(job_id)
         return self._provider_download_job_payload(row)
+
+    def cancel_provider_download_job(self, provider_id: str, job_id: str) -> dict[str, Any]:
+        normalized = provider_id.strip().lower()
+        if normalized not in _PROVIDER_DOWNLOAD_PROVIDER_IDS:
+            raise ValueError(f"unsupported provider download: {provider_id}")
+        self._cleanup_provider_download_jobs()
+        row = fetch_one(
+            "SELECT * FROM cp_provider_download_jobs WHERE id = ? AND provider_id = ?",
+            (job_id, normalized),
+        )
+        if row is None:
+            raise KeyError(job_id)
+
+        status = str(row["status"] or "pending")
+        if status not in {"pending", "running"}:
+            return self._provider_download_job_payload(row)
+
+        event = self._provider_download_cancel_events_ref().get(job_id)
+        if event is not None:
+            event.set()
+
+        details = _safe_json_object(json_load(row["details_json"], {}))
+        self._persist_provider_download_job(
+            job_id,
+            provider_id=normalized,
+            asset_id=str(row["asset_id"]),
+            status="cancelled",
+            downloaded_bytes=int(row["downloaded_bytes"] or 0),
+            total_bytes=int(row["total_bytes"] or 0),
+            details={**details, "message": "Download cancelado."},
+        )
+
+        thread = getattr(self, "_provider_download_threads", {}).get(job_id)
+        if thread is None or not thread.is_alive():
+            self._clear_provider_download_tracking(job_id)
+
+        refreshed = fetch_one(
+            "SELECT * FROM cp_provider_download_jobs WHERE id = ? AND provider_id = ?",
+            (job_id, normalized),
+        )
+        if refreshed is None:
+            raise KeyError(job_id)
+        return self._provider_download_job_payload(refreshed)
 
     def get_provider_connection(self, provider_id: str) -> dict[str, Any]:
         return self._serialize_provider_connection(provider_id.strip().lower())
@@ -6225,17 +6228,12 @@ class ControlPlaneManager:
         api_key = _trimmed_text(payload.get("api_key"))
         clear_api_key = bool(payload.get("clear_api_key"))
         existing_row = self._provider_connection_row(normalized)
-        project_id = _trimmed_text(payload.get("project_id")) or _trimmed_text(existing_row["project_id"])
+        project_id = _trimmed_text(existing_row["project_id"])
         verify_after_save = bool(payload.get("verify_after_save", False))
-        base_url = ""
-        if normalized == "ollama":
-            base_url = self._resolve_ollama_base_url(
-                auth_mode="api_key",
-                env={"OLLAMA_BASE_URL": _trimmed_text(payload.get("base_url"))},
-            )
-            self._persist_provider_connection_meta(normalized, base_url=base_url)
-        if normalized == "gemini" and project_id:
-            self._persist_provider_connection_meta(normalized, project_id=project_id)
+        # Ollama in api_key mode targets the cloud endpoint (https://ollama.com).
+        # The base URL is resolved at verify-time from the auth_mode default,
+        # so we don't persist it into meta here — meta is reserved for the
+        # operator-configured local endpoint.
         if api_key:
             self.upsert_global_secret_asset(
                 PROVIDER_API_KEY_ENV_KEYS[cast(Any, normalized)],
@@ -6307,11 +6305,9 @@ class ControlPlaneManager:
         if normalized == "ollama":
             title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
             raise ValueError(f"{title} uses API key or local connection in this interface.")
-        payload = payload or {}
-        project_id = _trimmed_text(payload.get("project_id"))
+        del payload
         existing_row = self._provider_connection_row(normalized)
-        if not project_id:
-            project_id = _trimmed_text(existing_row["project_id"])
+        project_id = _trimmed_text(existing_row["project_id"])
 
         # Kill any lingering login subprocess for this provider so we never
         # leak a PTY when the operator restarts the wizard.
@@ -6556,6 +6552,9 @@ class ControlPlaneManager:
             last_error=result.last_error,
         )
         if result.verified:
+            detected_models = normalize_string_list(_safe_json_object(result.details).get("model_ids"))
+            if detected_models:
+                self._persist_provider_connection_meta(normalized, detected_models=detected_models)
             self._mark_provider_enabled(normalized, enabled=True)
         latest_row = fetch_one(
             """
@@ -6787,6 +6786,7 @@ class ControlPlaneManager:
                     "memory_policy",
                     "knowledge_policy",
                     "resource_access_policy",
+                    "skill_policy",
                 )
                 if _safe_json_object(normalized_spec.get(key))
             ],
@@ -6815,9 +6815,12 @@ class ControlPlaneManager:
             "voice_policy",
             "image_analysis_policy",
             "memory_extraction_schema",
+            "skill_policy",
         ):
             if key in payload:
                 updated_spec[key] = _safe_json_object(payload.get(key))
+        if "custom_skills" in payload:
+            updated_spec["custom_skills"] = _safe_json_list(payload.get("custom_skills"))
 
         if "documents" in payload:
             updated_spec["documents"] = {
@@ -6871,6 +6874,17 @@ class ControlPlaneManager:
                 prompting_payload["image_analysis_policy"] = _safe_json_object(updated_spec["image_analysis_policy"])
             else:
                 prompting_payload.pop("image_analysis_policy", None)
+        if "skill_policy" in payload:
+            if _safe_json_object(updated_spec.get("skill_policy")):
+                prompting_payload["skill_policy"] = _safe_json_object(updated_spec["skill_policy"])
+            else:
+                prompting_payload.pop("skill_policy", None)
+        if "custom_skills" in payload:
+            custom_skills = _safe_json_list(updated_spec.get("custom_skills"))
+            if custom_skills:
+                prompting_payload["custom_skills"] = custom_skills
+            else:
+                prompting_payload.pop("custom_skills", None)
 
         if "model_policy" in payload:
             self._apply_model_policy_to_section(providers_payload, _safe_json_object(updated_spec.get("model_policy")))
@@ -7787,10 +7801,97 @@ class ControlPlaneManager:
         return cloned
 
     def activate_agent(self, agent_id: str) -> dict[str, Any]:
-        return self.update_agent(agent_id, {"status": "active"})
+        result = self.update_agent(agent_id, {"status": "active"})
+        # Wake the supervisor immediately so the worker spawns without
+        # waiting for the next poll cycle. Items previously rolled back to
+        # 'queued' by ``pause_agent`` will be picked up by the fresh runtime.
+        from koda.control_plane.lifecycle_events import notify_lifecycle_change
+
+        notify_lifecycle_change(reason=f"activate:{agent_id}")
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type="control_plane.agent_activated",
+            details={"agent_id": str(agent_id), "to_status": "active"},
+        )
+        return result
 
     def pause_agent(self, agent_id: str) -> dict[str, Any]:
-        return self.update_agent(agent_id, {"status": "paused"})
+        result = self.update_agent(agent_id, {"status": "paused"})
+        # Rollback every in-flight queue item to ``queued`` so the operator
+        # can resume from a clean slate. The runtime worker is killed by
+        # the supervisor (no idle wait); without this rollback the killed
+        # runtime would leave items orphaned in ``running`` forever.
+        rolled_back = self._rollback_in_flight_queue_items_for_pause(agent_id)
+        from koda.control_plane.lifecycle_events import notify_lifecycle_change
+
+        notify_lifecycle_change(reason=f"pause:{agent_id}")
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type="control_plane.agent_paused",
+            details={
+                "agent_id": str(agent_id),
+                "to_status": "paused",
+                "rolled_back_queue_items": int(rolled_back),
+            },
+        )
+        return result
+
+    def _rollback_in_flight_queue_items_for_pause(self, agent_id: str) -> int:
+        """Mark every running/retrying queue item back to ``queued``.
+
+        Returns the number of rows rolled back so callers can record it on
+        the structured pause audit event.
+
+        Called from ``pause_agent``. The combination of:
+          1. supervisor force-stopping the worker process, and
+          2. this rollback marking in-flight items back to 'queued'
+
+        gives the operator the guarantee they asked for: pause interrupts
+        in the exact moment, and the next activate picks up the queue
+        cleanly without leaving zombie 'running' rows or losing pending
+        user messages.
+        """
+        normalized = str(agent_id or "").strip()
+        if not normalized:
+            return 0
+        try:
+            return int(
+                execute(
+                    """
+                    UPDATE runtime_queue_items
+                    SET status = 'queued',
+                        last_error = COALESCE(last_error, '') ||
+                                     CASE WHEN COALESCE(last_error, '') = '' THEN ''
+                                          ELSE ' | ' END ||
+                                     'paused_by_operator',
+                        updated_at = ?
+                    WHERE agent_id = ? AND status IN ('running', 'retrying')
+                    """,
+                    (now_iso(), normalized),
+                )
+                or 0
+            )
+        except Exception:
+            log.exception("control_plane_pause_queue_rollback_failed", agent_id=normalized)
+            return 0
+
+    def _emit_lifecycle_audit_event(
+        self,
+        agent_id: str,
+        *,
+        event_type: str,
+        details: dict[str, Any],
+    ) -> None:
+        """Append a structured row to ``audit_events`` for lifecycle changes.
+
+        Thin wrapper kept on the manager so existing callers and tests
+        keep their entry point. Implementation lives in
+        :mod:`koda.control_plane.audit` so the supervisor (crash-loop
+        detection) and any future caller emits exactly the same shape.
+        """
+        from koda.control_plane.audit import record_audit_event
+
+        record_audit_event(agent_id, event_type=event_type, details=details)
 
     def get_global_defaults(self) -> dict[str, Any]:
         self.ensure_seeded()
@@ -8122,11 +8223,6 @@ class ControlPlaneManager:
         provider_connections: dict[str, dict[str, Any]],
     ) -> bool:
         normalized = provider_id.strip().lower()
-        if normalized == "sora":
-            # Sora is exposed through OpenAI/Codex model ids for the actual supported path.
-            # Avoid advertising a redundant standalone provider until there is a dedicated
-            # runtime adapter and connection flow for it.
-            return False
         if normalized in MANAGED_PROVIDER_IDS:
             connection = _safe_json_object(provider_connections.get(normalized))
             if normalized == "codex" and function_id == "transcription":
@@ -8208,6 +8304,53 @@ class ControlPlaneManager:
                         "model_id": "whisper-1",
                     }
         return defaults
+
+    def _resolve_general_effort_target(
+        self,
+        *,
+        providers_section: dict[str, Any],
+        provider_catalog: dict[str, Any],
+    ) -> tuple[str, str]:
+        functional_defaults = self._resolve_general_functional_defaults(
+            providers_section=providers_section,
+            provider_catalog=provider_catalog,
+        )
+        general_selection = _safe_json_object(functional_defaults.get("general"))
+        provider_id = (
+            _nonempty_text(general_selection.get("provider_id")).lower()
+            or _nonempty_text(providers_section.get("default_provider")).lower()
+        )
+        providers = _safe_json_object(provider_catalog.get("providers"))
+        provider_payload = _safe_json_object(providers.get(provider_id))
+        model_id = (
+            _nonempty_text(general_selection.get("model_id"))
+            or _nonempty_text(providers_section.get(f"{provider_id}_default_model"))
+            or _nonempty_text(provider_payload.get("default_model"))
+        )
+        return provider_id, model_id
+
+    def _resolve_general_effort_default(
+        self,
+        *,
+        providers_section: dict[str, Any],
+        provider_catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider_id, model_id = self._resolve_general_effort_target(
+            providers_section=providers_section,
+            provider_catalog=provider_catalog,
+        )
+        effort_default = normalize_model_effort_selection(
+            providers_section.get("effort_default"),
+            provider_id=provider_id,
+            model_id=model_id,
+        )
+        if effort_default:
+            return effort_default
+        return normalize_legacy_effort_selection(
+            providers_section.get("effort_defaults"),
+            provider_id=provider_id,
+            model_id=model_id,
+        )
 
     def _resolve_elevenlabs_api_key(self) -> str:
         api_key = self._provider_api_key_secret_value("elevenlabs")
@@ -8430,6 +8573,16 @@ class ControlPlaneManager:
                 providers_section=providers_section,
                 provider_catalog=provider_catalog,
             ),
+            "effort_default": self._resolve_general_effort_default(
+                providers_section=providers_section,
+                provider_catalog=provider_catalog,
+            ),
+            # Apple Silicon Metal acceleration switch. Defaults to ``True``
+            # so the Metal path stays opt-out rather than opt-in for Apple
+            # users. Non-Apple hosts ignore the flag at runtime.
+            "metal_enabled": (
+                bool(providers_section["metal_enabled"]) if "metal_enabled" in providers_section else True
+            ),
         }
         resource_values = {
             "global_tools": [
@@ -8468,6 +8621,11 @@ class ControlPlaneManager:
             ),
             "procedural_enabled": bool(memory_section.get("procedural_enabled")),
             "proactive_enabled": bool(memory_section.get("proactive_enabled")),
+            "embedding_model": (
+                _nonempty_text(memory_section.get("embedding_model"))
+                or _nonempty_text(os.environ.get("MEMORY_EMBEDDING_MODEL"))
+                or _DEFAULT_EMBEDDING_MODEL_ID
+            ),
             "knowledge_enabled": bool(knowledge_section.get("enabled")),
             "knowledge_profile": self._infer_profile_from_presets(
                 knowledge_section,
@@ -9068,6 +9226,13 @@ class ControlPlaneManager:
                 general_ui["kokoro_default_voice_label"] = voice_label
             else:
                 general_ui.pop("kokoro_default_voice_label", None)
+        # Apple Silicon Metal acceleration toggle. Persisted in
+        # ``providers.metal_enabled`` and projected to the ``METAL_ENABLED``
+        # env var by ``_apply_system_settings_to_sections`` so the runtime
+        # gate in ``runtime_capabilities.is_metal_path_active`` picks it up
+        # without a worker restart.
+        if "metal_enabled" in models:
+            current_providers["metal_enabled"] = bool(models.get("metal_enabled"))
         normalized_kokoro_voice = _nonempty_text(current_providers.get("kokoro_default_voice")).lower()
         if normalized_kokoro_voice:
             voice_metadata = kokoro_voice_metadata(normalized_kokoro_voice)
@@ -9169,6 +9334,38 @@ class ControlPlaneManager:
             deduped_fallback.append(provider)
         current_providers["fallback_order"] = deduped_fallback
 
+        effort_provider, effort_model = self._resolve_general_effort_target(
+            providers_section=current_providers,
+            provider_catalog=provider_catalog,
+        )
+        existing_effort_default = normalize_model_effort_selection(
+            current_providers.get("effort_default"),
+            provider_id=effort_provider,
+            model_id=effort_model,
+        )
+        if existing_effort_default:
+            current_providers["effort_default"] = existing_effort_default
+        else:
+            current_providers.pop("effort_default", None)
+
+        if "effort_default" in models or "effort_defaults" in models:
+            normalized_effort_default = normalize_model_effort_selection(
+                models.get("effort_default"),
+                provider_id=effort_provider,
+                model_id=effort_model,
+            )
+            if not normalized_effort_default and "effort_defaults" in models:
+                normalized_effort_default = normalize_legacy_effort_selection(
+                    models.get("effort_defaults"),
+                    provider_id=effort_provider,
+                    model_id=effort_model,
+                )
+            if normalized_effort_default:
+                current_providers["effort_default"] = normalized_effort_default
+            else:
+                current_providers.pop("effort_default", None)
+            current_providers.pop("effort_defaults", None)
+
         # Deprecated compatibility: accept legacy provider_credentials payloads
         provider_creds = _safe_json_object(payload.get("provider_credentials"))
         for provider_id in _safe_json_object(provider_catalog.get("providers")):
@@ -9223,6 +9420,10 @@ class ControlPlaneManager:
             current_memory["procedural_enabled"] = bool(memory_and_knowledge.get("procedural_enabled"))
         if "proactive_enabled" in memory_and_knowledge:
             current_memory["proactive_enabled"] = bool(memory_and_knowledge.get("proactive_enabled"))
+        if "embedding_model" in memory_and_knowledge:
+            requested_model = _nonempty_text(memory_and_knowledge.get("embedding_model"))
+            if requested_model and requested_model in _embedding_catalog_keys():
+                current_memory["embedding_model"] = requested_model
         if "knowledge_enabled" in memory_and_knowledge:
             current_knowledge["enabled"] = bool(memory_and_knowledge.get("knowledge_enabled"))
 
@@ -9450,6 +9651,8 @@ class ControlPlaneManager:
 
     def get_global_secret_asset(self, secret_key: str) -> dict[str, Any] | None:
         normalized_secret_key = _normalize_secret_key(secret_key)
+        if normalized_secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+            return None
         sections = self._system_settings_sections()
         row = fetch_one(
             "SELECT * FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
@@ -9482,6 +9685,8 @@ class ControlPlaneManager:
         persist_sections: bool = True,
     ) -> dict[str, Any]:
         normalized_secret_key = _normalize_secret_key(secret_key)
+        if normalized_secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+            raise ValueError("RUNTIME_TOKEN is no longer supported. Use RUNTIME_LOCAL_UI_TOKEN.")
         if normalized_secret_key in _NON_SECRET_SYSTEM_ENV_KEYS and not looks_like_secret_key(normalized_secret_key):
             raise ValueError(
                 f"'{normalized_secret_key}' is a non-sensitive system setting. Store it in global settings instead."
@@ -10088,11 +10293,19 @@ class ControlPlaneManager:
         }
         for env_key in _CORE_CONNECTION_RUNTIME_ENV_KEYS:
             runtime_env.pop(env_key, None)
-        connection_refs = [
-            _safe_json_object(item)
-            for item in _safe_json_list(snapshot.get("connection_refs"))
-            if isinstance(item, dict)
-        ]
+        connection_refs: list[dict[str, Any]] = []
+        for item in _safe_json_list(snapshot.get("connection_refs")):
+            if not isinstance(item, dict):
+                continue
+            ref = _safe_json_object(item)
+            kind = str(ref.get("kind") or "").strip().lower()
+            connection_key = str(ref.get("connection_key") or "").strip().lower()
+            integration_key = str(ref.get("integration_key") or "").strip().lower()
+            if kind == "core" or connection_key.startswith("core:"):
+                core_id = integration_key or connection_key.split(":", 1)[1]
+                if core_id not in CORE_INTEGRATION_CATALOG:
+                    continue
+            connection_refs.append(ref)
         runtime_snapshot = dict(snapshot)
         runtime_snapshot["env"] = runtime_env
         runtime_snapshot["process_env"] = runtime_env
@@ -10117,9 +10330,6 @@ class ControlPlaneManager:
             if not content:
                 continue
             inline_documents[kind] = content
-
-        skills = [asset for asset in _safe_json_list(snapshot.get("skills")) if str(asset.get("content") or "").strip()]
-        skills_payload = {str(asset["name"]): str(asset["content"]).strip() for asset in skills}
 
         templates = {str(asset["name"]): str(asset["content"]) for asset in _safe_json_list(snapshot.get("templates"))}
 
@@ -10170,7 +10380,9 @@ class ControlPlaneManager:
             env["KOKORO_VOICES_PATH"] = str(kokoro_managed_voices_storage_path())
         except Exception:
             log.warning("control_plane_kokoro_assets_unavailable", agent_id=normalized, exc_info=True)
-        resource_access_policy = _safe_json_object(agent_spec.get("resource_access_policy"))
+        resource_access_policy = normalize_resource_access_policy(
+            _safe_json_object(agent_spec.get("resource_access_policy"))
+        )
         if resource_access_policy and "AGENT_RESOURCE_ACCESS_POLICY_JSON" not in env:
             env["AGENT_RESOURCE_ACCESS_POLICY_JSON"] = json_dump(resource_access_policy)
         if _safe_json_object(agent_spec.get("tool_policy")) and "AGENT_TOOL_POLICY_JSON" not in env:
@@ -10303,8 +10515,6 @@ class ControlPlaneManager:
         if composed_prompt:
             env["AGENT_COMPILED_PROMPT_TEXT"] = composed_prompt
         if inline_mode:
-            if skills_payload:
-                env["SKILLS_JSON"] = json.dumps(skills_payload, ensure_ascii=False)
             if templates:
                 env["TEMPLATES_JSON"] = json.dumps(templates, ensure_ascii=False)
             if inline_documents.get("voice_prompt_md"):
@@ -10488,9 +10698,6 @@ class ControlPlaneManager:
 
             if target_agent_ids:
                 self._import_legacy_templates(target_agent_ids)
-
-            if existing_agent_ids or target_agent_ids:
-                self._import_legacy_skills()
 
             for agent_id in target_agent_ids:
                 publish = self.publish_agent(agent_id)
@@ -10872,13 +11079,7 @@ class ControlPlaneManager:
         ):
             return "tools"
         if (
-            key.startswith("JIRA_")
-            or key.startswith("CONFLUENCE_")
-            or key.startswith("AWS_")
-            or key.startswith("POSTGRES_")
-            or key.startswith("GWS_")
-            or key.startswith("GH_")
-            or key.startswith("GLAB_")
+            key.startswith("POSTGRES_")
             or key.startswith("DOCKER_")
             or key.startswith("WHISPER_")
             or key.startswith("TTS_")
@@ -10921,28 +11122,6 @@ class ControlPlaneManager:
             data = json.loads(path.read_text(encoding="utf-8"))
             for name, content in data.items():
                 self.upsert_template_asset(agent_id, {"name": name, "content": content})
-
-    def _import_legacy_skills(self) -> None:
-        skills_dir = ROOT_DIR / "koda" / "skills"
-        if not skills_dir.exists():
-            return
-        seed_agent = "DEFAULT"
-        if not fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (seed_agent,)):
-            # Do not create an actual agent for skill seeding; use the first agent as scope carrier.
-            row = fetch_one("SELECT id FROM cp_agent_definitions ORDER BY id ASC LIMIT 1")
-            if row is not None:
-                seed_agent = str(row["id"])
-            else:
-                return
-        for path in skills_dir.glob("*.md"):
-            self.upsert_skill_asset(
-                seed_agent,
-                {
-                    "scope": "global",
-                    "name": path.stem,
-                    "content": path.read_text(encoding="utf-8"),
-                },
-            )
 
     # ------------------------------------------------------------------ #
     #  MCP Server Catalog                                                  #
@@ -11071,6 +11250,31 @@ class ControlPlaneManager:
 
     def _serialize_mcp_catalog_row(self, row: Any) -> dict[str, Any]:
         metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+        auth_capabilities = _safe_json_object(metadata.get("auth_capabilities"))
+        auth_flow_kind = str(auth_capabilities.get("auth_flow_kind") or metadata.get("auth_flow_kind") or "")
+        if not auth_flow_kind:
+            oauth_enabled = bool(int(row.get("oauth_enabled") or 0))
+            oauth_mode = str(row.get("oauth_mode") or "none")
+            transport_kind = str(row.get("transport_kind") or "local")
+            auth_strategy = str(row.get("auth_strategy") or "no_auth")
+            if oauth_enabled and transport_kind == "remote" and oauth_mode == "dcr":
+                auth_flow_kind = "mcp_remote_oauth_dcr"
+            elif oauth_enabled and transport_kind == "remote" and oauth_mode == "confidential":
+                auth_flow_kind = "mcp_remote_oauth_confidential"
+            elif "oauth" in auth_strategy and transport_kind == "local":
+                auth_flow_kind = "provider_native_oauth"
+            elif auth_strategy in {"api_key", "api_token"}:
+                auth_flow_kind = "api_key"
+            elif auth_strategy == "local_session":
+                auth_flow_kind = "local_session"
+            elif auth_strategy in {"manual_header", "header"}:
+                auth_flow_kind = "manual_header"
+            else:
+                auth_flow_kind = "none"
+        oauth_available = auth_flow_kind in {"mcp_remote_oauth_dcr", "mcp_remote_oauth_confidential"}
+        oauth_availability = str(
+            auth_capabilities.get("oauth_availability") or ("available" if oauth_available else "not_available")
+        )
         return {
             "server_key": str(row["server_key"]),
             "display_name": str(row.get("display_name") or ""),
@@ -11095,24 +11299,119 @@ class ControlPlaneManager:
             "vendor_notes": str(row.get("vendor_notes") or ""),
             "default_policy": str(row.get("default_policy") or "always_ask"),
             "metadata": metadata,
-            "auth_capabilities": _safe_json_object(metadata.get("auth_capabilities")),
+            "auth_capabilities": auth_capabilities,
+            "auth_flow_kind": auth_flow_kind,
+            "oauth_availability": oauth_availability,
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
         }
 
     def _serialize_unified_mcp_catalog_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+        # Merge runtime catalog spec when available so the API exposes the
+        # same surface the TS frontend used to ship as a literal: connection
+        # profile, curated tool hints, runtime constraints, command template
+        # and oauth-supported flag. Runtime spec is the source of truth for
+        # those fields; persisted DB row remains authoritative for the rest.
+        server_key = str(row.get("server_key") or "")
+        spec: Any = None
+        try:
+            from koda.integrations.mcp_catalog import MCP_CATALOG_BY_KEY
+
+            spec = MCP_CATALOG_BY_KEY.get(server_key)
+        except ImportError:
+            spec = None
+
+        metadata = _safe_json_object(row.get("metadata"))
+        tagline = str(metadata.get("tagline") or (spec.tagline if spec is not None else ""))
+        auth_capabilities = _safe_json_object(row.get("auth_capabilities"))
+        auth_flow_kind = str(row.get("auth_flow_kind") or auth_capabilities.get("auth_flow_kind") or "")
+        if not auth_flow_kind:
+            oauth_mode_value = str(row.get("oauth_mode") or "none")
+            transport_kind_value = str(row.get("transport_kind") or "local")
+            strategy_value = str(row.get("auth_strategy") or "no_auth")
+            if (
+                bool(auth_capabilities.get("oauth_enabled"))
+                and transport_kind_value == "remote"
+                and oauth_mode_value == "dcr"
+            ):
+                auth_flow_kind = "mcp_remote_oauth_dcr"
+            elif (
+                bool(auth_capabilities.get("oauth_enabled"))
+                and transport_kind_value == "remote"
+                and oauth_mode_value == "confidential"
+            ):
+                auth_flow_kind = "mcp_remote_oauth_confidential"
+            elif "oauth" in strategy_value and transport_kind_value == "local":
+                auth_flow_kind = "provider_native_oauth"
+            elif strategy_value in {"api_key", "api_token"}:
+                auth_flow_kind = "api_key"
+            elif strategy_value == "local_session":
+                auth_flow_kind = "local_session"
+            elif strategy_value in {"manual_header", "header"}:
+                auth_flow_kind = "manual_header"
+            else:
+                auth_flow_kind = "none"
+        oauth_supported = bool(auth_capabilities.get("oauth_enabled")) and auth_flow_kind in {
+            "mcp_remote_oauth_dcr",
+            "mcp_remote_oauth_confidential",
+        }
+        oauth_availability = str(
+            row.get("oauth_availability")
+            or auth_capabilities.get("oauth_availability")
+            or ("available" if oauth_supported else "not_available")
+        )
+
+        expected_tools: list[dict[str, Any]] = []
+        if spec is not None:
+            # McpTool stores a `classification` enum string; the public hint
+            # shape expects boolean flags. Map read→read_only_hint,
+            # destructive→destructive_hint; write tools land as neither
+            # (interactive).
+            for tool in spec.tools:
+                read_only_hint = tool.classification == "read"
+                destructive_hint = tool.classification == "destructive"
+                expected_tools.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "read_only_hint": read_only_hint or None,
+                        "destructive_hint": destructive_hint or None,
+                    }
+                )
+
+        connection_profile = serialize_connection_profile(spec.connection_profile) if spec is not None else None
+        runtime_constraints = list(spec.runtime_constraints) if spec is not None else []
+        command_template = list(spec.command_template) if spec is not None else []
+        transport_type = str(row.get("transport_type") or (spec.transport_type if spec is not None else "stdio"))
+
+        # i18n keys — frontend looks them up with t(key, { defaultValue: literal }).
+        # Convention: mcp.<server_key>.<field>. If the bundle has no entry the
+        # literal still renders, so this is a zero-impact additive change.
+        i18n_keys = {
+            "display_name": f"mcp.{server_key}.display_name" if server_key else None,
+            "tagline": f"mcp.{server_key}.tagline" if server_key else None,
+            "description": f"mcp.{server_key}.description" if server_key else None,
+            "vendor_notes": f"mcp.{server_key}.vendor_notes" if server_key else None,
+        }
+
         return {
-            "connection_key": _mcp_connection_key(row.get("server_key")),
+            "connection_key": _mcp_connection_key(server_key),
             "kind": "mcp",
-            "integration_key": str(row.get("server_key") or ""),
-            "display_name": str(row.get("display_name") or row.get("server_key") or ""),
+            "integration_key": server_key,
+            "display_name": str(row.get("display_name") or server_key),
             "description": str(row.get("description") or ""),
+            "tagline": tagline,
             "category": str(row.get("category") or "general"),
             "transport_kind": str(row.get("transport_kind") or "local"),
-            "auth_capabilities": _safe_json_object(row.get("auth_capabilities")),
+            "transport_type": transport_type,
+            "command_template": command_template,
+            "auth_capabilities": auth_capabilities,
             "auth_strategy_default": str(row.get("auth_strategy") or "no_auth"),
             "official_support_level": str(row.get("official_support_level") or "community_manual"),
             "oauth_mode": str(row.get("oauth_mode") or "none"),
+            "oauth_supported": oauth_supported,
+            "auth_flow_kind": auth_flow_kind,
+            "oauth_availability": oauth_availability,
             "remote_url": row.get("remote_url") or row.get("url") or None,
             "vendor_notes": str(row.get("vendor_notes") or ""),
             "default_policy": str(row.get("default_policy") or "always_ask"),
@@ -11120,8 +11419,12 @@ class ControlPlaneManager:
             "headers_schema": row.get("headers_schema") or [],
             "documentation_url": row.get("documentation_url") or None,
             "logo_key": row.get("logo_key") or None,
-            "metadata": _safe_json_object(row.get("metadata")),
+            "metadata": metadata,
             "enabled": bool(row.get("enabled", True)),
+            "connection_profile": connection_profile,
+            "runtime_constraints": runtime_constraints,
+            "expected_tools": expected_tools,
+            "i18n_keys": i18n_keys,
         }
 
     # ------------------------------------------------------------------ #
@@ -11160,10 +11463,7 @@ class ControlPlaneManager:
         if _is_reserved_mcp_server_key(normalized_server_key):
             raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
         # Verify server exists in catalog
-        catalog_row = fetch_one(
-            "SELECT server_key FROM cp_mcp_server_catalog WHERE server_key = ?",
-            (normalized_server_key,),
-        )
+        catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (normalized_server_key,))
         if catalog_row is None:
             raise KeyError(f"unknown MCP server: {normalized_server_key}")
         normalized = _normalize_agent_id(agent_id)
@@ -11178,17 +11478,18 @@ class ControlPlaneManager:
             if "transport_override" in payload
             else (existing_row.get("transport_override") if existing_row else None)
         ) or None
-        command_override_json = (
-            json_dump(payload.get("command_override"))
-            if "command_override" in payload
-            else (existing_row.get("command_override_json") if existing_row else None)
-        )
-        url_override = (
-            payload["url_override"]
-            if "url_override" in payload
-            else (existing_row.get("url_override") if existing_row else None)
-        ) or None
-        raw_env = payload.get("env_values") or {}
+        command_override_json: str | None
+        if "command_override" in payload:
+            command_override_json = json_dump(
+                _validate_mcp_connection_command_override(payload.get("command_override"))
+            )
+        else:
+            command_override_json = existing_row.get("command_override_json") if existing_row else None
+        if "url_override" in payload:
+            url_override = _validate_mcp_connection_url_override(payload.get("url_override")) or None
+        else:
+            url_override = (existing_row.get("url_override") if existing_row else None) or None
+        raw_env = _validate_mcp_connection_env_values(payload.get("env_values") or {})
         encrypted_env = json_load(str(existing_row.get("env_values_json") or "{}"), {}) if existing_row else {}
         clear_env_keys = {str(item).strip() for item in payload.get("clear_env_keys") or [] if str(item).strip()}
         for clear_key in clear_env_keys:
@@ -11914,6 +12215,402 @@ class ControlPlaneManager:
         """Return server keys that have OAuth enabled in the catalog."""
         rows = fetch_all("SELECT server_key FROM cp_mcp_server_catalog WHERE oauth_enabled = 1 ORDER BY server_key")
         return [str(row["server_key"]) for row in rows]
+
+    # ------------------------------------------------------------------ #
+    #  MCP Capabilities (Tools + Resources + Prompts)                    #
+    # ------------------------------------------------------------------ #
+
+    def discover_mcp_capabilities(
+        self,
+        agent_id: str,
+        server_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Live discovery of tools + resources + prompts for an MCP server."""
+        from koda.services.mcp_capability_service import verify_capabilities
+
+        normalized = _normalize_agent_id(agent_id)
+        snapshot = verify_capabilities(normalized, server_key, force_refresh=force_refresh)
+        payload = snapshot.to_payload()
+        payload["policies"] = self.list_mcp_capability_policies(normalized, server_key)
+        return payload
+
+    def get_mcp_capability_snapshot(self, agent_id: str, server_key: str) -> dict[str, Any]:
+        """Return cached snapshot for an agent+server pair, or trigger discovery."""
+        from koda.services.mcp_capability_service import get_capability_snapshot
+
+        normalized = _normalize_agent_id(agent_id)
+        cached = get_capability_snapshot(normalized, server_key)
+        if cached is None:
+            return self.discover_mcp_capabilities(normalized, server_key, force_refresh=True)
+        payload = cached.to_payload()
+        payload["policies"] = self.list_mcp_capability_policies(normalized, server_key)
+        return payload
+
+    def list_mcp_resources(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_discovered_resources WHERE agent_id = ? AND server_key = ? ORDER BY uri",
+            (normalized, server_key),
+        )
+        return [self._serialize_mcp_resource_row(row) for row in rows]
+
+    def list_mcp_prompts(self, agent_id: str, server_key: str) -> list[dict[str, Any]]:
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            "SELECT * FROM cp_mcp_discovered_prompts WHERE agent_id = ? AND server_key = ? ORDER BY prompt_name",
+            (normalized, server_key),
+        )
+        return [self._serialize_mcp_prompt_row(row) for row in rows]
+
+    def read_mcp_resource(self, agent_id: str, server_key: str, uri: str) -> dict[str, Any]:
+        """Live-read a resource via the MCP server. Honors blocked policy."""
+        from koda.services.mcp_capability_service import _uri_hash
+
+        normalized = _normalize_agent_id(agent_id)
+        policy = self._get_mcp_capability_policy(normalized, server_key, "resource", _uri_hash(uri))
+        if policy == "auto":
+            policy = self._get_mcp_capability_policy(normalized, server_key, "resource", uri)
+        if policy == "blocked":
+            return {"success": False, "error": "resource_blocked", "uri": uri}
+        from koda.services.mcp_manager import McpServerInstance
+
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "error": "connection_not_found", "uri": uri}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            session = instance.session
+            if session is None:
+                raise RuntimeError("session not started")
+            content = run_coro_sync(session.read_resource(uri))
+            return {"success": True, "uri": uri, "contents": content.contents}
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "uri": uri}
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    def render_mcp_prompt(
+        self,
+        agent_id: str,
+        server_key: str,
+        prompt_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Live-render a prompt template via the MCP server. Honors blocked policy."""
+        normalized = _normalize_agent_id(agent_id)
+        policy = self._get_mcp_capability_policy(normalized, server_key, "prompt", prompt_name)
+        if policy == "blocked":
+            return {"success": False, "error": "prompt_blocked", "prompt": prompt_name}
+        from koda.services.mcp_manager import McpServerInstance
+
+        resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
+        if resolved is None:
+            return {"success": False, "error": "connection_not_found", "prompt": prompt_name}
+        instance = McpServerInstance(
+            server_key=server_key,
+            agent_id=normalized,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+        )
+        try:
+            run_coro_sync(instance.start())
+            session = instance.session
+            if session is None:
+                raise RuntimeError("session not started")
+            result = run_coro_sync(session.get_prompt(prompt_name, arguments))
+            return {
+                "success": True,
+                "prompt": prompt_name,
+                "description": result.description,
+                "messages": result.messages,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "prompt": prompt_name}
+        finally:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
+
+    # ------------------------------------------------------------------ #
+    #  MCP Capability Policies (unified tool/resource/prompt)            #
+    # ------------------------------------------------------------------ #
+
+    def list_mcp_capability_policies(self, agent_id: str, server_key: str) -> dict[str, list[dict[str, Any]]]:
+        """Return policies grouped by capability_kind."""
+        if _is_reserved_mcp_server_key(server_key):
+            return {"tools": [], "resources": [], "prompts": []}
+        normalized = _normalize_agent_id(agent_id)
+        rows = fetch_all(
+            (
+                "SELECT * FROM cp_mcp_capability_policies "
+                "WHERE agent_id = ? AND server_key = ? "
+                "ORDER BY capability_kind, capability_name"
+            ),
+            (normalized, server_key),
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {"tools": [], "resources": [], "prompts": []}
+        kind_to_bucket = {"tool": "tools", "resource": "resources", "prompt": "prompts"}
+        for row in rows:
+            kind = str(row.get("capability_kind") or "")
+            bucket = kind_to_bucket.get(kind)
+            if bucket is None:
+                continue
+            grouped[bucket].append(self._serialize_mcp_capability_policy_row(row))
+        return grouped
+
+    def upsert_mcp_capability_policy(
+        self,
+        agent_id: str,
+        server_key: str,
+        capability_kind: str,
+        capability_name: str,
+        policy: str,
+        *,
+        exposure_mode: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
+        if capability_kind not in {"tool", "resource", "prompt"}:
+            raise ValueError(f"invalid capability_kind: {capability_kind!r}")
+        if policy not in {"auto", "always_allow", "always_ask", "blocked"}:
+            raise ValueError(f"invalid MCP capability policy: {policy!r}")
+        if exposure_mode is not None and exposure_mode not in {"context", "tool", "auto"}:
+            raise ValueError(f"invalid exposure_mode: {exposure_mode!r}")
+        normalized = _normalize_agent_id(agent_id)
+        now = now_iso()
+        execute(
+            """
+            INSERT INTO cp_mcp_capability_policies
+                (agent_id, server_key, capability_kind, capability_name,
+                 policy, exposure_mode, metadata_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (agent_id, server_key, capability_kind, capability_name) DO UPDATE SET
+                policy = EXCLUDED.policy,
+                exposure_mode = EXCLUDED.exposure_mode,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (
+                normalized,
+                server_key,
+                capability_kind,
+                capability_name,
+                policy,
+                exposure_mode,
+                json_dump(metadata or {}),
+                now,
+            ),
+        )
+        # Mirror tool policies into the legacy table during transition window
+        # so dispatcher reads stay consistent until phase 3 wiring lands.
+        if capability_kind == "tool":
+            execute(
+                """
+                INSERT INTO cp_mcp_tool_policies (agent_id, server_key, tool_name, policy, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (agent_id, server_key, tool_name) DO UPDATE SET
+                    policy = EXCLUDED.policy,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (normalized, server_key, capability_name, policy, now),
+            )
+        row = fetch_one(
+            """
+            SELECT * FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (normalized, server_key, capability_kind, capability_name),
+        )
+        return self._serialize_mcp_capability_policy_row(row) if row else {}
+
+    def delete_mcp_capability_policy(
+        self,
+        agent_id: str,
+        server_key: str,
+        capability_kind: str,
+        capability_name: str,
+    ) -> dict[str, Any]:
+        if _is_reserved_mcp_server_key(server_key):
+            return {"deleted": False}
+        normalized = _normalize_agent_id(agent_id)
+        count = execute(
+            """
+            DELETE FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (normalized, server_key, capability_kind, capability_name),
+        )
+        if capability_kind == "tool":
+            execute(
+                "DELETE FROM cp_mcp_tool_policies WHERE agent_id = ? AND server_key = ? AND tool_name = ?",
+                (normalized, server_key, capability_name),
+            )
+        return {"deleted": bool(count)}
+
+    def _get_mcp_capability_policy(self, agent_id: str, server_key: str, kind: str, name: str) -> str:
+        row = fetch_one(
+            """
+            SELECT policy FROM cp_mcp_capability_policies
+            WHERE agent_id = ? AND server_key = ?
+              AND capability_kind = ? AND capability_name = ?
+            """,
+            (agent_id, server_key, kind, name),
+        )
+        if row is None:
+            return "auto"
+        return str(row.get("policy") or "auto")
+
+    def _serialize_mcp_capability_policy_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "capability_kind": str(row.get("capability_kind") or ""),
+            "capability_name": str(row.get("capability_name") or ""),
+            "policy": str(row.get("policy") or "auto"),
+            "exposure_mode": row.get("exposure_mode"),
+            "metadata": json_load(str(row.get("metadata_json") or "{}"), {}),
+            "updated_at": str(row.get("updated_at") or ""),
+        }
+
+    def _serialize_mcp_resource_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "uri_hash": str(row.get("uri_hash") or ""),
+            "uri": str(row.get("uri") or ""),
+            "name": row.get("name"),
+            "description": row.get("description"),
+            "mime_type": row.get("mime_type"),
+            "is_template": bool(row.get("is_template")),
+            "annotations": json_load(str(row.get("annotations_json") or "{}"), {}),
+            "discovered_at": str(row.get("discovered_at") or ""),
+        }
+
+    def _serialize_mcp_prompt_row(self, row: Any) -> dict[str, Any]:
+        return {
+            "name": str(row.get("prompt_name") or ""),
+            "description": row.get("description"),
+            "arguments": json_load(str(row.get("arguments_json") or "[]"), []),
+            "discovered_at": str(row.get("discovered_at") or ""),
+        }
+
+    # ------------------------------------------------------------------ #
+    #  Custom MCP Servers (system-wide + per-agent)                      #
+    # ------------------------------------------------------------------ #
+
+    def list_custom_mcp_servers(self, *, agent_id: str | None = None) -> list[dict[str, Any]]:
+        from koda.integrations.custom_mcp_registry import list_custom_servers
+
+        normalized = _normalize_agent_id(agent_id) if agent_id else None
+        return list_custom_servers(agent_id=normalized)
+
+    def get_custom_mcp_server(self, server_key: str, *, agent_id: str | None = None) -> dict[str, Any] | None:
+        from koda.integrations.custom_mcp_registry import get_custom_server
+
+        normalized = _normalize_agent_id(agent_id) if agent_id else None
+        return get_custom_server(server_key, agent_id=normalized)
+
+    def register_custom_mcp_server(
+        self,
+        payload: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        from koda.control_plane.crypto import get_signing_key
+        from koda.integrations.custom_mcp_registry import (
+            CustomServerPayload,
+            normalize_server_key,
+            upsert_custom_server,
+        )
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        try:
+            secret_key = get_signing_key()
+        except Exception:
+            secret_key = None
+
+        # Detect Claude Desktop import shape and route accordingly.
+        if isinstance(payload, dict) and "mcpServers" in payload:
+            return {
+                "import_result": self.import_claude_desktop_mcp(
+                    payload,
+                    agent_id=normalized_agent,
+                    owner_user_id=owner_user_id,
+                )
+            }
+
+        normalized_payload = CustomServerPayload(
+            server_key=normalize_server_key(str(payload.get("server_key") or "")),
+            display_name=str(payload.get("display_name") or ""),
+            description=str(payload.get("description") or ""),
+            transport_type=str(payload.get("transport_type") or "stdio"),
+            command=list(payload.get("command") or []),
+            args=list(payload.get("args") or []),
+            url=payload.get("url"),
+            headers_schema=list(payload.get("headers_schema") or []),
+            env_schema=list(payload.get("env_schema") or []),
+            auth_strategy=str(payload.get("auth_strategy") or "no_auth"),
+            oauth_config=dict(payload.get("oauth_config") or {}),
+            isolation_profile=str(payload.get("isolation_profile") or "auto"),
+            isolation_constraints=dict(payload.get("isolation_constraints") or {}),
+            runtime_constraints=list(payload.get("runtime_constraints") or []),
+            metadata=dict(payload.get("metadata") or {}),
+            source=str(payload.get("source") or "manual"),
+        )
+        return upsert_custom_server(
+            normalized_payload,
+            agent_id=normalized_agent,
+            owner_user_id=owner_user_id,
+            secret_key=secret_key,
+        )
+
+    def import_claude_desktop_mcp(
+        self,
+        raw: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        from koda.control_plane.crypto import get_signing_key
+        from koda.integrations.custom_mcp_registry import import_claude_desktop_json
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        try:
+            secret_key = get_signing_key()
+        except Exception:
+            secret_key = None
+        result = import_claude_desktop_json(
+            raw,
+            agent_id=normalized_agent,
+            owner_user_id=owner_user_id,
+            secret_key=secret_key,
+        )
+        return {
+            "created": list(result.created),
+            "updated": list(result.updated),
+            "errors": [{"name": err.name, "message": err.message} for err in result.errors],
+        }
+
+    def delete_custom_mcp_server(self, server_key: str, *, agent_id: str | None = None) -> dict[str, Any]:
+        from koda.integrations.custom_mcp_registry import delete_custom_server
+
+        normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
+        deleted = delete_custom_server(server_key, agent_id=normalized_agent)
+        return {"deleted": deleted}
 
 
 _MANAGER: ControlPlaneManager | None = None

@@ -28,7 +28,7 @@ async def test_pip_runs_command(mock_update, mock_context):
     mock_context.args = ["list"]
     with (
         patch("koda.handlers.packages.PIP_ENABLED", True),
-        patch("koda.handlers.packages.BLOCKED_PIP_PATTERN", None),
+        patch("koda.handlers.packages.is_blocked_pip", lambda _text: False),
         patch("koda.handlers.packages.run_shell_command", new_callable=AsyncMock) as mock_run,
         patch("koda.handlers.packages.send_long_message", new_callable=AsyncMock),
     ):
@@ -48,12 +48,13 @@ async def test_pip_unknown_subcommand_is_denied(mock_update, mock_context):
 
 @pytest.mark.asyncio
 async def test_pip_blocked_pattern(mock_update, mock_context):
-    import re
-
+    """Bypass the with_approval decorator (orthogonal to this test) and
+    drive cmd_pip directly so the new is_blocked_pip path is exercised."""
     mock_context.args = ["install", "evil-package"]
     with (
         patch("koda.handlers.packages.PIP_ENABLED", True),
-        patch("koda.handlers.packages.BLOCKED_PIP_PATTERN", re.compile(r"evil", re.I)),
+        patch("koda.handlers.packages.is_blocked_pip", lambda text: "evil" in text.lower()),
+        patch("koda.utils.approval._should_bypass_manual_validation", return_value=True),
     ):
         await cmd_pip(mock_update, mock_context)
     assert "Blocked" in mock_update.message.reply_text.call_args[0][0]
@@ -88,7 +89,7 @@ async def test_npm_runs_command(mock_update, mock_context):
     mock_context.args = ["list"]
     with (
         patch("koda.handlers.packages.NPM_ENABLED", True),
-        patch("koda.handlers.packages.BLOCKED_NPM_PATTERN", None),
+        patch("koda.handlers.packages.is_blocked_npm", lambda _text: False),
         patch("koda.handlers.packages.run_shell_command", new_callable=AsyncMock) as mock_run,
         patch("koda.handlers.packages.send_long_message", new_callable=AsyncMock),
     ):

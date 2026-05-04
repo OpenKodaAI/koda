@@ -66,7 +66,7 @@ export function usePrefetchRouteData() {
         );
       }
 
-      if (href === "/dlq") {
+      if (href === "/executions/dlq") {
         prefetchers.push(
           queryClient.prefetchQuery({
             ...getTierQueryOptions("live"),

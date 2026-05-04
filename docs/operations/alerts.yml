@@ -1,0 +1,90 @@
+# Phase E — alert rules referencing ONLY metrics that exist today.
+#
+# Audited against ``koda/services/metrics.py`` (last reviewed 2026-05-02).
+# A grounding gate in ``tests/test_observability_alerts_grounded.py``
+# enforces this — adding an alert that references an unknown metric
+# fails CI before it ever loads into a live Prometheus.
+#
+# What this file does NOT cover (intentionally):
+# - Worker crash-loops — already detected via the ``audit_events``
+#   table (Phase 0 P1-4). For alerting, query the audit table from
+#   Grafana with a Postgres datasource instead of Prometheus.
+# - Disk space — requires node-exporter; not in the base compose.
+# - Sidecar /metrics — Rust sidecars do not expose Prometheus
+#   endpoints yet (Phase E follow-up). Watch container health via
+#   docker compose ps + the koda /health endpoint.
+
+groups:
+  - name: koda-critical
+    interval: 30s
+    rules:
+      - alert: KodaCircuitBreakerOpen
+        # CIRCUIT_BREAKER_STATE is a Gauge: 0=closed, 1=half-open,
+        # 2=open. Labels: agent_id, dependency.
+        expr: koda_circuit_breaker_state == 2
+        for: 1m
+        labels:
+          severity: high
+        annotations:
+          summary: "Circuit breaker open: {{ $labels.dependency }} (agent {{ $labels.agent_id }})"
+          description: "An internal_rpc dependency is failing fast. Check the matching sidecar's container logs and restart if needed. The breaker auto-recovers via a half-open probe after the cooldown."
+
+      - alert: KodaQueueDepthHigh
+        expr: koda_queue_depth > 50
+        for: 5m
+        labels:
+          severity: medium
+        annotations:
+          summary: "User queue depth >50 for agent {{ $labels.agent_id }}"
+          description: "Sustained queue backlog. Check provider rate limits, worker capacity, or unblock the worker via /health."
+
+      - alert: KodaActiveTasksStuck
+        # Tasks ramping up without queue ramping down implies workers
+        # are stuck. ACTIVE_TASKS rises while QUEUE_DEPTH stays high.
+        expr: koda_active_tasks > 10 and koda_queue_depth > 10
+        for: 10m
+        labels:
+          severity: medium
+        annotations:
+          summary: "Active tasks stuck high alongside non-empty queue (agent {{ $labels.agent_id }})"
+          description: "Workers may be hung in an LLM call or sidecar wait. Check supervisor /health."
+
+      - alert: KodaProviderResumeDegraded
+        # When resume falls back to transcript bootstrap, costs spike.
+        expr: increase(koda_provider_resume_degraded_total[15m]) > 5
+        labels:
+          severity: medium
+        annotations:
+          summary: "Provider {{ $labels.provider }} resume degraded {{ $value }}x in 15m"
+          description: "Sessions are losing native resume support. Verify provider session compatibility and monitor cost."
+
+      - alert: KodaProviderContractErrors
+        expr: increase(koda_provider_adapter_contract_errors_total[10m]) > 3
+        labels:
+          severity: high
+        annotations:
+          summary: "Provider {{ $labels.provider }} contract errors detected"
+          description: "Provider adapter is rejecting CLI output. Likely vendor schema change."
+
+  - name: koda-postgres
+    interval: 30s
+    rules:
+      - alert: KodaPostgresPoolExhausted
+        # Postgres-exporter ships pg_stat_activity_count and
+        # pg_settings_max_connections out of the box.
+        expr: pg_stat_activity_count >= pg_settings_max_connections * 0.9
+        for: 2m
+        labels:
+          severity: high
+        annotations:
+          summary: "Postgres connection pool ≥90% full"
+          description: "Workers will start timing out. See docs/operations/incident-response.md#3-postgres-connection-pool-exhausted."
+
+      - alert: KodaPostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres unreachable from prometheus"
+          description: "The control plane is down too. Check ``docker compose ps postgres``."

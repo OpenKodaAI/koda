@@ -1,5 +1,6 @@
 use anyhow::Result;
 use koda_observability::{health_details, init_tracing};
+use koda_postgres::{KodaPgPool, KodaPgPoolConfig, PostgresWorkload};
 use koda_proto::common::v1::{HealthRequest, HealthResponse};
 use koda_proto::memory::v1::memory_engine_service_server::{
     MemoryEngineService, MemoryEngineServiceServer,
@@ -19,7 +20,8 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use tokio::fs;
 use tokio::net::UnixListener;
-use tokio_postgres::{Client, NoTls, Row};
+use tokio::sync::OnceCell;
+use tokio_postgres::{Client, Row};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
@@ -81,35 +83,54 @@ const MEMORY_SELECT_SQL: &str = r#"
     FROM napkin_log n
 "#;
 
-fn memory_postgres_dsn() -> String {
-    std::env::var("KNOWLEDGE_V2_POSTGRES_DSN").unwrap_or_default()
+const REVIEW_STATUS_SQL: &str = r#"
+    LOWER(COALESCE(
+        NULLIF(n.metadata_json::jsonb ->> 'review_status', ''),
+        CASE LOWER(COALESCE(n.memory_status, 'active'))
+            WHEN 'superseded' THEN 'merged'
+            WHEN 'stale' THEN 'expired'
+            WHEN 'rejected' THEN 'discarded'
+            WHEN 'invalidated' THEN 'archived'
+            ELSE 'pending'
+        END
+    ))
+"#;
+
+static MEMORY_POSTGRES_POOL: OnceCell<KodaPgPool> = OnceCell::const_new();
+
+async fn connect_memory_postgres_pool() -> Result<KodaPgPool, Status> {
+    KodaPgPool::connect(KodaPgPoolConfig::from_env(
+        "koda-memory-engine",
+        "KODA_MEMORY_POSTGRES_POOL_MAX_SIZE",
+    ))
+    .await
 }
 
-fn memory_postgres_schema() -> String {
-    std::env::var("KNOWLEDGE_V2_POSTGRES_SCHEMA").unwrap_or_else(|_| "knowledge_v2".to_string())
+async fn memory_postgres_pool() -> Result<&'static KodaPgPool, Status> {
+    MEMORY_POSTGRES_POOL
+        .get_or_try_init(connect_memory_postgres_pool)
+        .await
 }
 
-async fn memory_postgres_client() -> Result<Client, Status> {
-    let dsn = memory_postgres_dsn();
-    if dsn.trim().is_empty() {
-        return Err(Status::failed_precondition(
-            "knowledge postgres dsn is not configured",
-        ));
+fn memory_pg_error(operation: &'static str, error: tokio_postgres::Error) -> Status {
+    if let Some(pool) = MEMORY_POSTGRES_POOL.get() {
+        pool.status_from_pg_error(operation, error)
+    } else {
+        Status::internal(format!("{operation}: postgres query failed: {error}"))
     }
-    let schema = memory_postgres_schema();
-    let (client, connection) = tokio_postgres::connect(&dsn, NoTls)
+}
+
+async fn memory_postgres_ready() -> bool {
+    let Ok(pool) = memory_postgres_pool().await else {
+        return false;
+    };
+    let Ok(client) = pool
+        .connection(PostgresWorkload::Health, "memory health")
         .await
-        .map_err(|error| {
-            Status::unavailable(format!("failed to connect to memory postgres: {error}"))
-        })?;
-    tokio::spawn(async move {
-        let _ = connection.await;
-    });
-    client
-        .batch_execute(&format!(r#"SET search_path TO "{schema}""#))
-        .await
-        .map_err(|error| Status::internal(format!("failed to set memory search_path: {error}")))?;
-    Ok(client)
+    else {
+        return false;
+    };
+    client.query_one("SELECT 1", &[]).await.is_ok()
 }
 
 fn pg_string(row: &Row, column: &str) -> String {
@@ -248,51 +269,199 @@ async fn query_memory_rows(
     let rows = client
         .query(sql, params)
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory rows: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory rows", error))?;
     Ok(rows.iter().map(memory_row_value).collect())
 }
 
 async fn load_list_curation_payload(agent_id: &str, filters: &Value) -> Result<Value, Status> {
-    let client = memory_postgres_client().await?;
+    let client = memory_postgres_pool()
+        .await?
+        .connection(PostgresWorkload::Read, "list memory curation")
+        .await?;
+    let limit = value_i64(filters.get("limit")).clamp(1, 250);
+    let offset = value_i64(filters.get("offset")).max(0);
+    let memory_status = value_string(filters.get("memory_status"))
+        .trim()
+        .to_ascii_lowercase();
+    let review_status = value_string(filters.get("review_status"))
+        .trim()
+        .to_ascii_lowercase();
+    let memory_type = value_string(filters.get("memory_type"))
+        .trim()
+        .to_ascii_lowercase();
+    let cluster_id = value_string(filters.get("cluster_id")).trim().to_string();
+    let user_id = value_i64(filters.get("user_id")).max(0);
+    let has_is_active = filters.get("is_active").and_then(Value::as_bool).is_some();
+    let is_active = value_bool(filters.get("is_active"));
+    let origin_kind = value_string(filters.get("origin_kind"))
+        .trim()
+        .to_ascii_lowercase();
+    let query = value_string(filters.get("query"))
+        .trim()
+        .to_ascii_lowercase();
+    let query_like = if query.is_empty() {
+        String::new()
+    } else {
+        format!("%{query}%")
+    };
+    let filter_sql = format!(
+        r#"
+          AND ($2::TEXT = '' OR LOWER(COALESCE(n.memory_status, 'active')) = $2)
+          AND ($3::TEXT = '' OR {REVIEW_STATUS_SQL} = $3)
+          AND ($4::TEXT = '' OR LOWER(COALESCE(n.memory_type, '')) = $4)
+          AND ($5::TEXT = '' OR COALESCE(n.conflict_key, '') = $5)
+          AND ($6::BIGINT = 0 OR n.user_id = $6)
+          AND ($7::BOOLEAN = false OR COALESCE(n.is_active, 0) = CASE WHEN $8::BOOLEAN THEN 1 ELSE 0 END)
+          AND ($9::TEXT = '' OR LOWER(COALESCE(n.origin_kind, '')) = $9)
+          AND ($10::TEXT = '' OR LOWER(COALESCE(n.subject, '')) LIKE $10 OR LOWER(COALESCE(n.content, '')) LIKE $10)
+        "#
+    );
     let total_row = client
         .query_one(
-            "SELECT COUNT(*)::BIGINT AS total FROM napkin_log WHERE agent_id = $1",
-            &[&agent_id],
+            &format!(
+                "SELECT COUNT(*)::BIGINT AS total FROM napkin_log n WHERE n.agent_id = $1 {filter_sql}"
+            ),
+            &[
+                &agent_id,
+                &memory_status,
+                &review_status,
+                &memory_type,
+                &cluster_id,
+                &user_id,
+                &has_is_active,
+                &is_active,
+                &origin_kind,
+                &query_like,
+            ],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query curation total: {error}")))?;
+        .map_err(|error| memory_pg_error("query curation total", error))?;
     let rows = query_memory_rows(
         &client,
         &format!(
-            "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC LIMIT 5000"
+            "{MEMORY_SELECT_SQL} WHERE n.agent_id = $1 {filter_sql} ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC LIMIT $11 OFFSET $12"
         ),
-        &[&agent_id],
+        &[
+            &agent_id,
+            &memory_status,
+            &review_status,
+            &memory_type,
+            &cluster_id,
+            &user_id,
+            &has_is_active,
+            &is_active,
+            &origin_kind,
+            &query_like,
+            &limit,
+            &offset,
+        ],
     )
     .await?;
-    let cluster_rows = client
-        .query(
-            "SELECT conflict_key, COUNT(*)::BIGINT AS memory_count, COALESCE(MAX(created_at)::text, '') AS latest_created_at FROM napkin_log WHERE agent_id = $1 AND conflict_key IS NOT NULL AND conflict_key != '' GROUP BY conflict_key ORDER BY latest_created_at DESC LIMIT 200",
+    let overview_row = client
+        .query_one(
+            &format!(
+                r#"
+                SELECT
+                    SUM(CASE WHEN {REVIEW_STATUS_SQL} = 'pending' THEN 1 ELSE 0 END)::BIGINT AS pending_memories,
+                    SUM(CASE WHEN n.expires_at IS NOT NULL AND n.expires_at != '' THEN 1 ELSE 0 END)::BIGINT AS expiring_soon,
+                    SUM(CASE WHEN {REVIEW_STATUS_SQL} = 'discarded' THEN 1 ELSE 0 END)::BIGINT AS discarded_last_7d,
+                    SUM(CASE WHEN {REVIEW_STATUS_SQL} = 'merged' THEN 1 ELSE 0 END)::BIGINT AS merged_last_7d,
+                    SUM(CASE WHEN {REVIEW_STATUS_SQL} = 'approved' THEN 1 ELSE 0 END)::BIGINT AS approved_last_7d
+                FROM napkin_log n
+                WHERE n.agent_id = $1
+                "#
+            ),
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory clusters: {error}")))?;
+        .map_err(|error| memory_pg_error("query curation overview", error))?;
+    let status_rows = client
+        .query(
+            &format!(
+                "SELECT {REVIEW_STATUS_SQL} AS review_status, COUNT(*)::BIGINT AS memory_count FROM napkin_log n WHERE n.agent_id = $1 GROUP BY review_status"
+            ),
+            &[&agent_id],
+        )
+        .await
+        .map_err(|error| memory_pg_error("query curation status filters", error))?;
+    let type_rows = client
+        .query(
+            "SELECT memory_type, COUNT(*)::BIGINT AS memory_count FROM napkin_log n WHERE n.agent_id = $1 GROUP BY memory_type",
+            &[&agent_id],
+        )
+        .await
+        .map_err(|error| memory_pg_error("query curation type filters", error))?;
+    let cluster_rows = client
+        .query(
+            &format!(
+                r#"
+                SELECT
+                    conflict_key,
+                    COUNT(*)::BIGINT AS memory_count,
+                    COALESCE(MAX(created_at)::text, '') AS latest_created_at
+                FROM napkin_log n
+                WHERE n.agent_id = $1
+                  AND COALESCE(n.conflict_key, '') != ''
+                  {filter_sql}
+                GROUP BY conflict_key
+                ORDER BY latest_created_at DESC
+                LIMIT 200
+                "#
+            ),
+            &[
+                &agent_id,
+                &memory_status,
+                &review_status,
+                &memory_type,
+                &cluster_id,
+                &user_id,
+                &has_is_active,
+                &is_active,
+                &origin_kind,
+                &query_like,
+            ],
+        )
+        .await
+        .map_err(|error| memory_pg_error("query memory clusters", error))?;
     Ok(json!({
         "agent_id": agent_id,
         "total": pg_i64(&total_row, "total"),
         "rows": rows,
-        "all_rows": rows,
+        "all_rows": [],
+        "overview": {
+            "pending_memories": pg_i64(&overview_row, "pending_memories"),
+            "expiring_soon": pg_i64(&overview_row, "expiring_soon"),
+            "discarded_last_7d": pg_i64(&overview_row, "discarded_last_7d"),
+            "merged_last_7d": pg_i64(&overview_row, "merged_last_7d"),
+            "approved_last_7d": pg_i64(&overview_row, "approved_last_7d"),
+        },
+        "status_rows": status_rows.iter().map(|row| json!({
+            "review_status": pg_string(row, "review_status"),
+            "memory_count": pg_i64(row, "memory_count"),
+        })).collect::<Vec<Value>>(),
+        "type_rows": type_rows.iter().map(|row| json!({
+            "memory_type": pg_string(row, "memory_type"),
+            "memory_count": pg_i64(row, "memory_count"),
+        })).collect::<Vec<Value>>(),
         "cluster_rows": cluster_rows.iter().map(|row| json!({
             "cluster_id": pg_string(row, "conflict_key"),
             "summary": pg_string(row, "conflict_key"),
             "memory_count": pg_i64(row, "memory_count"),
+            "member_count": pg_i64(row, "memory_count"),
             "latest_created_at": optional_string_value(pg_string(row, "latest_created_at")),
+            "review_status": "pending",
+            "dominant_type": Value::Null,
+            "member_ids": [],
         })).collect::<Vec<Value>>(),
         "filters": filters.clone(),
     }))
 }
 
 async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Value, Status> {
-    let client = memory_postgres_client().await?;
+    let client = memory_postgres_pool()
+        .await?
+        .connection(PostgresWorkload::Read, "memory map")
+        .await?;
     let summary_row = client
         .query_one(
             r#"
@@ -308,42 +477,42 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory summary: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory summary", error))?;
     let type_rows = client
         .query(
             "SELECT memory_type, COUNT(*)::BIGINT AS memory_count FROM napkin_log WHERE agent_id = $1 GROUP BY memory_type",
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory type counts: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory type counts", error))?;
     let user_rows = client
         .query(
             "SELECT user_id::BIGINT AS user_id, COUNT(*)::BIGINT AS memory_count, SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)::BIGINT AS active_count FROM napkin_log WHERE agent_id = $1 GROUP BY user_id",
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory user counts: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory user counts", error))?;
     let embedding_rows = client
         .query(
             "SELECT embedding_status AS status, COUNT(*)::BIGINT AS job_count FROM napkin_log WHERE agent_id = $1 GROUP BY embedding_status",
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory embedding jobs: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory embedding jobs", error))?;
     let quality_rows = client
         .query(
             "SELECT counter_key, counter_value::BIGINT AS counter_value, COALESCE(updated_at::text, '') AS updated_at FROM memory_quality_counters WHERE agent_id = $1",
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory quality counters: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory quality counters", error))?;
     let cluster_rows = client
         .query(
             "SELECT conflict_key, COUNT(*)::BIGINT AS memory_count, COALESCE(MAX(created_at)::text, '') AS latest_created_at FROM napkin_log WHERE agent_id = $1 AND conflict_key IS NOT NULL AND conflict_key != '' GROUP BY conflict_key",
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory clusters: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory clusters", error))?;
     let rows = query_memory_rows(
         &client,
         &format!(
@@ -367,19 +536,20 @@ async fn load_memory_map_payload(agent_id: &str, filters: &Value) -> Result<Valu
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query recent memory recall: {error}")))?;
+        .map_err(|error| memory_pg_error("query recent memory recall", error))?;
     let maintenance_rows = client
         .query(
             r#"
             SELECT operation, memories_affected::BIGINT AS memories_affected, details, COALESCE(executed_at::text, '') AS executed_at
             FROM memory_maintenance_log
+            WHERE COALESCE(agent_id, 'default') = $1
             ORDER BY executed_at DESC
             LIMIT 12
             "#,
-            &[],
+            &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory maintenance log: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory maintenance log", error))?;
     Ok(json!({
         "agent_id": agent_id,
         "summary_row": {
@@ -443,7 +613,10 @@ async fn load_curation_detail_payload(
     detail_kind: &str,
     cluster_id: &str,
 ) -> Result<Value, Status> {
-    let client = memory_postgres_client().await?;
+    let client = memory_postgres_pool()
+        .await?
+        .connection(PostgresWorkload::Read, "memory curation detail")
+        .await?;
     if detail_kind.eq_ignore_ascii_case("cluster") {
         let effective_cluster_id = if cluster_id.trim().is_empty() {
             subject_id.trim()
@@ -477,7 +650,7 @@ async fn load_curation_detail_payload(
                 &[&agent_id],
             )
             .await
-            .map_err(|error| Status::internal(format!("failed to query memory audit events: {error}")))?;
+            .map_err(|error| memory_pg_error("query memory audit events", error))?;
         return Ok(json!({
             "agent_id": agent_id,
             "detail_kind": "cluster",
@@ -558,7 +731,7 @@ async fn load_curation_detail_payload(
             &[&agent_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to query memory recall audits: {error}")))?;
+        .map_err(|error| memory_pg_error("query memory recall audits", error))?;
     Ok(json!({
         "agent_id": agent_id,
         "detail_kind": "memory",
@@ -590,7 +763,10 @@ async fn execute_action_plan(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let client = memory_postgres_client().await?;
+    let client = memory_postgres_pool()
+        .await?
+        .connection(PostgresWorkload::Write, "memory curation action")
+        .await?;
     let mut updated_count = 0_i64;
     let mut affected_ids = Vec::<i64>::new();
     for operation in operations {
@@ -610,7 +786,7 @@ async fn execute_action_plan(
                         &[&agent_id, &ids],
                     )
                     .await
-                    .map_err(|error| Status::internal(format!("failed to batch deactivate memories: {error}")))?;
+                    .map_err(|error| memory_pg_error("batch deactivate memories", error))?;
                 updated_count += updated as i64;
                 affected_ids.extend(ids);
             }
@@ -633,7 +809,7 @@ async fn execute_action_plan(
                         &[&memory_status, &duplicate_of_memory_id, &agent_id, &memory_id],
                     )
                     .await
-                    .map_err(|error| Status::internal(format!("failed to set memory status: {error}")))?;
+                    .map_err(|error| memory_pg_error("set memory status", error))?;
                 updated_count += updated as i64;
                 affected_ids.push(memory_id);
             }
@@ -651,7 +827,7 @@ async fn execute_action_plan(
                         &[&agent_id, &memory_id],
                     )
                     .await
-                    .map_err(|error| Status::internal(format!("failed to load memory metadata: {error}")))?;
+                    .map_err(|error| memory_pg_error("load memory metadata", error))?;
                 let Some(current_row) = current else {
                     continue;
                 };
@@ -681,7 +857,11 @@ async fn execute_action_plan(
                     }
                 }
                 let memory_status = value_string(operation.get("memory_status"));
-                let is_active = value_bool(operation.get("is_active"));
+                let is_active = if value_bool(operation.get("is_active")) {
+                    1_i32
+                } else {
+                    0_i32
+                };
                 let duplicate_of_memory_id = operation
                     .get("duplicate_of_memory_id")
                     .and_then(Value::as_i64)
@@ -691,11 +871,11 @@ async fn execute_action_plan(
                     .execute(
                         r#"
                         UPDATE napkin_log
-                        SET metadata_json = $1::jsonb,
+                        SET metadata_json = $1,
                             memory_status = $2,
                             is_active = $3,
                             supersedes_memory_id = $4,
-                            expires_at = CASE WHEN $5 THEN NOW() ELSE expires_at END
+                            expires_at = CASE WHEN $5 THEN NOW()::TEXT ELSE expires_at END
                         WHERE agent_id = $6 AND id = $7
                         "#,
                         &[
@@ -709,9 +889,7 @@ async fn execute_action_plan(
                         ],
                     )
                     .await
-                    .map_err(|error| {
-                        Status::internal(format!("failed to persist review state: {error}"))
-                    })?;
+                    .map_err(|error| memory_pg_error("persist review state", error))?;
                 updated_count += updated as i64;
                 affected_ids.push(memory_id);
             }
@@ -839,7 +1017,10 @@ async fn load_recall_rows(
     limit: u32,
     context: Option<&RecallContext>,
 ) -> Result<Vec<Value>, Status> {
-    let client = memory_postgres_client().await?;
+    let client = memory_postgres_pool()
+        .await?
+        .connection(PostgresWorkload::Read, "memory recall")
+        .await?;
     let user_id = context.map(|item| item.user_id).unwrap_or_default();
     let memory_types = context
         .map(|item| item.memory_types.clone())
@@ -888,7 +1069,9 @@ async fn load_recall_rows(
               AND ($10::BIGINT = 0 OR COALESCE(n.source_task_id, 0) = $10)
               AND ($11::BIGINT = 0 OR COALESCE(n.source_episode_id, 0) = $11)
               AND (CARDINALITY($12::TEXT[]) = 0 OR COALESCE(n.memory_status, 'active') = ANY($12::TEXT[]))
-              AND COALESCE(n.is_active, false) = true
+              AND COALESCE(n.is_active, 0) = 1
+              AND (NULLIF(n.expires_at, '') IS NULL OR NULLIF(n.expires_at, '')::TIMESTAMPTZ >= NOW())
+              AND (NULLIF(n.valid_until, '') IS NULL OR NULLIF(n.valid_until, '')::TIMESTAMPTZ >= NOW())
             ORDER BY COALESCE(n.last_accessed, n.created_at) DESC, n.id DESC
             LIMIT {scan_limit}
             "#
@@ -1744,10 +1927,16 @@ fn build_memory_map(payload: &Value) -> Value {
         .get("total_memories")
         .and_then(Value::as_i64)
         .unwrap_or(rows.len() as i64);
-    let semantic_status = if rows.iter().any(|row| {
-        !row_text(row, "conflict_key").is_empty() || !row_text(row, "vector_ref_id").is_empty()
-    }) {
+    let has_vector_refs = rows
+        .iter()
+        .any(|row| !row_text(row, "vector_ref_id").is_empty());
+    let has_lexical_fallback = rows.iter().any(|row| {
+        !row_text(row, "content").is_empty() || !row_text(row, "conflict_key").is_empty()
+    });
+    let semantic_status = if has_vector_refs {
         "available"
+    } else if has_lexical_fallback {
+        "fallback"
     } else {
         "missing"
     };
@@ -1960,6 +2149,7 @@ fn build_memory_map(payload: &Value) -> Value {
 fn build_list_curation_items(payload: &Value) -> Value {
     let rows = payload_rows(payload, "rows");
     let all_rows = payload_rows(payload, "all_rows");
+    let overview_payload = payload_object(payload, "overview");
     let filters = payload_object(payload, "filters");
     let limit = filters.get("limit").and_then(Value::as_i64).unwrap_or(50);
     let offset = filters.get("offset").and_then(Value::as_i64).unwrap_or(0);
@@ -2073,7 +2263,12 @@ fn build_list_curation_items(payload: &Value) -> Value {
         });
     }
 
-    let mut clusters = build_clusters(&all_rows);
+    let cluster_rows = payload_rows(payload, "cluster_rows");
+    let mut clusters = if cluster_rows.is_empty() {
+        build_clusters(&all_rows)
+    } else {
+        cluster_rows
+    };
     if kind == "memory" {
         clusters.clear();
     } else if kind == "cluster" {
@@ -2081,11 +2276,33 @@ fn build_list_curation_items(payload: &Value) -> Value {
     }
     let mut available_statuses: BTreeMap<String, i64> = BTreeMap::new();
     let mut available_types: BTreeMap<String, i64> = BTreeMap::new();
-    for row in &all_rows {
-        *available_statuses.entry(review_status(row)).or_default() += 1;
-        let memory_type = row_text(row, "memory_type");
-        if !memory_type.is_empty() {
-            *available_types.entry(memory_type).or_default() += 1;
+    let status_rows = payload_rows(payload, "status_rows");
+    if status_rows.is_empty() {
+        for row in &all_rows {
+            *available_statuses.entry(review_status(row)).or_default() += 1;
+        }
+    } else {
+        for row in status_rows {
+            let status = row_text(&row, "review_status");
+            if !status.is_empty() {
+                available_statuses.insert(status, row_i64(&row, "memory_count"));
+            }
+        }
+    }
+    let type_rows = payload_rows(payload, "type_rows");
+    if type_rows.is_empty() {
+        for row in &all_rows {
+            let memory_type = row_text(row, "memory_type");
+            if !memory_type.is_empty() {
+                *available_types.entry(memory_type).or_default() += 1;
+            }
+        }
+    } else {
+        for row in type_rows {
+            let memory_type = row_text(&row, "memory_type");
+            if !memory_type.is_empty() {
+                available_types.insert(memory_type, row_i64(&row, "memory_count"));
+            }
         }
     }
     let status_filters = ["pending", "approved", "merged", "discarded", "expired", "archived"]
@@ -2100,12 +2317,12 @@ fn build_list_curation_items(payload: &Value) -> Value {
     json!({
         "agent_id": payload.get("agent_id").cloned().unwrap_or(Value::Null),
         "overview": {
-            "pending_memories": all_rows.iter().filter(|row| review_status(row) == "pending").count(),
+            "pending_memories": overview_payload.get("pending_memories").and_then(Value::as_i64).unwrap_or_else(|| all_rows.iter().filter(|row| review_status(row) == "pending").count() as i64),
             "pending_clusters": clusters.iter().filter(|item| item.get("review_status").and_then(Value::as_str).unwrap_or_default() == "pending").count(),
-            "expiring_soon": all_rows.iter().filter(|row| !row.get("expires_at").unwrap_or(&Value::Null).is_null()).count(),
-            "discarded_last_7d": all_rows.iter().filter(|row| review_status(row) == "discarded").count(),
-            "merged_last_7d": all_rows.iter().filter(|row| review_status(row) == "merged").count(),
-            "approved_last_7d": all_rows.iter().filter(|row| review_status(row) == "approved").count(),
+            "expiring_soon": overview_payload.get("expiring_soon").and_then(Value::as_i64).unwrap_or_else(|| all_rows.iter().filter(|row| !row.get("expires_at").unwrap_or(&Value::Null).is_null()).count() as i64),
+            "discarded_last_7d": overview_payload.get("discarded_last_7d").and_then(Value::as_i64).unwrap_or_else(|| all_rows.iter().filter(|row| review_status(row) == "discarded").count() as i64),
+            "merged_last_7d": overview_payload.get("merged_last_7d").and_then(Value::as_i64).unwrap_or_else(|| all_rows.iter().filter(|row| review_status(row) == "merged").count() as i64),
+            "approved_last_7d": overview_payload.get("approved_last_7d").and_then(Value::as_i64).unwrap_or_else(|| all_rows.iter().filter(|row| review_status(row) == "approved").count() as i64),
         },
         "items": items,
         "clusters": clusters,
@@ -2995,7 +3212,10 @@ impl MemoryEngineService for MemoryServer {
             if cluster_ids.is_empty() {
                 Vec::new()
             } else {
-                let client = memory_postgres_client().await?;
+                let client = memory_postgres_pool()
+                    .await?
+                    .connection(PostgresWorkload::Read, "memory cluster rows")
+                    .await?;
                 query_memory_rows(
                     &client,
                     &format!(
@@ -3068,10 +3288,36 @@ impl MemoryEngineService for MemoryServer {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
+        let postgres_ready = memory_postgres_ready().await;
         let mut details = health_details("koda-memory-engine");
-        details.insert("authoritative".to_string(), "true".to_string());
-        details.insert("production_ready".to_string(), "true".to_string());
-        details.insert("maturity".to_string(), "authoritative".to_string());
+        details.insert("authoritative".to_string(), postgres_ready.to_string());
+        details.insert("production_ready".to_string(), postgres_ready.to_string());
+        details.insert(
+            "maturity".to_string(),
+            if postgres_ready {
+                "authoritative"
+            } else {
+                "config_required"
+            }
+            .to_string(),
+        );
+        details.insert(
+            "postgres".to_string(),
+            if postgres_ready {
+                "ready"
+            } else {
+                "unavailable"
+            }
+            .to_string(),
+        );
+        if let Ok(pool) = memory_postgres_pool().await {
+            let snapshot = pool.snapshot();
+            details.insert(
+                "postgres_pool_size".to_string(),
+                snapshot.pool_max_size.to_string(),
+            );
+            details.extend(pool.health_details());
+        }
         details.insert(
             "projection_mode".to_string(),
             "kernel_authoritative".to_string(),
@@ -3087,8 +3333,13 @@ impl MemoryEngineService for MemoryServer {
         );
         Ok(Response::new(HealthResponse {
             service: "koda-memory-engine".to_string(),
-            ready: true,
-            status: "ready".to_string(),
+            ready: postgres_ready,
+            status: if postgres_ready {
+                "ready"
+            } else {
+                "postgres_unavailable"
+            }
+            .to_string(),
             details,
         }))
     }
@@ -3138,7 +3389,9 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{overlap_score, tokenize};
+    use serde_json::json;
+
+    use super::{build_list_curation_items, build_memory_map, overlap_score, tokenize};
 
     #[test]
     fn tokenize_discards_short_tokens() {
@@ -3156,5 +3409,81 @@ mod tests {
             overlap_score(&query_tokens, "deploy api rollout")
                 > overlap_score(&query_tokens, "other topic")
         );
+    }
+
+    #[test]
+    fn memory_map_reports_fallback_without_vector_refs() {
+        let rendered = build_memory_map(&json!({
+            "agent_id": "agent_a",
+            "summary_row": {"total_memories": 1, "active_memories": 1},
+            "rows": [{
+                "id": 1,
+                "agent_id": "agent_a",
+                "user_id": 42,
+                "memory_type": "fact",
+                "content": "Billing rollout prefers canary verification.",
+                "conflict_key": "cluster-1",
+                "quality_score": 0.8,
+                "importance": 0.8,
+                "is_active": true,
+                "memory_status": "active",
+                "metadata": {}
+            }],
+        }));
+
+        assert_eq!(rendered["semantic_status"], "fallback");
+    }
+
+    #[test]
+    fn memory_map_reports_available_only_with_vector_refs() {
+        let rendered = build_memory_map(&json!({
+            "agent_id": "agent_a",
+            "summary_row": {"total_memories": 1, "active_memories": 1},
+            "rows": [{
+                "id": 1,
+                "agent_id": "agent_a",
+                "user_id": 42,
+                "memory_type": "fact",
+                "content": "Billing rollout prefers canary verification.",
+                "vector_ref_id": "vec-1",
+                "quality_score": 0.8,
+                "importance": 0.8,
+                "is_active": true,
+                "memory_status": "active",
+                "metadata": {}
+            }],
+        }));
+
+        assert_eq!(rendered["semantic_status"], "available");
+    }
+
+    #[test]
+    fn curation_items_use_sql_supplied_filter_counts() {
+        let rendered = build_list_curation_items(&json!({
+            "agent_id": "agent_a",
+            "total": 1,
+            "rows": [{
+                "id": 1,
+                "agent_id": "agent_a",
+                "user_id": 42,
+                "memory_type": "procedure",
+                "content": "Run rollback only after canary evidence.",
+                "quality_score": 0.9,
+                "importance": 0.9,
+                "is_active": true,
+                "memory_status": "active",
+                "metadata": {}
+            }],
+            "all_rows": [],
+            "status_rows": [{"review_status": "pending", "memory_count": 7}],
+            "type_rows": [{"memory_type": "procedure", "memory_count": 3}],
+            "cluster_rows": [{"cluster_id": "cluster-1", "memory_count": 2, "review_status": "pending"}],
+            "overview": {"pending_memories": 7, "expiring_soon": 1},
+            "filters": {"limit": 25, "offset": 0}
+        }));
+
+        assert_eq!(rendered["overview"]["pending_memories"], 7);
+        assert_eq!(rendered["available_filters"]["types"][0]["count"], 3);
+        assert_eq!(rendered["clusters"][0]["cluster_id"], "cluster-1");
     }
 }

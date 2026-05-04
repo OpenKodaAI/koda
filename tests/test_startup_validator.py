@@ -15,11 +15,6 @@ _BASE = {
     "koda.config.CODEX_APPROVAL_POLICY": "never",
     "koda.config.OLLAMA_ENABLED": False,
     "koda.config.OLLAMA_BASE_URL": "",
-    "koda.config.GWS_ENABLED": False,
-    "koda.config.GWS_CREDENTIALS_FILE": None,
-    "koda.config.JIRA_ENABLED": False,
-    "koda.config.JIRA_URL": "",
-    "koda.config.JIRA_API_TOKEN": "",
     "koda.config.ELEVENLABS_ENABLED": False,
     "koda.config.ELEVENLABS_API_KEY": None,
     "koda.config.POSTGRES_ENABLED": False,
@@ -32,15 +27,6 @@ _BASE = {
     "koda.config.KOKORO_VOICES_PATH": "",
     "koda.config.SCHEDULER_ENABLED": False,
 }
-
-
-def _patch_all(**overrides: object):
-    """Return a context manager that patches all config values, with overrides."""
-    merged = {**_BASE, **overrides}
-    ctx = [patch(k, v) for k, v in merged.items()]
-    import contextlib
-
-    return contextlib.ExitStack(), ctx
 
 
 class TestStartupValidator:
@@ -86,34 +72,6 @@ class TestStartupValidator:
             }
         )
         assert any("OLLAMA_BASE_URL" in w for w in warnings)
-
-    def test_gws_enabled_no_credentials(self) -> None:
-        warnings = self._run(
-            **{
-                "koda.config.GWS_ENABLED": True,
-                "koda.config.GWS_CREDENTIALS_FILE": None,
-            }
-        )
-        assert any("GWS_CREDENTIALS_FILE" in w for w in warnings)
-
-    def test_gws_credentials_file_missing(self) -> None:
-        warnings = self._run(
-            **{
-                "koda.config.GWS_ENABLED": True,
-                "koda.config.GWS_CREDENTIALS_FILE": "/nonexistent/creds.json",
-            }
-        )
-        assert any("does not exist" in w for w in warnings)
-
-    def test_jira_enabled_no_url(self) -> None:
-        warnings = self._run(
-            **{
-                "koda.config.JIRA_ENABLED": True,
-                "koda.config.JIRA_URL": "",
-                "koda.config.JIRA_API_TOKEN": "",
-            }
-        )
-        assert any("JIRA_URL" in w for w in warnings)
 
     def test_elevenlabs_enabled_no_key(self) -> None:
         warnings = self._run(

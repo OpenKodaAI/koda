@@ -127,6 +127,21 @@ def run_doctor(
     except Exception as exc:  # pragma: no cover - exercised via failure payload expectations
         checks.append({"name": "web_dashboard", "ok": False, "error": str(exc)})
 
+    onboarding_payload: dict[str, Any] = {}
+    try:
+        onboarding_payload = fetch_json(f"{base_url.rstrip('/')}/api/control-plane/onboarding/status")
+        checks.append(
+            {
+                "name": "onboarding_status",
+                "ok": True,
+                "has_owner": bool(onboarding_payload.get("has_owner")),
+                "bootstrap_required": bool(onboarding_payload.get("bootstrap_required")),
+                "bootstrap_file_path": onboarding_payload.get("bootstrap_file_path"),
+            }
+        )
+    except Exception as exc:  # pragma: no cover - exercised via failure payload expectations
+        checks.append({"name": "onboarding_status", "ok": False, "error": str(exc)})
+
     if provider_id:
         onboarding_url = f"{base_url.rstrip('/')}/api/control-plane/onboarding/status"
         try:
@@ -144,9 +159,161 @@ def run_doctor(
         "checks": checks,
         "base_url": base_url,
         "dashboard_url": dashboard_url,
-        "setup_url": f"{dashboard_url.rstrip('/')}/control-plane",
+        "dashboard_setup_url": f"{dashboard_url.rstrip('/')}/setup",
+        "setup_url": f"{dashboard_url.rstrip('/')}/setup",
         "legacy_setup_url": f"{base_url.rstrip('/')}/setup",
     }
+
+
+def _stat_mode(path: Path) -> int | None:
+    try:
+        return path.stat().st_mode & 0o777
+    except OSError:
+        return None
+
+
+def run_strict_hardening(env: dict[str, str], *, env_file: Path) -> list[dict[str, Any]]:
+    """Phase F — pre-deploy hardening checks matching
+    ``docs/operations/hardening.md``.
+
+    Each check returns ``{name, ok, ...detail}``. Strict mode AND-s
+    all of them so a deployment that fails any single check is
+    refused by ``--strict``.
+    """
+    checks: list[dict[str, Any]] = []
+
+    # --- Filesystem & secrets -------------------------------------------------
+    state_root = Path(env.get("STATE_ROOT_DIR", "/var/lib/koda/state").strip() or "/var/lib/koda/state")
+    state_mode = _stat_mode(state_root)
+    checks.append(
+        {
+            "name": "state_root_owner_only_perms",
+            "ok": state_mode is not None and state_mode == 0o700,
+            "path": str(state_root),
+            "mode": f"{state_mode:o}" if state_mode is not None else None,
+            "expected": "700",
+        }
+    )
+
+    master_key_path = Path(
+        env.get("CONTROL_PLANE_MASTER_KEY_FILE", "").strip() or str(state_root / "control_plane" / ".master.key")
+    )
+    master_mode = _stat_mode(master_key_path)
+    checks.append(
+        {
+            "name": "master_key_perms_0600",
+            "ok": master_mode is not None and master_mode == 0o600,
+            "path": str(master_key_path),
+            "mode": f"{master_mode:o}" if master_mode is not None else None,
+            "expected": "600",
+        }
+    )
+
+    env_mode = _stat_mode(env_file)
+    checks.append(
+        {
+            "name": "env_file_perms_0600",
+            "ok": env_mode is None or env_mode == 0o600,
+            "path": str(env_file),
+            "mode": f"{env_mode:o}" if env_mode is not None else None,
+            "note": "skipped when .env file does not exist",
+        }
+    )
+
+    # --- Auth posture ---------------------------------------------------------
+    api_token = env.get("CONTROL_PLANE_API_TOKEN", "").strip()
+    checks.append(
+        {
+            "name": "control_plane_api_token_strong",
+            "ok": len(api_token) >= 32 and not api_token.startswith("replace-with"),
+            "length": len(api_token),
+        }
+    )
+
+    session_secret = env.get("WEB_OPERATOR_SESSION_SECRET", "").strip()
+    checks.append(
+        {
+            "name": "web_operator_session_secret_strong",
+            "ok": len(session_secret) >= 32 and not session_secret.startswith("replace-with"),
+            "length": len(session_secret),
+        }
+    )
+
+    runtime_token = env.get("RUNTIME_LOCAL_UI_TOKEN", "").strip()
+    checks.append(
+        {
+            "name": "runtime_local_ui_token_strong",
+            "ok": len(runtime_token) >= 32 and not runtime_token.startswith("replace-with"),
+            "length": len(runtime_token),
+        }
+    )
+
+    allowed_user_ids = env.get("ALLOWED_USER_IDS", "").strip()
+    checks.append(
+        {
+            "name": "allowed_user_ids_set",
+            "ok": bool(allowed_user_ids),
+            "note": "empty means no Telegram user is authorized",
+        }
+    )
+
+    allow_loopback = env.get("ALLOW_LOOPBACK_BOOTSTRAP", "false").strip().lower()
+    checks.append(
+        {
+            "name": "loopback_bootstrap_disabled_in_production",
+            "ok": allow_loopback in {"false", "0", "no", "off", ""},
+            "value": allow_loopback,
+        }
+    )
+
+    # --- Browser sandbox ------------------------------------------------------
+    browser_private = env.get("BROWSER_ALLOW_PRIVATE_NETWORK", "false").strip().lower()
+    checks.append(
+        {
+            "name": "browser_private_network_disabled",
+            "ok": browser_private in {"false", "0", "no", "off", ""},
+            "value": browser_private,
+        }
+    )
+
+    # --- Audit retention ------------------------------------------------------
+    try:
+        retention = int(env.get("AUDIT_RETENTION_DAYS", "90"))
+    except ValueError:
+        retention = 0
+    checks.append(
+        {
+            "name": "audit_retention_at_least_90_days",
+            "ok": retention >= 90,
+            "value": retention,
+        }
+    )
+
+    # --- Cgroup root (Linux only) --------------------------------------------
+    import sys as _sys
+
+    if _sys.platform == "linux":
+        cgroup_root = Path(env.get("KODA_CGROUP_ROOT", "/sys/fs/cgroup/koda"))
+        checks.append(
+            {
+                "name": "cgroup_root_writable_for_isolation",
+                "ok": cgroup_root.exists() and os_access(cgroup_root, write=True),
+                "path": str(cgroup_root),
+                "note": "required when KODA_AGENT_DEFAULT_* limits are set",
+            }
+        )
+
+    return checks
+
+
+def os_access(path: Path, *, write: bool) -> bool:
+    import os as _os
+
+    mode = _os.W_OK if write else _os.R_OK
+    try:
+        return _os.access(str(path), mode)
+    except OSError:
+        return False
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -155,17 +322,31 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default="http://127.0.0.1:8090")
     parser.add_argument("--dashboard-url", default=None)
     parser.add_argument("--provider", default=None)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Phase F — pre-deploy hardening gate. Adds the checklist "
+            "from docs/operations/hardening.md to the default checks; "
+            "exits non-zero if any hardening item fails."
+        ),
+    )
     return parser
 
 
 def main() -> int:
     args = _build_parser().parse_args()
+    env_values = load_env_file(args.env_file)
     payload = run_doctor(
-        env=load_env_file(args.env_file),
+        env=env_values,
         base_url=args.base_url,
         dashboard_url=args.dashboard_url,
         provider_id=args.provider,
     )
+    if args.strict:
+        strict_checks = run_strict_hardening(env_values, env_file=args.env_file)
+        payload["strict_checks"] = strict_checks
+        payload["ok"] = bool(payload["ok"]) and all(bool(item.get("ok")) for item in strict_checks)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0 if payload["ok"] else 1
 

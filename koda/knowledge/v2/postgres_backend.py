@@ -19,9 +19,12 @@ from koda.knowledge.config import (
     KNOWLEDGE_EMBEDDING_MODEL,
     KNOWLEDGE_V2_INGEST_MAX_POISONED_JOBS,
     KNOWLEDGE_V2_INGEST_MAX_QUEUE_DEPTH,
+    KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS,
     KNOWLEDGE_V2_POSTGRES_DSN,
+    KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS,
     KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE,
     KNOWLEDGE_V2_POSTGRES_POOL_MIN_SIZE,
+    KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS,
     KNOWLEDGE_V2_POSTGRES_RETRY_BASE_SECONDS,
     KNOWLEDGE_V2_POSTGRES_SCHEMA,
     KNOWLEDGE_V2_POSTGRES_START_RETRIES,
@@ -73,6 +76,10 @@ _RELATION_WEIGHTS: dict[str, float] = {
     "mentions": 0.35,
     "contradicts": 0.0,
 }
+
+
+class _PostgresAcquireTimeout(RuntimeError):
+    """Raised when the asyncpg pool or guarded direct lane cannot provide a connection."""
 
 
 def _json_dumps(value: Any) -> str:
@@ -142,6 +149,8 @@ class KnowledgeV2PostgresBackend:
         embedding_dimension: int = 1024,
         pool_min_size: int = KNOWLEDGE_V2_POSTGRES_POOL_MIN_SIZE,
         pool_max_size: int = KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE,
+        acquire_timeout_ms: int = KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS,
+        query_timeout_ms: int = KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS,
         start_retries: int = KNOWLEDGE_V2_POSTGRES_START_RETRIES,
         retry_base_seconds: float = KNOWLEDGE_V2_POSTGRES_RETRY_BASE_SECONDS,
     ) -> None:
@@ -151,6 +160,8 @@ class KnowledgeV2PostgresBackend:
         self._embedding_dimension = max(1, int(embedding_dimension))
         self._pool_min_size = max(1, int(pool_min_size))
         self._pool_max_size = max(self._pool_min_size, int(pool_max_size))
+        self._acquire_timeout_seconds = max(0.05, int(acquire_timeout_ms) / 1000)
+        self._query_timeout_seconds = max(0.1, int(query_timeout_ms) / 1000)
         self._start_retries = max(0, int(start_retries))
         self._retry_base_seconds = max(0.05, float(retry_base_seconds))
         self._ready = False
@@ -158,6 +169,12 @@ class KnowledgeV2PostgresBackend:
         self._ensure_lock = asyncio.Lock()
         self._pool: Any | None = None
         self._asyncpg: Any | None = None
+        self._direct_connection_gate = asyncio.Semaphore(self._pool_max_size)
+        self._direct_connections_in_flight = 0
+        self._pool_wait_timeout_total = 0
+        self._direct_wait_timeout_total = 0
+        self._query_timeout_total = 0
+        self._last_postgres_error = ""
 
     @property
     def enabled(self) -> bool:
@@ -219,9 +236,27 @@ class KnowledgeV2PostgresBackend:
             "pool_active": pool_active,
             "pool_min_size": self._pool_min_size,
             "pool_max_size": self._pool_max_size,
+            "pool_size": self._pool_size(),
+            "pool_idle": self._pool_idle_size(),
+            "pool_in_use": max(0, self._pool_size() - self._pool_idle_size()),
+            "acquire_timeout_ms": int(self._acquire_timeout_seconds * 1000),
+            "query_timeout_ms": int(self._query_timeout_seconds * 1000),
+            "idle_timeout_seconds": KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS,
+            "pool_wait_timeout_total": self._pool_wait_timeout_total,
+            "direct_wait_timeout_total": self._direct_wait_timeout_total,
+            "query_timeout_total": self._query_timeout_total,
+            "direct_connections_in_flight": self._direct_connections_in_flight,
+            "postgres_pool_max_size": self._pool_max_size,
+            "postgres_pool_idle": self._pool_idle_size(),
+            "postgres_pool_in_use": max(0, self._pool_size() - self._pool_idle_size()),
+            "postgres_acquire_timeout_ms": int(self._acquire_timeout_seconds * 1000),
+            "postgres_query_timeout_ms": int(self._query_timeout_seconds * 1000),
+            "postgres_wait_timeout_total": self._pool_wait_timeout_total,
+            "postgres_query_timeout_total": self._query_timeout_total,
+            "postgres_last_error": error or self._last_postgres_error,
             "probe_mode": probe_mode,
             "check_ok": check_ok,
-            "error": error,
+            "error": error or self._last_postgres_error,
             "cache": {},
             "ingest_queue": ingest_queue,
         }
@@ -229,9 +264,18 @@ class KnowledgeV2PostgresBackend:
     async def _probe_connectivity(self) -> tuple[bool, str, str]:
         try:
             async with self._probe_connection() as (conn, probe_mode):
-                await conn.fetchval("SELECT 1")
+                async with asyncio.timeout(self._query_timeout_seconds):
+                    await conn.fetchval("SELECT 1")
             return True, "", probe_mode
+        except TimeoutError:
+            self._query_timeout_total += 1
+            self._last_postgres_error = "postgres health query timed out"
+            return False, self._last_postgres_error, "unavailable"
+        except _PostgresAcquireTimeout as exc:
+            self._last_postgres_error = str(exc)
+            return False, str(exc), "unavailable"
         except Exception as exc:
+            self._last_postgres_error = str(exc)
             return False, str(exc), "unavailable"
 
     async def ensure_ready(self) -> bool:
@@ -248,8 +292,7 @@ class KnowledgeV2PostgresBackend:
             if self._ready:
                 return True
             try:
-                asyncpg = await self._load_asyncpg()
-                conn = await asyncpg.connect(self._dsn)
+                conn = await self._open_direct_connection()
                 try:
                     await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
                     await conn.execute(
@@ -297,7 +340,7 @@ class KnowledgeV2PostgresBackend:
                                 USING hnsw (embedding_vector vector_cosine_ops)"""
                         )
                 finally:
-                    await conn.close()
+                    await self._close_direct_connection(conn)
             except Exception:
                 log.exception("knowledge_v2_postgres_init_failed")
                 return False
@@ -328,20 +371,22 @@ class KnowledgeV2PostgresBackend:
             self._dsn,
             min_size=self._pool_min_size,
             max_size=self._pool_max_size,
+            timeout=self._acquire_timeout_seconds,
+            command_timeout=self._query_timeout_seconds,
+            max_inactive_connection_lifetime=max(1, KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS),
         )
 
     @asynccontextmanager
     async def _probe_connection(self) -> AsyncIterator[tuple[Any, str]]:
         if self._pool is not None and self._pool_loop_matches_current():
-            async with self._pool.acquire() as conn:
+            async with self._pooled_connection() as conn:
                 yield conn, "pool"
             return
-        asyncpg = await self._load_asyncpg()
-        conn = await asyncpg.connect(self._dsn)
+        conn = await self._open_direct_connection()
         try:
             yield conn, "direct"
         finally:
-            await conn.close()
+            await self._close_direct_connection(conn)
 
     def _pool_loop_matches_current(self) -> bool:
         """Return True when the cached pool is usable from the current loop.
@@ -368,19 +413,104 @@ class KnowledgeV2PostgresBackend:
             raise RuntimeError("knowledge_v2_postgres_backend_unavailable")
         await self._ensure_pool()
         if self._pool is not None and self._pool_loop_matches_current():
-            async with self._pool.acquire() as conn:
+            async with self._pooled_connection() as conn:
                 yield conn
             return
         # No pool for the current loop — fall back to a throwaway direct
         # connection rather than poisoning the cached pool. This happens
         # when a caller on a second event loop in the same process needs
         # DB access (worker main loop while bridge loop owns the pool).
-        asyncpg = await self._load_asyncpg()
-        conn = await asyncpg.connect(self._dsn)
+        conn = await self._open_direct_connection()
         try:
             yield conn
         finally:
+            await self._close_direct_connection(conn)
+
+    @asynccontextmanager
+    async def _pooled_connection(self) -> AsyncIterator[Any]:
+        context = self._pool_acquire_context()
+        try:
+            conn = await context.__aenter__()
+        except TimeoutError:
+            self._pool_wait_timeout_total += 1
+            self._last_postgres_error = "postgres pool acquire timed out"
+            raise _PostgresAcquireTimeout(self._last_postgres_error) from None
+        except Exception as exc:
+            self._last_postgres_error = str(exc)
+            raise
+        try:
+            yield conn
+        except BaseException as exc:
+            handled = await context.__aexit__(type(exc), exc, exc.__traceback__)
+            if not handled:
+                raise
+        else:
+            await context.__aexit__(None, None, None)
+
+    def _pool_acquire_context(self) -> Any:
+        """Acquire asyncpg pools with timeout while keeping lightweight test fakes usable."""
+        if self._pool is None:
+            raise RuntimeError("knowledge_v2_postgres_pool_unavailable")
+        try:
+            return self._pool.acquire(timeout=self._acquire_timeout_seconds)
+        except TypeError:
+            return self._pool.acquire()
+
+    async def _open_direct_connection(self) -> Any:
+        try:
+            await asyncio.wait_for(
+                self._direct_connection_gate.acquire(),
+                timeout=self._acquire_timeout_seconds,
+            )
+        except TimeoutError:
+            self._direct_wait_timeout_total += 1
+            self._last_postgres_error = "direct postgres connection lane saturated"
+            raise _PostgresAcquireTimeout(self._last_postgres_error) from None
+        self._direct_connections_in_flight += 1
+        try:
+            asyncpg = await self._load_asyncpg()
+            try:
+                return await asyncpg.connect(
+                    self._dsn,
+                    timeout=self._acquire_timeout_seconds,
+                    command_timeout=self._query_timeout_seconds,
+                )
+            except TypeError:
+                return await asyncpg.connect(self._dsn)
+        except Exception as exc:
+            self._last_postgres_error = str(exc)
+            self._direct_connections_in_flight = max(0, self._direct_connections_in_flight - 1)
+            self._direct_connection_gate.release()
+            raise
+
+    async def _close_direct_connection(self, conn: Any) -> None:
+        try:
             await conn.close()
+        finally:
+            self._direct_connections_in_flight = max(0, self._direct_connections_in_flight - 1)
+            self._direct_connection_gate.release()
+
+    def _pool_size(self) -> int:
+        if self._pool is None:
+            return 0
+        getter = getattr(self._pool, "get_size", None)
+        if callable(getter):
+            with suppress(Exception):
+                return max(0, int(getter()))
+        holders = getattr(self._pool, "_holders", None)
+        if holders is not None:
+            with suppress(Exception):
+                return max(0, len(holders))
+        return 0
+
+    def _pool_idle_size(self) -> int:
+        if self._pool is None:
+            return 0
+        getter = getattr(self._pool, "get_idle_size", None)
+        if callable(getter):
+            with suppress(Exception):
+                return max(0, int(getter()))
+        return 0
 
     def _invalidate_query_caches(self) -> None:
         return None
@@ -1405,11 +1535,15 @@ class KnowledgeV2PostgresBackend:
                            (user_id, agent_id, conflict_key, memory_status, created_at DESC)""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."memory_maintenance_log" (
                             id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT DEFAULT 'default',
                             operation TEXT NOT NULL,
                             memories_affected INTEGER DEFAULT 0,
                             details TEXT,
                             executed_at TEXT NOT NULL
                         )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_memory_maintenance_log_agent
+                           ON "{schema}"."memory_maintenance_log"
+                           (agent_id, executed_at DESC)""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."memory_recall_audit" (
                             id BIGSERIAL PRIMARY KEY,
                             agent_id TEXT,
@@ -2056,6 +2190,88 @@ class KnowledgeV2PostgresBackend:
                 ),
             ),
             _Migration(
+                "019b_scheduled_job_runs_lease_recovery_columns",
+                (
+                    # Added when scheduled_job_dispatcher started recovering
+                    # expired leases. Without these columns the recovery query
+                    # crashes the runtime on boot and the supervisor enters a
+                    # restart loop, never delivering user messages.
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS lease_recovery_count INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS last_recovered_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS trace_id TEXT""",
+                ),
+            ),
+            _Migration(
+                "019c_provider_session_map",
+                (
+                    # Maps koda's canonical session id ↔ provider-native session
+                    # id (Claude/Codex/Gemini resume tokens). Used by the
+                    # llm_runner fallback chain and by history_store when the
+                    # operator switches providers mid-conversation. Missing
+                    # this table causes "relation does not exist" the moment
+                    # the agent tries to persist its first turn.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."provider_session_map" (
+                            canonical_session_id TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            provider_session_id TEXT NOT NULL,
+                            last_model TEXT,
+                            last_used TEXT NOT NULL,
+                            PRIMARY KEY (canonical_session_id, provider)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_provider_session_map_last_used
+                           ON "{schema}"."provider_session_map" (last_used DESC)""",
+                ),
+            ),
+            _Migration(
+                "019d_sessions_table",
+                (
+                    # Per-user conversation sessions tracked by history_store.
+                    # The worker logs every user-initiated turn as a row here so
+                    # /sessions can list past conversations and the LLM runner
+                    # can resume the right provider-native session id. Missing
+                    # this table makes the first message of every user fail
+                    # with "relation 'sessions' does not exist".
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."sessions" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL DEFAULT 'KODA',
+                            user_id BIGINT NOT NULL,
+                            session_id TEXT NOT NULL,
+                            name TEXT,
+                            provider TEXT NOT NULL,
+                            provider_session_id TEXT,
+                            last_model TEXT,
+                            created_at TEXT NOT NULL,
+                            last_used TEXT NOT NULL,
+                            UNIQUE (user_id, session_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_user_last_used
+                           ON "{schema}"."sessions" (user_id, last_used DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_last_used
+                           ON "{schema}"."sessions" (agent_id, last_used DESC)""",
+                ),
+            ),
+            _Migration(
+                "019e_scheduled_jobs_policy_snapshot_columns",
+                (
+                    # Added when the scheduler began capturing a policy
+                    # snapshot for every job (model_policy + tool_policy at
+                    # creation time, hashed for change detection) and a
+                    # `config_version` for idempotent updates. Without these
+                    # columns the INSERT in scheduled_jobs.create_job fails
+                    # silently inside the LLM turn pipeline and the agent
+                    # stops responding to user messages.
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS policy_snapshot_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS policy_snapshot_hash TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS config_version INTEGER NOT NULL DEFAULT 1""",
+                ),
+            ),
+            _Migration(
                 "019_knowledge_governance_tables",
                 (
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."knowledge_candidates" (
@@ -2180,6 +2396,319 @@ class KnowledgeV2PostgresBackend:
                     f"""CREATE INDEX IF NOT EXISTS idx_knowledge_source_registry_lookup
                            ON "{schema}"."knowledge_source_registry"
                            (agent_id, status, is_canonical, updated_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "020_telegram_offsets",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_telegram_offsets" (
+                            agent_id TEXT PRIMARY KEY,
+                            last_update_id BIGINT NOT NULL DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                ),
+            ),
+            _Migration(
+                "021_bot_gateway",
+                (
+                    # Token registry — one row per agent. The bot-gateway
+                    # service polls Telegram on behalf of every registered
+                    # bot. ``bot_token`` is treated as a secret; gateway
+                    # logs redact it via the koda-security-core helpers.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_bot_gateway_tokens" (
+                            agent_id TEXT PRIMARY KEY,
+                            bot_token TEXT NOT NULL,
+                            registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    # Durable per-agent queue. Gateway INSERTs each Update
+                    # before advancing Telegram's polling offset, so a
+                    # restart never loses messages. Subscribers consume
+                    # rows in order and DELETE them via AcknowledgeUpdate
+                    # to confirm processing (at-least-once delivery).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_telegram_pending_updates" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            update_id BIGINT NOT NULL,
+                            payload_json JSONB NOT NULL,
+                            queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, update_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_telegram_pending_updates_lookup
+                           ON "{schema}"."cp_telegram_pending_updates"
+                           (agent_id, queued_at, id)""",
+                ),
+            ),
+            _Migration(
+                "022_policy_engine",
+                (
+                    # Per-workspace policy: rate, concurrency and spend caps.
+                    # ``enabled=false`` makes the policy-engine a no-op for that
+                    # workspace (used by single-tenant deployments that don't
+                    # care about isolation yet).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy" (
+                            workspace_id TEXT PRIMARY KEY,
+                            max_concurrent_agents INTEGER NOT NULL DEFAULT 0,
+                            max_messages_per_minute INTEGER NOT NULL DEFAULT 0,
+                            monthly_llm_spend_usd_cap DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            spend_warning_fraction DOUBLE PRECISION NOT NULL DEFAULT 0.8,
+                            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    # Append-only ledger of LLM spend. Aggregated lazily into
+                    # ``cp_policy_spend_window`` for fast cap decisions.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy_spend_ledger" (
+                            id BIGSERIAL PRIMARY KEY,
+                            workspace_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            cost_usd DOUBLE PRECISION NOT NULL,
+                            provider TEXT NOT NULL DEFAULT '',
+                            model TEXT NOT NULL DEFAULT '',
+                            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_policy_spend_lookup
+                           ON "{schema}"."cp_policy_spend_ledger"
+                           (workspace_id, recorded_at DESC)""",
+                    # Running monthly spend per workspace. Updated atomically
+                    # by RecordSpend so the hard-stop decision is sub-ms.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_policy_spend_window" (
+                            workspace_id TEXT PRIMARY KEY,
+                            window_start TIMESTAMPTZ NOT NULL,
+                            spent_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                ),
+            ),
+            _Migration(
+                "023_mcp_resources_prompts_custom",
+                (
+                    # Per-agent user-defined MCP servers (custom JSON paste / form).
+                    # System-wide custom rows live in cp_mcp_server_catalog with
+                    # is_custom=1; per-agent variants live here.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_user_servers" (
+                            server_key TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            owner_user_id TEXT,
+                            display_name TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            transport_type TEXT NOT NULL DEFAULT 'stdio',
+                            command_json TEXT NOT NULL DEFAULT '[]',
+                            args_json TEXT NOT NULL DEFAULT '[]',
+                            url TEXT,
+                            headers_schema_json TEXT NOT NULL DEFAULT '[]',
+                            env_schema_json TEXT NOT NULL DEFAULT '[]',
+                            auth_strategy TEXT NOT NULL DEFAULT 'no_auth',
+                            oauth_config_json TEXT NOT NULL DEFAULT '{{}}',
+                            isolation_profile TEXT NOT NULL DEFAULT 'auto',
+                            isolation_constraints_json TEXT NOT NULL DEFAULT '{{}}',
+                            runtime_constraints_json TEXT NOT NULL DEFAULT '[]',
+                            source TEXT NOT NULL DEFAULT 'manual',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            validation_signature TEXT,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (server_key, agent_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_user_servers_agent
+                           ON "{schema}"."cp_mcp_user_servers" (agent_id)""",
+                    # Capability snapshot cache (initialize + tools/list +
+                    # resources/list + prompts/list). One row per
+                    # (agent_id, server_key); refreshed on demand.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_capability_snapshots" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            server_info_json TEXT NOT NULL DEFAULT '{{}}',
+                            server_capabilities_json TEXT NOT NULL DEFAULT '{{}}',
+                            tools_json TEXT NOT NULL DEFAULT '[]',
+                            resources_json TEXT NOT NULL DEFAULT '[]',
+                            resource_templates_json TEXT NOT NULL DEFAULT '[]',
+                            prompts_json TEXT NOT NULL DEFAULT '[]',
+                            captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            ttl_seconds INTEGER NOT NULL DEFAULT 3600,
+                            error TEXT,
+                            PRIMARY KEY (agent_id, server_key)
+                        )""",
+                    # Discovered resources (data sources exposed by MCP server).
+                    # uri_hash is sha256(uri) — used as PK component to keep
+                    # the key short for long URIs.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_discovered_resources" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            uri_hash TEXT NOT NULL,
+                            uri TEXT NOT NULL,
+                            name TEXT,
+                            description TEXT,
+                            mime_type TEXT,
+                            is_template INTEGER NOT NULL DEFAULT 0,
+                            annotations_json TEXT NOT NULL DEFAULT '{{}}',
+                            schema_hash TEXT NOT NULL DEFAULT '',
+                            discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, uri_hash)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_discovered_resources_lookup
+                           ON "{schema}"."cp_mcp_discovered_resources" (agent_id, server_key)""",
+                    # Discovered prompts (reusable prompt templates exposed by MCP).
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_discovered_prompts" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            prompt_name TEXT NOT NULL,
+                            description TEXT,
+                            arguments_json TEXT NOT NULL DEFAULT '[]',
+                            schema_hash TEXT NOT NULL DEFAULT '',
+                            discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, prompt_name)
+                        )""",
+                    # Unified per-capability policy table. Replaces the
+                    # tools-only cp_mcp_tool_policies; capability_kind
+                    # discriminates between tool / resource / prompt rows.
+                    # The legacy table stays untouched until a future cleanup.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_mcp_capability_policies" (
+                            agent_id TEXT NOT NULL,
+                            server_key TEXT NOT NULL,
+                            capability_kind TEXT NOT NULL,
+                            capability_name TEXT NOT NULL,
+                            policy TEXT NOT NULL DEFAULT 'auto',
+                            exposure_mode TEXT,
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (agent_id, server_key, capability_kind, capability_name)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_cp_mcp_capability_policies_lookup
+                           ON "{schema}"."cp_mcp_capability_policies"
+                           (agent_id, server_key, capability_kind)""",
+                    # Backfill: copy existing tool policies into the new table
+                    # so reads can transition without losing state. Idempotent
+                    # via ON CONFLICT DO NOTHING.
+                    f"""INSERT INTO "{schema}"."cp_mcp_capability_policies"
+                           (agent_id, server_key, capability_kind, capability_name, policy, updated_at)
+                           SELECT agent_id, server_key, 'tool', tool_name, policy, updated_at::timestamptz
+                           FROM "{schema}"."cp_mcp_tool_policies"
+                           ON CONFLICT DO NOTHING""",
+                    # ALTERs on cp_mcp_server_catalog for custom servers + isolation +
+                    # runtime token placement (where the OAuth/api_key token goes
+                    # at runtime: env var, auth header, or url param).
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS is_custom INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS isolation_profile TEXT NOT NULL DEFAULT 'auto'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS isolation_constraints_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS runtime_token_placement TEXT NOT NULL DEFAULT 'env_var'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_env_key TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_header_name TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS token_header_template TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS owner_user_id TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'curated'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_server_catalog"
+                           ADD COLUMN IF NOT EXISTS validation_signature TEXT""",
+                    # ALTER on oauth_sessions to add HMAC binding (defense in
+                    # depth against state replay across sessions).
+                    f"""ALTER TABLE "{schema}"."cp_mcp_oauth_sessions"
+                           ADD COLUMN IF NOT EXISTS state_hmac TEXT""",
+                ),
+            ),
+            _Migration(
+                "024_supervisor_cluster",
+                (
+                    # leader-elected agent placement so a fleet of
+                    # supervisor instances can host the same active set without
+                    # two of them spawning duplicate workers for the same
+                    # agent. ``supervisor_id`` identifies the claiming process
+                    # (uuid generated at boot); ``heartbeat_at`` is refreshed
+                    # on every reconcile and other supervisors reap claims
+                    # whose heartbeat is older than
+                    # ``KODA_CLUSTER_HEARTBEAT_STALE_SECONDS``.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_agent_assignments" (
+                            agent_id TEXT PRIMARY KEY,
+                            supervisor_id TEXT NOT NULL,
+                            claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            version INTEGER NOT NULL DEFAULT 0,
+                            draining BOOLEAN NOT NULL DEFAULT FALSE
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_agent_assignments_supervisor
+                           ON "{schema}"."cp_agent_assignments"
+                           (supervisor_id, heartbeat_at DESC)""",
+                    # supervisor runtime registry. Used by the
+                    # blue/green drain protocol: setting ``draining=TRUE``
+                    # for a supervisor causes the cluster module to release
+                    # its claims on next heartbeat instead of refreshing
+                    # them, so a rolling deploy hands work to the new
+                    # version without dropping in-flight requests.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_supervisor_runtimes" (
+                            supervisor_id TEXT PRIMARY KEY,
+                            version TEXT NOT NULL DEFAULT '',
+                            host TEXT NOT NULL DEFAULT '',
+                            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            draining BOOLEAN NOT NULL DEFAULT FALSE,
+                            capacity INTEGER NOT NULL DEFAULT 0
+                        )""",
+                ),
+            ),
+            _Migration(
+                "025_task_leases",
+                (
+                    # Per-task lease ownership for crash-safe orchestration.
+                    # ``lease_owner`` is the worker process UUID generated at
+                    # boot; ``lease_expires_at`` is the point past which any
+                    # other worker (or the janitor) is free to reclaim the
+                    # row. Acquisition, renewal, completion and reaping all
+                    # run as single atomic UPDATEs scoped to ``lease_owner``,
+                    # so two workers cannot execute the same task and a
+                    # crashed worker cannot resurrect a task that the janitor
+                    # already requeued.
+                    f"""ALTER TABLE "{schema}"."tasks"
+                           ADD COLUMN IF NOT EXISTS lease_owner TEXT""",
+                    f"""ALTER TABLE "{schema}"."tasks"
+                           ADD COLUMN IF NOT EXISTS lease_expires_at TEXT""",
+                    # Janitor sweep filter: scans active rows whose lease has
+                    # expired (or was never set, for legacy stuck rows). The
+                    # partial index keeps this O(stale rows) instead of
+                    # O(all tasks) on agents with long history.
+                    f"""CREATE INDEX IF NOT EXISTS idx_tasks_lease_sweep
+                           ON "{schema}"."tasks"
+                           (agent_id, lease_expires_at)
+                           WHERE status IN ('running', 'retrying')""",
+                ),
+            ),
+            _Migration(
+                "026_memory_truthful_status_and_agent_maintenance",
+                (
+                    f"""ALTER TABLE "{schema}"."memory_maintenance_log"
+                           ADD COLUMN IF NOT EXISTS agent_id TEXT DEFAULT 'default'""",
+                    f"""UPDATE "{schema}"."memory_maintenance_log"
+                           SET agent_id = 'default'
+                           WHERE agent_id IS NULL OR agent_id = ''""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_memory_maintenance_log_agent
+                           ON "{schema}"."memory_maintenance_log"
+                           (agent_id, executed_at DESC)""",
+                    f"""UPDATE "{schema}"."napkin_log"
+                           SET embedding_status = 'lexical_ready'
+                           WHERE COALESCE(embedding_status, '') = 'ready'
+                             AND COALESCE(vector_ref_id, '') = ''""",
+                ),
+            ),
+            _Migration(
+                "027_sessions_agent_scope",
+                (
+                    f"""ALTER TABLE "{schema}"."sessions"
+                           ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT 'KODA'""",
+                    f"""UPDATE "{schema}"."sessions"
+                           SET agent_id = 'KODA'
+                           WHERE agent_id IS NULL OR agent_id = ''""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_last_used
+                           ON "{schema}"."sessions" (agent_id, last_used DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_session
+                           ON "{schema}"."sessions" (agent_id, session_id)""",
                 ),
             ),
         )

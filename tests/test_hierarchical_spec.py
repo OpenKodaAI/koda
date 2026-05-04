@@ -16,9 +16,7 @@ from koda.control_plane.agent_spec import (
     normalize_workspace_spec,
 )
 
-# ---------------------------------------------------------------------------
 # normalize_workspace_spec
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeWorkspaceSpec:
@@ -76,9 +74,7 @@ class TestNormalizeWorkspaceSpec:
         assert result == {}
 
 
-# ---------------------------------------------------------------------------
 # normalize_squad_spec
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeSquadSpec:
@@ -137,9 +133,7 @@ class TestNormalizeSquadSpec:
         assert result["knowledge_policy"]["custom_field"] == "should be kept"
 
 
-# ---------------------------------------------------------------------------
 # merge_hierarchical_spec
-# ---------------------------------------------------------------------------
 
 
 class TestMergeHierarchicalSpec:
@@ -248,9 +242,7 @@ class TestMergeHierarchicalSpec:
         assert rules.count("shared rule") == 1
 
 
-# ---------------------------------------------------------------------------
 # merge_hierarchical_documents
-# ---------------------------------------------------------------------------
 
 
 class TestMergeHierarchicalDocuments:
@@ -296,9 +288,7 @@ class TestMergeHierarchicalDocuments:
         assert "Agent instructions" in result["instructions_md"]
 
 
-# ---------------------------------------------------------------------------
 # Prompt budget origin detection
-# ---------------------------------------------------------------------------
 
 
 class TestPromptBudgetOrigin:
@@ -335,9 +325,7 @@ class TestPromptBudgetOrigin:
         assert seg["origin"] == "workspace"
 
 
-# ---------------------------------------------------------------------------
 # API endpoint tests (mock manager)
-# ---------------------------------------------------------------------------
 
 
 class TestWorkspaceSpecAPI:
@@ -392,9 +380,7 @@ class TestWorkspaceSpecAPI:
         assert "system_prompt_md" in result["documents"]
 
 
-# ---------------------------------------------------------------------------
 # Integration: normalize + merge round-trip
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeMergeRoundTrip:
@@ -434,9 +420,7 @@ class TestNormalizeMergeRoundTrip:
         assert "No secrets in logs" in merged["hard_rules"]["security_rules"]
 
 
-# ---------------------------------------------------------------------------
 # In-memory DB stub for integration tests (#4)
-# ---------------------------------------------------------------------------
 
 
 class _DictRow(dict):
@@ -595,9 +579,7 @@ def hierarchy_manager(monkeypatch: pytest.MonkeyPatch):
     return mgr, db
 
 
-# ---------------------------------------------------------------------------
 # #4: Integration tests with real manager CRUD
-# ---------------------------------------------------------------------------
 
 
 class TestManagerIntegrationCRUD:
@@ -672,9 +654,7 @@ class TestManagerIntegrationCRUD:
             mgr.get_squad_spec("ws-acme", "sq-other")
 
 
-# ---------------------------------------------------------------------------
 # #5: Budget test with 3-level merged prompt
-# ---------------------------------------------------------------------------
 
 
 class TestBudgetThreeLevelMerge:
@@ -749,7 +729,7 @@ class TestBudgetThreeLevelMerge:
         planner = PromptBudgetPlanner(context_window=200_000)
         result = planner.compile(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             segments=segments,
         )
 
@@ -799,7 +779,7 @@ class TestBudgetThreeLevelMerge:
         planner = PromptBudgetPlanner(context_window=8_000)
         result = planner.compile(
             provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             segments=segments,
         )
 
@@ -807,9 +787,7 @@ class TestBudgetThreeLevelMerge:
         assert len(result.dropped_segments) > 0 or result.compiled_tokens <= result.max_input_tokens
 
 
-# ---------------------------------------------------------------------------
 # #6: Squad with mismatched workspace_id excluded from merge
-# ---------------------------------------------------------------------------
 
 
 class TestResolveHierarchicalSpecSquadMismatch:

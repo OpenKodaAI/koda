@@ -9,10 +9,12 @@ import hashlib
 import json
 import os
 import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime, timedelta
+from email.message import Message
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -22,14 +24,37 @@ from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 
+_OAUTH_DISCOVERY_CACHE_TTL_SECONDS = 300
+_OAUTH_DISCOVERY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
-def _sync_http_get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+
+def _sync_http_get_response(
+    url: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], str]:
     req = urllib.request.Request(url, method="GET")
     req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", "Koda MCP OAuth/1.0")
     for key, value in (headers or {}).items():
         req.add_header(key, value)
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-        body = resp.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            body = resp.read().decode("utf-8")
+            response_headers = {str(key): str(value) for key, value in resp.headers.items()}
+            return int(resp.status), response_headers, body
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        response_headers = {str(key): str(value) for key, value in exc.headers.items()}
+        return int(exc.code), response_headers, body
+
+
+def _sync_http_get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    status, response_headers, body = _sync_http_get_response(url, headers)
+    if status >= 400:
+        error_headers = Message()
+        for key, value in response_headers.items():
+            error_headers[key] = value
+        raise urllib.error.HTTPError(url, status, body or f"HTTP {status}", error_headers, None)
     return json.loads(body) if body else {}
 
 
@@ -118,38 +143,266 @@ def _build_code_challenge(code_verifier: str) -> str:
 
 
 def _metadata_candidates(row: Any) -> list[str]:
+    return _legacy_authorization_metadata_candidates(row)
+
+
+def _append_unique(target: list[str], value: str) -> None:
+    normalized = str(value or "").strip()
+    if normalized and normalized not in target:
+        target.append(normalized)
+
+
+def _header_value(headers: dict[str, str], name: str) -> str:
+    expected = name.lower()
+    for key, value in headers.items():
+        if key.lower() == expected:
+            return value
+    return ""
+
+
+def _parse_www_authenticate_header(header: str) -> dict[str, str]:
+    value = str(header or "").strip()
+    if not value:
+        return {}
+    if " " in value:
+        scheme, remainder = value.split(" ", 1)
+    else:
+        scheme, remainder = value, ""
+    result: dict[str, str] = {"scheme": scheme.strip()}
+    parts: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    escaped = False
+    for char in remainder:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_quotes:
+            escaped = True
+            continue
+        if char == '"':
+            in_quotes = not in_quotes
+            current.append(char)
+            continue
+        if char == "," and not in_quotes:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, raw_value = part.split("=", 1)
+        cleaned = raw_value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == '"' and cleaned[-1] == '"':
+            cleaned = cleaned[1:-1]
+        result[key.strip().lower()] = cleaned
+    return result
+
+
+def _url_origin_and_path(url: str) -> tuple[str, str]:
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return "", ""
+    origin = f"{parts.scheme}://{parts.netloc}"
+    path = parts.path.rstrip("/")
+    return origin, path
+
+
+def _protected_resource_metadata_candidates(row: Any, www_authenticate_header: str = "") -> list[str]:
+    metadata_json = _safe_json_object(json_load(str(row.get("metadata_json") or "{}"), {}))
+    candidates: list[str] = []
+    _append_unique(candidates, _safe_text(metadata_json.get("oauth_protected_resource_metadata_url")))
+    auth_params = _parse_www_authenticate_header(www_authenticate_header)
+    _append_unique(candidates, auth_params.get("resource_metadata") or "")
+
+    remote_url = str(row.get("remote_url") or row.get("url") or "").strip()
+    origin, path = _url_origin_and_path(remote_url)
+    if not origin:
+        return candidates
+    if path:
+        _append_unique(candidates, f"{origin}/.well-known/oauth-protected-resource{path}")
+    _append_unique(candidates, f"{origin}/.well-known/oauth-protected-resource")
+    return candidates
+
+
+def _authorization_server_metadata_candidates(issuer: str) -> list[str]:
+    value = str(issuer or "").strip().rstrip("/")
+    if not value:
+        return []
+    if "/.well-known/" in value:
+        return [value]
+    origin, path = _url_origin_and_path(value)
+    candidates: list[str] = []
+    if origin:
+        if path:
+            _append_unique(candidates, f"{origin}/.well-known/oauth-authorization-server{path}")
+            _append_unique(candidates, f"{origin}/.well-known/openid-configuration{path}")
+        _append_unique(candidates, f"{origin}/.well-known/oauth-authorization-server")
+        _append_unique(candidates, f"{origin}/.well-known/openid-configuration")
+    _append_unique(candidates, f"{value}/.well-known/oauth-authorization-server")
+    _append_unique(candidates, f"{value}/.well-known/openid-configuration")
+    return candidates
+
+
+def _legacy_authorization_metadata_candidates(row: Any) -> list[str]:
+    metadata_json = _safe_json_object(json_load(str(row.get("metadata_json") or "{}"), {}))
+    candidates: list[str] = []
     explicit = str(row.get("oauth_metadata_url") or "").strip()
-    if explicit:
-        return [explicit]
+    _append_unique(candidates, explicit)
+    _append_unique(candidates, _safe_text(metadata_json.get("oauth_authorization_server_metadata_url")))
     remote_url = str(row.get("remote_url") or row.get("url") or "").strip()
     if not remote_url:
-        return []
-    parts = urlsplit(remote_url)
-    origin = f"{parts.scheme}://{parts.netloc}"
-    return [
-        f"{origin}/.well-known/oauth-authorization-server",
-        f"{origin}/.well-known/openid-configuration",
-    ]
+        return candidates
+    origin, _path = _url_origin_and_path(remote_url)
+    if origin:
+        _append_unique(candidates, f"{origin}/.well-known/oauth-authorization-server")
+        _append_unique(candidates, f"{origin}/.well-known/openid-configuration")
+    return candidates
+
+
+def _oauth_metadata_cache_key(row: Any) -> str:
+    return json.dumps(
+        {
+            "server_key": str(row.get("server_key") or ""),
+            "remote_url": str(row.get("remote_url") or row.get("url") or ""),
+            "oauth_metadata_url": str(row.get("oauth_metadata_url") or ""),
+            "metadata_json": str(row.get("metadata_json") or "{}"),
+        },
+        sort_keys=True,
+    )
+
+
+def _is_authorization_server_metadata(metadata: dict[str, Any]) -> bool:
+    return bool(_safe_text(metadata.get("authorization_endpoint")) and _safe_text(metadata.get("token_endpoint")))
+
+
+def _is_protected_resource_metadata(metadata: dict[str, Any]) -> bool:
+    return isinstance(metadata.get("authorization_servers"), list)
+
+
+def _authorization_servers_from_protected(metadata: dict[str, Any]) -> list[str]:
+    servers = metadata.get("authorization_servers")
+    result: list[str] = []
+    if isinstance(servers, list):
+        for item in servers:
+            _append_unique(result, str(item or ""))
+    _append_unique(result, _safe_text(metadata.get("authorization_server")))
+    return result
+
+
+def _validate_protected_resource_metadata(metadata: dict[str, Any]) -> None:
+    bearer_methods = metadata.get("bearer_methods_supported")
+    if not isinstance(bearer_methods, list):
+        return
+    normalized = {str(method).strip().lower() for method in bearer_methods}
+    if normalized and "header" not in normalized:
+        raise ValueError("bearer_header_not_supported")
+
+
+async def _fetch_www_authenticate_header(remote_url: str) -> str:
+    if not remote_url:
+        return ""
+    loop = asyncio.get_running_loop()
+    try:
+        _status, headers, _body = await loop.run_in_executor(None, _sync_http_get_response, remote_url, None)
+    except Exception:
+        return ""
+    return _header_value(headers, "WWW-Authenticate")
+
+
+async def _fetch_json_metadata(candidate: str) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _sync_http_get_json, candidate, None)
+
+
+async def _resolve_authorization_server_metadata(
+    protected_metadata: dict[str, Any],
+    fallback_resource: str,
+) -> dict[str, Any]:
+    _validate_protected_resource_metadata(protected_metadata)
+    last_error: Exception | None = None
+    for issuer in _authorization_servers_from_protected(protected_metadata):
+        for candidate in _authorization_server_metadata_candidates(issuer):
+            try:
+                authorization_metadata = await _fetch_json_metadata(candidate)
+            except Exception as exc:
+                last_error = exc
+                continue
+            if not _is_authorization_server_metadata(authorization_metadata):
+                last_error = ValueError(f"authorization_server_metadata_invalid: {candidate}")
+                continue
+            authorization_metadata["__protected_resource_metadata"] = protected_metadata
+            authorization_metadata["__resource"] = _safe_text(protected_metadata.get("resource")) or fallback_resource
+            authorization_metadata["__authorization_server"] = issuer
+            authorization_metadata["__authorization_server_metadata_url"] = candidate
+            return authorization_metadata
+    if last_error is not None:
+        raise ValueError(f"authorization_server_metadata_not_found: {last_error}") from last_error
+    raise ValueError("authorization_server_metadata_not_found")
 
 
 async def _discover_oauth_metadata(row: Any) -> dict[str, Any]:
-    loop = asyncio.get_running_loop()
+    cache_key = _oauth_metadata_cache_key(row)
+    cached = _OAUTH_DISCOVERY_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and cached[0] > now:
+        return dict(cached[1])
+
+    remote_url = str(row.get("remote_url") or row.get("url") or "").strip()
+    www_authenticate_header = await _fetch_www_authenticate_header(remote_url)
     last_error: Exception | None = None
-    for candidate in _metadata_candidates(row):
+
+    for candidate in _protected_resource_metadata_candidates(row, www_authenticate_header):
         try:
-            return await loop.run_in_executor(None, _sync_http_get_json, candidate, None)
+            protected_metadata = await _fetch_json_metadata(candidate)
         except Exception as exc:
             last_error = exc
             continue
+        try:
+            metadata = await _resolve_authorization_server_metadata(protected_metadata, remote_url)
+        except Exception as exc:
+            last_error = exc
+            continue
+        _OAUTH_DISCOVERY_CACHE[cache_key] = (time.monotonic() + _OAUTH_DISCOVERY_CACHE_TTL_SECONDS, metadata)
+        return dict(metadata)
+
+    for candidate in _legacy_authorization_metadata_candidates(row):
+        try:
+            metadata = await _fetch_json_metadata(candidate)
+        except Exception as exc:
+            last_error = exc
+            continue
+        if _is_protected_resource_metadata(metadata):
+            try:
+                metadata = await _resolve_authorization_server_metadata(metadata, remote_url)
+            except Exception as exc:
+                last_error = exc
+                continue
+        if not _is_authorization_server_metadata(metadata):
+            last_error = ValueError(f"authorization_server_metadata_invalid: {candidate}")
+            continue
+        metadata.setdefault("__resource", remote_url)
+        metadata.setdefault("__authorization_server_metadata_url", candidate)
+        _OAUTH_DISCOVERY_CACHE[cache_key] = (time.monotonic() + _OAUTH_DISCOVERY_CACHE_TTL_SECONDS, metadata)
+        return dict(metadata)
+
     if last_error is not None:
         raise ValueError(f"oauth_metadata_discovery_failed: {last_error}") from last_error
-    raise ValueError("oauth_metadata_not_configured")
+    raise ValueError("resource_metadata_not_found")
 
 
 def _scopes_for_server(row: Any, metadata: dict[str, Any]) -> str:
     custom = _safe_text(json_load(str(row.get("metadata_json") or "{}"), {}).get("oauth_scopes"))
     if custom:
         return custom
+    protected_metadata = _safe_json_object(metadata.get("__protected_resource_metadata"))
+    supported = protected_metadata.get("scopes_supported")
+    if isinstance(supported, list):
+        return " ".join(str(scope) for scope in supported if str(scope).strip())
     supported = metadata.get("scopes_supported")
     if isinstance(supported, list):
         return " ".join(str(scope) for scope in supported if str(scope).strip())
@@ -168,6 +421,11 @@ async def _build_oauth_context(server_key: str, redirect_uri: str) -> dict[str, 
     revocation_url = _safe_text(oauth_metadata.get("revocation_endpoint") or metadata_json.get("revocation_url"))
     if not authorization_url or not token_url:
         raise ValueError("oauth_endpoints_not_available")
+    challenge_methods = oauth_metadata.get("code_challenge_methods_supported")
+    if isinstance(challenge_methods, list):
+        normalized = {str(method).strip().upper() for method in challenge_methods}
+        if normalized and "S256" not in normalized:
+            raise ValueError("pkce_s256_not_supported")
 
     context: dict[str, Any] = {
         "server_key": server_key,
@@ -176,6 +434,9 @@ async def _build_oauth_context(server_key: str, redirect_uri: str) -> dict[str, 
         "token_url": token_url,
         "revocation_url": revocation_url,
         "redirect_uri": redirect_uri,
+        "resource": _safe_text(oauth_metadata.get("__resource")),
+        "authorization_server": _safe_text(oauth_metadata.get("__authorization_server")),
+        "protected_resource_metadata": _safe_json_object(oauth_metadata.get("__protected_resource_metadata")),
         "scopes": _scopes_for_server(row, oauth_metadata),
         "extra_auth_params": _safe_json_object(metadata_json.get("extra_auth_params")),
         "token_exchange_auth": "body",
@@ -186,16 +447,23 @@ async def _build_oauth_context(server_key: str, redirect_uri: str) -> dict[str, 
             oauth_metadata.get("registration_endpoint") or metadata_json.get("registration_endpoint")
         )
         if not registration_endpoint:
-            raise ValueError("oauth_registration_endpoint_not_available")
-        context.update(await _register_dynamic_client(server_key, registration_endpoint, redirect_uri, metadata_json))
+            raise ValueError("dcr_failed: registration_endpoint_not_available")
+        try:
+            context.update(
+                await _register_dynamic_client(server_key, registration_endpoint, redirect_uri, metadata_json)
+            )
+        except Exception as exc:
+            raise ValueError(f"dcr_failed: {exc}") from exc
     elif oauth_mode == "confidential":
         client_id = _oauth_env(server_key, "CLIENT_ID")
         client_secret = _oauth_env(server_key, "CLIENT_SECRET")
         if not client_id or not client_secret:
-            raise ValueError(f"missing OAuth client credentials for {server_key}")
+            raise ValueError(f"missing_client_credentials:{server_key}")
         methods = oauth_metadata.get("token_endpoint_auth_methods_supported")
         if isinstance(methods, list) and "client_secret_basic" in methods:
             token_exchange_auth = "basic"
+        elif isinstance(methods, list) and "client_secret_post" in methods:
+            token_exchange_auth = "body"
         else:
             token_exchange_auth = _safe_text(metadata_json.get("token_exchange_auth")) or "body"
         context.update(
@@ -290,6 +558,8 @@ async def start_oauth_flow(
     }
     if oauth_context.get("scopes"):
         params["scope"] = str(oauth_context["scopes"])
+    if oauth_context.get("resource"):
+        params["resource"] = str(oauth_context["resource"])
     for key, value in _safe_json_object(oauth_context.get("extra_auth_params")).items():
         if value not in (None, ""):
             params[str(key)] = str(value)
@@ -355,6 +625,8 @@ async def handle_oauth_callback(state: str, code: str, error: str | None = None)
         "client_id": client_id,
         "code_verifier": code_verifier,
     }
+    if oauth_context.get("resource"):
+        token_data["resource"] = str(oauth_context["resource"])
     headers: dict[str, str] = {}
     if client_secret:
         if token_exchange_auth == "basic":
@@ -467,6 +739,8 @@ async def refresh_oauth_token(agent_id: str, server_key: str) -> dict[str, Any]:
         "refresh_token": refresh_token,
         "client_id": client_id,
     }
+    if oauth_context.get("resource"):
+        token_data["resource"] = str(oauth_context["resource"])
     headers: dict[str, str] = {}
     if client_secret:
         if token_exchange_auth == "basic":

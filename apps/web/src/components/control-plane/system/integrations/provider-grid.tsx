@@ -24,9 +24,7 @@ import {
   integrationCardRootClassName,
 } from "./integration-card-presentation";
 
-/* ------------------------------------------------------------------ */
 /*  Category labels for provider types                                 */
-/* ------------------------------------------------------------------ */
 
 const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   general: "LLM",
@@ -34,9 +32,7 @@ const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   media: "Mídia",
 };
 
-/* ------------------------------------------------------------------ */
 /*  Transition variants                                                */
-/* ------------------------------------------------------------------ */
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -54,9 +50,7 @@ const viewOut = {
   transition: { duration: 0.28, ease: EASE },
 } as const;
 
-/* ------------------------------------------------------------------ */
 /*  Provider card (matching IntegrationCard layout)                    */
-/* ------------------------------------------------------------------ */
 
 function ProviderCard({
   provider,
@@ -97,9 +91,7 @@ function ProviderCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Provider detail view (matches integration detail layout)           */
-/* ------------------------------------------------------------------ */
 
 const PROVIDER_CATEGORY_DISPLAY: Record<string, string> = {
   general: "LLM",
@@ -113,7 +105,6 @@ const PROVIDER_HIGHLIGHT_COPY: Record<string, string> = {
   gemini: "Google Gemini para geração multimodal, AI Studio e autenticação oficial via Gemini CLI.",
   elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por agent.",
   ollama: "Ollama para modelos locais ou remotos com descoberta real do catálogo no endpoint configurado.",
-  sora: "Sora amplia os fluxos de mídia da OpenAI para geração visual e vídeo quando disponível.",
   kokoro: "Kokoro entrega TTS local com vozes sob demanda e operação otimizada para ambientes self-hosted.",
   whispercpp: "Whisper.cpp mantém transcrição local com runtime leve para ambientes controlados.",
 };
@@ -264,9 +255,7 @@ function ProviderDetailView({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Provider grid (list view)                                          */
-/* ------------------------------------------------------------------ */
 
 function ProviderListView({
   onSelect,
@@ -373,9 +362,7 @@ function ProviderListView({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Main export: manages list ↔ detail switching                       */
-/* ------------------------------------------------------------------ */
 
 export function ProviderGrid() {
   const { providerOptions } = useSystemSettings();

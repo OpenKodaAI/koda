@@ -1,0 +1,139 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "datasource", "uid": "grafana"},
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Koda runtime overview. References only metrics emitted by koda/services/metrics.py. Each panel includes the source metric name in the description so future maintainers can verify against the code.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "End-to-end request latency p50 / p95 / p99. Source: koda_request_duration_seconds (Histogram).",
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(koda_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum(rate(koda_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum(rate(koda_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "title": "Request latency (worker)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Throughput by status. Source: koda_requests_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {"expr": "sum by (status) (rate(koda_requests_total[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+      ],
+      "title": "Requests per second by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Active and queued tasks per agent. Source: koda_active_tasks (Gauge), koda_queue_depth (Gauge).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [
+        {"expr": "koda_active_tasks", "legendFormat": "{{agent_id}} active", "refId": "A"},
+        {"expr": "koda_queue_depth", "legendFormat": "{{agent_id}} queued", "refId": "B"}
+      ],
+      "title": "Active tasks vs queue depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Circuit breaker state per dependency. 0=closed, 1=half-open, 2=open. Source: koda_circuit_breaker_state (Gauge).",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"options": {"0": {"text": "closed"}, "1": {"text": "half-open"}, "2": {"text": "OPEN"}}, "type": "value"}
+          ]
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [
+        {"expr": "koda_circuit_breaker_state", "legendFormat": "{{dependency}} (agent {{agent_id}})", "refId": "A"}
+      ],
+      "title": "Circuit breaker state by dependency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Tool execution rate by name and status. Source: koda_tool_executions_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [
+        {"expr": "sum by (tool_name, status) (rate(koda_tool_executions_total[5m]))", "legendFormat": "{{tool_name}} ({{status}})", "refId": "A"}
+      ],
+      "title": "Tool executions per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Cumulative LLM cost by provider/model. Source: koda_cost_total_usd (Counter).",
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [
+        {"expr": "sum by (provider, model) (koda_cost_total_usd)", "legendFormat": "{{provider}}/{{model}}", "refId": "A"}
+      ],
+      "title": "Cumulative LLM cost (USD)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Knowledge recall hit rate. Source: koda_knowledge_hits_total / (hits + misses).",
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "id": 7,
+      "targets": [
+        {
+          "expr": "rate(koda_knowledge_hits_total[5m]) / (rate(koda_knowledge_hits_total[5m]) + rate(koda_knowledge_misses_total[5m]) + 1e-9)",
+          "legendFormat": "{{agent_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Knowledge recall hit rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Postgres connections by state. Source: postgres-exporter pg_stat_activity_count.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "id": 8,
+      "targets": [
+        {"expr": "pg_stat_activity_count", "legendFormat": "{{state}}", "refId": "A"},
+        {"expr": "pg_settings_max_connections", "legendFormat": "max_connections", "refId": "B"}
+      ],
+      "title": "Postgres connections vs max",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["koda"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "Koda — overview",
+  "uid": "koda-overview",
+  "version": 1,
+  "weekStart": ""
+}

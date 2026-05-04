@@ -45,13 +45,13 @@ VoiceConfig = namedtuple("VoiceConfig", ["label", "engine", "engine_voice_id", "
 
 AVAILABLE_VOICES: dict[str, VoiceConfig] = {
     # ElevenLabs voices (primary — cloud, alta qualidade)
-    "alice": VoiceConfig("Alice (feminina)", "elevenlabs", "Xb7hH8MSUJpSbSDYk0k2", "pf_dora"),
-    "bill": VoiceConfig("Bill (masculino)", "elevenlabs", "pqHfZKP75CvOlQylNhV4", "pm_alex"),
-    "brian": VoiceConfig("Brian (masculino)", "elevenlabs", "nPczCjzI2devNBz1zQrb", "pm_alex"),
+    "alice": VoiceConfig("Alice (female)", "elevenlabs", "Xb7hH8MSUJpSbSDYk0k2", "pf_dora"),
+    "bill": VoiceConfig("Bill (male)", "elevenlabs", "pqHfZKP75CvOlQylNhV4", "pm_alex"),
+    "brian": VoiceConfig("Brian (male)", "elevenlabs", "nPczCjzI2devNBz1zQrb", "pm_alex"),
     # Kokoro voices (fallback — local, gratuito)
-    "pf_dora": VoiceConfig("Dora (feminina, local)", "kokoro", "pf_dora", None),
-    "pm_alex": VoiceConfig("Alex (masculino, local)", "kokoro", "pm_alex", None),
-    "pm_santa": VoiceConfig("Santa (masculino, local)", "kokoro", "pm_santa", None),
+    "pf_dora": VoiceConfig("Dora (female, local)", "kokoro", "pf_dora", None),
+    "pm_alex": VoiceConfig("Alex (male, local)", "kokoro", "pm_alex", None),
+    "pm_santa": VoiceConfig("Santa (male, local)", "kokoro", "pm_santa", None),
 }
 
 # --- Kokoro lazy singleton ---

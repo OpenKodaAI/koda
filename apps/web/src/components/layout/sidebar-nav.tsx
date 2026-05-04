@@ -2,14 +2,13 @@ import type { ComponentType, SVGProps } from "react";
 import {
   ControlPlaneNavIcon,
   CostsNavIcon,
-  DlqNavIcon,
   ExecutionsNavIcon,
   GeneralSettingsNavIcon,
   MemoryNavIcon,
   OverviewNavIcon,
+  RoutinesNavIcon,
   RuntimeNavIcon,
   SessionsNavIcon,
-  SchedulesNavIcon,
 } from "@/components/layout/sidebar-nav-icons";
 import type { AppTranslator } from "@/lib/i18n";
 
@@ -95,15 +94,14 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
         ),
         buildItem(
           t,
-          "/schedules",
-          "schedules",
-          SchedulesNavIcon,
+          "/routines",
+          "routines",
+          RoutinesNavIcon,
           "primary",
           "live",
           "viewport",
           "startsWith",
         ),
-        buildItem(t, "/dlq", "dlq", DlqNavIcon, "primary", "live", "viewport", "startsWith"),
       ],
     },
     {

@@ -32,6 +32,12 @@ export type SessionArtifactItem = ExecutionArtifact & {
 interface ContextArtifactsProps {
   items: SessionArtifactItem[];
   linkPreviewByUrl: Map<string, ExecutionArtifactLinkPreview | null>;
+  /**
+   * Optional click handler for each artifact row. When provided, the row
+   * becomes a button that surfaces the rich viewer; the external-link icon
+   * still appears for HTTP artifacts so the user can also open the source.
+   */
+  onArtifactClick?: (artifact: SessionArtifactItem) => void;
 }
 
 function isHttpUrl(value: string | null | undefined) {
@@ -141,7 +147,11 @@ function resolveArtifactLine(
   return { title, hint };
 }
 
-export function ContextArtifacts({ items, linkPreviewByUrl }: ContextArtifactsProps) {
+export function ContextArtifacts({
+  items,
+  linkPreviewByUrl,
+  onArtifactClick,
+}: ContextArtifactsProps) {
   const { t } = useAppI18n();
 
   if (items.length === 0) {
@@ -190,7 +200,18 @@ export function ContextArtifacts({ items, linkPreviewByUrl }: ContextArtifactsPr
               key={artifact.dedupeKey}
               className="border-b border-[color:var(--divider-hair)] last:border-b-0"
             >
-              {externalUrl ? (
+              {onArtifactClick ? (
+                <button
+                  type="button"
+                  onClick={() => onArtifactClick(artifact)}
+                  className="grid w-full grid-cols-[auto_1fr_auto_auto] items-center gap-3 py-2.5 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:text-[var(--text-primary)]"
+                  aria-label={t("sessions.context.artifacts.openPreview", {
+                    defaultValue: "Open preview",
+                  })}
+                >
+                  {content}
+                </button>
+              ) : externalUrl ? (
                 <a
                   href={externalUrl}
                   target="_blank"

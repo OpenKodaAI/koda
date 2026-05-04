@@ -20,6 +20,7 @@ apps/web/tsconfig.tsbuildinfo
 *.pyc
 *.pyo
 *.pyd
+*.tgz
 *.db
 *.sqlite
 *.sqlite3

@@ -56,6 +56,58 @@ def _check_browser_url_safety(url: str, *, allow_private: bool) -> str | None:
     return _check_url_safety(url)
 
 
+class _BrowserUrlSafetyRoute:
+    """Playwright route handler that blocks unsafe requests before they leave the browser."""
+
+    pattern = "**/*"
+
+    def __init__(self, *, allow_private: bool) -> None:
+        self.allow_private = allow_private
+        self.blocked_url: str | None = None
+        self.blocked_error: str | None = None
+
+    async def __call__(self, route: Any) -> None:
+        request_attr = getattr(route, "request", None)
+        request = request_attr() if callable(request_attr) else request_attr
+        request_url = str(getattr(request, "url", "") or "")
+        safety_error = _check_browser_url_safety(request_url, allow_private=self.allow_private)
+        if safety_error:
+            self.blocked_url = request_url
+            self.blocked_error = safety_error
+            abort = getattr(route, "abort", None)
+            if callable(abort):
+                await _maybe_await(abort())
+            return
+
+        continue_ = getattr(route, "continue_", None)
+        if callable(continue_):
+            await _maybe_await(continue_())
+
+
+async def _install_browser_url_safety_route(page: Any, *, allow_private: bool) -> _BrowserUrlSafetyRoute | None:
+    route = _BrowserUrlSafetyRoute(allow_private=allow_private)
+    route_method = getattr(page, "route", None)
+    if not callable(route_method):
+        return None
+    await _maybe_await(route_method(route.pattern, route))
+    return route
+
+
+async def _remove_browser_url_safety_route(page: Any, route: _BrowserUrlSafetyRoute | None) -> None:
+    if route is None:
+        return
+    unroute = getattr(page, "unroute", None)
+    if callable(unroute):
+        await _maybe_await(unroute(route.pattern, route))
+
+
+def _browser_route_blocked_message(route: _BrowserUrlSafetyRoute | None) -> str | None:
+    if route is None or not route.blocked_error:
+        return None
+    target = route.blocked_url or "unknown URL"
+    return f"Blocked browser request to {target}: {route.blocked_error}"
+
+
 class BrowserManager:
     """Singleton managing Playwright browser contexts per runtime scope."""
 
@@ -334,6 +386,7 @@ class BrowserManager:
             return f"Error: {safety_error}"
         ctx = await self._get_or_create_context(scope_id)
         page = self._require_active_page(scope_id)
+        route_guard = await _install_browser_url_safety_route(page, allow_private=effective_allow_private)
         try:
             try:
                 await page.goto(url, wait_until="networkidle", timeout=15000)
@@ -357,7 +410,12 @@ class BrowserManager:
                 f"Links: {counts['links']} | Forms: {counts['forms']} | Inputs: {counts['inputs']}"
             )
         except Exception as e:
+            blocked_message = _browser_route_blocked_message(route_guard)
+            if blocked_message:
+                return f"Error: {blocked_message}"
             return f"Error navigating: {e}"
+        finally:
+            await _remove_browser_url_safety_route(page, route_guard)
 
     async def click(self, scope_id: int, selector: str) -> str:
         """Click an element by CSS selector."""
@@ -413,7 +471,10 @@ class BrowserManager:
         allow_private: bool = False,
     ) -> str:
         """Download a file through the active browser context and save it locally."""
-        safety_error = _check_browser_url_safety(url, allow_private=allow_private)
+        from koda.config import BROWSER_ALLOW_PRIVATE_NETWORK
+
+        effective_allow_private = allow_private and BROWSER_ALLOW_PRIVATE_NETWORK
+        safety_error = _check_browser_url_safety(url, allow_private=effective_allow_private)
         if safety_error:
             return f"Error: {safety_error}"
 
@@ -421,6 +482,7 @@ class BrowserManager:
         page = self._require_active_page(scope_id)
         target_dir = self._resolve_output_dir(scope_id)
         safe_filename = Path(filename).name if filename else ""
+        route_guard = await _install_browser_url_safety_route(page, allow_private=effective_allow_private)
         try:
             async with page.expect_download(timeout=15000) as download_info:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -431,15 +493,35 @@ class BrowserManager:
             await download.save_as(str(path))
             return str(path)
         except Exception as e:
+            blocked_message = _browser_route_blocked_message(route_guard)
+            if blocked_message:
+                return f"Error: {blocked_message}"
             return f"Error downloading file: {e}"
+        finally:
+            await _remove_browser_url_safety_route(page, route_guard)
 
-    async def upload_file(self, scope_id: int, selector: str, file_path: str) -> str:
+    async def upload_file(
+        self,
+        scope_id: int,
+        selector: str,
+        file_path: str,
+        *,
+        allowed_root: str | None = None,
+    ) -> str:
         """Upload a local file to a file input."""
+        resolved_path = Path(file_path).expanduser().resolve()
+        root = allowed_root or str((self._runtime_live_scopes.get(scope_id) or {}).get("runtime_dir") or "")
+        if root:
+            resolved_root = Path(root).expanduser().resolve()
+            if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
+                return f"Error: file path outside allowed browser upload root: {resolved_path}"
+        if not resolved_path.is_file():
+            return f"Error: upload file does not exist or is not a regular file: {resolved_path}"
+
         await self._get_or_create_context(scope_id)
         page = self._require_active_page(scope_id)
         try:
-            resolved_path = str(Path(file_path).expanduser().resolve())
-            await page.locator(selector).set_input_files(resolved_path, timeout=10000)
+            await page.locator(selector).set_input_files(str(resolved_path), timeout=10000)
             return f"Uploaded file to '{selector}': {resolved_path}"
         except Exception as e:
             return f"Error uploading file to '{selector}': {e}"

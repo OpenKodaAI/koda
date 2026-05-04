@@ -116,3 +116,61 @@ def estimate_complexity(
 def estimate_model(query: str, provider: str = DEFAULT_PROVIDER, has_images: bool = False) -> str:
     """Provider-aware model estimator kept as an explicit public name."""
     return estimate_complexity(query, provider=provider, has_images=has_images)
+
+
+def complexity_score(query: str, *, has_images: bool = False) -> float:
+    """Return a normalized complexity estimate in ``[0.0, 1.0]``.
+
+    Mirrors the heuristics in :func:`estimate_complexity` but exposes the raw
+    score so the cascade router (:mod:`koda.services.local_routing_policy`)
+    can decide whether to prepend a local provider.
+
+    Score interpretation:
+
+    - ``< 0.3`` — trivial chat / Q&A; local 7B is plenty.
+    - ``0.3–0.6`` — moderate; local 13–30B viable, cloud safe.
+    - ``> 0.6`` — heavy reasoning, large diffs, multi-file refactors; cloud preferred.
+
+    Images always raise the floor to 0.5 because vision models are not
+    available on the local Metal path today.
+    """
+    query_len = len(query)
+    line_count = query.count("\n") + 1
+    code_matches = len(_CODE_PATTERNS.findall(query))
+    has_complex_keywords = bool(_COMPLEX_KEYWORDS.search(query))
+    is_simple = bool(_SIMPLE_KEYWORDS.match(query.strip()))
+    is_tool_query = bool(_TOOL_QUERY_PATTERNS.search(query))
+
+    # Re-use the same signed score as estimate_complexity, then map to [0, 1].
+    score = 0
+    if query_len < 100:
+        score -= 1
+    elif query_len > 1000:
+        score += 1
+    if query_len > 3000:
+        score += 1
+    if line_count > 20:
+        score += 1
+    if line_count > 50:
+        score += 1
+    if code_matches > 0:
+        score += 1
+    if code_matches > 3:
+        score += 1
+    if has_complex_keywords:
+        score += 2
+    if is_simple:
+        score -= 2
+    if is_tool_query and not has_complex_keywords and query_len < 500:
+        score -= 1
+
+    # Raw score range observed in practice: roughly [-3, +6]. Squash linearly
+    # to [0, 1] using a midpoint of 0 (= "moderate baseline").
+    raw_min, raw_max = -3.0, 6.0
+    clamped = max(raw_min, min(raw_max, float(score)))
+    normalized = (clamped - raw_min) / (raw_max - raw_min)
+
+    if has_images:
+        normalized = max(normalized, 0.5)
+
+    return round(normalized, 3)

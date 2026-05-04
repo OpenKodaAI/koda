@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -295,11 +296,15 @@ def list_kokoro_voices(language_id: str = "") -> list[dict[str, Any]]:
             metadata = kokoro_voice_metadata(voice_id)
             if metadata is None:
                 continue
+            is_downloaded = voice_id in downloaded
+            voice_path = kokoro_voice_file_path(voice_id) if is_downloaded else None
+            bytes_on_disk = voice_path.stat().st_size if voice_path and voice_path.exists() else 0
             items.append(
                 {
                     **metadata,
-                    "downloaded": voice_id in downloaded,
-                    "local_path": str(kokoro_voice_file_path(voice_id)) if voice_id in downloaded else "",
+                    "downloaded": is_downloaded,
+                    "local_path": str(voice_path) if voice_path is not None else "",
+                    "bytes": int(bytes_on_disk),
                 }
             )
     return items
@@ -331,13 +336,103 @@ def kokoro_catalog_payload(language_id: str = "") -> dict[str, Any]:
     }
 
 
-def ensure_kokoro_model() -> Path:
+def delete_kokoro_model() -> dict[str, Any]:
+    """Remove the Kokoro base ONNX file from disk.
+
+    Idempotent: missing-file is treated as success so the UI can call this
+    even when the user clicks "remove" twice in quick succession.
+    """
+    _ensure_storage()
+    existed = _KOKORO_MODEL_PATH.exists()
+    bytes_freed = _KOKORO_MODEL_PATH.stat().st_size if existed else 0
+    if existed:
+        _KOKORO_MODEL_PATH.unlink(missing_ok=True)
+    return {
+        "removed": existed,
+        "bytes_freed": int(bytes_freed),
+        "local_path": str(_KOKORO_MODEL_PATH),
+    }
+
+
+def delete_kokoro_voice(voice_id: str) -> dict[str, Any]:
+    """Remove a single Kokoro voice ``.pt`` file.
+
+    Rebuilds the managed voice bank afterwards so the runtime never tries to
+    load a tensor for a voice the user just deleted.
+    """
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata is None:
+        raise KeyError(f"unknown kokoro voice: {voice_id}")
+
+    target_path = kokoro_voice_file_path(str(metadata["voice_id"]))
+    existed = target_path.exists()
+    bytes_freed = target_path.stat().st_size if existed else 0
+    if existed:
+        target_path.unlink(missing_ok=True)
+    # Rebuild the managed bank so the freshly-removed voice is no longer
+    # served. If no voices remain, drop the bank file too — there's nothing
+    # to bundle and the empty bank would crash on load.
+    with _KOKORO_REBUILD_LOCK:
+        remaining = downloaded_kokoro_voice_ids()
+        if remaining:
+            with contextlib.suppress(Exception):
+                rebuild_kokoro_voice_bank()
+        else:
+            _KOKORO_VOICES_BANK_PATH.unlink(missing_ok=True)
+            if _KOKORO_METADATA_PATH.exists():
+                _write_voice_metadata_file(set())
+    return {
+        "voice_id": str(metadata["voice_id"]),
+        "removed": existed,
+        "bytes_freed": int(bytes_freed),
+        "local_path": str(target_path),
+    }
+
+
+def kokoro_model_status() -> dict[str, Any]:
+    _ensure_storage()
+    bytes_on_disk = _KOKORO_MODEL_PATH.stat().st_size if _KOKORO_MODEL_PATH.exists() else 0
+    return {
+        "downloaded": bool(_KOKORO_MODEL_PATH.exists() and bytes_on_disk > 0),
+        "bytes": bytes_on_disk,
+        "local_path": str(_KOKORO_MODEL_PATH),
+        "url": KOKORO_MODEL_URL,
+        "version": KOKORO_MODEL_VERSION,
+    }
+
+
+def ensure_kokoro_model(
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> Path:
     _ensure_storage()
     if _KOKORO_MODEL_PATH.exists() and _KOKORO_MODEL_PATH.stat().st_size > 0:
+        if progress_callback is not None:
+            total = _KOKORO_MODEL_PATH.stat().st_size
+            progress_callback(total, total)
         return _KOKORO_MODEL_PATH
-    tmp_path = _KOKORO_MODEL_PATH.with_suffix(".tmp")
-    urllib.request.urlretrieve(KOKORO_MODEL_URL, tmp_path)
-    tmp_path.replace(_KOKORO_MODEL_PATH)
+    request = urllib.request.Request(
+        KOKORO_MODEL_URL,
+        headers={"User-Agent": "koda/kokoro-manager"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        total_bytes = int(response.headers.get("Content-Length", "0") or "0")
+        downloaded_bytes = 0
+        tmp_path = _KOKORO_MODEL_PATH.with_suffix(".tmp")
+        try:
+            with open(tmp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(_KOKORO_DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(downloaded_bytes, total_bytes)
+            tmp_path.replace(_KOKORO_MODEL_PATH)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
     return _KOKORO_MODEL_PATH
 
 

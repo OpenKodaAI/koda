@@ -1,32 +1,19 @@
-"""Skill definition dataclass and file-backed registry."""
+"""Skill definition dataclass and agent-scoped in-memory registry."""
 
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
-
-# ---------------------------------------------------------------------------
 # Regex helpers
-# ---------------------------------------------------------------------------
 
-_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _WHEN_TO_USE_RE = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
 _FIRST_SENTENCE_RE = re.compile(r"^(.*?[.!?])(?:\s|$)")
-_H1_RE = re.compile(r"^#\s+(.+)", re.MULTILINE)
-_OUTPUT_FORMAT_RE = re.compile(
-    r"^##\s+Output\s+Format\s*\n(.*?)(?=^##\s|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
 
 
-# ---------------------------------------------------------------------------
 # SkillDefinition
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -56,9 +43,7 @@ class SkillDefinition:
     output_format_enforcement: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Parser
-# ---------------------------------------------------------------------------
+# Builders
 
 
 def _first_sentence(text: str) -> str:
@@ -83,98 +68,70 @@ def _compile_triggers(raw: list[str] | None) -> tuple[re.Pattern[str], ...]:
     return tuple(patterns)
 
 
-def _parse_skill_file(path: Path) -> SkillDefinition:
-    """Parse a single ``.md`` skill file into a :class:`SkillDefinition`."""
-    raw = path.read_text(encoding="utf-8")
-    skill_id = path.stem
+def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
 
-    # --- frontmatter ---
-    frontmatter: dict[str, Any] = {}
-    body = raw
-    fm_match = _FRONTMATTER_RE.match(raw)
-    frontmatter_present = fm_match is not None
-    if fm_match:
-        try:
-            frontmatter = yaml.safe_load(fm_match.group(1)) or {}
-        except yaml.YAMLError:
-            frontmatter = {}
-        body = raw[fm_match.end() :]
 
-    # --- when_to_use ---
-    wtu_match = _WHEN_TO_USE_RE.search(body)
-    when_to_use = wtu_match.group(1).strip() if wtu_match else ""
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
-    # --- name ---
-    name = frontmatter.get("name", "")
-    if not name:
-        h1 = _H1_RE.search(body)
-        name = h1.group(1).strip() if h1 else skill_id.replace("-", " ").title()
 
-    # --- simple fields ---
-    aliases = tuple(frontmatter.get("aliases", []))
-    version = str(frontmatter.get("version", "1.0.0"))
-    category = frontmatter.get("category", "general")
-    tags = tuple(frontmatter.get("tags", []))
-    requires = tuple(frontmatter.get("requires", []))
-    conflicts = tuple(frontmatter.get("conflicts", []))
-    base_priority = int(frontmatter.get("base_priority", 50))
-    max_token_budget = int(frontmatter.get("max_token_budget", 2000))
-    model_hints: dict[str, Any] = frontmatter.get("model_hints", {}) or {}
+def _label_keys(value: str) -> tuple[str, ...]:
+    normalized = value.lower().strip()
+    if not normalized:
+        return ()
+    slug = re.sub(r"[\s_]+", "-", normalized)
+    if slug == normalized:
+        return (normalized,)
+    return (normalized, slug)
 
-    # --- instruction & output_format_enforcement ---
-    instruction = str(frontmatter.get("instruction", ""))
-    output_format_enforcement = str(frontmatter.get("output_format_enforcement", ""))
 
-    # --- derived ---
-    awareness_summary = _first_sentence(when_to_use) if when_to_use else ""
-    triggers = _compile_triggers(frontmatter.get("triggers"))
+def _is_skill_enabled(raw: dict[str, Any]) -> bool:
+    value = raw.get("enabled", True)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}
 
-    parts = [name]
-    if aliases:
-        parts.append(" ".join(aliases))
-    if when_to_use:
-        parts.append(when_to_use)
-    if tags:
-        parts.append(" ".join(tags))
-    embedding_text = "\n".join(parts)
 
-    stat = path.stat()
+def _skill_allowed_by_policy(skill_id: str, policy: dict[str, Any] | None) -> bool:
+    if not policy:
+        return True
+    if not policy.get("enabled", True):
+        return False
 
-    return SkillDefinition(
-        id=skill_id,
-        name=name,
-        aliases=aliases,
-        version=version,
-        category=category,
-        tags=tags,
-        when_to_use=when_to_use,
-        awareness_summary=awareness_summary,
-        triggers=triggers,
-        embedding_text=embedding_text,
-        full_content=body if frontmatter_present else raw,
-        requires=requires,
-        conflicts=conflicts,
-        base_priority=base_priority,
-        max_token_budget=max_token_budget,
-        model_hints=model_hints,
-        source_path=path,
-        last_modified=stat.st_mtime,
-        frontmatter_present=frontmatter_present,
-        instruction=instruction,
-        output_format_enforcement=output_format_enforcement,
-    )
+    enabled = policy.get("enabled_skills")
+    if isinstance(enabled, list | tuple | set):
+        allowed = {str(item).strip() for item in enabled if str(item).strip()}
+        if allowed and skill_id not in allowed:
+            return False
+
+    disabled = policy.get("disabled_skills")
+    if isinstance(disabled, list | tuple | set):
+        blocked = {str(item).strip() for item in disabled if str(item).strip()}
+        if skill_id in blocked:
+            return False
+
+    return True
 
 
 def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
     """Build a SkillDefinition from a control-plane custom skill dict."""
-    skill_id = str(raw.get("id", ""))
-    name = str(raw.get("name", skill_id))
-    aliases = tuple(str(a) for a in raw.get("aliases", []))
-    tags = tuple(str(t) for t in raw.get("tags", []))
-    category = str(raw.get("category", "general"))
-    instruction = str(raw.get("instruction", ""))
-    content = str(raw.get("content", ""))
-    output_format_enforcement = str(raw.get("output_format_enforcement", ""))
+    skill_id = str(raw.get("id", "")).strip()
+    name = str(raw.get("name", skill_id)).strip() or skill_id
+    aliases = _normalize_string_tuple(raw.get("aliases", []))
+    tags = _normalize_string_tuple(raw.get("tags", []))
+    category = str(raw.get("category", "general")).strip() or "general"
+    instruction = str(raw.get("instruction", "")).strip()
+    content = str(raw.get("content", "")).strip()
+    output_format_enforcement = str(raw.get("output_format_enforcement", "")).strip()
+    requires = _normalize_string_tuple(raw.get("requires", []))
+    conflicts = _normalize_string_tuple(raw.get("conflicts", []))
+    triggers = _compile_triggers(list(_normalize_string_tuple(raw.get("triggers", []))))
 
     when_to_use = ""
     wtu_match = _WHEN_TO_USE_RE.search(content)
@@ -196,19 +153,19 @@ def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
         id=skill_id,
         name=name,
         aliases=aliases,
-        version="1.0.0",
+        version=str(raw.get("version", "1.0.0")),
         category=category,
         tags=tags,
         when_to_use=when_to_use,
         awareness_summary=awareness_summary,
-        triggers=(),
+        triggers=triggers,
         embedding_text=embedding_text,
         full_content=content,
-        requires=(),
-        conflicts=(),
-        base_priority=50,
-        max_token_budget=2500,
-        model_hints={},
+        requires=requires,
+        conflicts=conflicts,
+        base_priority=_coerce_int(raw.get("base_priority", 50), 50),
+        max_token_budget=_coerce_int(raw.get("max_token_budget", 2500), 2500),
+        model_hints=raw.get("model_hints", {}) if isinstance(raw.get("model_hints"), dict) else {},
         source_path=None,
         last_modified=0.0,
         frontmatter_present=False,
@@ -217,116 +174,74 @@ def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
     )
 
 
-# ---------------------------------------------------------------------------
 # Registry
-# ---------------------------------------------------------------------------
 
 
 class SkillRegistry:
-    """File-backed registry that lazily scans a directory of ``.md`` skill files."""
+    """In-memory registry scoped to one agent's configured skills."""
 
-    def __init__(self, skills_dir: Path, scan_interval: float = 30.0) -> None:
-        self._skills_dir = skills_dir
-        self._scan_interval = scan_interval
-        self._skills: dict[str, SkillDefinition] = {}
+    def __init__(self, skills: dict[str, SkillDefinition] | list[SkillDefinition] | None = None) -> None:
+        if isinstance(skills, dict):
+            self._skills = dict(skills)
+        else:
+            self._skills = {skill.id: skill for skill in skills or [] if skill.id}
         self._alias_index: dict[str, str] = {}
-        self._last_scan: float = 0.0
-        # Perform initial scan.
-        self._skills = self._scan_directory()
         self._rebuild_alias_index()
-        self._last_scan = time.monotonic()
 
     # -- public API --
 
     def get_all(self) -> dict[str, SkillDefinition]:
         """Return a snapshot of all registered skills keyed by ID."""
-        self.reload_if_stale()
         return dict(self._skills)
 
     def get(self, skill_id: str) -> SkillDefinition | None:
         """Return a single skill by canonical ID, or ``None``."""
-        self.reload_if_stale()
         return self._skills.get(skill_id)
 
     def resolve_alias(self, name: str) -> str | None:
         """Resolve an alias (case-insensitive) to a canonical skill ID."""
-        self.reload_if_stale()
-        return self._alias_index.get(name.lower())
+        normalized = name.lower().strip()
+        return self._alias_index.get(normalized) or (normalized if normalized in self._skills else None)
 
     def reload_if_stale(self) -> bool:
-        """Re-scan the directory if the scan interval has elapsed.
-
-        Returns ``True`` if a reload was performed.
-        """
-        now = time.monotonic()
-        if now - self._last_scan < self._scan_interval:
-            return False
-
-        new_skills = self._scan_directory()
-
-        changed = set(new_skills.keys()) != set(self._skills.keys())
-        if not changed:
-            for sid, defn in new_skills.items():
-                old = self._skills.get(sid)
-                if old is None or defn.last_modified != old.last_modified:
-                    changed = True
-                    break
-
-        if changed:
-            self._skills = new_skills
-            self._rebuild_alias_index()
-
-        self._last_scan = now
-        return changed
-
-    # -- internals --
-
-    def _scan_directory(self) -> dict[str, SkillDefinition]:
-        skills: dict[str, SkillDefinition] = {}
-        if not self._skills_dir.is_dir():
-            return skills
-        for path in sorted(self._skills_dir.glob("*.md")):
-            try:
-                defn = _parse_skill_file(path)
-                skills[defn.id] = defn
-            except Exception:  # noqa: BLE001
-                # Skip unparseable files silently.
-                continue
-        return skills
-
-    def merge_agent_skills(self, custom_skills: list[dict[str, Any]]) -> dict[str, SkillDefinition]:
-        """Merge global skills with agent-specific custom skills.
-
-        Custom skills override global skills with the same ID.
-        """
-        merged = dict(self.get_all())
-        for raw in custom_skills:
-            skill = _build_skill_from_dict(raw)
-            if skill.id:
-                merged[skill.id] = skill
-        return merged
+        """Compatibility no-op for the old file-backed registry API."""
+        return False
 
     def _rebuild_alias_index(self) -> None:
         index: dict[str, str] = {}
         for defn in self._skills.values():
+            index[defn.id.lower()] = defn.id
+            for key in _label_keys(defn.name):
+                index.setdefault(key, defn.id)
             for alias in defn.aliases:
-                index[alias.lower()] = defn.id
+                for key in _label_keys(alias):
+                    index.setdefault(key, defn.id)
         self._alias_index = index
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
+def build_skill_registry_from_custom_skills(
+    custom_skills: list[dict[str, Any]] | None,
+    skill_policy: dict[str, Any] | None = None,
+) -> SkillRegistry:
+    """Build an agent-scoped registry from ``agent_spec.custom_skills``."""
+    skills: dict[str, SkillDefinition] = {}
+    for raw in custom_skills or []:
+        if not isinstance(raw, dict) or not _is_skill_enabled(raw):
+            continue
+        skill = _build_skill_from_dict(raw)
+        if skill.id and skill.full_content.strip() and _skill_allowed_by_policy(skill.id, skill_policy):
+            skills[skill.id] = skill
+    return SkillRegistry(skills)
+
+
+# Compatibility singleton: intentionally empty, never file-backed.
 
 _shared_registry: SkillRegistry | None = None
 
 
 def get_shared_registry() -> SkillRegistry:
-    """Return (and lazily create) the process-wide :class:`SkillRegistry`."""
+    """Return an empty process-wide registry for legacy callers."""
     global _shared_registry  # noqa: PLW0603
     if _shared_registry is None:
-        from koda.config import _env
-
-        skills_dir = Path(_env("SKILLS_DIR", str(Path(__file__).parent)))
-        _shared_registry = SkillRegistry(Path(skills_dir))
+        _shared_registry = SkillRegistry()
     return _shared_registry

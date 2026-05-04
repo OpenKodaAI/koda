@@ -1,10 +1,21 @@
 """Tests for TTS module."""
 
+from contextlib import suppress
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from koda.utils.tts import AVAILABLE_VOICES, VoiceConfig, is_mostly_code, strip_for_tts
+from koda.utils.tts import AVAILABLE_VOICES, VoiceConfig, elevenlabs_breaker, is_mostly_code, strip_for_tts
+
+
+@pytest.fixture(autouse=True)
+def _isolate_elevenlabs_breaker():
+    """Keep randomized TTS tests from inheriting an open ElevenLabs circuit."""
+    with suppress(Exception):
+        elevenlabs_breaker.close()
+    yield
+    with suppress(Exception):
+        elevenlabs_breaker.close()
 
 
 class TestStripForTts:

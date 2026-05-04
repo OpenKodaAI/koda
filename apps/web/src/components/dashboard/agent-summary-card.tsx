@@ -1,6 +1,7 @@
 "use client";
 
-import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { deriveAgentState } from "@/components/ui/agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 import { getSemanticTextStyle, type SemanticTone } from "@/lib/theme-semantic";
@@ -87,11 +88,16 @@ export function AgentSummaryCard({
   const content = (
     <div className="relative flex w-full items-start gap-3 py-3">
       <div className="shrink-0 self-start pt-0.5">
-        <AgentGlyph
+        <AgentSigil
           agentId={agentConfig.id}
+          label={agentConfig.label}
           color={agentConfig.color}
-          active={status.pulse}
-          variant="list"
+          state={deriveAgentState({
+            activeTasks: stats.activeTasks,
+            featuredStatus: featuredTask?.status ?? null,
+            dbExists: stats.dbExists,
+          })}
+          size="sm"
         />
       </div>
 

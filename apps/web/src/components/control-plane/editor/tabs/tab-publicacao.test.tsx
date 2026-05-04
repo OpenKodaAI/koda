@@ -115,9 +115,9 @@ const core = {
 const workspaces: ControlPlaneWorkspaceTree = {
   items: [],
   virtual_buckets: {
-    no_workspace: { id: null, label: "Sem workspace", bot_count: 0 },
+    no_workspace: { id: null, label: "Sem workspace", agent_count: 0 },
   },
-  total_bot_count: 0,
+  total_agent_count: 0,
 };
 
 const systemSettings: ControlPlaneSystemSettings = {
@@ -197,13 +197,14 @@ function renderTab(
 }
 
 describe("TabPublicacao", () => {
-  it("renders the change summary and publication sections", () => {
+  it("renders the lifecycle status and publication metadata", () => {
     renderTab();
 
-    expect(screen.getByText("Resumo de alteracoes")).toBeInTheDocument();
-    expect(screen.getByText("Versao publicada")).toBeInTheDocument();
-    expect(screen.getByText("Versao desejada")).toBeInTheDocument();
-    expect(screen.getByText("Publicado")).toBeInTheDocument();
+    expect(screen.getByText("Status do agente")).toBeInTheDocument();
+    expect(screen.getByText("Versão aplicada")).toBeInTheDocument();
+    expect(screen.getByText("Versão desejada")).toBeInTheDocument();
+    // applied_version=3, desired_version=3, status=active → "Ativo"
+    expect(screen.getByText("Ativo")).toBeInTheDocument();
   });
 
   it("renders clone and delete sections", () => {
@@ -219,10 +220,12 @@ describe("TabPublicacao", () => {
     expect(screen.getByRole("button", { name: "Remover agente" })).toBeInTheDocument();
   });
 
-  it("shows published badge when no pending changes exist", () => {
+  it("shows the active lifecycle label when no pending changes exist", () => {
     renderTab();
 
-    expect(screen.getByText("Publicado")).toBeInTheDocument();
-    expect(screen.queryByText("Alteracoes pendentes")).not.toBeInTheDocument();
+    expect(screen.getByText("Ativo")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Alterações não publicadas"),
+    ).not.toBeInTheDocument();
   });
 });

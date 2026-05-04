@@ -146,6 +146,8 @@ class KnowledgeHit:
     graph_relation_types: tuple[str, ...] = ()
     evidence_modalities: tuple[EvidenceModality, ...] = ()
     reasons: tuple[str, ...] = ()
+    rerank_score: float = 0.0
+    rerank_rank: int = -1
 
     def to_trace_dict(self) -> dict[str, object]:
         """Serialize the hit for audit traces."""
@@ -177,6 +179,8 @@ class KnowledgeHit:
             "graph_relation_types": list(self.graph_relation_types),
             "evidence_modalities": [modality.value for modality in self.evidence_modalities],
             "reasons": list(self.reasons),
+            "rerank_score": round(self.rerank_score, 4),
+            "rerank_rank": self.rerank_rank,
         }
 
 
@@ -228,6 +232,8 @@ class RetrievalTraceHit:
     exclusion_reason: str = ""
     evidence_modalities: tuple[EvidenceModality, ...] = ()
     supporting_evidence_keys: tuple[str, ...] = ()
+    rerank_score: float = 0.0
+    rerank_rank: int = -1
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -252,6 +258,8 @@ class RetrievalTraceHit:
             "exclusion_reason": self.exclusion_reason,
             "evidence_modalities": [modality.value for modality in self.evidence_modalities],
             "supporting_evidence_keys": list(self.supporting_evidence_keys),
+            "rerank_score": round(self.rerank_score, 4),
+            "rerank_rank": self.rerank_rank,
         }
 
 
@@ -696,6 +704,8 @@ def _parse_knowledge_hits(raw_items: Any) -> list[KnowledgeHit]:
                 graph_relation_types=tuple(str(item) for item in list(raw_item.get("graph_relation_types") or [])),
                 evidence_modalities=evidence_modalities,
                 reasons=reasons,
+                rerank_score=_safe_float(raw_item.get("rerank_score")),
+                rerank_rank=_safe_int(raw_item.get("rerank_rank", -1)),
             )
         )
     return hits
@@ -734,6 +744,8 @@ def _parse_trace_hits(raw_items: Any) -> list[RetrievalTraceHit]:
                 supporting_evidence_keys=tuple(
                     str(item) for item in list(raw_item.get("supporting_evidence_keys") or [])
                 ),
+                rerank_score=_safe_float(raw_item.get("rerank_score")),
+                rerank_rank=_safe_int(raw_item.get("rerank_rank", -1)),
             )
         )
     return trace_hits

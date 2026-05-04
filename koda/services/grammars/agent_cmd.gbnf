@@ -1,0 +1,56 @@
+# GBNF grammar for Koda's <agent_cmd> tool-call protocol.
+#
+# Constrains llama.cpp output to a stream of optional prose interleaved with
+# zero or more <agent_cmd tool="..."> blocks containing valid JSON. The
+# grammar is consumed by llama-server --grammar-file (or via the grammar
+# field in the OpenAI-compatible chat payload).
+#
+# The protocol is parsed by koda.services.tool_dispatcher.parse_agent_commands
+# using the regex <agent_cmd\s+tool="([^"]+)">(.*?)</agent_cmd>. This grammar
+# is the production-side mirror of that pattern — drift between them breaks
+# tests/test_services/test_structured_decoding.py.
+#
+# IMPORTANT — GBNF syntax: alternatives separated by | MUST live on the same
+# line. Multi-line alternatives without explicit operators silently break
+# llama.cpp's grammar parser, which silently disables the constraint and
+# leaves the model unrestricted. Validated against llama-server b9000+.
+
+root ::= prose-or-cmd*
+prose-or-cmd ::= agent-cmd | prose-char
+
+# Prose: anything that doesn't begin the literal token "<agent_cmd". The
+# trick is to allow "<" only when the next character disqualifies it from
+# being the start of an agent_cmd opener. We collapse the lookahead into a
+# single ascending alternation kept on ONE line per rule (GBNF requires it).
+prose-char ::= safe-char | partial-tag-prefix
+safe-char ::= [^<]
+partial-tag-prefix ::= "<" not-a | "<a" not-g | "<ag" not-e | "<age" not-n | "<agen" not-t | "<agent" not-underscore | "<agent_" not-c | "<agent_c" not-m | "<agent_cm" not-d
+not-a ::= [^a]
+not-g ::= [^g]
+not-e ::= [^e]
+not-n ::= [^n]
+not-t ::= [^t]
+not-underscore ::= [^_]
+not-c ::= [^c]
+not-m ::= [^m]
+not-d ::= [^d]
+
+# The agent-cmd block itself. The body MUST be valid JSON so
+# tool_dispatcher.parse_agent_commands' json.loads call succeeds.
+agent-cmd ::= "<agent_cmd tool=\"" tool-name "\">" ws json-value ws "</agent_cmd>"
+tool-name ::= [a-zA-Z_] [a-zA-Z0-9_]*
+
+# Standard JSON grammar (subset Koda tools accept).
+json-value ::= object | array | string | number | "true" | "false" | "null"
+object ::= "{" ws ( object-pair ( ws "," ws object-pair )* )? ws "}"
+object-pair ::= string ws ":" ws json-value
+array ::= "[" ws ( json-value ( ws "," ws json-value )* )? ws "]"
+string ::= "\"" string-char* "\""
+string-char ::= [^"\\] | "\\" escape-char
+escape-char ::= "\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | "u" hex hex hex hex
+hex ::= [0-9a-fA-F]
+number ::= "-"? int-part frac-part? exp-part?
+int-part ::= "0" | [1-9] [0-9]*
+frac-part ::= "." [0-9]+
+exp-part ::= [eE] [+-]? [0-9]+
+ws ::= [ \t\n\r]*

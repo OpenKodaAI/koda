@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import os
 import re
@@ -26,6 +27,20 @@ _BRIDGE_LOOP: asyncio.AbstractEventLoop | None = None
 _BRIDGE_THREAD: threading.Thread | None = None
 _BRIDGE_LOCK = threading.Lock()
 _BRIDGE_OWNER_PID: int | None = None
+_BRIDGE_TIMEOUT_SECONDS = float(os.environ.get("PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS", "30"))
+
+
+def _active_bridge_loop() -> asyncio.AbstractEventLoop | None:
+    current_pid = os.getpid()
+    with _BRIDGE_LOCK:
+        if (
+            _BRIDGE_LOOP is not None
+            and _BRIDGE_THREAD is not None
+            and _BRIDGE_THREAD.is_alive()
+            and current_pid == _BRIDGE_OWNER_PID
+        ):
+            return _BRIDGE_LOOP
+    return None
 
 
 def _ensure_bridge_loop() -> asyncio.AbstractEventLoop:
@@ -147,17 +162,27 @@ def run_coro_sync(coro: Any) -> Any:
     main loop ≠ the bridge loop). The fresh-loop path below is the
     pragmatic baseline.
     """
+
+    def _run_on_bridge(loop: asyncio.AbstractEventLoop) -> Any:
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return future.result(timeout=_BRIDGE_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(f"primary_state_bridge_timeout_after_{_BRIDGE_TIMEOUT_SECONDS:g}s") from exc
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        if bridge_loop := _active_bridge_loop():
+            return _run_on_bridge(bridge_loop)
         _reset_shared_backends_for_transient_loop()
         try:
             return asyncio.run(coro)
         finally:
             _reset_shared_backends_for_transient_loop()
     bridge_loop = _ensure_bridge_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, bridge_loop)
-    return future.result()
+    return _run_on_bridge(bridge_loop)
 
 
 def _reset_shared_backends_for_transient_loop() -> None:

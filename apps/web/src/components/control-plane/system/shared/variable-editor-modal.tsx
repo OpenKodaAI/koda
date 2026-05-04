@@ -34,13 +34,13 @@ export function VariableEditorModal({
   return createPortal(
     <>
       <div
-        className="app-overlay-backdrop z-[70]"
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
         onClick={onCancel}
         aria-hidden="true"
       />
       <div className="app-modal-frame z-[80] p-4">
         <div
-          className="app-modal-panel relative w-full max-w-2xl overflow-hidden border-[var(--border-strong)]"
+          className="app-modal-panel app-modal-anim relative w-full max-w-2xl overflow-hidden border-[var(--border-strong)]"
           onClick={(event) => event.stopPropagation()}
         >
         <button

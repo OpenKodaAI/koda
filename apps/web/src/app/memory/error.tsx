@@ -1,6 +1,7 @@
 "use client";
 
 import { RouteErrorState } from "@/components/ui/route-error-state";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export default function MemoryError({
   error,
@@ -9,10 +10,11 @@ export default function MemoryError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { tl } = useAppI18n();
   return (
     <RouteErrorState
-      title="Memory workspace unavailable"
-      description={error.message || "The memory section could not be loaded."}
+      title={tl("Memory workspace unavailable")}
+      description={error.message || tl("The memory section could not be loaded.")}
       onRetry={reset}
     />
   );

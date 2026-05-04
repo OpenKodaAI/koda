@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
-import os
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
@@ -36,7 +35,6 @@ from .onboarding import load_control_plane_openapi_spec, render_setup_page
 from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
 from .settings import (
     AGENT_SECTIONS,
-    CONTROL_PLANE_AUTH_MODE,
     DOCUMENT_KINDS,
 )
 
@@ -96,10 +94,6 @@ def _is_public_control_plane_api_path(path: str) -> bool:
     return any(path == candidate or path.startswith(f"{candidate}/") for candidate in _PUBLIC_CONTROL_PLANE_API_PATHS)
 
 
-def _development_auth_enabled() -> bool:
-    return CONTROL_PLANE_AUTH_MODE == "development" and os.environ.get("NODE_ENV", "").strip().lower() != "production"
-
-
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
     auth_header = request.headers.get("Authorization", "").strip()
     if not auth_header.startswith("Bearer "):
@@ -111,25 +105,11 @@ def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
 
 
 def _authorize_request(request: web.Request) -> web.Response | None:
-    if CONTROL_PLANE_AUTH_MODE == "open" or _development_auth_enabled():
-        request["operator_auth"] = OperatorAuthContext(
-            auth_kind="development",
-            subject_type="development",
-            user_id=None,
-            username="dev",
-            email=None,
-            display_name="Development Operator",
-        )
-        return None
-    if CONTROL_PLANE_AUTH_MODE == "token":
-        context = _optional_auth_context(request)
-        if context is None:
-            return web.json_response({"error": "operator session is required"}, status=401)
-        request["operator_auth"] = context
-        return None
-    # Unknown mode — fail closed. settings.py validates at boot, so this is a
-    # defence-in-depth check.
-    return web.json_response({"error": "operator session is required"}, status=401)
+    context = _optional_auth_context(request)
+    if context is None:
+        return web.json_response({"error": "operator session is required"}, status=401)
+    request["operator_auth"] = context
+    return None
 
 
 def _request_auth_context(request: web.Request) -> OperatorAuthContext | None:
@@ -691,6 +671,8 @@ async def post_dashboard_session_message_route(request: web.Request) -> web.Resp
             text=str(payload.get("text") or ""),
             session_id=str(payload.get("session_id") or "").strip() or None,
         )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     except RuntimeError as exc:
         return _service_unavailable(exc)
     return web.json_response(result, status=202)
@@ -713,27 +695,6 @@ async def list_dashboard_agent_approvals_route(request: web.Request) -> web.Resp
     return web.json_response({"items": items})
 
 
-async def list_skills_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
-    import re
-
-    from koda.services.templates import _SKILL_TEMPLATES
-
-    when_to_use_re = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
-    items: list[dict[str, Any]] = []
-    for name, content in sorted(_SKILL_TEMPLATES.items()):
-        match = when_to_use_re.search(content)
-        description = match.group(1).strip().split(". ")[0] if match else ""
-        items.append(
-            {
-                "id": name,
-                "title": name.replace("-", " ").replace("_", " "),
-                "description": description,
-                "category": "skill",
-            }
-        )
-    return web.json_response({"items": items})
-
-
 async def list_agent_tools_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
     try:
         from koda.utils.approval import _OPS_COMMANDS, WRITE_CLASSIFIERS
@@ -743,14 +704,9 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
     tool_descriptions = {
         "shell": "Execute shell commands in the agent workspace",
         "git": "Git operations (status, log, diff, commit, push)",
-        "gh": "GitHub CLI operations (PRs, issues, releases)",
-        "glab": "GitLab CLI operations",
         "docker": "Docker container operations",
         "pip": "Python package manager",
         "npm": "Node package manager",
-        "gws": "Google Workspace (Gmail, Calendar, Drive, Sheets)",
-        "jira": "Jira issue tracker",
-        "confluence": "Confluence wiki",
         "http_request": "HTTP request (GET/POST/etc)",
         "cron": "Scheduled jobs",
         "write": "Write a file",
@@ -1685,16 +1641,195 @@ async def start_kokoro_voice_download(request: web.Request) -> web.Response:
     return web.json_response(payload, status=202)
 
 
+async def get_embedding_models(request: web.Request) -> web.Response:
+    """Curated embedding-model catalog with installation status + active job."""
+    import asyncio
+
+    del request
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager.get_embedding_model_catalog(),
+    )
+    return web.json_response(payload)
+
+
+async def start_embedding_model_download(request: web.Request) -> web.Response:
+    """Spawn a background download for the requested embedding model.
+
+    Idempotent: if the model is already on disk, returns a completed job
+    record so the UI's toast pattern still resolves cleanly.
+    """
+    import asyncio
+
+    manager = _manager()
+    model_id = request.match_info["model_id"]
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.start_embedding_model_download(model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload, status=202)
+
+
+async def select_embedding_model(request: web.Request) -> web.Response:
+    """Persist the operator's choice. Refuses uninstalled models."""
+    import asyncio
+
+    manager = _manager()
+    model_id = request.match_info["model_id"]
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.select_embedding_model(model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def delete_embedding_model(request: web.Request) -> web.Response:
+    """Drop a downloaded embedding model's cache directory."""
+    import asyncio
+
+    manager = _manager()
+    model_id = request.match_info["model_id"]
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.delete_embedding_model_asset(model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
 async def get_provider_download_job(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.get_provider_download_job(
+                request.match_info["provider_id"],
+                request.match_info["job_id"],
+            ),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except KeyError:
+        return web.json_response({"error": "download job not found"}, status=404)
+    return web.json_response(payload)
+
+
+async def cancel_provider_download_job(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.cancel_provider_download_job(
+                request.match_info["provider_id"],
+                request.match_info["job_id"],
+            ),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except KeyError:
+        return web.json_response({"error": "download job not found"}, status=404)
+    return web.json_response(payload)
+
+
+async def list_active_provider_downloads(request: web.Request) -> web.Response:
+    """Active downloads across providers — used by the UI to rebind sticky
+    toasts after a page reload so progress UI survives F5 mid-download."""
     import asyncio
 
     manager = _manager()
     payload = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: manager.get_provider_download_job(
-            request.match_info["provider_id"],
-            request.match_info["job_id"],
-        ),
+        manager.list_active_provider_downloads,
+    )
+    return web.json_response({"items": payload})
+
+
+async def get_kokoro_model(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        manager.get_kokoro_model_status,
+    )
+    return web.json_response(payload)
+
+
+async def start_kokoro_model_download(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        manager.start_kokoro_model_download,
+    )
+    return web.json_response(payload, status=202)
+
+
+async def get_whisper_models(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        manager.get_whisper_catalog,
+    )
+    return web.json_response(payload)
+
+
+async def start_whisper_model_download(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager.start_whisper_model_download(request.match_info["variant_id"]),
+    )
+    return web.json_response(payload, status=202)
+
+
+async def delete_kokoro_model(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        manager.delete_kokoro_model_asset,
+    )
+    return web.json_response(payload)
+
+
+async def delete_kokoro_voice(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager.delete_kokoro_voice_asset(request.match_info["voice_id"]),
+    )
+    return web.json_response(payload)
+
+
+async def delete_whisper_model(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: manager.delete_whisper_model_asset(request.match_info["variant_id"]),
     )
     return web.json_response(payload)
 
@@ -1928,12 +2063,17 @@ async def start_oauth_flow_route(request: web.Request) -> web.Response:
 
     frontend_callback_uri = str(payload.get("frontend_callback_uri") or payload.get("redirect_uri") or "")
     redirect_uri = str(payload.get("redirect_uri") or frontend_callback_uri)
-    result = await start_oauth_flow(
-        agent_id,
-        server_key,
-        frontend_callback_uri=frontend_callback_uri,
-        redirect_uri=redirect_uri,
-    )
+    try:
+        result = await start_oauth_flow(
+            agent_id,
+            server_key,
+            frontend_callback_uri=frontend_callback_uri,
+            redirect_uri=redirect_uri,
+        )
+    except KeyError:
+        return web.json_response({"error": "agent_not_found"}, status=404)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     return web.json_response(result, status=201)
 
 
@@ -1983,6 +2123,159 @@ async def get_oauth_status_route(request: web.Request) -> web.Response:
     agent_id = request.match_info["agent_id"]
     server_key = _mcp_connection_key(request)
     return web.json_response(_manager().get_oauth_token_status(agent_id, server_key))
+
+
+# ------------------------------------------------------------------ #
+#  MCP Capabilities (Tools + Resources + Prompts)                      #
+# ------------------------------------------------------------------ #
+
+
+async def get_mcp_capabilities_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response(_manager().get_mcp_capability_snapshot(agent_id, server_key))
+
+
+async def discover_mcp_capabilities_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response(_manager().discover_mcp_capabilities(agent_id, server_key, force_refresh=True))
+
+
+async def list_mcp_resources_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response({"resources": _manager().list_mcp_resources(agent_id, server_key)})
+
+
+async def list_mcp_prompts_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response({"prompts": _manager().list_mcp_prompts(agent_id, server_key)})
+
+
+async def read_mcp_resource_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    payload = await request.json()
+    uri = str(payload.get("uri") or "")
+    return web.json_response(_manager().read_mcp_resource(agent_id, server_key, uri))
+
+
+async def render_mcp_prompt_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    prompt_name = request.match_info["prompt_name"]
+    payload = await request.json() if request.body_exists else {}
+    arguments = payload.get("arguments") if isinstance(payload, dict) else None
+    return web.json_response(_manager().render_mcp_prompt(agent_id, server_key, prompt_name, arguments or {}))
+
+
+# ------------------------------------------------------------------ #
+#  MCP Capability Policies (unified tool/resource/prompt)            #
+# ------------------------------------------------------------------ #
+
+
+async def list_mcp_capability_policies_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    return web.json_response(_manager().list_mcp_capability_policies(agent_id, server_key))
+
+
+async def put_mcp_capability_policy_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    capability_kind = request.match_info["capability_kind"]
+    capability_name = request.match_info["capability_name"]
+    payload = await request.json()
+    policy = str(payload.get("policy") or "auto")
+    exposure_mode = payload.get("exposure_mode")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None
+    return web.json_response(
+        _manager().upsert_mcp_capability_policy(
+            agent_id,
+            server_key,
+            capability_kind,
+            capability_name,
+            policy,
+            exposure_mode=exposure_mode,
+            metadata=metadata,
+        )
+    )
+
+
+async def delete_mcp_capability_policy_route(request: web.Request) -> web.Response:
+    agent_id = request.match_info["agent_id"]
+    server_key = _mcp_connection_key(request)
+    capability_kind = request.match_info["capability_kind"]
+    capability_name = request.match_info["capability_name"]
+    return web.json_response(
+        _manager().delete_mcp_capability_policy(agent_id, server_key, capability_kind, capability_name)
+    )
+
+
+# ------------------------------------------------------------------ #
+#  Custom MCP Servers (system-wide + per-agent)                      #
+# ------------------------------------------------------------------ #
+
+
+async def list_custom_mcp_servers_route(request: web.Request) -> web.Response:
+    agent_id = request.query.get("agent_id") or None
+    return web.json_response({"servers": _manager().list_custom_mcp_servers(agent_id=agent_id)})
+
+
+async def get_custom_mcp_server_route(request: web.Request) -> web.Response:
+    server_key = request.match_info["server_key"]
+    agent_id = request.query.get("agent_id") or None
+    entry = _manager().get_custom_mcp_server(server_key, agent_id=agent_id)
+    if entry is None:
+        return web.json_response({"error": "not_found", "server_key": server_key}, status=404)
+    return web.json_response(entry)
+
+
+async def register_custom_mcp_server_route(request: web.Request) -> web.Response:
+    payload = await request.json()
+    agent_id = payload.get("agent_id") or request.query.get("agent_id") or None
+    owner_user_id = _resolve_owner_user_id(request)
+    try:
+        result = _manager().register_custom_mcp_server(
+            payload.get("server") or payload,
+            agent_id=agent_id,
+            owner_user_id=owner_user_id,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
+async def import_claude_desktop_mcp_route(request: web.Request) -> web.Response:
+    payload = await request.json()
+    agent_id = payload.get("agent_id") or request.query.get("agent_id") or None
+    owner_user_id = _resolve_owner_user_id(request)
+    raw = payload.get("payload") or payload
+    if not isinstance(raw, dict):
+        return web.json_response({"error": "payload must be an object"}, status=400)
+    return web.json_response(_manager().import_claude_desktop_mcp(raw, agent_id=agent_id, owner_user_id=owner_user_id))
+
+
+async def delete_custom_mcp_server_route(request: web.Request) -> web.Response:
+    server_key = request.match_info["server_key"]
+    agent_id = request.query.get("agent_id") or None
+    return web.json_response(_manager().delete_custom_mcp_server(server_key, agent_id=agent_id))
+
+
+def _resolve_owner_user_id(request: web.Request) -> str | None:
+    """Best-effort owner identification for audit trail.
+
+    Returns the operator user_id when an authenticated session is present.
+    """
+    try:
+        session = getattr(request, "operator_session", None)
+        if session is None:
+            return None
+        return getattr(session, "user_id", None) or session.get("user_id") if isinstance(session, dict) else None
+    except Exception:
+        return None
 
 
 def setup_control_plane_routes(app: web.Application) -> None:
@@ -2048,10 +2341,6 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_post(
         "/api/control-plane/dashboard/agents/{agent_id}/approvals/{approval_id}",
         post_dashboard_approval_route,
-    )
-    app.router.add_get(
-        "/api/control-plane/skills",
-        list_skills_catalog_route,
     )
     app.router.add_get(
         "/api/control-plane/dashboard/agents/{agent_id}/tools",
@@ -2182,9 +2471,56 @@ def setup_control_plane_routes(app: web.Application) -> None:
         "/api/control-plane/providers/kokoro/voices/{voice_id}/download",
         start_kokoro_voice_download,
     )
+    app.router.add_get("/api/control-plane/providers/kokoro/model", get_kokoro_model)
+    app.router.add_post(
+        "/api/control-plane/providers/kokoro/model/download",
+        start_kokoro_model_download,
+    )
+    app.router.add_get(
+        "/api/control-plane/providers/embedding/models",
+        get_embedding_models,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/embedding/models/{model_id}/download",
+        start_embedding_model_download,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/embedding/models/{model_id}/select",
+        select_embedding_model,
+    )
+    app.router.add_delete(
+        "/api/control-plane/providers/embedding/models/{model_id}",
+        delete_embedding_model,
+    )
+    app.router.add_get("/api/control-plane/providers/whispercpp/models", get_whisper_models)
+    app.router.add_post(
+        "/api/control-plane/providers/whispercpp/models/{variant_id}/download",
+        start_whisper_model_download,
+    )
+    # DELETE counterparts — remove a downloaded asset from disk. Idempotent.
+    app.router.add_delete(
+        "/api/control-plane/providers/kokoro/model",
+        delete_kokoro_model,
+    )
+    app.router.add_delete(
+        "/api/control-plane/providers/kokoro/voices/{voice_id}",
+        delete_kokoro_voice,
+    )
+    app.router.add_delete(
+        "/api/control-plane/providers/whispercpp/models/{variant_id}",
+        delete_whisper_model,
+    )
+    app.router.add_get(
+        "/api/control-plane/providers/downloads/active",
+        list_active_provider_downloads,
+    )
     app.router.add_get(
         "/api/control-plane/providers/{provider_id}/downloads/{job_id}",
         get_provider_download_job,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/{provider_id}/downloads/{job_id}/cancel",
+        cancel_provider_download_job,
     )
     app.router.add_get("/api/control-plane/providers/ollama/models", get_ollama_models)
     app.router.add_get("/api/control-plane/system-settings/secrets/{secret_key}", get_global_secret)
@@ -2336,3 +2672,86 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/agents/{agent_id}/connections/{connection_key}/oauth/status", get_oauth_status_route
     )
+
+    # --- MCP Capabilities (tools + resources + prompts) ---
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/capabilities",
+        get_mcp_capabilities_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/capabilities",
+        get_mcp_capabilities_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/capabilities/discover",
+        discover_mcp_capabilities_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/capabilities/discover",
+        discover_mcp_capabilities_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/resources",
+        list_mcp_resources_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/resources",
+        list_mcp_resources_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/resources/read",
+        read_mcp_resource_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/resources/read",
+        read_mcp_resource_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/prompts",
+        list_mcp_prompts_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/prompts",
+        list_mcp_prompts_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/prompts/{prompt_name}/render",
+        render_mcp_prompt_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/prompts/{prompt_name}/render",
+        render_mcp_prompt_route,
+    )
+
+    # --- MCP Capability Policies (tool/resource/prompt) ---
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/capability-policies",
+        list_mcp_capability_policies_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/capability-policies",
+        list_mcp_capability_policies_route,
+    )
+    app.router.add_put(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/capability-policies/{capability_kind}/{capability_name}",
+        put_mcp_capability_policy_route,
+    )
+    app.router.add_put(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/capability-policies/{capability_kind}/{capability_name}",
+        put_mcp_capability_policy_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/agents/{agent_id}/mcp/connections/{server_key}/capability-policies/{capability_kind}/{capability_name}",
+        delete_mcp_capability_policy_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/agents/{agent_id}/connections/{connection_key}/capability-policies/{capability_kind}/{capability_name}",
+        delete_mcp_capability_policy_route,
+    )
+
+    # --- Custom MCP Servers (system-wide + per-agent JSON registration) ---
+    app.router.add_get("/api/control-plane/mcp/servers", list_custom_mcp_servers_route)
+    app.router.add_post("/api/control-plane/mcp/servers", register_custom_mcp_server_route)
+    app.router.add_post("/api/control-plane/mcp/servers/import", import_claude_desktop_mcp_route)
+    app.router.add_get("/api/control-plane/mcp/servers/{server_key}", get_custom_mcp_server_route)
+    app.router.add_delete("/api/control-plane/mcp/servers/{server_key}", delete_custom_mcp_server_route)

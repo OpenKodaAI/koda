@@ -13,6 +13,8 @@ import {
   Database,
   Fingerprint,
   KeyRound,
+  Pause,
+  Play,
   Plug,
   Rocket,
   Wand2,
@@ -25,6 +27,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { AgentEditorProvider, useAgentEditor } from "@/hooks/use-agent-editor";
 import { useTabNavigation } from "@/hooks/use-tab-navigation";
+import { getAgentLifecycleState } from "@/lib/agent-lifecycle";
 import { requestJson } from "@/lib/http-client";
 import { cn } from "@/lib/utils";
 import type {
@@ -183,6 +186,9 @@ function EditorHeader({
   onSave,
   isSaving,
   saveStatus,
+  onLifecycleToggle,
+  isLifecyclePending,
+  lifecycleStatus,
 }: {
   previousStep: StepDefinition | null;
   nextStep: StepDefinition | null;
@@ -193,11 +199,20 @@ function EditorHeader({
   onSave: () => Promise<void>;
   isSaving: boolean;
   saveStatus: "idle" | "pending" | "success" | "error";
+  onLifecycleToggle: () => Promise<void>;
+  isLifecyclePending: boolean;
+  lifecycleStatus: "idle" | "pending" | "success" | "error";
 }) {
   const { state } = useAgentEditor();
   const { tl } = useAppI18n();
 
   const agentId = state.agent.id;
+  const lifecycle = getAgentLifecycleState({
+    status: state.agent.status,
+    appliedVersion: state.agent.applied_version ?? null,
+    desiredVersion: state.agent.desired_version ?? null,
+    hasPendingChanges: hasUnsavedChanges,
+  });
 
   return (
     <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2" {...tourAnchor("editor.header")}>
@@ -262,17 +277,40 @@ function EditorHeader({
                   "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm shadow-none transition-colors",
                   nextStep
                     ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
-                    : "font-semibold text-[var(--interactive-active-text)]",
+                    : "font-semibold text-[color:var(--interactive-active-text)]",
                 )}
                 style={nextStep ? undefined : {
                   background: "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
                   border: "1px solid var(--interactive-active-border)",
+                  color: "var(--interactive-active-text)",
                 }}
                 {...tourAnchor("editor.next-step")}
               >
                 {nextStep ? tl("Avançar") : tl("Salvar e Publicar")}
                 {nextStep ? <ArrowRight size={15} /> : null}
               </button>
+              {lifecycle.toggle !== "none" ? (
+                <>
+                  <span className="mx-1 hidden h-5 w-px bg-[var(--border-subtle)] lg:block" />
+                  <AsyncActionButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    icon={lifecycle.toggle === "activate" ? Play : Pause}
+                    onClick={onLifecycleToggle}
+                    loading={isLifecyclePending}
+                    loadingLabel={
+                      lifecycle.toggle === "activate" ? tl("Ativando") : tl("Pausando")
+                    }
+                    status={lifecycleStatus}
+                    className="shadow-none"
+                    title={lifecycle.description}
+                    {...tourAnchor("editor.lifecycle")}
+                  >
+                    {lifecycle.toggle === "activate" ? tl("Ativar") : tl("Pausar")}
+                  </AsyncActionButton>
+                </>
+              ) : null}
               {hasUnsavedChanges ? (
                 <>
                   <span className="mx-1 hidden h-5 w-px bg-[var(--border-subtle)] lg:block" />
@@ -323,7 +361,7 @@ function ActiveStepRenderer({
 }
 
 function InnerShell() {
-  const { state, persistDraft, discardDraft } = useAgentEditor();
+  const { state, persistDraft, discardDraft, applyAgentLifecycle } = useAgentEditor();
   const { tl } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending, getStatus } = useAsyncAction();
@@ -372,6 +410,48 @@ function InnerShell() {
     );
   }
 
+  async function handleLifecycleToggle() {
+    const lifecycle = getAgentLifecycleState({
+      status: state.agent.status,
+      appliedVersion: state.agent.applied_version ?? null,
+      desiredVersion: state.agent.desired_version ?? null,
+      hasPendingChanges: hasUnsavedChanges,
+    });
+    const action = lifecycle.toggle;
+    if (action === "none") return;
+    // Optimistic update — flip the runtime status the moment the user clicks
+    // so the badge/icon never lags behind the click. The API response below
+    // will overwrite this with the canonical server state, and router.refresh
+    // re-hydrates secondary data (workers list, version history, etc.).
+    applyAgentLifecycle({ status: action === "activate" ? "active" : "paused" });
+    await runAction(
+      "lifecycle-toggle",
+      async () => {
+        const response = await requestJson<{
+          status?: string;
+          applied_version?: number | null;
+          desired_version?: number | null;
+        }>(`/api/control-plane/agents/${state.agent.id}/${action}`, {
+          method: "POST",
+        });
+        applyAgentLifecycle({
+          status: response.status ?? null,
+          appliedVersion: response.applied_version ?? null,
+          desiredVersion: response.desired_version ?? null,
+        });
+        router.refresh();
+      },
+      {
+        successMessage:
+          action === "activate" ? tl("Agente ativado.") : tl("Agente pausado."),
+        errorMessage:
+          action === "activate"
+            ? tl("Erro ao ativar agente.")
+            : tl("Erro ao pausar agente."),
+      },
+    );
+  }
+
   async function handleSaveAndPublish() {
     await runAction(
       "save-editor",
@@ -405,6 +485,9 @@ function InnerShell() {
           onSave={handleSaveDraft}
           isSaving={isPending("save-editor")}
           saveStatus={getStatus("save-editor")}
+          onLifecycleToggle={handleLifecycleToggle}
+          isLifecyclePending={isPending("lifecycle-toggle")}
+          lifecycleStatus={getStatus("lifecycle-toggle")}
         />
 
         <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[auto_minmax(0,1fr)]">

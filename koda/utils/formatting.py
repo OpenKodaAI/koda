@@ -98,9 +98,7 @@ def extract_and_replace_large_blocks(text: str) -> tuple[str, list[tuple[str, st
     return modified, files
 
 
-# ---------------------------------------------------------------------------
 # GFM Markdown -> Telegram HTML conversion
-# ---------------------------------------------------------------------------
 
 _SENTINEL = "\x00"  # null-byte placeholder prefix
 

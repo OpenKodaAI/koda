@@ -19,7 +19,7 @@ export function useAgentStats(agentId?: string) {
     notifyOnChangeProps: ["data", "error"],
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true,
     refetchOnReconnect: false,
     refetchInterval: (query) => {
       const hasActive = (query.state.data ?? []).some((s) => s.activeTasks > 0);

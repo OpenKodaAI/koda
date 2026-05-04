@@ -49,12 +49,6 @@ export type EditorState = {
   squadId: string;
   color: string;
   colorRgb: string;
-  healthPort: string;
-  healthUrl: string;
-  runtimeBaseUrl: string;
-  appearanceJson: string;
-  runtimeEndpointJson: string;
-  metadataJson: string;
   // Documents
   documents: Record<string, string>;
   // Agent spec fields (all as JSON strings)
@@ -128,6 +122,12 @@ type EditorAction =
       agent: ControlPlaneAgent;
       compiledPromptPayload?: ControlPlaneCompiledPrompt | null;
       executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null;
+    }
+  | {
+      type: "applyAgentLifecycle";
+      status?: string | null;
+      appliedVersion?: number | null;
+      desiredVersion?: number | null;
     };
 
 // ---------------------------------------------------------------------------
@@ -142,12 +142,6 @@ const META_FIELDS = new Set<string>([
   "squadId",
   "color",
   "colorRgb",
-  "healthPort",
-  "healthUrl",
-  "runtimeBaseUrl",
-  "appearanceJson",
-  "runtimeEndpointJson",
-  "metadataJson",
 ]);
 
 const AGENT_SPEC_FIELDS = new Set<string>([
@@ -166,6 +160,8 @@ const AGENT_SPEC_FIELDS = new Set<string>([
   "voicePolicyJson",
   "imageAnalysisPolicyJson",
   "memoryExtractionSchemaJson",
+  "skillPolicyJson",
+  "customSkillsJson",
 ]);
 
 const COLLECTION_TO_DIRTY: Record<string, string> = {
@@ -280,6 +276,30 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       };
     }
 
+    case "applyAgentLifecycle": {
+      // Partial merge of runtime-lifecycle fields. Used after activate/pause
+      // so the UI flips instantly without waiting for a full route refresh.
+      const nextStatus = action.status ?? state.agent.status;
+      const nextApplied =
+        action.appliedVersion === undefined
+          ? state.agent.applied_version
+          : action.appliedVersion;
+      const nextDesired =
+        action.desiredVersion === undefined
+          ? state.agent.desired_version
+          : action.desiredVersion;
+      return {
+        ...state,
+        status: nextStatus ?? state.status,
+        agent: {
+          ...state.agent,
+          status: nextStatus ?? state.agent.status,
+          applied_version: nextApplied,
+          desired_version: nextDesired,
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -322,10 +342,8 @@ function buildInitialState(
   compiledPromptPayload?: ControlPlaneCompiledPrompt | null,
   executionPolicyPayload?: ControlPlaneExecutionPolicyPayload | null,
 ): EditorState {
-  // Backend may omit runtime_endpoint / agent_spec for archived agents or
-  // during transient error states. Default to empty objects so we don't
-  // crash with "Cannot read properties of null (reading 'health_port')".
-  const rt = (agent.runtime_endpoint ?? {}) as Record<string, unknown>;
+  // Backend may omit agent_spec for archived agents or during transient error
+  // states. Default to an empty object so we don't crash on hydrate.
   const spec = (agent.agent_spec ?? {}) as Record<string, unknown>;
   const normalizedCompiledPromptPayload = normalizeCompiledPromptPayload(agent, compiledPromptPayload);
   const normalizedExecutionPolicyPayload = executionPolicyPayload ?? null;
@@ -342,12 +360,6 @@ function buildInitialState(
     squadId: agent.organization?.squad_id ?? "",
     color: agent.appearance?.color ?? "",
     colorRgb: agent.appearance?.color_rgb ?? "",
-    healthPort: String(rt.health_port ?? ""),
-    healthUrl: String(rt.health_url ?? ""),
-    runtimeBaseUrl: String(rt.runtime_base_url ?? ""),
-    appearanceJson: prettyJson(agent.appearance ?? {}),
-    runtimeEndpointJson: prettyJson(agent.runtime_endpoint ?? {}),
-    metadataJson: prettyJson(agent.metadata ?? {}),
     // Documents — the backend may legitimately omit this for new agents.
     // Spreading null throws; the empty-object fallback keeps the editor
     // mountable for agents that haven't been fully initialized yet.
@@ -445,6 +457,11 @@ type AgentEditorContextValue = {
   refreshCompiledPrompt: () => Promise<ControlPlaneCompiledPrompt>;
   discardDraft: () => void;
   persistDraft: (options?: PersistDraftOptions) => Promise<{ persisted: string[] }>;
+  applyAgentLifecycle: (input: {
+    status?: string | null;
+    appliedVersion?: number | null;
+    desiredVersion?: number | null;
+  }) => void;
 };
 
 const AgentEditorContext = createContext<AgentEditorContextValue | null>(null);
@@ -664,6 +681,21 @@ export function AgentEditorProvider({
     return payload;
   }, [dispatch, state.agent.id]);
 
+  const applyAgentLifecycle = useCallback(
+    (input: {
+      status?: string | null;
+      appliedVersion?: number | null;
+      desiredVersion?: number | null;
+    }) =>
+      dispatch({
+        type: "applyAgentLifecycle",
+        status: input.status,
+        appliedVersion: input.appliedVersion,
+        desiredVersion: input.desiredVersion,
+      }),
+    [dispatch],
+  );
+
   const persistDraft = useCallback(async (options: PersistDraftOptions = {}) => {
     const includeMeta = options.includeMeta ?? state.dirty.meta;
     const includeAgentSpec =
@@ -681,12 +713,7 @@ export function AgentEditorProvider({
         squadId: state.squadId,
         color: state.color,
         colorRgb: state.colorRgb,
-        healthPort: state.healthPort,
-        healthUrl: state.healthUrl,
-        runtimeBaseUrl: state.runtimeBaseUrl,
-        appearanceJson: state.appearanceJson,
-        runtimeEndpointJson: state.runtimeEndpointJson,
-        metadataJson: state.metadataJson,
+        existingAppearance: state.agent.appearance ?? null,
       });
       await requestJson(`/api/control-plane/agents/${agentId}`, {
         method: "PATCH",
@@ -718,6 +745,8 @@ export function AgentEditorProvider({
           voicePolicyJson: state.voicePolicyJson,
           imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,
           memoryExtractionSchemaJson: state.memoryExtractionSchemaJson,
+          skillPolicyJson: state.skillPolicyJson,
+          customSkillsJson: state.customSkillsJson,
           executionPolicyJson: state.executionPolicyDirty
             ? state.executionPolicyJson
             : undefined,
@@ -846,6 +875,7 @@ export function AgentEditorProvider({
     refreshCompiledPrompt,
     discardDraft,
     persistDraft,
+    applyAgentLifecycle,
   }), [
     state,
     developerMode,
@@ -867,6 +897,7 @@ export function AgentEditorProvider({
     refreshCompiledPrompt,
     discardDraft,
     persistDraft,
+    applyAgentLifecycle,
   ]);
 
   return React.createElement(AgentEditorContext.Provider, { value }, children);

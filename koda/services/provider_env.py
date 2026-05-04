@@ -102,7 +102,23 @@ _SAFE_TOOL_ENV_KEYS = frozenset(
         "ALL_PROXY",
     }
 )
-_SAFE_LLM_ENV_KEYS = frozenset({*_SAFE_TOOL_ENV_KEYS, "HOME"})
+# User-identity vars: provider CLIs (claude, codex, gemini) need these to
+# resolve per-user credential stores. Even with HOME set, the claude CLI
+# returns ``loggedIn: false`` when USER / LOGNAME are missing — the keychain
+# / credential lookup keys off the effective user, not just $HOME. Stripping
+# them silently breaks subscription_login auth in subprocesses.
+_SAFE_LLM_ENV_KEYS = frozenset(
+    {
+        *_SAFE_TOOL_ENV_KEYS,
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+    }
+)
 
 
 def _minimal_safe_env(
@@ -184,9 +200,24 @@ def build_llm_subprocess_env(
         allowed_provider_keys=_provider_allowed_keys(provider, source),
         safe_env_keys=_SAFE_LLM_ENV_KEYS,
     )
-    home = source.get("HOME")
-    if home and "HOME" not in env:
-        env["HOME"] = home
+    # Force-inject user-identity vars after sanitization. The Rust security
+    # guard's SAFE_EXACT_KEYS allowlist only includes HOME — without USER /
+    # LOGNAME the claude CLI silently reports ``loggedIn: false`` because the
+    # subscription_login credential lookup keys off the effective user, not
+    # just $HOME. Re-applying these after the RPC mirrors the pre-existing
+    # HOME guard below.
+    for identity_key in (
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+    ):
+        identity_value = source.get(identity_key)
+        if identity_value and identity_key not in env:
+            env[identity_key] = identity_value
     return env
 
 
@@ -196,7 +227,8 @@ def build_tool_subprocess_env(
     env_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Return a tool-safe environment with only explicit overrides added back."""
-    env = _sanitize_env(base_env, env_overrides=env_overrides, safe_env_keys=_SAFE_TOOL_ENV_KEYS)
-    if not dict(env_overrides or {}).get("HOME"):
+    overrides = {str(key): str(value) for key, value in dict(env_overrides or {}).items()}
+    env = _sanitize_env(base_env, env_overrides=overrides, safe_env_keys=_SAFE_TOOL_ENV_KEYS)
+    if "HOME" not in overrides:
         env.pop("HOME", None)
     return env

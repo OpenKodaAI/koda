@@ -13,6 +13,7 @@ import { FormInput } from "@/components/control-plane/shared/form-field";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { StatusDot } from "@/components/ui/status-dot";
+import { getAgentLifecycleState } from "@/lib/agent-lifecycle";
 import { requestJson } from "@/lib/http-client";
 
 const SECTION_LABELS: Record<string, string> = {
@@ -37,6 +38,13 @@ export function TabPublicacao() {
     .map(([key]) => key);
   const hasPendingChanges = dirtyKeys.length > 0;
 
+  const lifecycle = getAgentLifecycleState({
+    status: state.agent.status,
+    appliedVersion: state.agent.applied_version ?? null,
+    desiredVersion: state.agent.desired_version ?? null,
+    hasPendingChanges,
+  });
+
   async function handleClone() {
     if (!state.cloneDisplayName.trim()) {
       showToast(tl("Nome do clone e obrigatorio."), "warning");
@@ -46,7 +54,7 @@ export function TabPublicacao() {
       state.cloneDisplayName
         .trim()
         .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[̀-ͯ]/g, "")
         .toLowerCase()
         .replace(/[^a-z0-9_\s-]/g, "")
         .replace(/[\s-]+/g, "_")
@@ -91,30 +99,31 @@ export function TabPublicacao() {
   return (
     <div className="flex flex-col gap-8">
       <section className="flex flex-col gap-4">
-        <span className="eyebrow">{tl("Resumo de alteracoes")}</span>
+        <span className="eyebrow">{tl("Status do agente")}</span>
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <div className="flex flex-col gap-1.5">
           <span className="inline-flex items-center gap-2">
-            <StatusDot
-              tone={hasPendingChanges ? "warning" : "success"}
-              pulse={hasPendingChanges}
-            />
-            <span className="text-[var(--text-primary)]">
-              {hasPendingChanges
-                ? tl("Alteracoes pendentes")
-                : tl("Publicado")}
+            <StatusDot tone={lifecycle.tone} pulse={lifecycle.pulse} />
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              {tl(lifecycle.label)}
             </span>
           </span>
-          <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)]">
-            <span className="text-[var(--text-quaternary)]">{tl("Versao publicada")}</span>
+          <p className="max-w-xl text-xs leading-relaxed text-[var(--text-tertiary)]">
+            {tl(lifecycle.description)}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[var(--text-tertiary)]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-[var(--text-quaternary)]">{tl("Versão aplicada")}</span>
             <span className="tabular-nums text-[var(--text-secondary)]">
-              {state.agent.applied_version || "—"}
+              {state.agent.applied_version ?? "—"}
             </span>
           </span>
-          <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)]">
-            <span className="text-[var(--text-quaternary)]">{tl("Versao desejada")}</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-[var(--text-quaternary)]">{tl("Versão desejada")}</span>
             <span className="tabular-nums text-[var(--text-secondary)]">
-              {state.agent.desired_version || tl("Rascunho")}
+              {state.agent.desired_version ?? tl("Rascunho")}
             </span>
           </span>
         </div>
@@ -122,6 +131,7 @@ export function TabPublicacao() {
         {hasPendingChanges ? (
           <InlineAlert tone="warning">
             <span className="text-[var(--text-secondary)]">
+              {tl("Alterações pendentes em")}: {" "}
               {dirtyKeys
                 .map((key) => tl(SECTION_LABELS[key] ?? key))
                 .join(" · ")}

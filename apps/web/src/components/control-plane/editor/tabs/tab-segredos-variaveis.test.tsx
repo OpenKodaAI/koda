@@ -104,10 +104,10 @@ const workspaces: ControlPlaneWorkspaceTree = {
     no_workspace: {
       id: null,
       label: "Sem workspace",
-      bot_count: 0,
+      agent_count: 0,
     },
   },
-  total_bot_count: 0,
+  total_agent_count: 0,
 };
 
 function makeSystemSettings(): ControlPlaneSystemSettings {

@@ -21,6 +21,7 @@ def _isolate_state(tmp_path, monkeypatch):
     import koda.config as config_module
 
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "STATE_BACKEND", "sqlite")
 
 
 @pytest.mark.asyncio

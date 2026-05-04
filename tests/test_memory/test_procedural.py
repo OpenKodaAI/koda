@@ -44,6 +44,32 @@ def test_build_execution_memories_success() -> None:
     assert "README.md" in memory.content
 
 
+def test_build_execution_memories_conflict_key_includes_tool_sequence() -> None:
+    common = {
+        "query": "Fix the login bug and run pytest",
+        "user_id": 111,
+        "task_id": 42,
+        "status": "completed",
+        "confidence_score": 0.81,
+        "error_message": None,
+        "tool_uses": [{"name": "Bash", "input": {"command": "pytest tests/test_auth.py"}}],
+        "knowledge_hits": [{"source_label": "README.md"}],
+        "work_dir": "/tmp/project",
+        "model": "claude-sonnet-4-6",
+        "task_kind": "bugfix",
+        "project_key": "project",
+        "environment": "prod",
+        "team": "agent_a",
+        "owner": "AGENT_A",
+    }
+
+    first = build_execution_memories(tool_execution_trace=[{"tool": "shell"}], **common)[0]
+    second = build_execution_memories(tool_execution_trace=[{"tool": "apply_patch"}], **common)[0]
+
+    assert first.conflict_key != second.conflict_key
+    assert first.metadata["conflict_key_version"] == 2
+
+
 @pytest.mark.asyncio
 async def test_build_procedural_context_groups_success_and_caution() -> None:
     store = MagicMock()

@@ -324,6 +324,25 @@ export interface RuntimeWorkspaceFile {
   truncated?: boolean;
 }
 
+export interface RuntimeWorkspaceSearchMatch {
+  path: string;
+  line_number: number;
+  column: number;
+  line: string;
+  preview: string;
+  match: string;
+  start: number;
+  end: number;
+}
+
+export interface RuntimeWorkspaceSearch {
+  ok?: boolean;
+  query?: string;
+  items?: RuntimeWorkspaceSearchMatch[];
+  truncated?: boolean;
+  searched_files?: number;
+}
+
 export interface RuntimeWorkspaceStatus {
   ok?: boolean;
   text?: string;

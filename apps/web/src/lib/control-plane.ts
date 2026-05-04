@@ -23,9 +23,7 @@ export type ControlPlaneAgentOrganization = {
   squad_name?: string | null;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad spec types — hierarchical prompt governance              */
-/* -------------------------------------------------------------------------- */
 
 export type WorkspaceSpec = Record<string, never>;
 export type SquadSpec = Record<string, never>;
@@ -34,16 +32,14 @@ export interface ScopePromptDocuments {
   system_prompt_md?: string;
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad entity types                                             */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneWorkspaceSquad = {
   id: string;
   workspace_id: string;
   name: string;
   description: string;
-  bot_count: number;
+  agent_count: number;
   spec?: SquadSpec;
   documents?: ScopePromptDocuments;
   created_at: string;
@@ -54,7 +50,7 @@ export type ControlPlaneWorkspace = {
   id: string;
   name: string;
   description: string;
-  bot_count: number;
+  agent_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;
   squads: ControlPlaneWorkspaceSquad[];
@@ -62,7 +58,7 @@ export type ControlPlaneWorkspace = {
     no_squad: {
       id: null;
       label: string;
-      bot_count: number;
+      agent_count: number;
     };
   };
   created_at: string;
@@ -75,10 +71,10 @@ export type ControlPlaneWorkspaceTree = {
     no_workspace: {
       id: null;
       label: string;
-      bot_count: number;
+      agent_count: number;
     };
   };
-  total_bot_count: number;
+  total_agent_count: number;
 };
 
 export type ControlPlaneAgentSummary = {
@@ -229,6 +225,8 @@ export type KokoroVoiceOption = {
   sha256_prefix: string;
   downloaded: boolean;
   local_path: string;
+  /** On-disk file size in bytes when downloaded; 0 otherwise. */
+  bytes?: number;
 };
 
 export type KokoroVoiceCatalog = {
@@ -397,6 +395,13 @@ export type GeneralSystemSettings = {
       kokoro_default_language: string;
       kokoro_default_voice: string;
       kokoro_default_voice_label: string;
+      /**
+       * Apple Silicon Metal acceleration toggle. When false, the
+       * Metal-capable runtimes (llama.cpp, MLX) are gated off at the
+       * runtime layer regardless of any other flag. No-op on non-Apple
+       * Silicon hosts.
+       */
+      metal_enabled: boolean;
       functional_defaults: Record<
         string,
         {
@@ -406,6 +411,15 @@ export type GeneralSystemSettings = {
           model_label?: string;
         }
       >;
+      /**
+       * Singular default effort for the currently selected general model.
+       * Legacy per-model maps are read by the backend only for migration.
+       */
+      effort_default?: {
+        provider_id: string;
+        model_id: string;
+        value: string | number;
+      } | null;
     };
     resources: {
       global_tools: string[];
@@ -464,6 +478,11 @@ export type GeneralSystemSettings = {
         title: string;
         description?: string;
         status?: string;
+        effort_kind?: "enum" | "tokens";
+        effort_enum_values?: string[];
+        effort_token_min?: number;
+        effort_token_max?: number;
+        effort_default?: string | number;
       }>
     >;
     global_tools: Array<Record<string, unknown>>;
@@ -628,9 +647,7 @@ export type ControlPlaneRuntimeAccess = {
 
 export type ControlPlaneServerRuntimeAccess = ControlPlaneRuntimeAccess;
 
-/* -------------------------------------------------------------------------- */
 /*  MCP types                                                                  */
-/* -------------------------------------------------------------------------- */
 
 export type McpToolPolicy = "auto" | "always_allow" | "always_ask" | "blocked";
 
@@ -659,9 +676,7 @@ export type McpEnvSchemaField = {
   input_type?: string;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  ConnectionProfile — declarative per-integration connection contract        */
-/* -------------------------------------------------------------------------- */
 
 export type ConnectionStrategy =
   | "none"
@@ -671,7 +686,9 @@ export type ConnectionStrategy =
   | "local_path"
   | "local_app"
   | "oauth_only"
-  | "oauth_preferred";
+  | "oauth_preferred"
+  | "custom_stdio"
+  | "custom_http";
 
 export type RuntimeConstraintKey =
   | "allowed_domains"
@@ -727,6 +744,8 @@ export type McpServerCatalogEntry = {
   auth_strategy?: string | null;
   oauth_enabled?: boolean;
   oauth_mode?: string | null;
+  auth_flow_kind?: string | null;
+  oauth_availability?: string | null;
   oauth_metadata_url?: string | null;
   vendor_notes?: string | null;
   default_policy?: McpToolPolicy | null;
@@ -782,6 +801,8 @@ export type ControlPlaneConnectionCatalogEntry = {
   auth_strategy_default?: string | null;
   official_support_level?: string | null;
   oauth_mode?: string | null;
+  auth_flow_kind?: string | null;
+  oauth_availability?: string | null;
   remote_url?: string | null;
   vendor_notes?: string | null;
   default_policy?: McpToolPolicy | null;
@@ -848,9 +869,144 @@ export type ControlPlaneConnectionTools = {
   };
 };
 
-/* -------------------------------------------------------------------------- */
+/*  MCP capabilities — Tools + Resources + Prompts                            */
+
+export type McpDiscoveredResource = {
+  uri: string;
+  uri_hash?: string;
+  name?: string | null;
+  description?: string | null;
+  mime_type?: string | null;
+  is_template?: boolean;
+  annotations?: Record<string, unknown>;
+};
+
+export type McpResourceTemplate = {
+  uri_template: string;
+  name?: string | null;
+  description?: string | null;
+  mime_type?: string | null;
+};
+
+export type McpPromptArgument = {
+  name: string;
+  description?: string | null;
+  required?: boolean;
+};
+
+export type McpDiscoveredPrompt = {
+  name: string;
+  description?: string | null;
+  arguments?: McpPromptArgument[];
+};
+
+export type McpServerInfo = {
+  name?: string;
+  version?: string;
+  protocol_version?: string;
+  [key: string]: unknown;
+};
+
+export type McpCapabilityKind = "tool" | "resource" | "prompt";
+
+export type McpCapabilityPolicy = "auto" | "always_allow" | "always_ask" | "blocked";
+
+export type McpResourceExposureMode = "context" | "tool" | "auto";
+
+export type McpCapabilityPolicyEntry = {
+  capability_kind: McpCapabilityKind;
+  capability_name: string;
+  policy: McpCapabilityPolicy;
+  exposure_mode?: McpResourceExposureMode | null;
+  metadata?: Record<string, unknown>;
+  updated_at?: string;
+};
+
+export type McpCapabilityPolicies = {
+  tools: McpCapabilityPolicyEntry[];
+  resources: McpCapabilityPolicyEntry[];
+  prompts: McpCapabilityPolicyEntry[];
+};
+
+export type ControlPlaneConnectionCapabilities = {
+  agent_id: string;
+  server_key: string;
+  server_info: McpServerInfo;
+  server_capabilities: Record<string, unknown>;
+  protocol_version?: string | null;
+  tools: McpDiscoveredTool[];
+  resources: McpDiscoveredResource[];
+  resource_templates: McpResourceTemplate[];
+  prompts: McpDiscoveredPrompt[];
+  captured_at: string;
+  ttl_seconds: number;
+  error?: string | null;
+  policies?: McpCapabilityPolicies;
+  summary: {
+    tool_count: number;
+    resource_count: number;
+    resource_template_count: number;
+    prompt_count: number;
+  };
+};
+
+/*  Custom MCP servers — system-wide + per-agent                              */
+
+export type McpCustomServerScope = "system" | "agent";
+
+export type McpCustomServerHeader = { key: string; label?: string };
+
+export type McpCustomServerOAuthConfig = {
+  oauth_metadata_url?: string;
+  authorize_url?: string;
+  token_url?: string;
+  client_id?: string;
+  scopes?: string[];
+  oauth_provider?: string;
+};
+
+export type McpCustomServerIsolationConstraints = {
+  cpu_quota?: number;
+  memory_limit_bytes?: number;
+  network_mode?: "none" | "egress_allowlist" | "any";
+  egress_domains?: string[];
+  mounts?: Array<{ host: string; container: string; read_only?: boolean }>;
+  timeout_seconds?: number;
+};
+
+export type McpCustomServerEntry = {
+  server_key: string;
+  scope: McpCustomServerScope;
+  agent_id?: string;
+  display_name: string;
+  description: string;
+  transport_type: "stdio" | "http_sse";
+  command: string[];
+  args?: string[];
+  url?: string | null;
+  env_schema: McpEnvSchemaField[];
+  headers_schema: McpCustomServerHeader[];
+  auth_strategy: "no_auth" | "api_key" | "oauth" | "connection_string" | "dual_token";
+  oauth_config?: McpCustomServerOAuthConfig | null;
+  isolation_profile: "auto" | "native" | "bwrap" | "sandbox-exec" | "docker";
+  isolation_constraints?: McpCustomServerIsolationConstraints;
+  runtime_constraints?: RuntimeConstraintKey[];
+  is_custom: true;
+  source: "manual" | "claude_desktop_json";
+  owner_user_id?: string | null;
+  metadata?: Record<string, unknown>;
+  validation_signature?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type McpClaudeDesktopImportResult = {
+  created: string[];
+  updated: string[];
+  errors: Array<{ name: string; message: string }>;
+};
+
 /*  Core integration type                                                      */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneCoreIntegration = {
   id: string;
@@ -917,7 +1073,7 @@ export type GeneralSystemSettingsCatalogProvider = {
   category?: string;
   enabled_by_default?: boolean;
   command_present?: boolean;
-  available_models?: Array<Record<string, unknown>>;
+  available_models?: string[];
   default_model?: string;
   supported_auth_modes?: string[];
   supports_api_key?: boolean;
@@ -931,9 +1087,7 @@ export type GeneralSystemSettingsCatalogProvider = {
   functional_models?: Array<Record<string, unknown>>;
 };
 
-/* -------------------------------------------------------------------------- */
 /*  Onboarding status type                                                     */
-/* -------------------------------------------------------------------------- */
 
 export type ControlPlaneOnboardingStatus = {
   has_owner?: boolean;
@@ -1093,6 +1247,13 @@ export function sanitizeControlPlanePayload<T>(
 type ControlPlaneFetchOptions = {
   tier?: ControlPlaneFetchTier;
   tags?: string[];
+  /**
+   * Override the default 6s timeout for this request. Use shorter values
+   * (1500–2500ms) for SSR probes that block page render — `/login` and
+   * `/setup` ask "is the user already authenticated?" and the operator
+   * shouldn't wait 6s for that probe to give up before seeing the form.
+   */
+  timeoutMs?: number;
 };
 
 function buildUrl(pathname: string) {
@@ -1102,6 +1263,32 @@ function buildUrl(pathname: string) {
     pathname,
     cleanBase.endsWith("/") ? cleanBase : `${cleanBase}/`,
   );
+}
+
+// Hard ceiling for SSR fetches against the control plane. Keeps the layout
+// from blocking when the backend is unreachable or hung — surfaces as a 503
+// `ControlPlaneRequestError` instead of letting Next sit on the request for
+// the full Node fetch default. Routes that need a longer budget (downloads,
+// SSE streams) bypass this helper entirely via `runtimeFetch`.
+//
+// 10s, not 6s: the dashboard aggregation routes (`agents/summary`,
+// `executions`, `costs`) run ~10 sync queries per agent through
+// `run_coro_sync`, so a 4-agent fan-out genuinely takes 3-5s on a healthy
+// backend. 6s tipped them into "did not respond" the moment any cold query
+// added latency. 10s is still tight enough to flag a real hang.
+const CONTROL_PLANE_FETCH_TIMEOUT_MS = 10_000;
+
+function combineSignals(
+  caller: AbortSignal | null | undefined,
+  timeout: AbortSignal,
+): AbortSignal {
+  if (!caller) return timeout;
+  // AbortSignal.any is widely available in Node 22+ and modern browsers; if a
+  // runtime lacks it, fall back to the caller's signal (timeout still applies
+  // via the underlying fetch when supported by the caller).
+  const factory = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal })
+    .any;
+  return typeof factory === "function" ? factory([caller, timeout]) : caller;
 }
 
 export async function controlPlaneFetch(
@@ -1119,6 +1306,10 @@ export async function controlPlaneFetch(
     headers.set("Content-Type", "application/json");
   }
 
+  const timeoutMs = options.timeoutMs ?? CONTROL_PLANE_FETCH_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = combineSignals(init.signal, timeoutSignal);
+
   try {
     const fetchConfig = getControlPlaneFetchConfig(
       options.tier ?? "live",
@@ -1128,8 +1319,15 @@ export async function controlPlaneFetch(
       ...init,
       ...fetchConfig,
       headers,
+      signal,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ControlPlaneRequestError(
+        `Control plane did not respond within ${timeoutMs}ms`,
+        503,
+      );
+    }
     const message =
       error instanceof Error
         ? error.message
@@ -1377,11 +1575,17 @@ export async function getControlPlaneOnboardingStatus() {
   );
 }
 
-export async function getControlPlaneAuthStatus() {
+export async function getControlPlaneAuthStatus(
+  options: { timeoutMs?: number } = {},
+) {
+  // Auth status is a lightweight probe; if the backend hangs we'd rather
+  // surface a 503 quickly than block the page render. SSR call sites pass
+  // a short timeout (1.5–2s); the default keeps the global 6s ceiling for
+  // anything else that ends up calling this helper.
   return controlPlaneFetchJson<ControlPlaneAuthStatus>(
     "/api/control-plane/auth/status",
     {},
-    { tier: "live" },
+    { tier: "live", timeoutMs: options.timeoutMs },
   );
 }
 
@@ -1501,6 +1705,11 @@ export async function getControlPlaneCoreIntegrations() {
             : "",
         supports_persistence: Boolean(connection?.metadata?.supports_persistence ?? true),
         connection: toCoreIntegrationConnection(item, connection),
+        // Pass the declarative connection profile through so the UI can
+        // render the credential form (e.g. Confluence/Jira: URL + email +
+        // API token) instead of an empty "Activate" stub.
+        connection_profile: item.connection_profile ?? null,
+        runtime_constraints: item.runtime_constraints,
       } satisfies ControlPlaneCoreIntegration;
     });
 
@@ -1513,9 +1722,7 @@ export async function getControlPlaneCoreIntegrations() {
   } satisfies ControlPlaneCoreIntegrations;
 }
 
-/* -------------------------------------------------------------------------- */
 /*  Workspace / Squad spec API                                                 */
-/* -------------------------------------------------------------------------- */
 
 export async function getWorkspaceSpec(workspaceId: string) {
   return controlPlaneFetchJson<{ spec: WorkspaceSpec; documents: ScopePromptDocuments }>(

@@ -502,9 +502,16 @@ def build_provider_process_env(
         if configured_bin:
             env["GEMINI_BIN"] = configured_bin
     if provider_id == "ollama":
-        resolved_base_url = base_url.strip() or str(source.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or "").strip()
-        if not resolved_base_url:
-            resolved_base_url = provider_default_base_url("ollama", auth_mode)
+        # In api_key mode, Ollama targets the cloud endpoint regardless of any
+        # caller-supplied or env-inherited base URL — those values are
+        # local-mode-only (e.g. host.docker.internal:11434, localhost:11434)
+        # and would crash the subprocess with `Connection refused`.
+        if auth_mode == "api_key":
+            resolved_base_url = provider_default_base_url("ollama", "api_key")
+        else:
+            resolved_base_url = base_url.strip() or str(source.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or "").strip()
+            if not resolved_base_url:
+                resolved_base_url = provider_default_base_url("ollama", auth_mode)
         env[PROVIDER_BASE_URL_ENV_KEYS["ollama"]] = resolved_base_url
     env[PROVIDER_AUTH_MODE_ENV_KEYS[provider_id]] = auth_mode
 
@@ -835,6 +842,30 @@ _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
+def _extract_model_ids_from_payload(provider_id: str, payload: dict[str, Any]) -> list[str]:
+    """Return provider model IDs from common model-list response shapes."""
+    raw_items: Any
+    if isinstance(payload.get("data"), list):
+        raw_items = payload.get("data")
+    elif isinstance(payload.get("models"), list):
+        raw_items = payload.get("models")
+    else:
+        raw_items = []
+
+    model_ids: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        raw_id = str(item.get("id") or item.get("model") or item.get("model_id") or item.get("name") or "").strip()
+        if not raw_id:
+            continue
+        if provider_id == "gemini" and raw_id.startswith("models/"):
+            raw_id = raw_id.removeprefix("models/")
+        if raw_id and raw_id not in model_ids:
+            model_ids.append(raw_id)
+    return model_ids[:250]
+
+
 def _verify_openai_compatible_api_key(
     provider_id: str,
     api_key: str,
@@ -867,15 +898,13 @@ def _verify_openai_compatible_api_key(
     else:
         verify_url = effective_base.rstrip("/") + str(profile.get("health_path", "/"))
         method = "GET"
-    request = urllib_request.Request(
-        verify_url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-            "User-Agent": "koda/control-plane",
-        },
-        method=method,
-    )
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "User-Agent": "koda/control-plane",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib_request.Request(verify_url, headers=headers, method=method)
     with urllib_request.urlopen(request, timeout=10) as response:
         status = response.status
         body = response.read().decode("utf-8", "replace")
@@ -895,7 +924,11 @@ def _verify_openai_compatible_api_key(
         account_label=str(profile.get("account_label") or provider_id.capitalize()),
         plan_label=str(profile.get("plan_label") or "API key"),
         checked_via="api_key",
-        details={"http_status": status, "models_payload": bool(payload)},
+        details={
+            "http_status": status,
+            "models_payload": bool(payload),
+            "model_ids": _extract_model_ids_from_payload(provider_id, payload),
+        },
     )
 
 
@@ -907,7 +940,9 @@ def verify_provider_api_key(
     base_url: str = "",
 ) -> ProviderVerificationResult:
     secret = api_key.strip()
-    if not secret:
+    profile = _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES.get(str(provider_id))
+    auth_optional = bool(profile and profile.get("auth_optional"))
+    if not secret and not auth_optional:
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="api_key",
@@ -942,7 +977,7 @@ def verify_provider_api_key(
                 account_label="Anthropic Console",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "claude"},
+                details={"provider": "claude", "model_ids": _extract_model_ids_from_payload("claude", payload)},
             )
 
         if provider_id == "codex":
@@ -962,7 +997,7 @@ def verify_provider_api_key(
                 account_label="OpenAI Platform",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "codex"},
+                details={"provider": "codex", "model_ids": _extract_model_ids_from_payload("codex", payload)},
             )
 
         if provider_id == "elevenlabs":
@@ -982,12 +1017,24 @@ def verify_provider_api_key(
                 account_label="ElevenLabs",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "elevenlabs"},
+                details={
+                    "provider": "elevenlabs",
+                    "model_ids": _extract_model_ids_from_payload("elevenlabs", payload),
+                },
             )
 
         if provider_id == "ollama":
+            # API key mode targets Ollama Cloud, which is a fixed endpoint
+            # (`https://ollama.com`). We ignore any caller-supplied `base_url`
+            # because some upstream code paths (notably the runtime
+            # capability probe in `ollama_runner._probe_ollama_auth_status`)
+            # default the base URL to `http://localhost:11434` when
+            # `OLLAMA_BASE_URL` isn't exported into the host process. Letting
+            # that localhost URL through would make the cloud verify hit the
+            # local daemon and fail with `Connection refused (Errno 61)`.
+            cloud_base_url = provider_default_base_url("ollama", "api_key")
             request = urllib_request.Request(
-                ollama_api_url(base_url, "tags", auth_mode="api_key"),
+                ollama_api_url(cloud_base_url, "tags", auth_mode="api_key"),
                 headers={
                     "Authorization": f"Bearer {secret}",
                     "User-Agent": "koda/control-plane",
@@ -1002,27 +1049,34 @@ def verify_provider_api_key(
                 account_label="Ollama Cloud",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "ollama"},
+                details={"provider": "ollama", "model_ids": _extract_model_ids_from_payload("ollama", payload)},
             )
 
-        query = urllib_parse.urlencode({"key": secret})
+        # Gemini API key auth: pass the credential via the `x-goog-api-key`
+        # header instead of a `?key=...` query string. Google explicitly
+        # recommends the header form because query strings end up in proxy
+        # access logs, browser history and Referer headers — leaking the key.
+        # See https://ai.google.dev/gemini-api/docs/api-key.
         request = urllib_request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models?{query}",
-            headers={"User-Agent": "koda/control-plane"},
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={
+                "x-goog-api-key": secret,
+                "User-Agent": "koda/control-plane",
+            },
         )
         with urllib_request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        account_label = "Google AI Studio"
-        if project_id.strip():
-            account_label = f"{account_label} · {project_id.strip()}"
+        # Gemini API key auth does not require a GCP project — that's only
+        # needed for Vertex AI. Keep the label provider-neutral.
+        del project_id
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="api_key",
             verified=bool(payload),
-            account_label=account_label,
+            account_label="Google AI Studio",
             plan_label="Gemini API key",
             checked_via="api_key",
-            details={"project_id": project_id},
+            details={"model_ids": _extract_model_ids_from_payload("gemini", payload)},
         )
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
@@ -1469,9 +1523,7 @@ def _last_url(text: str) -> str:
     return urls[-1] if urls else ""
 
 
-# ---------------------------------------------------------------------------
 # OAuth relay: rewrite CLI callback URLs so they go through the control plane
-# ---------------------------------------------------------------------------
 
 _OAUTH_RELAY_TARGETS: dict[str, str] = {}
 """Maps session_id → internal callback URL (http://localhost:PORT/...)."""
@@ -1559,9 +1611,7 @@ def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
-# ---------------------------------------------------------------------------
 # Claude direct OAuth PKCE — bypass CLI subprocess entirely
-# ---------------------------------------------------------------------------
 
 _CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _CLAUDE_OAUTH_AUTH_URL = "https://claude.com/cai/oauth/authorize"

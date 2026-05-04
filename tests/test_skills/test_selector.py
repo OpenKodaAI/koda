@@ -10,9 +10,7 @@ from koda.skills._index import SkillEmbeddingIndex
 from koda.skills._registry import SkillDefinition, SkillRegistry
 from koda.skills._selector import SkillSelector
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_skill(
@@ -51,9 +49,7 @@ def _mock_index(
     return index
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 
 class TestAliasMatch:

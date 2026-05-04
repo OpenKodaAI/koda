@@ -8,8 +8,11 @@ import { RouteStage } from "@/components/layout/route-stage";
 import { Sidebar } from "@/components/layout/sidebar";
 import { WorkspaceTopbar } from "@/components/layout/workspace-topbar";
 import { AppTourProvider } from "@/components/providers/app-tour-provider";
+import { AuthProvider } from "@/components/providers/auth-provider";
 import { ToastNotification } from "@/components/ui/toast-notification";
+import { ActiveDownloadsRebinder } from "@/components/layout/active-downloads-rebinder";
 import { ToastProvider } from "@/hooks/use-toast";
+import type { ControlPlaneAuthStatus } from "@/lib/control-plane";
 import { sidebarCollapsedStorageCodec } from "@/lib/storage-codecs";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +22,7 @@ const SIDEBAR_COLLAPSED_WIDTH = "3.5rem";
 interface AppShellProps {
   children: React.ReactNode;
   serverPathname?: string;
+  initialAuth?: ControlPlaneAuthStatus | null;
 }
 
 function ShellViewportFrame({
@@ -85,7 +89,7 @@ function isFullScreenAuthRoute(pathname: string): boolean {
   return FULL_SCREEN_AUTH_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
-export function AppShell({ children, serverPathname }: AppShellProps) {
+export function AppShell({ children, serverPathname, initialAuth = null }: AppShellProps) {
   const clientPathname = usePathname();
   // During SSR, usePathname() returns null. Fall back to the server-provided
   // pathname (read from the request headers in layout.tsx) so the shell
@@ -128,43 +132,45 @@ export function AppShell({ children, serverPathname }: AppShellProps) {
 
   return (
     <ToastProvider>
-      <AppTourProvider
-        pathname={pathname}
-        mobileNavOpen={isMobileNavOpen}
-        onMobileNavOpenChange={setIsMobileNavOpen}
-      >
-        <div
-          className="app-shell"
-          data-sidebar-collapsed={isSidebarCollapsed ? "true" : "false"}
-          style={shellStyle}
+      <AuthProvider initialAuth={initialAuth}>
+        <AppTourProvider
+          pathname={pathname}
+          onMobileNavOpenChange={setIsMobileNavOpen}
         >
-          {!isControlPlaneSetupRoute ? (
-            <Sidebar
-              mobileOpen={isMobileNavOpen}
-              onMobileOpenChange={setIsMobileNavOpen}
-              collapsed={isSidebarCollapsed}
-            />
-          ) : null}
-          {!isSessionsRoute && !isControlPlaneSetupRoute ? (
-            <WorkspaceTopbar
-              isSidebarCollapsed={isSidebarCollapsed}
-              onToggleSidebarCollapse={() => setIsSidebarCollapsed((value) => !value)}
-              onOpenMobileNav={() => setIsMobileNavOpen(true)}
-            />
-          ) : null}
-          <ShellViewportFrame
-            pathname={pathname}
-            isSessionsRoute={isSessionsRoute}
-            isControlPlaneSetupRoute={isControlPlaneSetupRoute}
-            isControlPlaneCatalogRoute={isControlPlaneCatalogRoute}
-            isControlPlaneAgentRoute={isControlPlaneAgentRoute}
+          <div
+            className="app-shell"
+            data-sidebar-collapsed={isSidebarCollapsed ? "true" : "false"}
+            style={shellStyle}
           >
-            {children}
-          </ShellViewportFrame>
-          <ToastNotification />
-          <CommandBarModal />
-        </div>
-      </AppTourProvider>
+            {!isControlPlaneSetupRoute ? (
+              <Sidebar
+                mobileOpen={isMobileNavOpen}
+                onMobileOpenChange={setIsMobileNavOpen}
+                collapsed={isSidebarCollapsed}
+              />
+            ) : null}
+            {!isSessionsRoute && !isControlPlaneSetupRoute ? (
+              <WorkspaceTopbar
+                isSidebarCollapsed={isSidebarCollapsed}
+                onToggleSidebarCollapse={() => setIsSidebarCollapsed((value) => !value)}
+                onOpenMobileNav={() => setIsMobileNavOpen(true)}
+              />
+            ) : null}
+            <ShellViewportFrame
+              pathname={pathname}
+              isSessionsRoute={isSessionsRoute}
+              isControlPlaneSetupRoute={isControlPlaneSetupRoute}
+              isControlPlaneCatalogRoute={isControlPlaneCatalogRoute}
+              isControlPlaneAgentRoute={isControlPlaneAgentRoute}
+            >
+              {children}
+            </ShellViewportFrame>
+            <ToastNotification />
+            <ActiveDownloadsRebinder />
+            <CommandBarModal />
+          </div>
+        </AppTourProvider>
+      </AuthProvider>
     </ToastProvider>
   );
 }

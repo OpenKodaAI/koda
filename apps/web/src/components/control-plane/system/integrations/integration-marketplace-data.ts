@@ -9,12 +9,11 @@ import {
   type IntegrationStatus,
 } from "./integration-catalog-data";
 import {
-  MCP_SUGGESTED_SERVERS,
   filterAllowedMcpCatalogEntries,
   isReservedMcpServerKey,
   type McpExpectedTool,
   type McpSuggestedServer,
-} from "@/components/control-plane/system/mcp/mcp-catalog-data";
+} from "@/components/control-plane/system/mcp/mcp-catalog-utils";
 import { getIntegrationAccent } from "./integration-logos";
 
 export type UnifiedIntegrationCategory = IntegrationCategory | "general";
@@ -238,10 +237,17 @@ export function buildUnifiedIntegrationEntries({
   integrations,
   integrationConnections,
   mcpCatalog,
+  suggestedMcpServers,
 }: {
   integrations: Record<string, boolean>;
   integrationConnections: Record<string, IntegrationConnectionLike>;
   mcpCatalog: McpServerCatalogEntry[];
+  /**
+   * Curated MCP entries from the API. The marketplace fetches these via
+   * `useMcpCatalogSuggestions`; an empty array yields a marketplace that
+   * still renders core integrations + custom MCP rows.
+   */
+  suggestedMcpServers: McpSuggestedServer[];
 }): UnifiedIntegrationEntry[] {
   const coreEntries = INTEGRATION_CATALOG.map((entry) =>
     buildCoreEntry(
@@ -256,11 +262,11 @@ export function buildUnifiedIntegrationEntries({
     allowedMcpCatalog.map((server) => [server.server_key, server] as const),
   );
 
-  const curatedMcpEntries = MCP_SUGGESTED_SERVERS.filter(
-    (suggested) => !isReservedMcpServerKey(suggested.server_key),
-  ).map((suggested) =>
-    buildCuratedMcpEntry(suggested, catalogByKey.get(suggested.server_key) ?? null),
-  );
+  const curatedMcpEntries = suggestedMcpServers
+    .filter((suggested) => !isReservedMcpServerKey(suggested.server_key))
+    .map((suggested) =>
+      buildCuratedMcpEntry(suggested, catalogByKey.get(suggested.server_key) ?? null),
+    );
 
   const curatedKeys = new Set(curatedMcpEntries.map((entry) => entry.key));
   const customMcpEntries = allowedMcpCatalog

@@ -358,13 +358,13 @@ class TestCmdProviderModelDbEnvCoverage:
     @pytest.mark.asyncio
     async def test_featuremodel_text_setter_accepts_brand_and_provider_aliases(self, mock_update, mock_context):
         init_user_data(mock_context.user_data)
-        settings = _runtime_settings(provider="codex", model="gpt-5.4", function_id="video")
+        settings = _runtime_settings(provider="gemini", model="gemini-2.5-pro", function_id="video")
         settings["selectable_function_options"]["video"] = [
             {
-                "provider_id": "codex",
-                "model_id": "sora-2",
-                "provider_title": "OpenAI",
-                "title": "Sora 2",
+                "provider_id": "gemini",
+                "model_id": "veo-3.1-generate-preview",
+                "provider_title": "Google",
+                "title": "Veo 3.1",
             }
         ]
         settings["selectable_function_options"]["transcription"] = [
@@ -376,7 +376,7 @@ class TestCmdProviderModelDbEnvCoverage:
             }
         ]
 
-        mock_context.args = ["video", "sora", "sora-2"]
+        mock_context.args = ["video", "google", "veo-3.1-generate-preview"]
         with (
             patch("koda.handlers.commands.get_agent_runtime_settings", return_value=settings),
             patch(
@@ -386,7 +386,7 @@ class TestCmdProviderModelDbEnvCoverage:
         ):
             await cmd_featuremodel(mock_update, mock_context)
 
-        mock_set_video.assert_called_once_with("video", "codex", "sora-2")
+        mock_set_video.assert_called_once_with("video", "gemini", "veo-3.1-generate-preview")
 
         mock_context.args = ["transcricao", "whisper", "whisper-cpp-local"]
         with (

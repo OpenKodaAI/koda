@@ -21,9 +21,7 @@ def _isolate_state(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
 
 
-# ------------------------------------------------------------------
 # save + load round-trip
-# ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -80,9 +78,7 @@ async def test_agent_cmd_round_trip_preserves_requests_and_preview():
     assert ops["agent-1"]["requests"][0]["envelope"]["tool_id"] == "file_delete"
 
 
-# ------------------------------------------------------------------
 # Expired ops are filtered on load
-# ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -117,9 +113,7 @@ async def test_expired_ops_filtered_on_load(tmp_path):
     assert "dead" not in ops
 
 
-# ------------------------------------------------------------------
 # remove_pending_op
-# ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -136,9 +130,7 @@ async def test_remove_nonexistent_op():
     await remove_pending_op("nope")
 
 
-# ------------------------------------------------------------------
 # cleanup_expired_ops
-# ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -175,9 +167,7 @@ async def test_cleanup_expired_ops(tmp_path):
     assert "expired" not in raw
 
 
-# ------------------------------------------------------------------
 # File doesn't exist on first load
-# ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

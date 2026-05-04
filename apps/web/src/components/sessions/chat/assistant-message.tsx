@@ -4,6 +4,7 @@ import { SessionRichText } from "@/components/sessions/session-rich-text";
 import { ReasoningBlock } from "@/components/sessions/chat/reasoning-block";
 import { ToolCallCard } from "@/components/sessions/chat/tool-call-card";
 import { ApprovalPrompt } from "@/components/sessions/chat/approval-prompt";
+import { BlockRenderer } from "@/components/sessions/chat/generative/block-renderer";
 import { formatDuration } from "@/lib/utils";
 import type { ExecutionSummary } from "@/lib/types";
 
@@ -14,6 +15,9 @@ interface AssistantMessageProps {
   onOpenExecution?: (taskId: number) => void;
   agentId?: string | null;
   sessionId?: string | null;
+  blocks?: unknown[];
+  /** Forwarded by interactive blocks (M6). */
+  onBlockAction?: (blockId: string, actionId: string) => void;
 }
 
 function collectReasoningLines(execution: ExecutionSummary | null | undefined): string[] {
@@ -37,6 +41,8 @@ export function AssistantMessage({
   onOpenExecution,
   agentId,
   sessionId,
+  blocks,
+  onBlockAction,
 }: AssistantMessageProps) {
   const reasoning = collectReasoningLines(linkedExecution);
   const hasReasoning = reasoning.length > 0;
@@ -69,6 +75,26 @@ export function AssistantMessage({
       {text.trim() ? (
         <div className="text-[var(--font-size-md)] leading-[1.6] text-[var(--text-primary)]">
           <SessionRichText content={text} variant="assistant" />
+        </div>
+      ) : null}
+
+      {blocks && blocks.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {blocks.map((raw, index) => {
+            const id =
+              (raw && typeof raw === "object" && "id" in raw && typeof raw.id === "string"
+                ? raw.id
+                : null) ?? `block-${index}`;
+            return (
+              <BlockRenderer
+                key={id}
+                raw={raw}
+                onAction={onBlockAction}
+                agentId={agentId}
+                sessionId={sessionId}
+              />
+            );
+          })}
         </div>
       ) : null}
 

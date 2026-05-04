@@ -4,12 +4,14 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -118,6 +120,36 @@ export function CommandBar({
   const open = mode === "modal" || isFocused || value.length > 0;
   const isInline = mode === "inline";
 
+  // Anchor the inline dropdown to the input container's viewport position so
+  // we can portal it to <body>. Rendering inline kills glass-blur because
+  // backdrop-filter samples whatever opaque surface wraps the input
+  // (page section bg, card, etc.) instead of the canvas. See
+  // apps/web/CLAUDE.md › Glass-blur.
+  const inputContainerRef = useRef<HTMLDivElement>(null);
+  const [anchorRect, setAnchorRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isInline || !open) return;
+
+    const update = () => {
+      const rect = inputContainerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setAnchorRect({ top: rect.bottom + 8, left: rect.left, width: rect.width });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [isInline, open, value]);
+
   const activeCommandId = flat[activeIndex]?.id;
 
   const resolveIndex = useCallback(
@@ -130,19 +162,20 @@ export function CommandBar({
       ref={containerRef}
       className={cn(
         "relative flex flex-col",
-        isInline ? "gap-4" : "gap-0",
+        isInline ? "gap-4" : "min-h-0 flex-1 gap-0",
         className,
       )}
     >
       <div
+        ref={inputContainerRef}
         className={cn(
-          "flex items-center gap-2 px-3 transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "flex shrink-0 items-center gap-2 px-3 transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           isInline
             ? cn(
                 "rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] py-2",
                 isFocused && "border-[var(--border-strong)] bg-[var(--panel)]",
               )
-            : "bg-transparent py-3",
+            : "border-b border-[var(--divider-hair)] bg-transparent py-3",
         )}
         onPointerDown={(event) => {
           if (event.target !== inputRef.current) {
@@ -192,74 +225,93 @@ export function CommandBar({
 
       {pillsSlot ? <div className="flex justify-center">{pillsSlot}</div> : null}
 
-      {open ? (
-        <div
-          className={cn(
-            isInline
-              ? "app-floating-panel !absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden !rounded-[var(--radius-input)]"
-              : "flex min-h-0 flex-1 flex-col",
-          )}
-          role="listbox"
-          id={listId}
-        >
-          {flat.length === 0 ? (
-            <div className="px-4 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
-              {emptyState}
-            </div>
-          ) : (
+      {open ? (() => {
+          const dropdown = (
             <div
               className={cn(
-                "flex flex-col",
-                isInline ? "max-h-[60vh] overflow-y-auto" : "flex-1 overflow-y-auto",
+                isInline
+                  ? "app-floating-panel app-floating-anim overflow-hidden !rounded-[var(--radius-input)]"
+                  : "flex min-h-0 flex-1 flex-col",
               )}
+              role="listbox"
+              id={listId}
+              style={
+                isInline && anchorRect
+                  ? {
+                      position: "fixed",
+                      top: anchorRect.top,
+                      left: anchorRect.left,
+                      width: anchorRect.width,
+                      zIndex: 90,
+                    }
+                  : undefined
+              }
             >
-              {groups.map((group) => (
-                <div key={group.category} className="flex flex-col">
-                  <div className="eyebrow px-4 pt-3 pb-1 text-[10px] text-[var(--text-quaternary)]">
-                    {group.heading}
-                  </div>
-                  <ul className="flex flex-col">
-                    {group.commands.map((command) => {
-                      const index = resolveIndex(command.id);
-                      const active = index === activeIndex;
-                      const Icon = command.icon;
-                      return (
-                        <li key={command.id}>
-                          <button
-                            type="button"
-                            id={`${listId}-${command.id}`}
-                            role="option"
-                            aria-selected={active}
-                            onMouseEnter={() => setActiveIndex(index)}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                              execute(command);
-                            }}
-                            className={cn(
-                              "flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                              active
-                                ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-                            )}
-                          >
-                            <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                            <span className="flex-1 truncate">{command.label}</span>
-                            {command.description ? (
-                              <span className="shrink-0 truncate text-[12px] text-[var(--text-quaternary)]">
-                                {command.description}
-                              </span>
-                            ) : null}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+              {flat.length === 0 ? (
+                <div className="px-4 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
+                  {emptyState}
                 </div>
-              ))}
+              ) : (
+                <div
+                  className={cn(
+                    "flex flex-col overflow-x-hidden",
+                    isInline ? "max-h-[60vh] overflow-y-auto" : "flex-1 overflow-y-auto",
+                  )}
+                >
+                  {groups.map((group) => (
+                    <div key={group.category} className="flex flex-col">
+                      <div className="eyebrow px-4 pt-3 pb-1 text-[10px] text-[var(--text-quaternary)]">
+                        {group.heading}
+                      </div>
+                      <ul className="flex flex-col">
+                        {group.commands.map((command) => {
+                          const index = resolveIndex(command.id);
+                          const active = index === activeIndex;
+                          const Icon = command.icon;
+                          return (
+                            <li key={command.id}>
+                              <button
+                                type="button"
+                                id={`${listId}-${command.id}`}
+                                role="option"
+                                aria-selected={active}
+                                onMouseEnter={() => setActiveIndex(index)}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  execute(command);
+                                }}
+                                className={cn(
+                                  "flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                                  active
+                                    ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
+                                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                                )}
+                              >
+                                <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                                <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                                {command.description ? (
+                                  <span className="min-w-0 max-w-[40%] truncate text-[12px] text-[var(--text-quaternary)]">
+                                    {command.description}
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      ) : null}
+          );
+
+          if (isInline && typeof document !== "undefined" && anchorRect) {
+            return createPortal(dropdown, document.body);
+          }
+          return dropdown;
+        })()
+        : null}
     </div>
   );
 }

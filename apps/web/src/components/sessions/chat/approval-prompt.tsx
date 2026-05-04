@@ -5,6 +5,7 @@ import { AlertTriangle, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useApprovalAction } from "@/hooks/use-approval-action";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { ApprovalDecision } from "@/lib/contracts/sessions";
 
 interface ApprovalPromptProps {
@@ -26,6 +27,7 @@ export function ApprovalPrompt({
   preview,
   onResolved,
 }: ApprovalPromptProps) {
+  const { tl } = useAppI18n();
   const { submit, isPending, error } = useApprovalAction({ agentId, sessionId });
   const [rationale, setRationale] = useState("");
 
@@ -45,7 +47,7 @@ export function ApprovalPrompt({
       <div className="flex items-center gap-2">
         <StatusDot tone="warning" pulse />
         <span className="text-[var(--font-size-sm)] font-medium text-[var(--tone-warning-text)]">
-          Approval required
+          {tl("Approval required")}
         </span>
         {toolName ? (
           <span className="truncate font-mono text-[12px] text-[var(--text-tertiary)]">
@@ -70,7 +72,7 @@ export function ApprovalPrompt({
 
       <textarea
         className="min-h-[36px] w-full resize-none rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent-muted)]"
-        placeholder="Optional rationale"
+        placeholder={tl("Optional rationale")}
         rows={2}
         maxLength={500}
         value={rationale}
@@ -92,7 +94,7 @@ export function ApprovalPrompt({
           onClick={() => handle("deny")}
         >
           <X strokeWidth={1.75} className="icon-sm" />
-          Deny
+          {tl("Deny")}
         </Button>
         <Button
           variant="accent"
@@ -101,12 +103,12 @@ export function ApprovalPrompt({
           onClick={() => handle("approve")}
         >
           <Check strokeWidth={1.75} className="icon-sm" />
-          Approve
+          {tl("Approve")}
         </Button>
       </div>
       <p className="m-0 flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
         <AlertTriangle strokeWidth={1.5} className="icon-xs" />
-        Runtime pauses until you answer.
+        {tl("Runtime pauses until you answer.")}
       </p>
     </div>
   );

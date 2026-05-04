@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from koda.services.templates import (
-    _SKILL_TEMPLATES,
     add_template,
     build_skills_awareness_prompt,
     delete_template,
@@ -68,9 +67,9 @@ class TestTemplates:
     def test_list_template_names(self, tmp_templates):
         add_template("custom", "My custom")
         skills, builtin, user = list_template_names()
+        assert skills == []
         assert "debug" in builtin
         assert "custom" in user
-        assert isinstance(skills, list)
 
     def test_user_cannot_override_builtin(self, tmp_templates):
         with pytest.raises(ValueError):
@@ -78,10 +77,14 @@ class TestTemplates:
         templates = get_all_templates()
         assert templates["debug"] != "My custom debug"
 
+    def test_user_can_use_former_skill_name_as_template(self, tmp_templates):
+        add_template("security", "Custom security prompt")
+
+        assert get_template("security") == "Custom security prompt"
+
     def test_empty_file_handled(self, tmp_templates):
         tmp_templates.write_text("")
         templates = get_all_templates()
-        # Should still have builtins
         assert "debug" in templates
 
     def test_inline_templates_json_is_loaded(self, monkeypatch):
@@ -96,110 +99,12 @@ class TestTemplates:
             importlib.reload(templates_module)
 
 
-class TestSkills:
-    def test_skills_loaded(self):
-        """Skills should be loaded from the skills directory."""
-        assert len(_SKILL_TEMPLATES) > 0
+class TestSkillsCompatibility:
+    def test_global_skill_templates_are_empty(self, tmp_templates):
+        skills, _, _ = list_template_names()
+        assert skills == []
+        assert get_skill_template("security") is None
+        assert get_template("security") is None
 
-    def test_expected_skills_exist(self):
-        """All 17 expected skill files should be loaded."""
-        expected = [
-            "security",
-            "architecture",
-            "mobile",
-            "best-practices",
-            "ddd",
-            "tdd",
-            "clean-arch",
-            "microservices",
-            "data-analysis",
-            "sql",
-            "dynamodb",
-            "aws",
-            "docs",
-            "code-review",
-            "design",
-            "prototype",
-            "deep-research",
-        ]
-        for name in expected:
-            assert name in _SKILL_TEMPLATES, f"Skill '{name}' not found"
-
-    def test_skill_accessible_via_get_template(self, tmp_templates):
-        """Skills should be accessible via get_template."""
-        t = get_template("security")
-        assert t is not None
-        assert "OWASP" in t or "security" in t.lower()
-        assert get_skill_template("security") == t
-
-    def test_skill_in_get_all_templates(self, tmp_templates):
-        """Skills should appear in get_all_templates."""
-        templates = get_all_templates()
-        assert "security" in templates
-        assert "code-review" in templates
-
-    def test_cannot_delete_skill(self, tmp_templates):
-        """Skills should be protected from deletion."""
-        assert not delete_template("security")
-        assert get_template("security") is not None
-
-    def test_skills_in_list_template_names(self, tmp_templates):
-        """Skills should appear in the skills section of list_template_names."""
-        skills, builtin, user = list_template_names()
-        assert "security" in skills
-        assert "code-review" in skills
-        # code-review should NOT be in builtins (removed)
-        assert "code-review" not in builtin
-
-    def test_user_cannot_override_skill(self, tmp_templates):
-        with pytest.raises(ValueError):
-            add_template("security", "My custom security")
-        t = get_template("security")
-        assert t is not None
-        assert t != "My custom security"
-
-    def test_skill_content_is_markdown(self):
-        """Each skill should contain structured markdown content."""
-        for name, content in _SKILL_TEMPLATES.items():
-            # Skills may start with YAML frontmatter (---) or a heading (#)
-            starts_ok = content.startswith("#") or content.startswith("---")
-            assert starts_ok, f"Skill '{name}' should start with heading or frontmatter"
-            assert "## Approach" in content, f"Skill '{name}' should have an Approach section"
-            assert "## Key Principles" in content, f"Skill '{name}' should have Key Principles"
-
-    def test_inline_skills_json_is_loaded(self, monkeypatch):
-        monkeypatch.setenv("SKILLS_JSON", json.dumps({"incident": "# Incident\n## Approach\nx\n## Key Principles\ny"}))
-        import koda.services.templates as templates_module
-
-        reloaded = importlib.reload(templates_module)
-        try:
-            assert reloaded.get_template("incident") is not None
-        finally:
-            monkeypatch.delenv("SKILLS_JSON", raising=False)
-            importlib.reload(templates_module)
-
-
-class TestSkillsAwareness:
-    def test_returns_nonempty_string(self):
-        result = build_skills_awareness_prompt()
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_has_xml_tags(self):
-        result = build_skills_awareness_prompt()
-        assert "<expert_skills>" in result
-        assert "</expert_skills>" in result
-
-    def test_contains_all_skill_names(self):
-        result = build_skills_awareness_prompt()
-        for name in _SKILL_TEMPLATES:
-            assert f"**{name}**" in result
-
-    def test_contains_descriptions(self):
-        result = build_skills_awareness_prompt()
-        assert "security" in result.lower()
-        assert "architecture" in result.lower() or "system design" in result.lower()
-
-    def test_empty_when_no_skills(self):
-        with patch("koda.services.templates._SKILL_TEMPLATES", {}):
-            assert build_skills_awareness_prompt() == ""
+    def test_skills_awareness_prompt_is_empty(self):
+        assert build_skills_awareness_prompt() == ""

@@ -3,7 +3,8 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from koda.config import BLOCKED_NPM_PATTERN, BLOCKED_PIP_PATTERN, GIT_META_CHARS, NPM_ENABLED, PIP_ENABLED
+from koda.config import GIT_META_CHARS, NPM_ENABLED, PIP_ENABLED
+from koda.services.blocked_patterns import is_blocked_npm, is_blocked_pip
 from koda.services.shell_runner import run_shell_command
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
@@ -27,7 +28,7 @@ async def cmd_pip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Shell meta-characters are not allowed in pip commands.")
         return
 
-    if BLOCKED_PIP_PATTERN and BLOCKED_PIP_PATTERN.search(args):
+    if is_blocked_pip(args):
         await update.message.reply_text("Blocked: this pip command is not allowed for safety reasons.")
         return
 
@@ -53,7 +54,7 @@ async def cmd_npm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Shell meta-characters are not allowed in npm commands.")
         return
 
-    if BLOCKED_NPM_PATTERN and BLOCKED_NPM_PATTERN.search(args):
+    if is_blocked_npm(args):
         await update.message.reply_text("Blocked: this npm command is not allowed for safety reasons.")
         return
 

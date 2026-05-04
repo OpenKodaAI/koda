@@ -3,7 +3,6 @@ import { config, proxy } from "./proxy";
 
 describe("web proxy auth gate", () => {
   afterEach(() => {
-    delete process.env.CONTROL_PLANE_AUTH_MODE;
     vi.unstubAllEnvs();
     vi.stubEnv("NODE_ENV", "test");
   });
@@ -54,9 +53,28 @@ describe("web proxy auth gate", () => {
     expect(response.status).toBe(200);
   });
 
-  it("allows development auth bypass only in development mode", () => {
+  it("allows public password recovery without an operator session cookie", () => {
+    const response = proxy({
+      nextUrl: new URL("http://localhost/api/control-plane/auth/password/recover"),
+      method: "POST",
+      cookies: {
+        get: () => undefined,
+      },
+      headers: {
+        get: (name: string) => {
+          if (name.toLowerCase() === "origin") {
+            return "http://localhost";
+          }
+          return null;
+        },
+      },
+    } as never);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("requires the operator session cookie even in development mode", () => {
     vi.stubEnv("NODE_ENV", "development");
-    process.env.CONTROL_PLANE_AUTH_MODE = "development";
 
     const response = proxy({
       nextUrl: new URL("http://localhost/api/control-plane/agents"),
@@ -69,7 +87,7 @@ describe("web proxy auth gate", () => {
       },
     } as never);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
   });
 
   it("blocks cross-site mutations even when a session cookie exists", () => {
@@ -94,9 +112,7 @@ describe("web proxy auth gate", () => {
 
   it("keeps the proxy matcher locked to the protected API surfaces", () => {
     expect(config.matcher).toEqual([
-      "/api/control-plane/:path*",
-      "/api/runtime/:path*",
-      "/api/channels/:path*",
+      "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",
     ]);
   });
 });

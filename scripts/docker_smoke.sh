@@ -22,11 +22,8 @@ compose() {
 probe_url() {
   local url="$1"
   curl -fsSL \
-    --retry 5 \
-    --retry-delay 2 \
-    --retry-connrefused \
-    --retry-all-errors \
-    --max-time 15 \
+    --connect-timeout 2 \
+    --max-time 5 \
     "$url" >/dev/null
 }
 
@@ -85,7 +82,7 @@ main() {
   wait_for_url "control-plane health" "http://127.0.0.1:8090/health"
   wait_for_url "web health" "http://127.0.0.1:3000/api/health"
   wait_for_url "dashboard root" "http://127.0.0.1:3000/"
-  wait_for_url "dashboard setup" "http://127.0.0.1:3000/control-plane/setup"
+  wait_for_url "dashboard setup" "http://127.0.0.1:3000/setup"
   wait_for_url "control-plane shell" "http://127.0.0.1:3000/control-plane"
   wait_for_url "control-plane openapi" "http://127.0.0.1:8090/openapi/control-plane.json"
 
@@ -93,7 +90,7 @@ main() {
   probe_url "http://127.0.0.1:8090/health"
   probe_url "http://127.0.0.1:3000/api/health"
   probe_url "http://127.0.0.1:3000/"
-  probe_url "http://127.0.0.1:3000/control-plane/setup"
+  probe_url "http://127.0.0.1:3000/setup"
   probe_url "http://127.0.0.1:3000/control-plane"
   probe_url "http://127.0.0.1:8090/openapi/control-plane.json"
 

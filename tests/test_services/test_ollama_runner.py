@@ -50,6 +50,97 @@ class TestOllamaCapabilities:
         assert capabilities.checked_via == "local_probe"
 
 
+class TestOllamaBaseUrlResolution:
+    """Regression tests: api_key mode must always target Ollama Cloud,
+    even when the host process has a stale ``OLLAMA_BASE_URL`` pointing at
+    localhost from a prior local-mode setup. Without these guards, every
+    chat request fails with ``<urlopen error [Errno 61] Connection refused>``.
+    """
+
+    def test_configured_base_url_returns_cloud_in_api_key_mode_regardless_of_env(self, monkeypatch):
+        from koda.services.ollama_runner import _configured_base_url
+
+        # Even with a stale localhost env from a prior local setup, api_key
+        # mode must hardcode the cloud endpoint.
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        assert _configured_base_url("api_key") == "https://ollama.com"
+
+        # And the docker-host alias is similarly ignored in api_key mode.
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+        assert _configured_base_url("api_key") == "https://ollama.com"
+
+    def test_configured_base_url_preserves_local_overrides_in_local_mode(self, monkeypatch):
+        from koda.services.ollama_runner import _configured_base_url
+
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+        assert _configured_base_url("local") == "http://127.0.0.1:11434"
+
+    @pytest.mark.asyncio
+    async def test_chat_request_targets_cloud_in_api_key_mode_even_with_localhost_env(self, monkeypatch):
+        """End-to-end: even when the operator's ``OLLAMA_BASE_URL`` is stuck
+        on localhost, the runtime chat call must hit ``https://ollama.com``
+        once they've connected via API key.
+        """
+        import io
+        import json
+
+        from koda.services import ollama_runner
+
+        # Simulate a stale localhost env carried from a previous local-mode
+        # configuration. After clicking "Connect" with an API key the user
+        # expects the runtime to pivot to the cloud endpoint.
+        monkeypatch.setenv("OLLAMA_AUTH_MODE", "api_key")
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        monkeypatch.setenv("OLLAMA_API_KEY", "ollama-cloud-key")
+
+        captured: dict[str, object] = {}
+
+        class _Resp:
+            def __enter__(self) -> "_Resp":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "prompt_eval_count": 1,
+                        "eval_count": 1,
+                    }
+                ).encode("utf-8")
+
+        def _fake_urlopen(request, timeout=None):  # noqa: ARG001
+            captured["url"] = request.full_url
+            captured["headers"] = {key.lower(): value for key, value in request.header_items()}
+            return _Resp()
+
+        monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+        # The runner imports urlopen via the ``urllib_request`` alias.
+        monkeypatch.setattr(ollama_runner.urllib_request, "urlopen", _fake_urlopen)
+
+        result = await run_ollama(
+            query="hi",
+            work_dir="/tmp",
+            model="qwen3:latest",
+            turn_mode="new_turn",
+            capabilities=_ready_capability("new_turn"),
+        )
+
+        url = str(captured.get("url", ""))
+        assert result["error"] is False, f"chat call failed: {result}"
+        assert url.startswith("https://ollama.com/"), f"api_key mode must route chat to Ollama Cloud, got {url!r}"
+        assert "localhost" not in url, "Regression: a stale localhost env leaked into the cloud chat URL"
+        # The Bearer auth header must travel with the request.
+        headers = captured.get("headers") or {}
+        assert isinstance(headers, dict)
+        assert headers.get("authorization") == "Bearer ollama-cloud-key"
+        # Suppress the unused stdlib import (we monkey-patched the module
+        # import path instead).
+        del io
+
+
 class TestRunOllama:
     @pytest.mark.asyncio
     async def test_successful_run(self):

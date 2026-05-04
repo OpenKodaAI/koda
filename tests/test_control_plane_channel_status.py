@@ -28,9 +28,7 @@ class _Request:
         return dict(self._payload)
 
 
-# ---------------------------------------------------------------------------
 #  get_secret without include_value (existing behavior)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -58,9 +56,7 @@ async def test_get_secret_returns_metadata_only_by_default() -> None:
     manager.get_decrypted_secret_value.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 #  get_secret with include_value=true
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -88,9 +84,7 @@ async def test_get_secret_returns_decrypted_value_when_requested() -> None:
     manager.get_decrypted_secret_value.assert_called_once_with("agent-1", "DISCORD_BOT_TOKEN")
 
 
-# ---------------------------------------------------------------------------
 #  get_secret with include_value=true but decryption returns None
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -117,9 +111,7 @@ async def test_get_secret_omits_value_when_decryption_returns_none() -> None:
     assert "value" not in body
 
 
-# ---------------------------------------------------------------------------
 #  get_secret for non-existent secret
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -141,9 +133,7 @@ async def test_get_secret_returns_empty_stub_for_missing_secret() -> None:
     assert "value" not in body
 
 
-# ---------------------------------------------------------------------------
 #  get_secret with include_value=true for non-existent secret
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

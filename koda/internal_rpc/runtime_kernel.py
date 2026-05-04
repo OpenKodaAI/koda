@@ -12,6 +12,7 @@ from koda import config
 from koda.internal_rpc.common import (
     create_grpc_channel,
     ensure_generated_proto_path,
+    make_internal_breaker,
     normalize_internal_service_probe,
     parse_boolish,
     resolve_grpc_target,
@@ -27,7 +28,7 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     return {str(key): str(value) for key, value in dict(metadata or {}).items()}
 
 
-_RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
+RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "workspace-provisioning",
     "workspace-cleanup",
     "environment-tracking",
@@ -46,17 +47,21 @@ _RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "snapshot-collection",
     "reconcile",
 )
-_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
+RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
     "create_environment",
     "start_task",
     "execute_command",
+    "attach_terminal",
     "stream_terminal",
     "open_terminal",
     "write_terminal",
     "resize_terminal",
     "close_terminal",
     "stream_terminal_session",
+    "pause_task",
+    "resume_task",
     "terminate_task",
+    "finalize_task",
     "cleanup_environment",
     "start_browser_session",
     "stop_browser_session",
@@ -65,6 +70,8 @@ _RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
     "get_checkpoint",
     "restore_checkpoint",
 )
+_RUNTIME_KERNEL_CAPABILITY_DEFAULTS = RUNTIME_KERNEL_CAPABILITY_DEFAULTS
+_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS = RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS
 
 
 class RuntimeKernelClient(Protocol):
@@ -263,6 +270,10 @@ class GrpcRuntimeKernelClient:
         self._runtime_pb2: Any | None = None
         self._startup_error: str | None = None
         self._started = False
+        # fail-fast breaker shared across all 23 RPC sites.
+        # The runtime-kernel sees the heaviest call volume, so a hung
+        # instance benefits the most from shedding load fast.
+        self._breaker = make_internal_breaker("runtime_kernel")
         self._last_health: dict[str, object] = {
             "service": "runtime-kernel",
             "mode": self.mode,
@@ -390,7 +401,7 @@ class GrpcRuntimeKernelClient:
     async def _probe_health(self) -> None:
         if self._stub is None or self._metadata_pb2 is None:
             return
-        response = await self._stub.Health(
+        response = await self._breaker.run(self._stub.Health, 
             self._metadata_pb2.HealthRequest(),
             timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
             metadata=self._rpc_metadata(),
@@ -416,7 +427,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.CreateEnvironment(
+        response = await self._breaker.run(self._stub.CreateEnvironment, 
             self._build_request(
                 self._runtime_pb2.CreateEnvironmentRequest,
                 _rpc_task_id=task_id,
@@ -459,7 +470,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.StartTask(
+        response = await self._breaker.run(self._stub.StartTask, 
             self._build_request(
                 self._runtime_pb2.StartTaskRequest,
                 _rpc_task_id=task_id,
@@ -521,7 +532,7 @@ class GrpcRuntimeKernelClient:
                 "ready": bool(health.get("ready", False)),
                 "authoritative": bool(health.get("authoritative", False)),
             }
-        response = await self._stub.ExecuteCommand(
+        response = await self._breaker.run(self._stub.ExecuteCommand, 
             self._build_request(
                 self._runtime_pb2.ExecuteCommandRequest,
                 _rpc_task_id=None,
@@ -562,7 +573,7 @@ class GrpcRuntimeKernelClient:
     async def terminate_task(self, *, task_id: int, force: bool = False) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.TerminateTask(
+        response = await self._breaker.run(self._stub.TerminateTask, 
             self._build_request(
                 self._runtime_pb2.TerminateTaskRequest,
                 _rpc_task_id=task_id,
@@ -588,7 +599,7 @@ class GrpcRuntimeKernelClient:
     async def attach_terminal(self, *, task_id: int, session_id: str) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.AttachTerminal(
+        response = await self._breaker.run(self._stub.AttachTerminal, 
             self._build_request(
                 self._runtime_pb2.AttachTerminalRequest,
                 _rpc_task_id=task_id,
@@ -640,7 +651,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.OpenTerminal(
+        response = await self._breaker.run(self._stub.OpenTerminal, 
             self._build_request(
                 self._runtime_pb2.OpenTerminalRequest,
                 _rpc_task_id=task_id,
@@ -686,7 +697,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.WriteTerminal(
+        response = await self._breaker.run(self._stub.WriteTerminal, 
             self._build_request(
                 self._runtime_pb2.WriteTerminalRequest,
                 _rpc_task_id=task_id,
@@ -718,7 +729,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.ResizeTerminal(
+        response = await self._breaker.run(self._stub.ResizeTerminal, 
             self._build_request(
                 self._runtime_pb2.ResizeTerminalRequest,
                 _rpc_task_id=task_id,
@@ -749,7 +760,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.CloseTerminal(
+        response = await self._breaker.run(self._stub.CloseTerminal, 
             self._build_request(
                 self._runtime_pb2.CloseTerminalRequest,
                 _rpc_task_id=task_id,
@@ -793,7 +804,7 @@ class GrpcRuntimeKernelClient:
     async def pause_task(self, *, task_id: int, reason: str, actor: str) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.PauseTask(
+        response = await self._breaker.run(self._stub.PauseTask, 
             self._build_request(
                 self._runtime_pb2.PauseTaskRequest,
                 _rpc_task_id=task_id,
@@ -814,7 +825,7 @@ class GrpcRuntimeKernelClient:
     async def resume_task(self, *, task_id: int, actor: str) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.ResumeTask(
+        response = await self._breaker.run(self._stub.ResumeTask, 
             self._build_request(
                 self._runtime_pb2.ResumeTaskRequest,
                 _rpc_task_id=task_id,
@@ -841,7 +852,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.FinalizeTask(
+        response = await self._breaker.run(self._stub.FinalizeTask, 
             self._build_request(
                 self._runtime_pb2.FinalizeTaskRequest,
                 _rpc_task_id=task_id,
@@ -864,7 +875,7 @@ class GrpcRuntimeKernelClient:
     async def reconcile(self) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.Reconcile(
+        response = await self._breaker.run(self._stub.Reconcile, 
             self._build_request(self._runtime_pb2.ReconcileRequest),
             timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
             metadata=self._rpc_metadata(),
@@ -878,7 +889,7 @@ class GrpcRuntimeKernelClient:
     async def collect_snapshot(self, *, task_id: int) -> dict[str, object] | None:
         if self._stub is None or self._runtime_pb2 is None:
             return None
-        response = await self._stub.CollectSnapshot(
+        response = await self._breaker.run(self._stub.CollectSnapshot, 
             self._build_request(
                 self._runtime_pb2.CollectSnapshotRequest,
                 _rpc_task_id=task_id,
@@ -946,7 +957,7 @@ class GrpcRuntimeKernelClient:
     async def cleanup_environment(self, *, task_id: int, force: bool = False) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.CleanupEnvironment(
+        response = await self._breaker.run(self._stub.CleanupEnvironment, 
             self._build_request(
                 self._runtime_pb2.CleanupEnvironmentRequest,
                 _rpc_task_id=task_id,
@@ -986,7 +997,7 @@ class GrpcRuntimeKernelClient:
                 "scope_id": str(scope_id),
                 "reason": "runtime-kernel unavailable",
             }
-        response = await self._stub.StartBrowserSession(
+        response = await self._breaker.run(self._stub.StartBrowserSession, 
             self._build_request(
                 self._runtime_pb2.StartBrowserSessionRequest,
                 _rpc_task_id=task_id,
@@ -1037,7 +1048,7 @@ class GrpcRuntimeKernelClient:
                 "scope_id": str(scope_id),
                 "reason": "runtime-kernel unavailable",
             }
-        response = await self._stub.StopBrowserSession(
+        response = await self._breaker.run(self._stub.StopBrowserSession, 
             self._build_request(
                 self._runtime_pb2.StopBrowserSessionRequest,
                 _rpc_task_id=task_id,
@@ -1065,7 +1076,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object] | None:
         if self._stub is None or self._runtime_pb2 is None:
             return None
-        response = await self._stub.GetBrowserSession(
+        response = await self._breaker.run(self._stub.GetBrowserSession, 
             self._build_request(
                 self._runtime_pb2.GetBrowserSessionRequest,
                 _rpc_task_id=task_id,
@@ -1107,7 +1118,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object]:
         if self._stub is None or self._runtime_pb2 is None:
             return {"forwarded": False, "task_id": task_id, "reason": "runtime-kernel unavailable"}
-        response = await self._stub.SaveCheckpoint(
+        response = await self._breaker.run(self._stub.SaveCheckpoint, 
             self._build_request(
                 self._runtime_pb2.SaveCheckpointRequest,
                 _rpc_task_id=task_id,
@@ -1149,7 +1160,7 @@ class GrpcRuntimeKernelClient:
     ) -> dict[str, object] | None:
         if self._stub is None or self._runtime_pb2 is None:
             return None
-        response = await self._stub.GetCheckpoint(
+        response = await self._breaker.run(self._stub.GetCheckpoint, 
             self._build_request(
                 self._runtime_pb2.GetCheckpointRequest,
                 _rpc_task_id=task_id,

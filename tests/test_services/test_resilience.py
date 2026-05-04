@@ -3,6 +3,7 @@
 from contextlib import suppress
 
 import pybreaker
+import pytest
 
 from koda.services.resilience import (
     ALL_BREAKERS,
@@ -14,14 +15,19 @@ from koda.services.resilience import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_shared_breakers():
+    for breaker in ALL_BREAKERS.values():
+        with suppress(Exception):
+            breaker.close()
+
+
 class TestCircuitBreakers:
     def test_all_breakers_registered(self):
         expected = {
             "claude_cli",
             "codex_cli",
             "telegram_api",
-            "jira",
-            "confluence",
             "postgres",
             "browser",
             "http_external",
@@ -66,9 +72,9 @@ class TestRecordOutcome:
 
 class TestCircuitOpenError:
     def test_error_message(self):
-        err = CircuitOpenError("jira")
-        assert err.dependency == "jira"
-        assert "jira" in str(err)
+        err = CircuitOpenError("postgres")
+        assert err.dependency == "postgres"
+        assert "postgres" in str(err)
         assert "circuit breaker" in str(err)
 
 

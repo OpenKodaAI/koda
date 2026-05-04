@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { KodaMark } from "@/components/layout/koda-mark";
@@ -10,13 +10,25 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
+import { isSafeRedirectTarget } from "@/lib/safe-redirect";
 
 const MIN_LENGTH = 12;
+
+// See LoginScreen — every 4xx auth failure is folded into one generic copy.
+// Only infra failures (5xx / network) get a distinct message.
+function isUpstreamFailure(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status >= 500 || error.status === 0;
+  }
+  return true;
+}
 
 export function ForgotPasswordScreen() {
   const { t } = useAppI18n();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [identifier, setIdentifier] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -51,12 +63,25 @@ export function ForgotPasswordScreen() {
         }),
       });
       setSuccess(true);
+      const nextParam = searchParams.get("next");
+      const loginTarget = isSafeRedirectTarget(nextParam)
+        ? `/login?next=${encodeURIComponent(nextParam)}`
+        : "/login";
       // Auto-redirect after a brief success banner.
       setTimeout(() => {
-        router.replace("/login");
+        router.replace(loginTarget);
       }, 2000);
-    } catch {
-      setError(t("auth.forgot.generic_error"));
+    } catch (error) {
+      if (isUpstreamFailure(error)) {
+        setError(
+          t("auth.forgot.service_unavailable", {
+            defaultValue:
+              "Recovery service is temporarily unavailable. Please try again in a moment.",
+          }),
+        );
+      } else {
+        setError(t("auth.forgot.generic_error"));
+      }
     } finally {
       setBusy(false);
     }

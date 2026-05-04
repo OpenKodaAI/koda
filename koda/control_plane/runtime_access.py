@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from koda.agent_contract import normalize_integration_grants, normalize_string_list
@@ -18,7 +19,7 @@ class ControlPlaneRuntimeAccessBroker:
     def __init__(self, manager: Any) -> None:
         self._manager = manager
 
-    def _resolve_runtime_secret(self, snapshot: dict[str, Any]) -> str:
+    def _resolve_runtime_secret(self, agent_id: str, snapshot: dict[str, Any]) -> str:
         secrets = _safe_json_object(snapshot.get("secrets"))
         payload = _safe_json_object(secrets.get("RUNTIME_LOCAL_UI_TOKEN"))
         encrypted_value = str(payload.get("encrypted_value") or "").strip()
@@ -30,7 +31,15 @@ class ControlPlaneRuntimeAccessBroker:
             ("RUNTIME_LOCAL_UI_TOKEN",),
         )
         encrypted_value = str(row["encrypted_value"] or "").strip() if row else ""
-        return decrypt_secret(encrypted_value) if encrypted_value else ""
+        if encrypted_value:
+            return decrypt_secret(encrypted_value)
+
+        normalized_agent_id = str(agent_id or "").strip().upper()
+        if normalized_agent_id:
+            scoped_value = str(os.environ.get(f"{normalized_agent_id}_RUNTIME_LOCAL_UI_TOKEN") or "").strip()
+            if scoped_value:
+                return scoped_value
+        return str(os.environ.get("RUNTIME_LOCAL_UI_TOKEN") or "").strip()
 
     def get_runtime_access(
         self,
@@ -61,7 +70,7 @@ class ControlPlaneRuntimeAccessBroker:
             runtime_endpoint.get("runtime_base_url") or health_url.removesuffix("/health").rstrip("/")
         )
 
-        runtime_secret = self._resolve_runtime_secret(snapshot)
+        runtime_secret = self._resolve_runtime_secret(normalized, snapshot)
         sections = _safe_json_object(snapshot.get("sections"))
         knowledge_section = _safe_json_object(sections.get("knowledge"))
         access_section = _safe_json_object(sections.get("access"))
@@ -72,11 +81,7 @@ class ControlPlaneRuntimeAccessBroker:
             workspace_id = str(agent_row["workspace_id"]).strip()
         except Exception:
             workspace_id = ""
-        workspace_scope = tuple(
-            item
-            for item in [workspace_id]
-            if item
-        )
+        workspace_scope = tuple(item for item in [workspace_id] if item)
         source_scope = tuple(normalize_string_list(knowledge_policy.get("allowed_source_labels")))
         access_scope = {
             "agent_scope": normalized,

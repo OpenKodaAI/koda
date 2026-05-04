@@ -71,7 +71,10 @@ def test_build_policy_catalog_exposes_action_entries_and_groupings() -> None:
     assert catalog["approval_scope_templates"]
     assert catalog["action_groups"]["by_integration"]
     assert any(action["tool_id"] == "http_request" and action["action_id"] == "http.get" for action in actions)
-    assert any(action["tool_id"] == "gws" and action["action_id"] == "gmail.send" for action in actions)
+    legacy_external_ids = {"gws", "jira", "confluence", "gh", "glab", "aws"}
+    assert not any(action["tool_id"] in legacy_external_ids for action in actions)
+    core_integration_ids = {str(item.get("id") or "") for item in catalog.get("core_integrations", [])}
+    assert not (core_integration_ids & legacy_external_ids)
 
 
 def test_build_mcp_action_catalog_maps_tool_policies_to_defaults() -> None:

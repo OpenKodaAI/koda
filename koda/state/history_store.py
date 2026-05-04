@@ -295,11 +295,12 @@ def save_session(
 ) -> None:
     now = _now_iso()
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         existing = run_coro_sync(
             primary_fetch_one(
-                "SELECT id FROM sessions WHERE user_id = ? AND session_id = ?",
-                (user_id, session_id),
+                "SELECT id FROM sessions WHERE agent_id = ? AND user_id = ? AND session_id = ?",
+                (agent_scope, user_id, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -317,9 +318,10 @@ def save_session(
             run_coro_sync(
                 primary_execute(
                     "INSERT INTO sessions "
-                    "(user_id, session_id, name, provider, provider_session_id, last_model, created_at, last_used) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (user_id, session_id, name, provider, provider_session_id, model, now, now),
+                    "(agent_id, user_id, session_id, name, provider, provider_session_id, last_model, created_at, "
+                    "last_used) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (agent_scope, user_id, session_id, name, provider, provider_session_id, model, now, now),
                     agent_id=AGENT_ID,
                 )
             )
@@ -372,12 +374,13 @@ def save_session(
 
 def get_sessions(user_id: int, limit: int = 20) -> list[tuple[Any, ...]]:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         rows = run_coro_sync(
             primary_fetch_all(
                 "SELECT id, session_id, name, provider, last_model, created_at, last_used "
-                "FROM sessions WHERE user_id = ? ORDER BY last_used DESC LIMIT ?",
-                (user_id, limit),
+                "FROM sessions WHERE agent_id = ? AND user_id = ? ORDER BY last_used DESC LIMIT ?",
+                (agent_scope, user_id, limit),
                 agent_id=AGENT_ID,
             )
         )
@@ -406,11 +409,12 @@ def get_sessions(user_id: int, limit: int = 20) -> list[tuple[Any, ...]]:
 
 def rename_session(user_id: int, session_id: str, name: str) -> bool:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         updated = run_coro_sync(
             primary_execute(
-                "UPDATE sessions SET name = ? WHERE user_id = ? AND session_id = ?",
-                (name, user_id, session_id),
+                "UPDATE sessions SET name = ? WHERE agent_id = ? AND user_id = ? AND session_id = ?",
+                (name, agent_scope, user_id, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -425,11 +429,13 @@ def rename_session(user_id: int, session_id: str, name: str) -> bool:
 
 def get_session_by_id(user_id: int, row_id: int) -> tuple[Any, ...] | None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
-                "SELECT session_id, name, provider, last_model FROM sessions WHERE id = ? AND user_id = ?",
-                (row_id, user_id),
+                "SELECT session_id, name, provider, last_model FROM sessions "
+                "WHERE agent_id = ? AND id = ? AND user_id = ?",
+                (agent_scope, row_id, user_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -447,17 +453,18 @@ def get_session_by_id(user_id: int, row_id: int) -> tuple[Any, ...] | None:
 def get_session_runtime_defaults(session_id: str) -> tuple[str | None, str | None] | None:
     """Return the latest provider/model pair observed for a canonical session id."""
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
                 """
                 SELECT provider, last_model
                   FROM sessions
-                 WHERE session_id = ?
+                 WHERE agent_id = ? AND session_id = ?
               ORDER BY COALESCE(last_used, created_at) DESC, id DESC
                  LIMIT 1
                 """,
-                (session_id,),
+                (agent_scope, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -518,6 +525,7 @@ def save_provider_session_mapping(
 
 def delete_provider_session_mapping(canonical_session_id: str, provider: str) -> None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         run_coro_sync(
             primary_execute(
@@ -528,8 +536,8 @@ def delete_provider_session_mapping(canonical_session_id: str, provider: str) ->
         )
         run_coro_sync(
             primary_execute(
-                "UPDATE sessions SET provider_session_id = NULL WHERE session_id = ? AND provider = ?",
-                (canonical_session_id, provider),
+                "UPDATE sessions SET provider_session_id = NULL WHERE agent_id = ? AND session_id = ? AND provider = ?",
+                (agent_scope, canonical_session_id, provider),
                 agent_id=AGENT_ID,
             )
         )
@@ -547,6 +555,7 @@ def delete_provider_session_mapping(canonical_session_id: str, provider: str) ->
 
 def get_provider_session_mapping(canonical_session_id: str, provider: str) -> tuple[str, str | None] | None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
@@ -560,8 +569,9 @@ def get_provider_session_mapping(canonical_session_id: str, provider: str) -> tu
             return (str(row["provider_session_id"]), cast(str | None, row.get("last_model")))
         legacy = run_coro_sync(
             primary_fetch_one(
-                "SELECT provider_session_id, last_model FROM sessions WHERE session_id = ? AND provider = ?",
-                (canonical_session_id, provider),
+                "SELECT provider_session_id, last_model FROM sessions "
+                "WHERE agent_id = ? AND session_id = ? AND provider = ?",
+                (agent_scope, canonical_session_id, provider),
                 agent_id=AGENT_ID,
             )
         )
@@ -793,6 +803,245 @@ def update_task_status(task_id: int, status: str, **kwargs: object) -> None:
         return
     with _history_backend_removed() as conn:
         conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", (*vals, task_id))
+
+
+def _lease_expiry_iso(lease_seconds: int) -> str:
+    """Return the absolute ISO timestamp at which a lease of the given
+    duration would expire. Lexicographic ISO comparison stays correct as
+    long as every writer uses the same UTC normalization (no offset)."""
+    expiry = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=max(1, int(lease_seconds)))
+    return expiry.isoformat()
+
+
+def acquire_task_lease(task_id: int, owner: str, lease_seconds: int) -> bool:
+    """Atomically claim a task for ``owner``.
+
+    Succeeds (returns True) iff the row is still in a non-terminal state
+    AND no other worker currently holds a fresh lease (i.e. the existing
+    lease is missing, owned by us, or already expired). All effects are in
+    a single UPDATE so two workers cannot both succeed for the same row.
+
+    On success the row transitions to ``status='running'`` with the lease
+    fields set; the caller must then start the renewal loop and reach a
+    terminal state via :func:`complete_task_with_lease` to release it.
+    """
+    backend = _primary_backend()
+    if backend is None:
+        return False
+    now = _now_iso()
+    expires = _lease_expiry_iso(lease_seconds)
+    rows = run_coro_sync(
+        primary_execute(
+            """
+            UPDATE tasks
+               SET status = 'running',
+                   lease_owner = ?,
+                   lease_expires_at = ?,
+                   last_heartbeat_at = ?,
+                   started_at = COALESCE(started_at, ?)
+             WHERE agent_id = ? AND id = ?
+               AND status IN ('queued', 'running', 'retrying')
+               AND (lease_owner IS NULL
+                    OR lease_owner = ?
+                    OR lease_expires_at IS NULL
+                    OR lease_expires_at < ?)
+            """,
+            (owner, expires, now, now, _current_agent_scope(), task_id, owner, now),
+            agent_id=AGENT_ID,
+        )
+    )
+    return int(rows or 0) > 0
+
+
+def extend_task_lease(task_id: int, owner: str, lease_seconds: int) -> bool:
+    """Extend the lease iff ``owner`` still holds it.
+
+    Returns True iff the renewal succeeded. A False return means the lease
+    was reaped or stolen — the caller must abort, since any subsequent
+    write to this task may collide with the janitor's decision.
+    """
+    backend = _primary_backend()
+    if backend is None:
+        return False
+    now = _now_iso()
+    expires = _lease_expiry_iso(lease_seconds)
+    rows = run_coro_sync(
+        primary_execute(
+            """
+            UPDATE tasks
+               SET lease_expires_at = ?, last_heartbeat_at = ?
+             WHERE agent_id = ? AND id = ?
+               AND lease_owner = ?
+               AND status IN ('running', 'retrying')
+            """,
+            (expires, now, _current_agent_scope(), task_id, owner),
+            agent_id=AGENT_ID,
+        )
+    )
+    return int(rows or 0) > 0
+
+
+def release_task_lease(task_id: int, owner: str) -> None:
+    """Best-effort lease release with no status change.
+
+    Used only by graceful-shutdown paths that requeue the task explicitly
+    with :func:`update_task_status`. For terminal-state transitions, use
+    :func:`complete_task_with_lease` instead, which scopes the status
+    update to the lease holder and prevents overwrite of a janitor's
+    decision after a lost-lease race.
+    """
+    backend = _primary_backend()
+    if backend is None:
+        return
+    run_coro_sync(
+        primary_execute(
+            """
+            UPDATE tasks
+               SET lease_owner = NULL, lease_expires_at = NULL
+             WHERE agent_id = ? AND id = ?
+               AND lease_owner = ?
+            """,
+            (_current_agent_scope(), task_id, owner),
+            agent_id=AGENT_ID,
+        )
+    )
+
+
+_TERMINAL_TASK_STATES = frozenset({"completed", "failed", "cancelled"})
+
+
+def update_task_with_lease(
+    task_id: int,
+    owner: str,
+    status: str,
+    **kwargs: object,
+) -> bool:
+    """Atomically transition a task to ``status`` iff ``owner`` still holds the lease.
+
+    Returns True iff the row was updated. A False return means the lease
+    was reaped (the janitor already requeued or failed the task) and the
+    caller MUST NOT retry the update — doing so would resurrect a row the
+    janitor decided was orphaned.
+
+    Mid-execution transitions (status ∈ {running, retrying}) leave the
+    lease intact so the renewal loop can keep extending it. Terminal
+    transitions (status ∈ {completed, failed, cancelled}) clear the lease
+    in the same UPDATE so a follow-up worker can immediately reacquire
+    sibling tasks without waiting for a separate release call.
+    """
+    allowed = {
+        "error_message",
+        "cost_usd",
+        "started_at",
+        "completed_at",
+        "attempt",
+        "session_id",
+        "provider_session_id",
+        "provider",
+        "model",
+        "env_id",
+        "classification",
+        "environment_kind",
+        "current_phase",
+        "last_heartbeat_at",
+        "retention_expires_at",
+        "source_task_id",
+        "source_action",
+    }
+    sets = ["status = ?"]
+    vals: list[Any] = [status]
+    if status in _TERMINAL_TASK_STATES:
+        sets.extend(["lease_owner = NULL", "lease_expires_at = NULL"])
+    for key, value in kwargs.items():
+        if key in allowed:
+            sets.append(f"{key} = ?")
+            vals.append(value)
+    backend = _primary_backend()
+    if backend is None:
+        return False
+    rows = run_coro_sync(
+        primary_execute(
+            f"""
+            UPDATE tasks SET {", ".join(sets)}
+             WHERE agent_id = ? AND id = ?
+               AND lease_owner = ?
+            """,
+            (*vals, _current_agent_scope(), task_id, owner),
+            agent_id=AGENT_ID,
+        )
+    )
+    return int(rows or 0) > 0
+
+
+def reap_expired_task_leases() -> list[dict[str, Any]]:
+    """Reap tasks whose lease has expired.
+
+    Performed in two atomic UPDATEs — one for tasks that still have retry
+    budget (status → ``queued``, attempt+1, lease cleared) and one for
+    exhausted tasks (status → ``failed`` with a clear ``error_message``).
+    Both branches use ``RETURNING`` so the caller can audit/log the reaped
+    set without a separate SELECT.
+
+    The query also catches tasks with ``status IN ('running', 'retrying')``
+    but a NULL ``lease_expires_at`` — these are legacy stuck rows from
+    pre-lease versions or rows where a worker died between status update
+    and lease setup (impossible in the current implementation, but cheap
+    to reap defensively).
+    """
+    backend = _primary_backend()
+    if backend is None:
+        return []
+    now = _now_iso()
+    scope = _current_agent_scope()
+    requeue_msg = "task lease expired without renewal — requeued"
+    fail_msg = "task lease expired without renewal — max attempts reached"
+
+    requeued = run_coro_sync(
+        primary_fetch_all(
+            """
+            UPDATE tasks
+               SET status = 'queued',
+                   attempt = attempt + 1,
+                   lease_owner = NULL,
+                   lease_expires_at = NULL,
+                   error_message = ?,
+                   started_at = NULL,
+                   completed_at = NULL
+             WHERE agent_id = ?
+               AND status IN ('running', 'retrying')
+               AND (lease_expires_at IS NULL OR lease_expires_at < ?)
+               AND attempt < max_attempts
+            RETURNING id, user_id, chat_id, attempt, max_attempts
+            """,
+            (requeue_msg, scope, now),
+            agent_id=AGENT_ID,
+        )
+    )
+    failed = run_coro_sync(
+        primary_fetch_all(
+            """
+            UPDATE tasks
+               SET status = 'failed',
+                   error_message = ?,
+                   completed_at = ?,
+                   lease_owner = NULL,
+                   lease_expires_at = NULL
+             WHERE agent_id = ?
+               AND status IN ('running', 'retrying')
+               AND (lease_expires_at IS NULL OR lease_expires_at < ?)
+               AND attempt >= max_attempts
+            RETURNING id, user_id, chat_id, attempt, max_attempts
+            """,
+            (fail_msg, now, scope, now),
+            agent_id=AGENT_ID,
+        )
+    )
+    out: list[dict[str, Any]] = []
+    for row in requeued:
+        out.append({**row, "outcome": "requeued"})
+    for row in failed:
+        out.append({**row, "outcome": "failed"})
+    return out
 
 
 def get_user_tasks(user_id: int, limit: int = 10, status: str | None = None) -> list[tuple[Any, ...]]:

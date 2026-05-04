@@ -103,20 +103,6 @@ telegram_api_breaker = pybreaker.CircuitBreaker(
     listeners=[_listener],
 )
 
-jira_breaker = pybreaker.CircuitBreaker(
-    fail_max=3,
-    reset_timeout=120,
-    name="jira",
-    listeners=[_listener],
-)
-
-confluence_breaker = pybreaker.CircuitBreaker(
-    fail_max=3,
-    reset_timeout=120,
-    name="confluence",
-    listeners=[_listener],
-)
-
 postgres_breaker = pybreaker.CircuitBreaker(
     fail_max=5,
     reset_timeout=60,
@@ -164,8 +150,6 @@ ALL_BREAKERS: dict[str, pybreaker.CircuitBreaker] = {
     "claude_cli": claude_cli_breaker,
     "codex_cli": codex_cli_breaker,
     "telegram_api": telegram_api_breaker,
-    "jira": jira_breaker,
-    "confluence": confluence_breaker,
     "postgres": postgres_breaker,
     "browser": browser_breaker,
     "http_external": http_external_breaker,

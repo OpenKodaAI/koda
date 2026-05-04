@@ -4,12 +4,16 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { LoginScreen } from "@/components/auth/login-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ApiError } from "@/lib/errors";
 
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
 
+const searchParamsGetMock = vi.fn<(name: string) => string | null>(() => null);
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock, refresh: refreshMock }),
+  useSearchParams: () => ({ get: searchParamsGetMock }),
 }));
 
 vi.mock("@/lib/http-client", async () => {
@@ -41,8 +45,12 @@ describe("LoginScreen", () => {
     expect(screen.getByRole("link", { name: /lost my password|esqueci|olvidé/i })).toBeInTheDocument();
   });
 
-  it("shows a generic error when credentials are rejected", async () => {
-    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Invalid credentials."));
+  it("shows a generic error when credentials are rejected (4xx)", async () => {
+    // Simulates the proxy returning 401 — wrong password / unknown user /
+    // rate-limited all collapse here per the auth contract.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid credentials.", 401),
+    );
     const user = userEvent.setup();
     render(
       <I18nProvider>
@@ -53,7 +61,50 @@ describe("LoginScreen", () => {
     await user.type(screen.getByLabelText(/password|senha/i), "wrong-password-attempt-XX");
     await user.click(screen.getByRole("button", { name: /sign in|entrar/i }));
     // Error is always generic — never reveals whether the account exists.
-    expect(await screen.findByText(/invalid credentials|credenciais inválidas|inválidas/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/invalid credentials|credenciais inválidas|inválidas/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a service-unavailable message when the upstream is down (503)", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Login service did not respond within 6000ms", 503),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <LoginScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|usuário|username/i), "owner");
+    await user.type(screen.getByLabelText(/password|senha/i), "any-password");
+    await user.click(screen.getByRole("button", { name: /sign in|entrar/i }));
+    expect(
+      await screen.findByText(
+        /service is temporarily unavailable|temporariamente indisponível|momentaneamente/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a service-unavailable message when fetch fails (network error)", async () => {
+    // No status — plain Error simulates `fetch` throwing before producing a Response.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("fetch failed"),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <LoginScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|usuário|username/i), "owner");
+    await user.type(screen.getByLabelText(/password|senha/i), "any-password");
+    await user.click(screen.getByRole("button", { name: /sign in|entrar/i }));
+    expect(
+      await screen.findByText(
+        /service is temporarily unavailable|temporariamente indisponível|momentaneamente/i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("redirects to dashboard on successful login", async () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -70,6 +71,28 @@ def _build_struct_message(payload: Mapping[str, object]) -> Any | None:
     return message
 
 
+_QUALITY_ORDER = {
+    "unavailable": 0,
+    "lexical_graph": 1,
+    "hybrid_dense": 2,
+    "hybrid_reranked": 3,
+}
+
+
+def _quality_rank(value: object) -> int:
+    return _QUALITY_ORDER.get(str(value or "").strip().lower(), 0)
+
+
+def _min_quality_tier() -> str:
+    raw = str(getattr(config, "KNOWLEDGE_RETRIEVAL_MIN_QUALITY_TIER", "lexical_graph") or "")
+    normalized = raw.strip().lower()
+    return normalized if normalized in _QUALITY_ORDER else "lexical_graph"
+
+
+def _finite_vector(values: list[float]) -> list[float]:
+    return [float(value) for value in values if math.isfinite(float(value))]
+
+
 class RetrievalEngineClient(Protocol):
     """Behavior expected from the retrieval-engine adapter."""
 
@@ -109,6 +132,7 @@ class GrpcRetrievalEngineClient:
         self._metadata_pb2: Any | None = None
         self._retrieval_pb2: Any | None = None
         self._startup_error: str | None = None
+        self._embedding_probe: dict[str, object] | None = None
         self._last_health: dict[str, object] = {
             "service": "retrieval",
             "mode": self.selection.mode,
@@ -197,6 +221,116 @@ class GrpcRetrievalEngineClient:
             "cutover_allowed": bool(self._last_health.get("cutover_allowed")) and bundle_contract_ready,
         }
 
+    def _query_embedding_payload(self, query: str) -> tuple[list[float], str, int] | None:
+        """Build a real query embedding without falling back to hash vectors."""
+        normalized_query = " ".join(str(query or "").split()).strip()
+        if not normalized_query:
+            return None
+        try:
+            from koda.utils.embeddings import (  # noqa: PLC0415
+                embed_text_with_model,
+                load_sentence_transformer,
+                resolve_active_embedding_repo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._embedding_probe = {
+                "query_embedding_ready": False,
+                "query_embedding_error": f"{type(exc).__name__}: {exc}",
+            }
+            return None
+        model_name = resolve_active_embedding_repo()
+        model = load_sentence_transformer(model_name)
+        if model is None:
+            self._embedding_probe = {
+                "query_embedding_ready": False,
+                "query_embedding_model": model_name,
+                "query_embedding_error": "embedding_model_not_installed",
+            }
+            return None
+        try:
+            vector = _finite_vector(embed_text_with_model(normalized_query, model))
+        except Exception as exc:  # noqa: BLE001
+            self._embedding_probe = {
+                "query_embedding_ready": False,
+                "query_embedding_model": model_name,
+                "query_embedding_error": f"{type(exc).__name__}: {exc}",
+            }
+            return None
+        if not vector:
+            self._embedding_probe = {
+                "query_embedding_ready": False,
+                "query_embedding_model": model_name,
+                "query_embedding_error": "empty_embedding",
+            }
+            return None
+        self._embedding_probe = {
+            "query_embedding_ready": True,
+            "query_embedding_model": model_name,
+            "query_embedding_dimension": len(vector),
+        }
+        return vector, model_name, len(vector)
+
+    def _rerank_available(self) -> bool:
+        try:
+            from koda.services import reranker  # noqa: PLC0415
+
+            return bool(reranker.is_enabled())
+        except Exception:
+            return False
+
+    def _apply_client_quality_gate(self, health: dict[str, object]) -> dict[str, object]:
+        details = health.get("details")
+        server_details = dict(details) if isinstance(details, Mapping) else {}
+        min_tier = _min_quality_tier()
+        raw_quality_tier = server_details.get("quality_tier")
+        quality_tier = str(raw_quality_tier or "").strip().lower()
+        if not quality_tier or quality_tier not in _QUALITY_ORDER:
+            capabilities = {
+                item.strip().lower()
+                for item in str(server_details.get("capabilities") or "").split(",")
+                if item.strip()
+            }
+            quality_tier = "hybrid_dense" if "hybrid_dense" in capabilities else "lexical_graph"
+
+        embedding_probe: Mapping[str, object] = self._embedding_probe or {}
+        embedding_ready = bool(embedding_probe.get("query_embedding_ready"))
+        rerank_ready = self._rerank_available()
+        if _quality_rank(min_tier) >= _quality_rank("hybrid_dense") and self._embedding_probe is None:
+            # Only top-tier cutover probes the local model eagerly. The default
+            # lexical tier keeps health checks light and avoids surprise model loads.
+            self._query_embedding_payload("health probe")
+            embedding_probe = self._embedding_probe or {}
+            embedding_ready = bool(embedding_probe.get("query_embedding_ready"))
+        if quality_tier == "hybrid_dense" and rerank_ready:
+            quality_tier = "hybrid_reranked"
+        cutover_allowed = bool(health.get("cutover_allowed")) and _quality_rank(quality_tier) >= _quality_rank(min_tier)
+        if _quality_rank(min_tier) >= _quality_rank("hybrid_dense"):
+            cutover_allowed = cutover_allowed and embedding_ready
+        if _quality_rank(min_tier) >= _quality_rank("hybrid_reranked"):
+            cutover_allowed = cutover_allowed and rerank_ready
+
+        next_details = {
+            **server_details,
+            "client_quality_tier": quality_tier,
+            "client_min_quality_tier": min_tier,
+            "query_embedding_ready": str(embedding_ready).lower(),
+            "rerank_ready": str(rerank_ready).lower(),
+        }
+        if self._embedding_probe:
+            for key, value in self._embedding_probe.items():
+                next_details[str(key)] = str(value)
+        return {
+            **health,
+            "details": next_details,
+            "quality_tier": quality_tier,
+            "min_quality_tier": min_tier,
+            "query_embedding_ready": embedding_ready,
+            "rerank_ready": rerank_ready,
+            "cutover_allowed": cutover_allowed,
+            "authoritative": bool(health.get("authoritative")) and cutover_allowed,
+            "production_ready": bool(health.get("production_ready")) and cutover_allowed,
+        }
+
     def query(
         self,
         *,
@@ -207,6 +341,9 @@ class GrpcRetrievalEngineClient:
             raise RuntimeError("grpc_retrieval_engine_unavailable")
         if not bool(self.health().get("cutover_allowed")):
             raise RuntimeError("grpc_retrieval_engine_not_authoritative")
+        embedding_payload = self._query_embedding_payload(envelope.normalized_query or envelope.query)
+        if _quality_rank(_min_quality_tier()) >= _quality_rank("hybrid_dense") and embedding_payload is None:
+            raise RuntimeError("grpc_retrieval_engine_query_embedding_unavailable")
 
         envelope_kwargs: dict[str, object] = {
             "normalized_query": envelope.normalized_query,
@@ -221,6 +358,11 @@ class GrpcRetrievalEngineClient:
             "allowed_source_labels": list(envelope.allowed_source_labels),
             "allowed_workspace_roots": list(envelope.allowed_workspace_roots),
         }
+        if embedding_payload is not None:
+            vector, model_name, dimension = embedding_payload
+            envelope_kwargs["query_embedding"] = vector
+            envelope_kwargs["query_embedding_model"] = model_name
+            envelope_kwargs["query_embedding_dimension"] = dimension
         metadata_struct = _build_struct_message(envelope.metadata)
         if metadata_struct is not None:
             envelope_kwargs["metadata"] = metadata_struct
@@ -288,6 +430,12 @@ class GrpcRetrievalEngineClient:
             "fallback_used": bool(getattr(retrieve_response, "fallback_used", False)),
             "explanation": str(getattr(retrieve_response, "explanation", "") or ""),
         }
+        self._apply_rerank_to_bundle_payload(
+            bundle_payload,
+            query=envelope.normalized_query or envelope.query,
+            max_results=max_results,
+            requires_write=envelope.requires_write,
+        )
         self._validate_remote_bundle_payload(bundle_payload)
         bundle = RetrievalBundle.from_dict(bundle_payload)
         bundle.effective_engine = str(bundle.effective_engine or self.engine_name)
@@ -299,6 +447,136 @@ class GrpcRetrievalEngineClient:
             else:
                 bundle.explanation = f"trace_id={trace_id}"
         return bundle
+
+    def _apply_rerank_to_bundle_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        query: str,
+        max_results: int,
+        requires_write: bool,
+    ) -> None:
+        if not self._rerank_available():
+            return
+        candidate_hits = payload.get("candidate_hits")
+        if not isinstance(candidate_hits, list) or len(candidate_hits) < 2:
+            return
+        top_k = max(
+            1,
+            min(
+                int(getattr(config, "KNOWLEDGE_RETRIEVAL_RERANK_TOP_K", 8) or 8),
+                len(candidate_hits),
+            ),
+        )
+        documents = [
+            f"{str(item.get('title') or '')}\n{str(item.get('content') or '')}"[:2000]
+            for item in candidate_hits[:top_k]
+            if isinstance(item, dict)
+        ]
+        if len(documents) < 2:
+            return
+        try:
+            from koda.services.reranker import rerank_sync  # noqa: PLC0415
+
+            ranked = rerank_sync(str(query or ""), documents, top_k=len(documents))
+        except Exception:  # noqa: BLE001
+            return
+        if not ranked or all(float(score or 0.0) == 0.0 for _, score in ranked):
+            return
+        scores = {int(index): float(score) for index, score in ranked}
+        score_values = list(scores.values())
+        min_score = min(score_values)
+        max_score = max(score_values)
+        span = max(max_score - min_score, 1e-9)
+        head_order = [index for index, _score in sorted(ranked, key=lambda pair: pair[1], reverse=True)]
+        tail_order = list(range(top_k, len(candidate_hits)))
+        reordered = [candidate_hits[index] for index in head_order + tail_order]
+        for rank, original_index in enumerate(head_order, start=1):
+            item = candidate_hits[original_index]
+            if not isinstance(item, dict):
+                continue
+            normalized_score = (scores[original_index] - min_score) / span if span > 1e-9 else 1.0
+            item["rerank_score"] = normalized_score
+            item["rerank_rank"] = rank
+            item["similarity"] = round(
+                min(
+                    1.0,
+                    (0.48 * normalized_score)
+                    + (0.20 * float(item.get("dense_score") or 0.0))
+                    + (0.14 * float(item.get("lexical_score") or 0.0))
+                    + (0.18 * float(item.get("similarity") or 0.0)),
+                ),
+                4,
+            )
+            reasons = [str(value) for value in list(item.get("reasons") or [])]
+            if "reranked" not in reasons:
+                reasons.append("reranked")
+            item["reasons"] = reasons
+        payload["candidate_hits"] = reordered
+        selected = [item for item in reordered[: max(1, int(max_results or 1))] if isinstance(item, dict)]
+        payload["selected_hits"] = selected
+        selected_ids = {str(item.get("id") or "") for item in selected}
+        selected_labels = {str(item.get("source_label") or "") for item in selected}
+        payload["authoritative_evidence"] = [
+            {
+                "source_label": str(item.get("source_label") or ""),
+                "layer": str(item.get("layer") or ""),
+                "title": str(item.get("title") or ""),
+                "excerpt": str(item.get("content") or "")[:240],
+                "updated_at": str(item.get("updated_at") or ""),
+                "freshness": str(item.get("freshness") or "fresh"),
+                "score": float(item.get("similarity") or 0.0),
+                "operable": bool(item.get("operable", True)),
+                "rationale": "; ".join(str(value) for value in list(item.get("reasons") or [])),
+                "evidence_modalities": [str(value) for value in list(item.get("evidence_modalities") or [])],
+            }
+            for item in selected
+            if str(item.get("layer") or "") in {"canonical_policy", "approved_runbook"}
+            and (not requires_write or bool(item.get("operable", True)))
+        ]
+        supporting = []
+        for item in list(payload.get("supporting_evidence") or []):
+            if not isinstance(item, dict):
+                continue
+            provenance = item.get("provenance")
+            source_label = str(provenance.get("source_label") or "") if isinstance(provenance, Mapping) else ""
+            if not source_label or source_label in selected_labels:
+                supporting.append(item)
+        payload["supporting_evidence"] = supporting
+        rank_after_by_id = {
+            str(item.get("id") or ""): index for index, item in enumerate(reordered, start=1) if isinstance(item, dict)
+        }
+        rerank_by_id = {
+            str(item.get("id") or ""): (float(item.get("rerank_score") or 0.0), int(item.get("rerank_rank") or -1))
+            for item in reordered
+            if isinstance(item, dict)
+        }
+        for index, item in enumerate(list(payload.get("trace_hits") or []), start=1):
+            if not isinstance(item, dict):
+                continue
+            hit_id = str(item.get("hit_id") or item.get("id") or "")
+            item["selected"] = hit_id in selected_ids
+            item["rank_after"] = rank_after_by_id.get(hit_id, index)
+            rerank_score, rerank_rank = rerank_by_id.get(hit_id, (0.0, -1))
+            item["rerank_score"] = rerank_score
+            item["rerank_rank"] = rerank_rank
+            if hit_id not in selected_ids:
+                item["exclusion_reason"] = "ranked_out"
+        answer_plan = payload.get("answer_plan")
+        if isinstance(answer_plan, dict):
+            answer_plan["authoritative_sources"] = [
+                str(item.get("source_label") or "") for item in payload["authoritative_evidence"]
+            ]
+            answer_plan["required_verifications"] = [str(item.get("source_label") or "") for item in selected[:3]]
+        payload["required_verifications"] = [str(item.get("source_label") or "") for item in selected[:3]]
+        payload["grounding_score"] = (
+            round(sum(float(item.get("similarity") or 0.0) for item in selected) / len(selected), 4)
+            if selected
+            else 0.0
+        )
+        payload["effective_engine"] = "rust_grpc+rerank"
+        explanation = str(payload.get("explanation") or "")
+        payload["explanation"] = f"{explanation}; rerank=applied; rerank_top_k={top_k}".strip("; ")
 
     def list_graph(
         self,
@@ -392,6 +670,8 @@ class GrpcRetrievalEngineClient:
             "graph_relation_types": [str(value) for value in list(getattr(item, "graph_relation_types", []) or [])],
             "evidence_modalities": [str(value) for value in list(getattr(item, "evidence_modalities", []) or [])],
             "reasons": [str(value) for value in list(getattr(item, "reasons", []) or [])],
+            "rerank_score": float(getattr(item, "rerank_score", 0.0) or 0.0),
+            "rerank_rank": int(getattr(item, "rerank_rank", -1) or -1),
         }
 
     def _trace_hit_payload(self, item: Any) -> dict[str, object]:
@@ -419,6 +699,8 @@ class GrpcRetrievalEngineClient:
             "supporting_evidence_keys": [
                 str(value) for value in list(getattr(item, "supporting_evidence_keys", []) or [])
             ],
+            "rerank_score": float(getattr(item, "rerank_score", 0.0) or 0.0),
+            "rerank_rank": int(getattr(item, "rerank_rank", -1) or -1),
         }
 
     def _authoritative_evidence_payload(self, item: Any) -> dict[str, object]:
@@ -555,7 +837,24 @@ class GrpcRetrievalEngineClient:
 
     def health(self) -> dict[str, object]:
         connected = self._channel is not None
-        return {
+        if (
+            connected
+            and self._stub is not None
+            and self._metadata_pb2 is not None
+            and self._startup_error is None
+            and not bool(self._last_health.get("cutover_allowed"))
+        ):
+            try:
+                self._probe_health()
+            except Exception as exc:  # pragma: no cover - depends on sidecar timing
+                self._last_health = {
+                    **self._last_health,
+                    "ready": False,
+                    "production_ready": False,
+                    "cutover_allowed": False,
+                    "last_probe_error": f"{type(exc).__name__}: {exc}",
+                }
+        health = {
             **self._last_health,
             "connected": connected,
             "ready": bool(self._last_health.get("ready")) and connected and self._startup_error is None,
@@ -567,6 +866,7 @@ class GrpcRetrievalEngineClient:
             and self._startup_error is None,
             "startup_error": self._startup_error,
         }
+        return self._apply_client_quality_gate(health)
 
 
 def build_retrieval_engine_client(*, agent_id: str | None = None) -> RetrievalEngineClient:

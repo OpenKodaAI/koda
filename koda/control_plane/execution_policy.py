@@ -10,7 +10,6 @@ from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
     build_action_envelope,
     normalize_string_list,
-    resolve_core_integration_action_catalog,
     resolve_feature_filtered_tools,
 )
 
@@ -121,8 +120,6 @@ def _tool_family(tool_id: str) -> str:
         return "web"
     if normalized.startswith("browser_"):
         return "browser"
-    if normalized in {"gws", "jira", "confluence"}:
-        return normalized
     if normalized.startswith("script_"):
         return "script_library"
     if normalized.startswith("cache_"):
@@ -133,10 +130,6 @@ def _tool_family(tool_id: str) -> str:
         return "shell"
     if normalized.startswith("git_"):
         return "git"
-    if normalized.startswith("gh_"):
-        return "gh"
-    if normalized.startswith("glab_"):
-        return "glab"
     if normalized.startswith("docker_"):
         return "docker"
     if normalized.startswith("pip_"):
@@ -244,7 +237,7 @@ def _effect_tags_for_core_action(tool_id: str, access_level: str, description: s
         tags.add("external_communication")
     if "permission" in normalized or "acl" in normalized or "share" in normalized:
         tags.add("sharing_or_permissions")
-    if "credential" in description.lower() or normalized in {"gws", "jira", "confluence"}:
+    if "credential" in description.lower():
         tags.add("credential_access")
     return sorted(tags)
 
@@ -434,47 +427,6 @@ def _browser_cookie_action_entries(
                 default_reason_code=default_reason_code,
             )
         )
-    return entries
-
-
-def _sample_args_for_action(action_id: str) -> str:
-    parts = [part for part in str(action_id or "").replace(".", " ").split() if part]
-    return " ".join(parts)
-
-
-def _grouped_surface_action_entries() -> list[dict[str, Any]]:
-    catalog = resolve_core_integration_action_catalog()
-    entries: list[dict[str, Any]] = []
-
-    for surface in ("gws", "jira", "confluence"):
-        for item in catalog.get(surface, []):
-            action_id = str(item.get("action_id") or "").strip()
-            if not action_id:
-                continue
-            sample_args = _sample_args_for_action(action_id)
-            envelope = build_action_envelope(surface, {"args": sample_args})
-            effect_tags = list(envelope.effect_tags)
-            if envelope.access_level != "read" and "credential_access" not in effect_tags:
-                effect_tags.append("credential_access")
-            entries.append(
-                _catalog_action_entry(
-                    tool_id=surface,
-                    integration_id=surface,
-                    action_id=action_id,
-                    title=f"{_humanize_label(surface)} {_humanize_label(action_id)}",
-                    description=f"Governed {surface} action {action_id}.",
-                    transport=envelope.transport,
-                    access_level=str(item.get("access_level") or envelope.access_level),
-                    risk_class=str(item.get("access_level") or envelope.risk_class),
-                    effect_tags=effect_tags,
-                    resource_method=action_id,
-                    source="core_surface",
-                    default_reason_code=(
-                        "preview_required_default" if envelope.access_level != "read" else "safe_read_default"
-                    ),
-                )
-            )
-
     return entries
 
 
@@ -923,11 +875,10 @@ def build_policy_catalog(
         for integration in CORE_INTEGRATION_CATALOG.values()
     ]
     core_actions = _core_tool_action_entries(feature_flags=feature_flags)
-    surface_actions = _grouped_surface_action_entries()
     extra_actions = [dict(item) for item in mcp_actions or [] if isinstance(item, dict)]
     combined_actions = []
     seen: set[tuple[str, str, str]] = set()
-    for item in [*core_actions, *surface_actions, *extra_actions]:
+    for item in [*core_actions, *extra_actions]:
         tool_id = str(item.get("tool_id") or "").strip()
         action_id = str(item.get("action_id") or "").strip()
         integration_id = str(item.get("integration_id") or "").strip()

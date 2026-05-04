@@ -14,6 +14,11 @@ from koda.services.runtime.api import (
     _runtime_task_browser,
     _runtime_task_browser_screenshot,
     _runtime_task_detail,
+    _runtime_task_workspace_create,
+    _runtime_task_workspace_delete,
+    _runtime_task_workspace_rename,
+    _runtime_task_workspace_search,
+    _runtime_task_workspace_write,
 )
 from koda.services.runtime_access_service import RuntimeAccessService
 
@@ -143,6 +148,18 @@ def _request(*, task_id: int | None = None, headers: dict[str, str] | None = Non
     return SimpleNamespace(match_info=match_info, headers=normalized_headers, query=query or {})
 
 
+def _json_request(
+    *,
+    task_id: int,
+    payload: dict[str, object],
+    headers: dict[str, str] | None = None,
+    query: dict[str, str] | None = None,
+):
+    request = _request(task_id=task_id, headers=headers, query=query)
+    request.json = AsyncMock(return_value=payload)
+    return request
+
+
 def _patch_agent_asset_registry(registry: object):
     module = ModuleType("koda.services.agent_asset_registry")
     module.get_agent_asset_registry = lambda *_args, **_kwargs: registry
@@ -187,6 +204,7 @@ class _ControllerStub:
         self.runtime_root = runtime_root
         self.store = _StoreStub(env=env, artifacts=artifacts)
         self._browser_snapshot = browser_snapshot or {}
+        self.workspace_calls: list[tuple[str, dict[str, object]]] = []
 
     def get_browser_snapshot(self, task_id: int) -> dict[str, object]:
         return dict(self._browser_snapshot)
@@ -196,6 +214,68 @@ class _ControllerStub:
 
     def get_runtime_readiness(self) -> dict[str, object]:
         return {"status": "ready", "ready": True}
+
+    def write_workspace_file(self, task_id: int, *, relative_path: str, content: str) -> dict[str, object]:
+        self.workspace_calls.append(("write", {"task_id": task_id, "relative_path": relative_path, "content": content}))
+        return {"ok": True, "path": relative_path, "size": len(content)}
+
+    def create_workspace_entry(
+        self,
+        task_id: int,
+        *,
+        relative_path: str,
+        kind: str,
+        content: str = "",
+    ) -> dict[str, object]:
+        if ".." in Path(relative_path).parts:
+            raise ValueError("path escapes workspace")
+        self.workspace_calls.append(
+            (
+                "create",
+                {"task_id": task_id, "relative_path": relative_path, "kind": kind, "content": content},
+            )
+        )
+        return {"ok": True, "path": relative_path, "kind": kind, "size": len(content)}
+
+    def delete_workspace_entry(self, task_id: int, *, relative_path: str) -> dict[str, object]:
+        self.workspace_calls.append(("delete", {"task_id": task_id, "relative_path": relative_path}))
+        return {"ok": True, "path": relative_path, "kind": "file"}
+
+    def rename_workspace_entry(self, task_id: int, *, from_path: str, to_path: str) -> dict[str, object]:
+        if to_path == "existing.md":
+            raise FileExistsError(to_path)
+        self.workspace_calls.append(("rename", {"task_id": task_id, "from_path": from_path, "to_path": to_path}))
+        return {"ok": True, "from_path": from_path, "to_path": to_path, "kind": "file"}
+
+    def search_workspace(
+        self,
+        task_id: int,
+        *,
+        query: str,
+        case_sensitive: bool = False,
+        whole_word: bool = False,
+        regex: bool = False,
+        max_results: int = 100,
+    ) -> dict[str, object]:
+        self.workspace_calls.append(
+            (
+                "search",
+                {
+                    "task_id": task_id,
+                    "query": query,
+                    "case_sensitive": case_sensitive,
+                    "whole_word": whole_word,
+                    "regex": regex,
+                    "max_results": max_results,
+                },
+            )
+        )
+        return {
+            "ok": True,
+            "query": query,
+            "items": [{"path": "README.md", "line_number": 1, "column": 1, "line": query}],
+            "truncated": False,
+        }
 
 
 class _KnowledgeStorageStub:
@@ -623,6 +703,130 @@ async def test_runtime_task_browser_screenshot_does_not_spawn_live_browser_for_p
         response = await _runtime_task_browser_screenshot(request)
 
     assert response.status == 404
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_workspace_write_proxies_mutation_payload(tmp_path):
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    request = _json_request(
+        task_id=22,
+        payload={"path": "README.md", "content": "# Updated"},
+        headers={"X-Runtime-Token": "secret"},
+    )
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_workspace_write(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload == {"ok": True, "path": "README.md", "size": len("# Updated")}
+    assert controller.workspace_calls == [
+        ("write", {"task_id": 22, "relative_path": "README.md", "content": "# Updated"})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_workspace_search_proxies_query_options(tmp_path):
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    request = _request(
+        task_id=26,
+        headers={"X-Runtime-Token": "secret"},
+        query={
+            "q": "Runtime",
+            "case_sensitive": "true",
+            "whole_word": "true",
+            "regex": "false",
+            "max_results": "25",
+        },
+    )
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_workspace_search(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["items"][0]["path"] == "README.md"
+    assert controller.workspace_calls == [
+        (
+            "search",
+            {
+                "task_id": 26,
+                "query": "Runtime",
+                "case_sensitive": True,
+                "whole_word": True,
+                "regex": False,
+                "max_results": 25,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_workspace_create_rejects_path_traversal(tmp_path):
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    request = _json_request(
+        task_id=23,
+        payload={"path": "../outside.md", "kind": "file", "content": ""},
+        headers={"X-Runtime-Token": "secret"},
+    )
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_workspace_create(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 400
+    assert payload["error"] == "path escapes workspace"
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_workspace_delete_blocks_checkpointing_phase(tmp_path):
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    controller.store.get_task_runtime = lambda task_id: {"id": task_id, "current_phase": "checkpointing"}  # type: ignore[method-assign]
+    request = _json_request(
+        task_id=24,
+        payload={"path": "README.md"},
+        headers={"X-Runtime-Token": "secret"},
+    )
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_workspace_delete(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 409
+    assert payload["error"] == "mutations blocked during checkpointing"
+    assert controller.workspace_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_workspace_rename_maps_existing_target_conflict(tmp_path):
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    request = _json_request(
+        task_id=25,
+        payload={"from_path": "README.md", "to_path": "existing.md"},
+        headers={"X-Runtime-Token": "secret"},
+    )
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_workspace_rename(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 409
+    assert payload["error"] == "existing.md"
 
 
 @pytest.mark.asyncio

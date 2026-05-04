@@ -19,6 +19,13 @@ from koda.memory.recall import (
 from koda.memory.types import Memory, MemoryType, RecallResult
 
 
+@pytest.fixture(autouse=True)
+def _isolate_recall_cache():
+    clear_recall_cache()
+    yield
+    clear_recall_cache()
+
+
 def test_recency_factor_recent():
     """Recent memories have high recency factor."""
     factor = _recency_factor(datetime.now())
@@ -354,9 +361,7 @@ async def test_build_memory_resolution_audits_full_considered_and_discarded_sets
     assert audit_kwargs["total_discarded"] == 48
 
 
-# ---------------------------------------------------------------------------
 # Recall cache tests
-# ---------------------------------------------------------------------------
 
 
 class TestRecallCache:
@@ -450,9 +455,7 @@ class TestRecallCache:
         assert len(_recall_cache) == 0
 
 
-# ---------------------------------------------------------------------------
 # Diversity filter tests
-# ---------------------------------------------------------------------------
 
 
 class TestIsRedundant:

@@ -6,6 +6,7 @@ import { McpServerEditorModal } from "./mcp-server-editor-modal";
 vi.mock("@/hooks/use-app-i18n", () => ({
   useAppI18n: () => ({
     tl: (value: string) => value,
+    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? "",
   }),
 }));
 

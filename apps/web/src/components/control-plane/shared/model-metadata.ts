@@ -19,14 +19,41 @@ export type ModelMeta = {
  */
 export const MODEL_METADATA: Record<string, ModelMeta> = {
   /* ── Anthropic ─────────────────────────────────────────── */
-  "claude-opus-4-6": {
-    displayName: "Claude Opus 4.6",
-    description: "Modelo de raciocinio mais avancado com pensamento estendido.",
+  "claude-opus-4-7": {
+    displayName: "Claude Opus 4.7",
+    description: "Modelo de raciocinio agentic mais capaz com adaptive thinking.",
     speed: 2,
     intelligence: 5,
     contextWindow: 1_000_000,
     inputCostPer1M: 5,
     outputCostPer1M: 25,
+  },
+  "claude-opus-4-6": {
+    displayName: "Claude Opus 4.6 (legacy)",
+    description: "Geracao anterior de Opus, mantida para compatibilidade.",
+    speed: 2,
+    intelligence: 5,
+    contextWindow: 1_000_000,
+    inputCostPer1M: 5,
+    outputCostPer1M: 25,
+  },
+  "claude-opus-4-5-20251101": {
+    displayName: "Claude Opus 4.5 (snapshot)",
+    description: "Snapshot Opus 4.5 (1101).",
+    speed: 2,
+    intelligence: 5,
+    contextWindow: 200_000,
+    inputCostPer1M: 5,
+    outputCostPer1M: 25,
+  },
+  "claude-sonnet-4-5-20250929": {
+    displayName: "Claude Sonnet 4.5 (snapshot)",
+    description: "Snapshot Sonnet 4.5 (0929).",
+    speed: 4,
+    intelligence: 4,
+    contextWindow: 200_000,
+    inputCostPer1M: 3,
+    outputCostPer1M: 15,
   },
   "claude-sonnet-4-6": {
     displayName: "Claude Sonnet 4.6",
@@ -111,9 +138,18 @@ export const MODEL_METADATA: Record<string, ModelMeta> = {
   },
 
   /* ── OpenAI ────────────────────────────────────────────── */
+  "gpt-5.5": {
+    displayName: "GPT-5.5",
+    description: "Frontier OpenAI lancado em abril/2026 com 1M de contexto.",
+    speed: 3,
+    intelligence: 5,
+    contextWindow: 1_000_000,
+    inputCostPer1M: 3,
+    outputCostPer1M: 18,
+  },
   "gpt-5.4": {
     displayName: "GPT-5.4",
-    description: "Modelo de ultima geracao com raciocinio avancado e contexto massivo.",
+    description: "Geracao anterior de frontier, mantida para compatibilidade.",
     speed: 3,
     intelligence: 5,
     contextWindow: 1_050_000,

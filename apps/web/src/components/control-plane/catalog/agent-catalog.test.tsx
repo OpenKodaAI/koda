@@ -74,14 +74,14 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
       name: "Produto",
       description: "Workspace de produto",
       color: "#4F7CFF",
-      bot_count: 2,
+      agent_count: 2,
       squads: [
         {
           id: "squad-platform",
           workspace_id: "workspace-product",
           name: "Plataforma",
           description: "Squad de plataforma",
-          bot_count: 1,
+          agent_count: 1,
           created_at: "2026-03-23T00:00:00Z",
           updated_at: "2026-03-23T00:00:00Z",
         },
@@ -90,7 +90,7 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
         no_squad: {
           id: null,
           label: "Sem squad",
-          bot_count: 1,
+          agent_count: 1,
         },
       },
       created_at: "2026-03-23T00:00:00Z",
@@ -101,13 +101,13 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
       name: "Operacoes",
       description: "Workspace de operacoes",
       color: "#2EAF6D",
-      bot_count: 1,
+      agent_count: 1,
       squads: [],
       virtual_buckets: {
         no_squad: {
           id: null,
           label: "Sem squad",
-          bot_count: 1,
+          agent_count: 1,
         },
       },
       created_at: "2026-03-23T00:00:00Z",
@@ -118,10 +118,10 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
     no_workspace: {
       id: null,
       label: "Sem workspace",
-      bot_count: 1,
+      agent_count: 1,
     },
   },
-  total_bot_count: 4,
+  total_agent_count: 4,
 };
 
 const agents: ControlPlaneAgentSummary[] = [
@@ -208,10 +208,10 @@ describe("AgentCatalog organization board", () => {
               name: "Pesquisa",
               description: "Workspace novo",
               color: "#7A8799",
-              bot_count: 0,
+              agent_count: 0,
               squads: [],
               virtual_buckets: {
-                no_squad: { id: null, label: "Sem squad", bot_count: 0 },
+                no_squad: { id: null, label: "Sem squad", agent_count: 0 },
               },
               created_at: "2026-03-23T00:00:00Z",
               updated_at: "2026-03-23T00:00:00Z",
@@ -464,10 +464,10 @@ describe("AgentCatalog organization board", () => {
     const deleteAction = within(screen.getByRole("menu")).getAllByRole("menuitem")[2];
     await user.click(deleteAction);
 
-    expect(
-      screen.getByRole("alertdialog", { name: /Remover agente/i }),
-    ).toBeInTheDocument();
-    const dialog = screen.getByRole("alertdialog", { name: /Remover agente/i });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: /Remover agente/i,
+    });
+    expect(dialog).toBeInTheDocument();
     await user.click(within(dialog).getAllByRole("button").at(-1)!);
 
     await waitFor(() => {

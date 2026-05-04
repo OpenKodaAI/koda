@@ -306,6 +306,7 @@ async def run_claude(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict:
     """Run claude CLI and return parsed result.
 
@@ -350,6 +351,13 @@ async def run_claude(
 
     if image_paths:
         cmd.extend(["--add-dir", str(IMAGE_TEMP_DIR)])
+
+    if isinstance(effort, str):
+        from koda.provider_models import get_model_effort_capability
+
+        cap = get_model_effort_capability("claude", model)
+        if cap and cap["kind"] == "enum" and effort in cap["values"]:
+            cmd.extend(["--effort", effort])
 
     from koda.services.resilience import check_breaker, claude_cli_breaker, record_failure, record_success
 
@@ -597,6 +605,7 @@ def _build_cmd(
     max_turns: int = 25,
     *,
     dry_run: bool = False,
+    effort: str | int | None = None,
 ) -> list[str]:
     """Build the Claude CLI command list."""
     cmd = [
@@ -627,6 +636,13 @@ def _build_cmd(
     if image_paths:
         cmd.extend(["--add-dir", str(IMAGE_TEMP_DIR)])
 
+    if isinstance(effort, str):
+        from koda.provider_models import get_model_effort_capability
+
+        cap = get_model_effort_capability("claude", model)
+        if cap and cap["kind"] == "enum" and effort in cap["values"]:
+            cmd.extend(["--effort", effort])
+
     return cmd
 
 
@@ -648,6 +664,7 @@ async def run_claude_streaming(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
     """Run claude CLI in streaming mode, yielding text chunks as they arrive.
 
@@ -681,6 +698,7 @@ async def run_claude_streaming(
         permission_mode=permission_mode,
         max_turns=max_turns,
         dry_run=dry_run,
+        effort=effort,
     )
 
     from koda.services.resilience import check_breaker, claude_cli_breaker, record_failure, record_success

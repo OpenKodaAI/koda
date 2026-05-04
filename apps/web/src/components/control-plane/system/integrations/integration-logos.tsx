@@ -1,8 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 
-/* ------------------------------------------------------------------ */
 /*  Brand SVG logos for core integrations + MCP servers                */
-/* ------------------------------------------------------------------ */
 
 import {
   useId,
@@ -149,51 +147,6 @@ function GoogleLogo(props: LogoProps) {
   );
 }
 
-/* — PostgreSQL ----------------------------------------------------- */
-
-function PostgreSQLLogo(props: LogoProps) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <path
-        d="M22.4 4.8a10.6 10.6 0 0 0-3.2-.6c-2.5 0-4.4.9-5.6 2.4a8.2 8.2 0 0 0-4.2-1c-2.3 0-4 .8-5 2.3A6.7 6.7 0 0 0 3.5 13c0 4.5 2.2 10.1 5 12.6a3 3 0 0 0 2 .8c1.3 0 2.3-.9 2.5-1.7l.3-1.3c1.2.8 2.8 1.2 4.4 1.2 1.8 0 3.3-.5 4.4-1.6.1.5.3.9.6 1.2a2.8 2.8 0 0 0 2 .8c2.4 0 4.5-3.3 5.3-6.6.6-2.2.6-4.2-.1-5.7a8 8 0 0 0-7.5-7.9Z"
-        fill="#336791"
-        stroke="#F0F0F0"
-        strokeWidth="0.6"
-      />
-      <ellipse cx="13.2" cy="13" rx="1.5" ry="2" fill="#F0F0F0" />
-      <ellipse cx="19.8" cy="13" rx="1.5" ry="2" fill="#F0F0F0" />
-      <path
-        d="M14 18.5c0 0 1-1.2 2.5-1.2s2.5 1.2 2.5 1.2"
-        stroke="#F0F0F0"
-        strokeWidth="0.8"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-/* — AWS ------------------------------------------------------------ */
-
-function AWSLogo(props: LogoProps) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <path
-        d="M9.2 14.4c0 .5.1.9.2 1.2l.6.9a.4.4 0 0 1 .1.3c0 .1-.1.3-.3.4l-.9.6a.5.5 0 0 1-.3.1c-.1 0-.3-.1-.4-.2a4 4 0 0 1-.5-.6l-.4-.8a4.8 4.8 0 0 1-3.6 1.7c-1 0-1.9-.3-2.5-1S.5 15.5.5 14.7c0-.9.3-1.6 1-2.1.6-.5 1.5-.8 2.6-.8.5 0 1 0 1.5.1l1.4.3v-.8c0-.7-.1-1.2-.4-1.5-.3-.3-.9-.5-1.7-.5-.5 0-1 .1-1.5.2a5.4 5.4 0 0 0-1.4.5l-.4.1h-.2c-.2 0-.3-.1-.3-.4v-.7c0-.2 0-.3.1-.4l.3-.3c.4-.2 1-.4 1.6-.5a7.6 7.6 0 0 1 2-.3c1.5 0 2.6.3 3.3 1 .6.7 1 1.7 1 3v3.8ZM4.8 16c.4 0 .9-.1 1.4-.2.5-.2.9-.5 1.2-.8.2-.2.3-.5.4-.7V13h-1c-1 0-1.6.1-2 .4-.5.3-.7.7-.7 1.2 0 .4.1.8.3 1 .3.3.6.4 1 .4h-.6Zm11.3 1.6c-.2 0-.4 0-.5-.1-.1-.1-.2-.3-.3-.6L12.6 8.7c-.1-.3-.2-.5-.2-.6 0-.2.1-.4.4-.4h1.3c.3 0 .5 0 .6.1.1.1.2.3.3.6l1.8 7.2 1.7-7.2c.1-.3.2-.5.3-.6.1-.1.3-.1.6-.1H20c.3 0 .5 0 .6.1.1.1.2.3.3.6l1.7 7.3 1.9-7.3c.1-.3.2-.5.3-.6.1-.1.3-.1.6-.1h1.2c.3 0 .4.1.4.4 0 .1 0 .2-.1.3 0 .1 0 .3-.1.4l-2.8 8.2c-.1.3-.2.5-.3.6-.1.1-.3.1-.5.1H22c-.3 0-.5 0-.6-.1-.1-.1-.2-.3-.3-.7l-1.7-7-1.6 7c-.1.4-.2.6-.3.7-.1.1-.3.1-.6.1h-1.2Z"
-        fill="#F90"
-      />
-      <path
-        d="M27.3 21.4c-3.4 2.5-8.3 3.8-12.5 3.8a22.6 22.6 0 0 1-10.9-2.8c-.2-.2 0-.4.2-.3a30.7 30.7 0 0 0 11.2 2.3c2.7 0 5.7-.6 8.5-1.7.4-.2.8.3.4.5l.1.2Z"
-        fill="#F90"
-      />
-      <path
-        d="M28.5 20c-.3-.4-2-.2-2.8-.1-.2 0-.3-.2-.1-.3 1.4-1 3.6-.7 3.9-.4.3.3-.1 2.5-1.3 3.6-.2.2-.4.1-.3-.1.3-.7.9-2.4.6-2.7Z"
-        fill="#F90"
-      />
-    </svg>
-  );
-}
-
 /* — GitHub --------------------------------------------------------- */
 
 function GitHubLogo(props: LogoProps) {
@@ -228,18 +181,10 @@ function GitLabLogo(props: LogoProps) {
 /* — Notion --------------------------------------------------------- */
 
 function NotionLogo(props: LogoProps) {
+  // Inline render matching simpleicons' Notion mark — vector SVG path.
   return (
-    <svg viewBox="0 0 32 32" fill="none" {...props}>
-      <rect x="6" y="5.5" width="20" height="21" rx="2.8" fill="#FFFFFF" />
-      <path
-        d="M12 10.5h2.2l5.3 8.6v-8.6H22V22h-2.1l-5.5-8.9V22H12V10.5Z"
-        fill="#111111"
-      />
-      <path
-        d="M8.4 7.7 22.8 6.2c1-.1 1.8.6 1.8 1.6v16.4c0 .8-.6 1.5-1.4 1.6l-13.8 1.5c-.9.1-1.7-.6-1.7-1.6V9.3c0-.8.6-1.5 1.4-1.6Z"
-        stroke="#111111"
-        strokeWidth="1.2"
-      />
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933z" />
     </svg>
   );
 }
@@ -250,6 +195,85 @@ function VercelLogo(props: LogoProps) {
   return (
     <svg viewBox="0 0 32 32" fill="none" {...props}>
       <path d="M16 6 26.5 24H5.5L16 6Z" fill="#FFFFFF" />
+    </svg>
+  );
+}
+
+/* — Superhuman ---------------------------------------------------- */
+
+function SuperhumanLogo(props: LogoProps) {
+  return (
+    <svg viewBox="0.5 0.33 22.09 22.09" fill="currentColor" {...props}>
+      <path d="M22.3826 6.22157C22.1402 3.17618 19.718 0.759886 16.6746 0.523503C13.2525 0.259071 9.81644 0.261063 6.3944 0.533481C3.34902 0.773957 0.932736 3.19625 0.696353 6.24163C0.431921 9.66367 0.433913 13.0997 0.706346 16.5217C0.948815 19.5671 3.3711 21.9834 6.4145 22.2198C9.83653 22.4843 13.2725 22.4823 16.6946 22.2098C19.74 21.9673 22.1563 19.545 22.3927 16.5018C22.6572 13.0797 22.6552 9.6436 22.3826 6.22157ZM11.5715 3.84741C12.8036 3.84741 13.8014 4.84317 13.8014 6.07133C13.8014 7.29949 12.8036 8.29525 11.5715 8.29525C10.3393 8.29525 9.34159 7.29949 9.34159 6.07133C9.34159 4.84317 10.3393 3.84741 11.5715 3.84741ZM15.779 18.4993H15.781L11.9101 16.3796C11.6997 16.2634 11.4432 16.2634 11.2329 16.3796L7.36202 18.4993C6.73891 18.8399 6.0598 18.1487 6.41838 17.5395L10.9664 9.83397C11.2369 9.37517 11.9041 9.37517 12.1745 9.83397L16.7226 17.5395C17.0812 18.1487 16.4041 18.8399 15.779 18.4993Z" />
+    </svg>
+  );
+}
+
+/* — Canva --------------------------------------------------------- */
+
+function CanvaLogo(props: LogoProps) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" {...props}>
+      <path
+        d="M45.6 43.1c-1.7 2.3-3.9 4.7-6.8 6.5-2.8 1.8-6 3.2-9.8 3.2-3.5 0-6.4-1.8-8-3.3-2.4-2.3-3.7-5.6-4.1-8.7-1.2-9.6 4.7-22.3 13.8-27.8 2.1-1.3 4.4-1.9 6.6-1.9 4.4 0 7.7 3.1 8.1 6.9.4 3.4-.9 6.3-4.7 8.2-1.9 1-2.9.9-3.2.5-.2-.3-.1-.8.3-1.1 3.5-2.9 3.6-5.3 3.2-8.7-.3-2.2-1.7-3.6-3.3-3.6-6.9 0-16.9 15.5-15.5 26.7.5 4.4 3.2 9.5 8.8 9.5 1.8 0 3.8-.5 5.5-1.4 3.9-2 5.6-3.4 7.9-6.6.3-.4.6-.9.9-1.3.2-.4.6-.5.9-.5.3 0 .7.3.7.8 0 .3-.1.9-.5 1.4-.1.2-.4.8-.8 1.2Z"
+        fill="#00C4CC"
+      />
+    </svg>
+  );
+}
+
+/* — Firecrawl ----------------------------------------------------- */
+
+function FirecrawlLogo(props: LogoProps) {
+  return (
+    <svg viewBox="0 0 200 284" fill="none" {...props}>
+      <path
+        d="M166.862 90.772c-11.05 3.279-19.379 10.699-25.479 18.758-1.31 1.73-4.04.43-3.52-1.689C149.543 59.814 134.113 19.896 86.016.247c-2.44-1-4.98 1.19-4.34 3.75 21.879 87.845-70.147 80.435-58.517 180.019.2 1.71-1.72 2.88-3.12 1.88-4.36-3.13-9.23-9.66-12.569-14.249-.98-1.35-3.1-.97-3.55.64C1.26 181.906 0 190.965 0 199.965c0 34.998 17.989 65.806 45.218 83.665 1.56 1.02 3.56-.44 3.03-2.23-1.4-4.7-2.19-9.66-2.25-14.789 0-3.15.2-6.37.69-9.37 1.14-7.539 3.76-14.719 8.16-21.258 15.089-22.649 45.337-44.528 40.507-74.236-.31-1.88 1.91-3.12 3.31-1.83 21.309 19.469 25.529 45.658 22.029 69.146-.3 2.04 2.26 3.13 3.55 1.53 3.26-4.08 7.239-7.66 11.569-10.349 1.08-.67 2.52-.16 2.93 1.04 2.41 7.009 5.99 13.589 9.37 20.168 4.039 7.91 6.189 16.939 5.849 26.499-.17 4.649-.94 9.149-2.23 13.429-.55 1.81 1.43 3.32 3.02 2.28C182.001 265.801 200 234.993 200 199.975c0-12.169-2.13-24.099-6.16-35.278-8.449-23.449-29.888-41.057-24.468-71.615.26-1.46-1.09-2.73-2.51-2.31Z"
+        fill="#FA5D19"
+      />
+    </svg>
+  );
+}
+
+/* — Hugging Face -------------------------------------------------- */
+
+function HuggingFaceLogo(props: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path
+        d="M12.025 1.13c-5.77 0-10.449 4.647-10.449 10.378 0 1.112.178 2.181.503 3.185.064-.222.203-.444.416-.577a.96.96 0 0 1 .524-.15c.293 0 .584.124.84.284.278.173.48.408.71.694.226.282.458.611.684.951v-.014c.017-.324.106-.622.264-.874s.403-.487.762-.543c.3-.047.596.06.787.203s.31.313.4.467c.15.257.212.468.233.542.01.026.653 1.552 1.657 2.54.616.605 1.01 1.223 1.082 1.912.055.537-.096 1.059-.38 1.572.637.121 1.294.187 1.967.187.657 0 1.298-.063 1.921-.178-.287-.517-.44-1.041-.384-1.581.07-.69.465-1.307 1.081-1.913 1.004-.987 1.647-2.513 1.657-2.539.021-.074.083-.285.233-.542.09-.154.208-.323.4-.467a1.08 1.08 0 0 1 .787-.203c.359.056.604.29.762.543s.247.55.265.874v.015c.225-.34.457-.67.683-.952.23-.286.432-.52.71-.694.257-.16.547-.284.84-.285a.97.97 0 0 1 .524.151c.228.143.373.388.43.625l.006.04a10.3 10.3 0 0 0 .534-3.273c0-5.731-4.678-10.378-10.449-10.378M8.327 6.583a1.5 1.5 0 0 1 .713.174 1.487 1.487 0 0 1 .617 2.013c-.183.343-.762-.214-1.102-.094-.38.134-.532.914-.917.71a1.487 1.487 0 0 1 .69-2.803m7.486 0a1.487 1.487 0 0 1 .689 2.803c-.385.204-.536-.576-.916-.71-.34-.12-.92.437-1.103.094a1.487 1.487 0 0 1 .617-2.013 1.5 1.5 0 0 1 .713-.174m-10.68 1.55a.96.96 0 1 1 0 1.921.96.96 0 0 1 0-1.92m13.838 0a.96.96 0 1 1 0 1.92.96.96 0 0 1 0-1.92M8.489 11.458c.588.01 1.965 1.157 3.572 1.164 1.607-.007 2.984-1.155 3.572-1.164.196-.003.305.12.305.454 0 .886-.424 2.328-1.563 3.202-.22-.756-1.396-1.366-1.63-1.32q-.011.001-.02.006l-.044.026-.01.008-.03.024q-.018.017-.035.036l-.032.04a1 1 0 0 0-.058.09l-.014.025q-.049.088-.11.19a1 1 0 0 1-.083.116 1.2 1.2 0 0 1-.173.18q-.035.029-.075.058a1.3 1.3 0 0 1-.251-.243 1 1 0 0 1-.076-.107c-.124-.193-.177-.363-.337-.444-.034-.016-.104-.008-.2.022q-.094.03-.216.087-.06.028-.125.063l-.13.074q-.067.04-.136.086a3 3 0 0 0-.135.096 3 3 0 0 0-.26.219 2 2 0 0 0-.12.121 2 2 0 0 0-.106.128l-.002.002a2 2 0 0 0-.09.132l-.001.001a1.2 1.2 0 0 0-.105.212q-.013.036-.024.073c-1.139-.875-1.563-2.317-1.563-3.203 0-.334.109-.457.305-.454m.836 10.354c.824-1.19.766-2.082-.365-3.194-1.13-1.112-1.789-2.738-1.789-2.738s-.246-.945-.806-.858-.97 1.499.202 2.362c1.173.864-.233 1.45-.685.64-.45-.812-1.683-2.896-2.322-3.295s-1.089-.175-.938.647 2.822 2.813 2.562 3.244-1.176-.506-1.176-.506-2.866-2.567-3.49-1.898.473 1.23 2.037 2.16c1.564.932 1.686 1.178 1.464 1.53s-3.675-2.511-4-1.297c-.323 1.214 3.524 1.567 3.287 2.405-.238.839-2.71-1.587-3.216-.642-.506.946 3.49 2.056 3.522 2.064 1.29.33 4.568 1.028 5.713-.624m5.349 0c-.824-1.19-.766-2.082.365-3.194 1.13-1.112 1.789-2.738 1.789-2.738s.246-.945.806-.858.97 1.499-.202 2.362c-1.173.864.233 1.45.685.64.451-.812 1.683-2.896 2.322-3.295s1.089-.175.938.647-2.822 2.813-2.562 3.244 1.176-.506 1.176-.506 2.866-2.567 3.49-1.898-.473 1.23-2.037 2.16c-1.564.932-1.686 1.178-1.464 1.53s3.675-2.511 4-1.297c.323 1.214-3.524 1.567-3.287 2.405.238.839 2.71-1.587 3.216-.642.506.946-3.49 2.056-3.522 2.064-1.29.33-4.568 1.028-5.713-.624"
+        fill="#FFD21E"
+      />
+    </svg>
+  );
+}
+
+/* — Microsoft 365 ------------------------------------------------- */
+
+function Microsoft365Logo(props: LogoProps) {
+  const uid = useId();
+  const g1 = `${uid}-m365-g1`;
+  const g2 = `${uid}-m365-g2`;
+  const g3 = `${uid}-m365-g3`;
+  return (
+    <svg viewBox="4 2 40 44" fill="none" {...props}>
+      <defs>
+        <radialGradient id={g1} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(17.4 10.6) rotate(110.5) scale(33.4 58.2)">
+          <stop offset="0.064" stopColor="#AE7FE2" />
+          <stop offset="1" stopColor="#0078D4" />
+        </radialGradient>
+        <radialGradient id={g2} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(10.4 36.4) rotate(-8.4) scale(31.1 20.5)">
+          <stop offset="0.134" stopColor="#D59DFF" />
+          <stop offset="1" stopColor="#5E438F" />
+        </radialGradient>
+        <radialGradient id={g3} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(41.1 26.5) rotate(-165.8) scale(24.9 42)">
+          <stop offset="0.058" stopColor="#50E6FF" />
+          <stop offset="1" stopColor="#436DCD" />
+        </radialGradient>
+      </defs>
+      <path d="M20.084 3.026 19.86 3.162a8 8 0 0 0-1.009.722l.648-.456H25l1 7.572-5 5-5 3.475v4.008a8 8 0 0 0 3.857 6.844l5.264 3.186L14 40h-2.145l-3.998-2.42A8 8 0 0 1 4 30.737V17.261a8 8 0 0 1 3.86-6.846l12-7.258q.111-.068.224-.13Z" fill={`url(#${g1})`} />
+      <path d="M32 19v4.48a8 8 0 0 1-3.857 6.844l-12 7.264a8 8 0 0 1-8.007.16l11.721 7.096a8 8 0 0 0 8.286 0l12-7.264A8 8 0 0 0 44 30.736V27.5L43 26z" fill={`url(#${g2})`} />
+      <path d="M40.141 10.415 28.141 3.157a8 8 0 0 0-8.043-.139l-.239.144A8 8 0 0 0 16 10.008v9.483l3.86-2.334a8 8 0 0 1 8.28 0l12 7.258a8 8 0 0 1 3.856 6.584q.004-.13.004-.263V17.261a8 8 0 0 0-3.859-6.846Z" fill={`url(#${g3})`} />
     </svg>
   );
 }
@@ -308,16 +332,32 @@ function GranolaLogo(props: LogoProps) {
 }
 
 const BRAND_IMAGE_LOGOS = {
+  atlassian: createRemoteLogo("https://cdn.simpleicons.org/atlassian/0052CC"),
+  aws: createRemoteLogo("https://www.vectorlogo.zone/logos/amazon_aws/amazon_aws-icon.svg"),
+  bitbucket: createRemoteLogo("https://cdn.simpleicons.org/bitbucket/2684FF"),
+  box: createRemoteLogo("https://cdn.simpleicons.org/box/0061D5"),
   brave: createRemoteLogo("https://cdn.simpleicons.org/brave/FB542B"),
+  clickup: createRemoteLogo("https://cdn.simpleicons.org/clickup/7B68EE"),
   cloudflare: createRemoteLogo("https://www.vectorlogo.zone/logos/cloudflare/cloudflare-icon.svg"),
+  discord: createRemoteLogo("https://cdn.simpleicons.org/discord/5865F2"),
   docker: createRemoteLogo("https://www.vectorlogo.zone/logos/docker/docker-icon.svg"),
   excalidraw: createRemoteLogo("https://cdn.simpleicons.org/excalidraw/6965DB"),
   figma: createRemoteLogo("https://www.vectorlogo.zone/logos/figma/figma-icon.svg"),
+  gmail: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg"),
+  google_calendar: createRemoteLogo("https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg"),
+  google_drive: createRemoteLogo("https://www.vectorlogo.zone/logos/google_drive/google_drive-icon.svg"),
   google_maps: createRemoteLogo("https://www.vectorlogo.zone/logos/google_maps/google_maps-icon.svg"),
+  grafana: createRemoteLogo("https://www.vectorlogo.zone/logos/grafana/grafana-icon.svg"),
   hubspot: createRemoteLogo("https://www.vectorlogo.zone/logos/hubspot/hubspot-icon.svg"),
   linear: createRemoteLogo("https://cdn.simpleicons.org/linear/FFFFFF"),
+  miro: createRemoteLogo("https://cdn.simpleicons.org/miro/FFD02F"),
   mongodb: createRemoteLogo("https://www.vectorlogo.zone/logos/mongodb/mongodb-icon.svg"),
+  n8n: createRemoteLogo("https://cdn.simpleicons.org/n8n/EA4B71"),
+  netlify: createRemoteLogo("https://www.vectorlogo.zone/logos/netlify/netlify-icon.svg"),
   obsidian: createRemoteLogo("https://cdn.simpleicons.org/obsidian/7C3AED"),
+  postgresql: createRemoteLogo("https://www.vectorlogo.zone/logos/postgresql/postgresql-icon.svg"),
+  posthog: createRemoteLogo("https://cdn.simpleicons.org/posthog/F9BD2B"),
+  postman: createRemoteLogo("https://cdn.simpleicons.org/postman/FF6C37"),
   puppeteer: createRemoteLogo("https://cdn.simpleicons.org/puppeteer/40B5A4"),
   sentry: createRemoteLogo("https://cdn.simpleicons.org/sentry/FFFFFF"),
   slack: createRemoteLogo("https://www.vectorlogo.zone/logos/slack/slack-icon.svg"),
@@ -325,74 +365,116 @@ const BRAND_IMAGE_LOGOS = {
   supabase: createRemoteLogo("https://www.vectorlogo.zone/logos/supabase/supabase-icon.svg"),
   todoist: createRemoteLogo("https://cdn.simpleicons.org/todoist/E44332"),
   twilio: createRemoteLogo("https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg"),
+  zapier: createRemoteLogo("https://cdn.simpleicons.org/zapier/FF4F00"),
 } as const;
 
 const LOGO_MAP: Record<string, ComponentType<{ className?: string }>> = {
-  aws: AWSLogo,
+  atlassian: BRAND_IMAGE_LOGOS.atlassian,
+  aws: BRAND_IMAGE_LOGOS.aws,
+  bitbucket: BRAND_IMAGE_LOGOS.bitbucket,
+  box: BRAND_IMAGE_LOGOS.box,
   brave: BRAND_IMAGE_LOGOS.brave,
   browser: BrowserLogo,
+  canva: CanvaLogo,
+  clickup: BRAND_IMAGE_LOGOS.clickup,
   cloudflare: BRAND_IMAGE_LOGOS.cloudflare,
   confluence: ConfluenceLogo,
+  discord: BRAND_IMAGE_LOGOS.discord,
   docker: BRAND_IMAGE_LOGOS.docker,
   excalidraw: BRAND_IMAGE_LOGOS.excalidraw,
   figma: BRAND_IMAGE_LOGOS.figma,
   filesystem: FilesystemLogo,
+  firecrawl: FirecrawlLogo,
   github: GitHubLogo,
   gitlab: GitLabLogo,
+  gmail: BRAND_IMAGE_LOGOS.gmail,
   google: GoogleLogo,
+  google_calendar: BRAND_IMAGE_LOGOS.google_calendar,
+  google_drive: BRAND_IMAGE_LOGOS.google_drive,
   google_maps: BRAND_IMAGE_LOGOS.google_maps,
+  grafana: BRAND_IMAGE_LOGOS.grafana,
   granola: GranolaLogo,
+  huggingface: HuggingFaceLogo,
   hubspot: BRAND_IMAGE_LOGOS.hubspot,
   jira: JiraLogo,
   linear: BRAND_IMAGE_LOGOS.linear,
   mcp: McpLogo,
   memory: MemoryLogo,
+  microsoft_365: Microsoft365Logo,
+  miro: BRAND_IMAGE_LOGOS.miro,
   mongodb: BRAND_IMAGE_LOGOS.mongodb,
+  n8n: BRAND_IMAGE_LOGOS.n8n,
+  netlify: BRAND_IMAGE_LOGOS.netlify,
   notion: NotionLogo,
   obsidian: BRAND_IMAGE_LOGOS.obsidian,
-  postgresql: PostgreSQLLogo,
+  postgresql: BRAND_IMAGE_LOGOS.postgresql,
+  posthog: BRAND_IMAGE_LOGOS.posthog,
+  postman: BRAND_IMAGE_LOGOS.postman,
   puppeteer: BRAND_IMAGE_LOGOS.puppeteer,
   sentry: BRAND_IMAGE_LOGOS.sentry,
   slack: BRAND_IMAGE_LOGOS.slack,
   stripe: BRAND_IMAGE_LOGOS.stripe,
+  superhuman: SuperhumanLogo,
   supabase: BRAND_IMAGE_LOGOS.supabase,
   todoist: BRAND_IMAGE_LOGOS.todoist,
   twilio: BRAND_IMAGE_LOGOS.twilio,
   vercel: VercelLogo,
+  zapier: BRAND_IMAGE_LOGOS.zapier,
 };
 
 export const INTEGRATION_BRAND_ACCENTS: Record<string, BrandAccent> = {
+  atlassian: { from: "#2684FF", to: "#0052CC" },
   aws: { from: "#FF9900", to: "#232F3E" },
+  aws_api: { from: "#FF9900", to: "#232F3E" },
+  bitbucket: { from: "#2684FF", to: "#0052CC" },
+  box: { from: "#0061D5", to: "#003D82" },
   brave: { from: "#FB542B", to: "#FF8A4C" },
   browser: { from: "#7C9CFF", to: "#3656D4" },
+  canva: { from: "#00C4CC", to: "#7D2AE7" },
+  clickup: { from: "#7B68EE", to: "#FD71AF" },
   cloudflare: { from: "#F38020", to: "#F9AE40" },
   confluence: { from: "#1868DB", to: "#0747A6" },
+  discord: { from: "#5865F2", to: "#404EED" },
   docker: { from: "#2496ED", to: "#0B76C5" },
   excalidraw: { from: "#6965DB", to: "#E95A4B" },
   figma: { from: "#A259FF", to: "#0ACF83" },
   filesystem: { from: "#C48E35", to: "#7F5C2E" },
+  firecrawl: { from: "#F37020", to: "#FF8A4C" },
   github: { from: "#6E5494", to: "#24292E" },
   gitlab: { from: "#FC6D26", to: "#292961" },
+  gmail: { from: "#EA4335", to: "#C5221F" },
   google: { from: "#4285F4", to: "#34A853" },
+  google_calendar: { from: "#4285F4", to: "#0F9D58" },
+  google_drive: { from: "#0F9D58", to: "#FFCC00" },
   google_maps: { from: "#4285F4", to: "#34A853" },
+  grafana: { from: "#F46800", to: "#F2495C" },
   granola: { from: "#B2C248", to: "#1E1E1E" },
+  huggingface: { from: "#FFD21E", to: "#FF9D00" },
   hubspot: { from: "#FF7A59", to: "#FFB381" },
   jira: { from: "#2684FF", to: "#0052CC" },
   linear: { from: "#FFFFFF", to: "#8E8E93" },
   mcp: { from: "#7C9CFF", to: "#5168D9" },
   memory: { from: "#8D74FF", to: "#5A44C5" },
+  microsoft_365: { from: "#D83B01", to: "#0078D4" },
+  miro: { from: "#FFD02F", to: "#FF8B00" },
   mongodb: { from: "#13AA52", to: "#00684A" },
+  n8n: { from: "#EA4B71", to: "#FF6D9C" },
+  netlify: { from: "#00C7B7", to: "#0E1E25" },
   notion: { from: "#F5F5F5", to: "#8C8C8C" },
   obsidian: { from: "#7C3AED", to: "#4C1D95" },
   postgresql: { from: "#336791", to: "#1B4F72" },
+  posthog: { from: "#F9BD2B", to: "#1D4AFF" },
+  postman: { from: "#FF6C37", to: "#FF8A4C" },
   puppeteer: { from: "#40B5A4", to: "#248277" },
   sentry: { from: "#A284FF", to: "#5B43AA" },
   slack: { from: "#36C5F0", to: "#E01E5A" },
   stripe: { from: "#635BFF", to: "#0A2540" },
+  superhuman: { from: "#000000", to: "#3F3F3F" },
   supabase: { from: "#3ECF8E", to: "#1E8C5F" },
   todoist: { from: "#E44332", to: "#C22D1C" },
   twilio: { from: "#F22F46", to: "#AA1630" },
   vercel: { from: "#F5F5F5", to: "#8C8C8C" },
+  zapier: { from: "#FF4F00", to: "#FF8A4C" },
 };
 
 export function getIntegrationAccent(key: string | null | undefined): BrandAccent {
@@ -405,10 +487,24 @@ export function getIntegrationLogo(
   return LOGO_MAP[key || "mcp"] || LOGO_MAP.mcp;
 }
 
+/**
+ * Brand marks shipped as a single white shape. They render fine on dark
+ * surfaces (the project default) but disappear on light backgrounds. We tag
+ * them with a class that the CSS layer flips to black via `filter: invert`
+ * only when the active theme is light.
+ */
+const MONO_WHITE_LOGO_KEYS = new Set(["linear", "notion", "sentry", "vercel"]);
+
 export function renderIntegrationLogo(
   key: string | null | undefined,
   className?: string,
 ): ReactNode {
   const LogoComponent = getIntegrationLogo(key);
-  return LogoComponent ? <LogoComponent className={className} /> : null;
+  if (!LogoComponent) return null;
+  const normalizedKey = (key ?? "").trim().toLowerCase();
+  const monoClass = MONO_WHITE_LOGO_KEYS.has(normalizedKey)
+    ? "integration-logo--mono-light"
+    : "";
+  const composed = [className, monoClass].filter(Boolean).join(" ") || undefined;
+  return <LogoComponent className={composed} />;
 }

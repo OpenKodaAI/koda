@@ -8,7 +8,18 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
+
+// Mirror LoginScreen / ForgotPasswordScreen: 4xx auth-flow errors fold into
+// one generic message (CLAUDE.md auth contract), only 5xx / network reach
+// the operator as a distinct "service unavailable" copy.
+function isUpstreamFailure(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status >= 500 || error.status === 0;
+  }
+  return true;
+}
 
 export interface StepCreateAccountProps {
   loopbackTrustEnabled: boolean;
@@ -105,13 +116,26 @@ export function StepCreateAccount({
           }),
         },
       );
+      if (!Array.isArray(payload.recovery_codes) || payload.recovery_codes.length === 0) {
+        setError(t("auth.setup.create_account.errors.recovery_codes_missing"));
+        return;
+      }
       onRegistered(payload);
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : t("auth.setup.create_account.errors.generic"),
-      );
+      if (isUpstreamFailure(submitError)) {
+        setError(
+          t("auth.setup.create_account.errors.service_unavailable", {
+            defaultValue:
+              "Setup service is temporarily unavailable. Please try again in a moment.",
+          }),
+        );
+      } else {
+        setError(
+          submitError instanceof Error
+            ? submitError.message
+            : t("auth.setup.create_account.errors.generic"),
+        );
+      }
     } finally {
       setBusy(false);
     }

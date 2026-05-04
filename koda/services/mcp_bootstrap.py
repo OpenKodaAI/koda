@@ -21,14 +21,16 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
     if not MCP_ENABLED:
         return {"skipped": True, "reason": "MCP_ENABLED is false"}
 
-    from koda.services.mcp_bridge import register_mcp_tools_for_agent
+    from koda.services.mcp_bridge import register_mcp_capabilities_for_agent
     from koda.services.mcp_manager import mcp_server_manager
     from koda.services.tool_dispatcher import _MCP_READ_TOOLS, _MCP_WRITE_TOOLS, _TOOL_HANDLERS
 
     started_servers = 0
     total_tools = 0
+    total_resources = 0
+    total_prompts = 0
     errors: list[str] = []
-    connections_for_registration: list[dict[str, Any]] = []
+    pending_registrations: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]] = []
 
     try:
         connections = _load_agent_mcp_connections(agent_id)
@@ -108,18 +110,48 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
                     }
                 cached_tools_data.append(tool_dict)
 
-            connections_for_registration.append(
-                {
-                    "server_key": server_key,
-                    "cached_tools": cached_tools_data,
-                }
-            )
+            # Discover resources and prompts (best-effort; servers without
+            # those capabilities return empty lists silently).
+            resources_data: list[dict[str, Any]] = []
+            prompts_data: list[dict[str, Any]] = []
+            session = instance.session
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    discovered_resources = await session.list_resources()
+                    resources_data = [
+                        {
+                            "uri": r.uri,
+                            "name": r.name,
+                            "description": r.description,
+                            "mime_type": r.mime_type,
+                        }
+                        for r in discovered_resources
+                    ]
+                with contextlib.suppress(Exception):
+                    discovered_prompts = await session.list_prompts()
+                    prompts_data = [
+                        {
+                            "name": p.name,
+                            "description": p.description,
+                            "arguments": [
+                                {"name": a.name, "description": a.description, "required": a.required}
+                                for a in (p.arguments or ())
+                            ],
+                        }
+                        for p in discovered_prompts
+                    ]
+            total_resources += len(resources_data)
+            total_prompts += len(prompts_data)
+
+            pending_registrations.append((server_key, cached_tools_data, resources_data, prompts_data))
 
             log.info(
                 "mcp_bootstrap_server_started",
                 agent_id=agent_id,
                 server_key=server_key,
                 tool_count=tool_count,
+                resource_count=len(resources_data),
+                prompt_count=len(prompts_data),
             )
             with contextlib.suppress(Exception):
                 from koda.control_plane.manager import get_control_plane_manager
@@ -150,19 +182,27 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
                     tools=[],
                 )
 
-    if connections_for_registration:
-        registered = register_mcp_tools_for_agent(
+    registered_tool_count = 0
+    for server_key, tools_data, resources_data, prompts_data in pending_registrations:
+        registered = register_mcp_capabilities_for_agent(
             agent_id,
-            connections_for_registration,
+            server_key,
+            tools_data,
+            resources_data,
+            prompts_data,
             _TOOL_HANDLERS,
             _MCP_WRITE_TOOLS,
             _MCP_READ_TOOLS,
         )
-        total_tools = len(registered)
+        registered_tool_count += len(registered.get("tools", []))
+    if pending_registrations:
+        total_tools = registered_tool_count
 
     summary: dict[str, Any] = {
         "started_servers": started_servers,
         "total_tools": total_tools,
+        "total_resources": total_resources,
+        "total_prompts": total_prompts,
         "errors": errors,
     }
     log.info("mcp_bootstrap_complete", agent_id=agent_id, **summary)

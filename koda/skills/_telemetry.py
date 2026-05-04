@@ -83,9 +83,7 @@ def emit_skill_reload(
         )
 
 
-# ---------------------------------------------------------------------------
 # Compliance feedback
-# ---------------------------------------------------------------------------
 
 
 def _extract_format_markers(enforcement_text: str) -> list[str]:

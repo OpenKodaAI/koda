@@ -19,11 +19,16 @@ interface UseRuntimeOverviewResult {
   lastUpdated: number | null;
 }
 
-export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOverviewResult {
+export function useRuntimeOverview(
+  selectedBotIds?: string[],
+): UseRuntimeOverviewResult {
   const { language } = useAppI18n();
   const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
-  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
+  const availableBotIds = useMemo(
+    () => agents.map((agent) => agent.id),
+    [agents],
+  );
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
@@ -219,8 +224,8 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   return {
     overviews,
     loading:
-      overviewQuery.isLoading ||
-      visibleBotIds.some((agentId) => !overviews[agentId]),
+      (overviewQuery.isLoading ||
+        visibleBotIds.some((agentId) => !overviews[agentId])),
     refreshing: overviewQuery.isFetching && !overviewQuery.isLoading,
     connected,
     error: overviewQuery.error?.message ?? null,

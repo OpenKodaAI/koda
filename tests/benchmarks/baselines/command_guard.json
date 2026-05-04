@@ -1,0 +1,6 @@
+{
+  "operation": "blocked_patterns.is_blocked_shell on a typical shell arg",
+  "measured_ns_authoring": 102,
+  "max_ns": 1000,
+  "rationale": "Native DFA call — measured 102ns on dev hardware. Baseline 1000ns gives ~10x headroom for slow CI runners while still catching a regression where the DFA falls back to Python re.search (which would be ~3000ns)."
+}

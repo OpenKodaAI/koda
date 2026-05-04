@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo } from "react";
 import { Check, Cpu, Server, Volume2 } from "lucide-react";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
@@ -16,6 +17,14 @@ import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
 import { ModelSelector } from "@/components/control-plane/shared/model-selector";
+import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
+import {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_ACCENTS,
+  COLORED_BRAND_LOGO_PROVIDERS,
+  providerDisplayName,
+} from "@/components/control-plane/shared/provider-brand";
 import { AnimatePresence, motion } from "framer-motion";
 import { FADE_TRANSITION, COLLAPSE_TRANSITION } from "@/components/control-plane/shared/motion-constants";
 import { cn } from "@/lib/utils";
@@ -44,33 +53,18 @@ function prettifyModelId(modelId: string) {
     .replace(/\bLlama\b/g, "Llama");
 }
 
-const PROVIDER_LOGOS: Record<string, string> = {
-  claude: "/providers/anthropic.svg",
-  codex: "/providers/openai.svg",
-  gemini: "/providers/google.svg",
-  ollama: "/providers/ollama.png",
-};
-
-const PROVIDER_ACCENTS: Record<string, string> = {
-  claude: "212 120 62",
-  codex: "16 163 127",
-  gemini: "86 138 248",
-  ollama: "56 189 248",
-};
-
 function providerDescription(providerId: string, title: string) {
-  if (providerId === "claude") {
-    return "Raciocínio forte";
-  }
-  if (providerId === "codex") {
-    return "Execução geral";
-  }
-  if (providerId === "gemini") {
-    return "Contexto amplo";
-  }
-  if (providerId === "ollama") {
-    return "Execução local";
-  }
+  if (providerId === "claude") return "Raciocínio forte";
+  if (providerId === "codex") return "Execução geral";
+  if (providerId === "gemini") return "Contexto amplo";
+  if (providerId === "ollama") return "Execução local";
+  if (providerId === "perplexity") return "Pesquisa em tempo real";
+  if (providerId === "mistral") return "Família Mistral";
+  if (providerId === "qwen") return "Qwen com VL e Coder";
+  if (providerId === "kimi") return "Contexto longo Moonshot";
+  if (providerId === "groq") return "Inferência via LPU";
+  if (providerId === "deepseek") return "DeepSeek V4 e Reasoner";
+  if (providerId === "xai") return "Grok 4 e variantes";
   return title;
 }
 
@@ -85,24 +79,52 @@ function ProviderLogo({
 }) {
   const accent = PROVIDER_ACCENTS[providerId] || "255 255 255";
   const accentColor = `rgb(${accent})`;
+  const Icon = PROVIDER_ICON_COMPONENTS[providerId];
   const logo = PROVIDER_LOGOS[providerId];
+  const preserveBrandColors = COLORED_BRAND_LOGO_PROVIDERS.has(providerId);
   const wrapperClass = size === "sm" ? "h-8 w-8 rounded-xl" : "h-11 w-11 rounded-2xl";
   const iconClass = size === "sm" ? "h-4 w-4" : "h-6 w-6";
   const fallbackIconClass = size === "sm" ? "h-4 w-4" : "h-5 w-5";
 
-  if (logo) {
+  const wrapperStyle = active
+    ? {
+        borderColor: `rgba(${accent}, 0.34)`,
+        backgroundColor: `rgba(${accent}, 0.1)`,
+      }
+    : undefined;
+  const wrapperBase = `flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`;
+
+  // Local-runtime providers (Ollama, Kokoro) render a CPU glyph in neutral
+  // grey so on-device inference is visually distinct from cloud providers.
+  if (Icon) {
     return (
-      <div
-        className={`flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`}
-        style={
-          active
-            ? {
-                borderColor: `rgba(${accent}, 0.34)`,
-                backgroundColor: `rgba(${accent}, 0.1)`,
-              }
-            : undefined
-        }
-      >
+      <div className={wrapperBase} style={wrapperStyle}>
+        <Icon
+          className={iconClass}
+          style={{ color: active ? accentColor : "rgb(255 255 255 / 0.78)" }}
+        />
+      </div>
+    );
+  }
+
+  if (logo) {
+    if (preserveBrandColors) {
+      // Colored brand logos render as a real image so the original palette
+      // stays intact (e.g. Mistral's orange gradient, Qwen's purple).
+      return (
+        <div className={wrapperBase} style={wrapperStyle}>
+          <Image
+            src={logo}
+            alt={providerDisplayName(providerId)}
+            width={size === "sm" ? 16 : 24}
+            height={size === "sm" ? 16 : 24}
+            className={`${iconClass} object-contain opacity-95`}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className={wrapperBase} style={wrapperStyle}>
         <span
           className={`block ${iconClass}`}
           style={{
@@ -122,17 +144,7 @@ function ProviderLogo({
   }
 
   return (
-    <div
-      className={`flex items-center justify-center border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] transition-colors ${wrapperClass}`}
-      style={
-        active
-          ? {
-              borderColor: `rgba(${accent}, 0.34)`,
-              backgroundColor: `rgba(${accent}, 0.1)`,
-            }
-            : undefined
-      }
-    >
+    <div className={wrapperBase} style={wrapperStyle}>
       <Server
         className={fallbackIconClass}
         style={{ color: active ? accentColor : "rgb(255 255 255 / 0.86)" }}
@@ -140,6 +152,7 @@ function ProviderLogo({
     </div>
   );
 }
+
 
 export function TabRecursos() {
   const { state, core, developerMode, updateAgentSpecField, updateDocument } = useAgentEditor();
@@ -196,7 +209,10 @@ export function TabRecursos() {
       ? providerEntries[effectiveDefaultProvider].available_models.map(String)
       : []);
   const defaultModel =
-    modelPolicy.default_models[effectiveDefaultProvider] || availableModels[0] || "";
+    modelPolicy.default_models[effectiveDefaultProvider] ||
+    String(providerEntries[effectiveDefaultProvider]?.default_model || "") ||
+    availableModels[0] ||
+    "";
   const modelFunctions = core.providers.model_functions ?? [];
   const functionalModelCatalog = useMemo(
     () => core.providers.functional_model_catalog ?? {},
@@ -219,6 +235,50 @@ export function TabRecursos() {
     (defaultModel
       ? generalModelLabelMap[`${effectiveDefaultProvider}:${defaultModel}`] || prettifyModelId(defaultModel)
       : "") || tl("Nenhum modelo selecionado");
+
+  const effortCapabilityLookup = useMemo(() => {
+    const lookup: Record<string, EffortCapability> = {};
+    for (const items of Object.values(functionalModelCatalog)) {
+      for (const item of items) {
+        if (!item.effort_kind) continue;
+        const slug = `${item.provider_id}:${item.model_id}`;
+        if (lookup[slug]) continue;
+        if (item.effort_kind === "enum") {
+          const values: string[] = Array.isArray(item.effort_enum_values)
+            ? item.effort_enum_values.map(String)
+            : [];
+          lookup[slug] = {
+            kind: "enum",
+            values,
+            defaultValue:
+              typeof item.effort_default === "string" ? item.effort_default : undefined,
+          };
+        } else {
+          lookup[slug] = {
+            kind: "tokens",
+            min: Number(item.effort_token_min ?? 0),
+            max: Number(item.effort_token_max ?? 0),
+            defaultValue:
+              typeof item.effort_default === "number" ? item.effort_default : undefined,
+          };
+        }
+      }
+    }
+    return lookup;
+  }, [functionalModelCatalog]);
+
+  function setEffortOverride(next: string | number | null) {
+    updateModelPolicy({
+      effort_override:
+        next === null || !effectiveDefaultProvider || !defaultModel
+          ? null
+          : {
+              provider_id: effectiveDefaultProvider,
+              model_id: defaultModel,
+              value: next,
+            },
+    });
+  }
   const currentProviderLabel =
     providerOptions.find((item) => item.value === effectiveDefaultProvider)?.label ??
     (effectiveDefaultProvider || tl("Nenhum provider selecionado"));
@@ -266,6 +326,7 @@ export function TabRecursos() {
       const providerDefault =
         next.default_models?.[provider] ||
         defaultModels[provider] ||
+        String(providerEntries[provider]?.default_model || "") ||
         providerModels[0] ||
         "";
       if (providerDefault) {
@@ -402,7 +463,7 @@ export function TabRecursos() {
                   <button
                     key={providerId}
                     type="button"
-                    onClick={() => updateModelPolicy({ default_provider: providerId })}
+                    onClick={() => updateModelPolicy({ default_provider: providerId, effort_override: null })}
                     className={cn(
                       "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
                       isDefault
@@ -439,6 +500,7 @@ export function TabRecursos() {
                     ...modelPolicy.default_models,
                     [pId]: mId,
                   },
+                  effort_override: null,
                   tier_models: {
                     ...modelPolicy.tier_models,
                     [pId]: {
@@ -476,6 +538,30 @@ export function TabRecursos() {
               placeholder="US$ 0,00"
             />
           </div>
+
+          {(() => {
+            const slug = `${effectiveDefaultProvider}:${defaultModel}`;
+            const capability = effortCapabilityLookup[slug];
+            if (!capability) return null;
+            const stored =
+              modelPolicy.effort_override?.provider_id === effectiveDefaultProvider &&
+              modelPolicy.effort_override?.model_id === defaultModel
+                ? modelPolicy.effort_override.value
+                : null;
+            const value: string | number | null =
+              typeof stored === "string" || typeof stored === "number" ? stored : null;
+            return (
+              <div className="mt-4">
+                <EffortPicker
+                  capability={capability}
+                  value={value}
+                  onChange={setEffortOverride}
+                  context="agent"
+                  readOnly={capability.kind === "enum" && capability.values.length <= 1}
+                />
+              </div>
+            );
+          })()}
         </motion.div>
 
         {modelFunctions.length > 0 ? (
@@ -510,7 +596,7 @@ export function TabRecursos() {
                     enabledProviders={generalProviders}
                     functionalCatalog={functionalModelCatalog}
                     functionId={fnId}
-                    emptyLabel="Herdar do modelo principal"
+                    emptyLabel={tl("Herdar do modelo principal")}
                   />
                 );
               })}

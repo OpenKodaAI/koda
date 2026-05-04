@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import {
+  useAnimatedPresence,
+  useBodyScrollLock,
+  useEscapeToClose,
+} from "@/hooks/use-animated-presence";
 
 interface ScopeSystemPromptEditorProps {
   open: boolean;
@@ -38,35 +43,31 @@ export function ScopeSystemPromptEditor({
   onSave,
 }: ScopeSystemPromptEditorProps) {
   const { tl } = useAppI18n();
+  const presence = useAnimatedPresence(open, null, { duration: 200 });
 
-  useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
+  useBodyScrollLock(presence.shouldRender);
+  useEscapeToClose(presence.shouldRender, onClose);
 
-  if (typeof document === "undefined") {
-    return null;
-  }
+  if (!presence.shouldRender) return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
-    open ? (
-      <>
-        <div
-          className="app-overlay-backdrop z-[70]"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-        <div className="app-modal-frame z-[80] items-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="scope-system-prompt-editor-title"
-              className="app-modal-panel relative flex h-[min(80vh,48rem)] w-full max-w-5xl flex-col overflow-hidden border-[var(--border-strong)]"
-              onClick={(event) => event.stopPropagation()}
-            >
+    <>
+      <div
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
+        data-visible={presence.isVisible}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="app-modal-frame z-[80] items-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scope-system-prompt-editor-title"
+            data-visible={presence.isVisible}
+            className="app-modal-panel app-modal-anim relative flex h-[min(80vh,48rem)] w-full max-w-5xl flex-col overflow-hidden border-[var(--border-strong)]"
+            onClick={(event) => event.stopPropagation()}
+          >
               <button
                 type="button"
                 onClick={onClose}
@@ -141,8 +142,7 @@ export function ScopeSystemPromptEditor({
               </div>
             </div>
           </div>
-      </>
-      ) : null,
+      </>,
     document.body,
   );
 }

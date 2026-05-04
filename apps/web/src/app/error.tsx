@@ -1,6 +1,7 @@
 "use client";
 
 import { RouteErrorState } from "@/components/ui/route-error-state";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export default function AppError({
   error,
@@ -9,10 +10,11 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { tl } = useAppI18n();
   return (
     <RouteErrorState
-      title="We hit a route error"
-      description={error.message || "The page could not be rendered."}
+      title={tl("We hit a route error")}
+      description={error.message || tl("The page could not be rendered.")}
       onRetry={reset}
     />
   );

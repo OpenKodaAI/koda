@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useState, useSyncExternalStore } from "react";
-import { ArrowRight, Bot as AgentIcon, Circle, MessageSquare, Plug, X } from "lucide-react";
+import { ArrowRight, Bot as AgentIcon, MessageSquare, Plug, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
@@ -62,21 +62,24 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
       label: t("dashboard.checklist.provider"),
       href: "/control-plane/system/models",
       Icon: Plug,
-      done: snapshot.providerReady,
+      iconTone:
+        "border-[color:var(--tone-info-border)] bg-[color:var(--tone-info-bg)] text-[color:var(--tone-info-text)]",
     },
     {
       key: "agent",
       label: t("dashboard.checklist.agent"),
       href: "/control-plane",
       Icon: AgentIcon,
-      done: snapshot.agentReady,
+      iconTone:
+        "border-[color:var(--tone-success-border)] bg-[color:var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
     },
     {
       key: "telegram",
       label: t("dashboard.checklist.telegram"),
       href: "/control-plane/system/integrations",
       Icon: MessageSquare,
-      done: snapshot.telegramReady,
+      iconTone:
+        "border-[color:var(--tone-retry-border)] bg-[color:var(--tone-retry-bg)] text-[color:var(--tone-retry-text)]",
     },
   ];
 
@@ -106,20 +109,16 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
         </Button>
       </header>
       <ul className="flex flex-col gap-0.5">
-        {items.map(({ key, label, href, Icon, done }) => (
+        {items.map(({ key, label, href, Icon, iconTone }) => (
           <li key={key} className="border-t border-[color:var(--divider-hair)] first:border-t-0">
             <Link
               href={href}
               className="group flex items-center gap-3 px-1.5 py-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
             >
               <span
-                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                  done
-                    ? "bg-[var(--tone-success-bg-strong)] text-white"
-                    : "bg-[var(--surface-hover)] text-[var(--text-tertiary)]"
-                }`}
+                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${iconTone}`}
               >
-                {done ? <Icon className="h-3.5 w-3.5" /> : <Circle className="h-3 w-3" />}
+                <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
               </span>
               <span className="flex-1 text-[13px]">{label}</span>
               <ArrowRight className="icon-xs text-[var(--text-quaternary)] transition-transform group-hover:translate-x-0.5" />

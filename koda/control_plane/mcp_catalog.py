@@ -632,7 +632,7 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "server_key": "postgres_mcp",
-        "display_name": "PostgreSQL (MCP)",
+        "display_name": "PostgreSQL",
         "description": "Servidor community/manual para PostgreSQL via connection string.",
         "transport_type": "stdio",
         "transport_kind": "local",
@@ -660,9 +660,941 @@ AUTHORITATIVE_MCP_CATALOG: tuple[dict[str, Any], ...] = (
             },
         },
     },
+    {
+        "server_key": "atlassian",
+        "display_name": "Atlassian",
+        "description": "Atlassian Rovo MCP remoto oficial com OAuth 2.1 + DCR. Suporta Jira issues e Confluence pages.",
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.atlassian.com/v1/mcp",
+        "url": "https://mcp.atlassian.com/v1/mcp",
+        "env_schema": (
+            _env_field("ATLASSIAN_SITE_URL", "Site URL (apenas para API token)", required=False, input_type="text"),
+            _env_field("ATLASSIAN_EMAIL", "Email (apenas para API token)", required=False, input_type="text"),
+            _env_field("ATLASSIAN_API_TOKEN", "API Token (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://support.atlassian.com/atlassian-rovo-mcp-server/",
+        "logo_key": "atlassian",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto por padrao via Rovo MCP server. API token apenas para automacao headless.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Jira + Confluence em um servidor",
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "github_mcp",
+        "display_name": "GitHub",
+        "description": "GitHub MCP Server oficial via api.githubcopilot.com/mcp com OAuth.",
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://api.githubcopilot.com/mcp",
+        "url": "https://api.githubcopilot.com/mcp",
+        "env_schema": (_env_field("GITHUB_PERSONAL_ACCESS_TOKEN", "Personal Access Token (fallback)", required=False),),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/github/github-mcp-server",
+        "logo_key": "github",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth via GitHub. PAT apenas para CI/headless.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Repos, issues, PRs e Actions",
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "gitlab_mcp",
+        "display_name": "GitLab",
+        "description": "Servidor community/manual para GitLab via Personal Access Token.",
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@modelcontextprotocol/server-gitlab"),
+        "env_schema": (
+            _env_field("GITLAB_PERSONAL_ACCESS_TOKEN", "Personal Access Token", required=True),
+            _env_field(
+                "GITLAB_API_URL",
+                "API URL (self-hosted)",
+                required=False,
+                input_type="text",
+            ),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab",
+        "logo_key": "gitlab",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual integration. OAuth ainda nao consolidado para MCP GitLab.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Repositorios, MRs e pipelines",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "bitbucket",
+        "display_name": "Bitbucket",
+        "description": (
+            "Servidor community/manual para Bitbucket Cloud e Server. "
+            "Usa Username + App Password (Cloud) ou HTTP Access Token (Server)."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@nexus2520/bitbucket-mcp-server"),
+        "env_schema": (
+            _env_field("BITBUCKET_USERNAME", "Username (Cloud)", required=False, input_type="text"),
+            _env_field("BITBUCKET_APP_PASSWORD", "App Password (Cloud)", required=False),
+            _env_field("BITBUCKET_TOKEN", "HTTP Access Token (Server)", required=False),
+            _env_field("BITBUCKET_URL", "Base URL (self-hosted)", required=False, input_type="text"),
+            _env_field("BITBUCKET_DEFAULT_WORKSPACE", "Workspace padrao (Cloud)", required=False, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/@nexus2520/bitbucket-mcp-server",
+        "logo_key": "bitbucket",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "Community/manual. Para Cloud, gere uma App Password em "
+            "id.atlassian.com/manage-profile/security/app-passwords. Para Server, "
+            "use HTTP access token."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Repositorios, PRs e pipelines",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "gmail",
+        "display_name": "Gmail",
+        "description": "Servidor MCP local para Gmail via OAuth nativo do Google (autoauth).",
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@gongrzhe/server-gmail-autoauth-mcp"),
+        "env_schema": (
+            _env_field("GMAIL_OAUTH_CLIENT_ID", "OAuth Client ID (fallback)", required=False),
+            _env_field("GMAIL_OAUTH_CLIENT_SECRET", "OAuth Client Secret (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://developers.google.com/gmail/api",
+        "logo_key": "gmail",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "provider_native_oauth",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "OAuth nativo do Google executado pelo servidor stdio/local; nao usa o fluxo OAuth MCP remoto generico."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Email, threads, labels",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "auth_flow_kind": "provider_native_oauth",
+                "oauth_availability": "adapter_required",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "google_calendar",
+        "display_name": "Google Calendar",
+        "description": "Servidor MCP local para Google Calendar com OAuth nativo do Google.",
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@cocal/google-calendar-mcp"),
+        "env_schema": (
+            _env_field("GOOGLE_OAUTH_CLIENT_ID", "OAuth Client ID (fallback)", required=False),
+            _env_field("GOOGLE_OAUTH_CLIENT_SECRET", "OAuth Client Secret (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://developers.google.com/calendar/api",
+        "logo_key": "google_calendar",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "provider_native_oauth",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "OAuth nativo do Google executado pelo servidor stdio/local; nao usa o fluxo OAuth MCP remoto generico."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Eventos, calendarios, agendamentos",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "auth_flow_kind": "provider_native_oauth",
+                "oauth_availability": "adapter_required",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "google_drive",
+        "display_name": "Google Drive",
+        "description": "Servidor MCP local para Google Drive com OAuth nativo do Google.",
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@modelcontextprotocol/server-gdrive"),
+        "env_schema": (
+            _env_field("GDRIVE_OAUTH_CLIENT_ID", "OAuth Client ID (fallback)", required=False),
+            _env_field("GDRIVE_OAUTH_CLIENT_SECRET", "OAuth Client Secret (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://developers.google.com/drive/api",
+        "logo_key": "google_drive",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "provider_native_oauth",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "OAuth nativo do Google executado pelo servidor stdio/local; nao usa o fluxo OAuth MCP remoto generico."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Arquivos, pastas, busca",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "auth_flow_kind": "provider_native_oauth",
+                "oauth_availability": "adapter_required",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "aws_knowledge",
+        "display_name": "AWS Knowledge",
+        "description": (
+            "Servidor MCP oficial da AWS com acesso publico (sem credenciais) "
+            "a documentacao, blogs, What's New e Well-Architected."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://knowledge-mcp.global.api.aws",
+        "url": "https://knowledge-mcp.global.api.aws",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://docs.aws.amazon.com/mcp/",
+        "logo_key": "aws",
+        "category": "cloud",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "no_auth",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor publico read-only. Sem credenciais necessarias.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Documentacao AWS e best practices",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": False,
+            },
+        },
+    },
+    # ------------------------------------------------------------ Wave 3 (10/2026)
+    {
+        "server_key": "microsoft_365",
+        "display_name": "Microsoft 365",
+        "description": (
+            "Servidor MCP comunitario (Lokka) que conecta ao Microsoft Graph. "
+            "Cobre Outlook, Teams e OneDrive. OAuth 2.1 do Microsoft Identity Platform."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@merill/lokka@0.3.0"),
+        "env_schema": (
+            _env_field("TENANT_ID", "Tenant ID (fallback)", required=False, input_type="text"),
+            _env_field("CLIENT_ID", "Client ID (fallback)", required=False, input_type="text"),
+            _env_field("CLIENT_SECRET", "Client Secret (fallback)", required=False),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/merill/lokka",
+        "logo_key": "microsoft_365",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "provider_native_oauth",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "OAuth nativo do Microsoft Identity Platform executado pelo servidor stdio/local; "
+            "nao usa o fluxo OAuth MCP remoto generico."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Outlook, Teams, OneDrive via Microsoft Graph",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "auth_flow_kind": "provider_native_oauth",
+                "oauth_availability": "adapter_required",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "firecrawl",
+        "display_name": "Firecrawl",
+        "description": (
+            "Servidor MCP oficial da Firecrawl: scrape, crawl, busca web e extracao "
+            "estruturada via LLM. Auth via API Key."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "firecrawl-mcp@3.14.1"),
+        "env_schema": (_env_field("FIRECRAWL_API_KEY", "API Key", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://docs.firecrawl.dev/mcp",
+        "logo_key": "firecrawl",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor oficial. Single-key auth.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Web scraping e crawling para pesquisa",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "posthog",
+        "display_name": "PostHog",
+        "description": (
+            "Servidor MCP remoto oficial em mcp.posthog.com. Eventos, funnels, "
+            "dashboards, feature flags e personas. OAuth remoto com fallback por Personal API Key."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.posthog.com/mcp",
+        "url": "https://mcp.posthog.com/mcp",
+        "env_schema": (
+            _env_field("POSTHOG_API_KEY", "Personal API Key (fallback)", required=False),
+            _env_field("POSTHOG_HOST", "Host (self-hosted)", required=False, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://posthog.com/docs/model-context-protocol",
+        "logo_key": "posthog",
+        "category": "data",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto por padrao; token manual via Authorization: Bearer continua como fallback.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Product analytics, eventos e feature flags",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {POSTHOG_API_KEY}",
+            },
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "auth_flow_kind": "mcp_remote_oauth_dcr",
+                "oauth_availability": "available",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "discord",
+        "display_name": "Discord",
+        "description": (
+            "Servidor MCP comunitario para Discord. Mensagens, threads, membros, "
+            "moderacao. Auth via Bot Token (Discord Developer Portal)."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "discord-mcp@2.4.0"),
+        "env_schema": (_env_field("DISCORD_BOT_TOKEN", "Bot Token", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/discord-mcp",
+        "logo_key": "discord",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. Crie bot em discord.com/developers/applications.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Mensagens, canais, threads e moderacao",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "grafana",
+        "display_name": "Grafana",
+        "description": (
+            "Servidor MCP oficial da Grafana Labs (Python via uvx). Dashboards, "
+            "queries Prometheus/Loki, alertas. Auth via Service Account Token."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("uvx", "mcp-grafana==0.13.1"),
+        "env_schema": (
+            _env_field("GRAFANA_URL", "Grafana URL", required=True, input_type="text"),
+            _env_field("GRAFANA_API_KEY", "Service Account Token", required=True),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/grafana/mcp-grafana",
+        "logo_key": "grafana",
+        "category": "cloud",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Requer uv (uvx) instalado. Service account token estavel.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Dashboards, alertas e queries Prometheus/Loki",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "canva",
+        "display_name": "Canva",
+        "description": (
+            "Servidor MCP remoto oficial em mcp.canva.com via OAuth. Designs, brand templates, exports e assets."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.canva.com/mcp",
+        "url": "https://mcp.canva.com/mcp",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://www.canva.dev/docs/connect/mcp/",
+        "logo_key": "canva",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Canva Connect. Sem fallback manual.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Designs, brand templates e exports",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "box",
+        "display_name": "Box",
+        "description": (
+            "Servidor MCP remoto oficial do Box Cloud. Files, folders e sharing. "
+            "OAuth remoto confidencial/pre-registrado ou Developer Token."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.box.com",
+        "url": "https://mcp.box.com",
+        "env_schema": (_env_field("BOX_DEVELOPER_TOKEN", "Developer Token (fallback)", required=False),),
+        "headers_schema": (),
+        "documentation_url": "https://developer.box.com/",
+        "logo_key": "box",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_confidential",
+        "official_support_level": "official",
+        "oauth_mode": "confidential",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "OAuth remoto confidencial exige MCP_OAUTH_BOX_CLIENT_ID/CLIENT_SECRET. "
+            "Developer Token fica como fallback manual."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Storage corporativo, files e sharing",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {BOX_DEVELOPER_TOKEN}",
+            },
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "confidential",
+                "auth_flow_kind": "mcp_remote_oauth_confidential",
+                "oauth_availability": "requires_client_credentials",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "n8n",
+        "display_name": "n8n",
+        "description": (
+            "Servidor MCP comunitario para n8n (cloud ou self-hosted). Workflows, "
+            "executions, credentials metadata. Auth via API Key."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "n8n-mcp@2.50.0"),
+        "env_schema": (
+            _env_field("N8N_API_KEY", "n8n API Key", required=True),
+            _env_field("N8N_BASE_URL", "Base URL", required=True, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://www.npmjs.com/package/n8n-mcp",
+        "logo_key": "n8n",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "community_manual",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Community/manual. Suporta cloud e self-hosted via N8N_BASE_URL.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Workflow automation, executions e credentials",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "aws_api",
+        "display_name": "AWS API",
+        "description": (
+            "Servidor MCP oficial AWS Labs (Python via uvx) para execucao real "
+            "de operacoes AWS via API. S3, EC2, Lambda, IAM, CloudWatch, DynamoDB. "
+            "Default always_ask em todas as tools; operador pode habilitar read_only_mode."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("uvx", "awslabs.aws-api-mcp-server==1.3.33"),
+        "env_schema": (
+            _env_field("AWS_ACCESS_KEY_ID", "Access Key ID", required=True),
+            _env_field("AWS_SECRET_ACCESS_KEY", "Secret Access Key", required=True),
+            _env_field("AWS_REGION", "Default Region", required=True, input_type="text"),
+            _env_field("AWS_SESSION_TOKEN", "Session Token (temporary)", required=False),
+            _env_field("AWS_PROFILE", "AWS Profile (~/.aws/credentials)", required=False, input_type="text"),
+        ),
+        "headers_schema": (),
+        "documentation_url": "https://github.com/awslabs/mcp/tree/main/src/aws-api-mcp-server",
+        "logo_key": "aws",
+        "category": "cloud",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": (
+            "Servidor oficial AWS Labs. Requer uv (uvx) instalado. "
+            "Tools destructive nativas: setar always_ask em todas e usar read_only_mode."
+        ),
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Execucao real de tools AWS (S3, EC2, Lambda, IAM)",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    # ------------------------------------------------------------ Wave 4 (10/2026)
+    {
+        "server_key": "postman",
+        "display_name": "Postman",
+        "description": (
+            "Servidor MCP remoto oficial para Postman API: workspaces, collections, requests, "
+            "environments e mock servers. OAuth remoto com fallback por API Key."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.postman.com/mcp",
+        "url": "https://mcp.postman.com/mcp",
+        "env_schema": (_env_field("POSTMAN_API_KEY", "API Key (fallback)", required=False),),
+        "headers_schema": (),
+        "documentation_url": "https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/",
+        "logo_key": "postman",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto por padrao; API Key manual continua como fallback.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Workspaces, collections e mock servers",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {POSTMAN_API_KEY}",
+            },
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "auth_flow_kind": "mcp_remote_oauth_dcr",
+                "oauth_availability": "available",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "zapier",
+        "display_name": "Zapier",
+        "description": ("Servidor MCP remoto oficial Zapier: 6.000+ apps via Zaps. OAuth remoto por usuario."),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.zapier.com/api/mcp/sse",
+        "url": "https://mcp.zapier.com/api/mcp/sse",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://zapier.com/mcp",
+        "logo_key": "zapier",
+        "category": "general",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto oficial via mcp.zapier.com. Sem credencial manual no catalogo fixo.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "6.000+ apps via Zaps automatizados",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "auth_flow_kind": "mcp_remote_oauth_dcr",
+                "oauth_availability": "available",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "netlify",
+        "display_name": "Netlify",
+        "description": (
+            "Servidor MCP oficial Netlify. Sites, deploys, env vars, edge "
+            "functions, formularios e dominios. Auth via Personal Access Token."
+        ),
+        "transport_type": "stdio",
+        "transport_kind": "local",
+        "command": ("npx", "-y", "@netlify/mcp@1.15.1"),
+        "env_schema": (_env_field("NETLIFY_PERSONAL_ACCESS_TOKEN", "Personal Access Token", required=True),),
+        "headers_schema": (),
+        "documentation_url": "https://docs.netlify.com/welcome/build-with-ai/netlify-mcp-server/",
+        "logo_key": "netlify",
+        "category": "development",
+        "enabled": True,
+        "oauth_enabled": False,
+        "auth_strategy": "api_token",
+        "official_support_level": "official",
+        "oauth_mode": "none",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "Servidor oficial Netlify. PAT estavel.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Deploys, sites e edge functions",
+            "auth_capabilities": {
+                "oauth_enabled": False,
+                "oauth_mode": "none",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "huggingface",
+        "display_name": "Hugging Face",
+        "description": (
+            "Servidor MCP remoto oficial em huggingface.co/mcp. Models, "
+            "datasets, Spaces e inference. OAuth remoto com fallback por User Access Token."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://huggingface.co/mcp",
+        "url": "https://huggingface.co/mcp",
+        "env_schema": (_env_field("HF_TOKEN", "User Access Token (fallback)", required=False),),
+        "headers_schema": (),
+        "documentation_url": "https://huggingface.co/docs/hub/mcp",
+        "logo_key": "huggingface",
+        "category": "data",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto por padrao; token manual via Authorization: Bearer continua como fallback.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Models, datasets, Spaces e inference",
+            "manual_auth_header": {
+                "header_name": "Authorization",
+                "value_template": "Bearer {HF_TOKEN}",
+            },
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "auth_flow_kind": "mcp_remote_oauth_dcr",
+                "oauth_availability": "available",
+                "supports_manual": True,
+            },
+        },
+    },
+    {
+        "server_key": "clickup",
+        "display_name": "ClickUp",
+        "description": (
+            "Servidor MCP remoto oficial para ClickUp. Tasks, lists, folders, "
+            "spaces, comments e time tracking via OAuth remoto."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.clickup.com/mcp",
+        "url": "https://mcp.clickup.com/mcp",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://developer.clickup.com/",
+        "logo_key": "clickup",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth remoto oficial. Sem fallback manual no catalogo fixo.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Tasks, lists, spaces e time tracking",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "auth_flow_kind": "mcp_remote_oauth_dcr",
+                "oauth_availability": "available",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "superhuman",
+        "display_name": "Superhuman",
+        "description": (
+            "Servidor MCP remoto oficial Superhuman Mail. Mail + calendar com "
+            "agente de produtividade que responde no seu tom. OAuth-only."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.mail.superhuman.com/mcp",
+        "url": "https://mcp.mail.superhuman.com/mcp",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://help.superhuman.com/hc/en-us/articles/49810745762067-Superhuman-Mail-MCP-Server",
+        "logo_key": "superhuman",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Superhuman. Sem fallback manual.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Mail e calendario com agente de produtividade",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
+    {
+        "server_key": "miro",
+        "display_name": "Miro",
+        "description": (
+            "Servidor MCP remoto oficial Miro em mcp.miro.com. Boards, items, "
+            "diagrams e code-board generation. OAuth 2.1 com DCR."
+        ),
+        "transport_type": "http_sse",
+        "transport_kind": "remote",
+        "remote_url": "https://mcp.miro.com/",
+        "url": "https://mcp.miro.com/",
+        "env_schema": (),
+        "headers_schema": (),
+        "documentation_url": "https://developers.miro.com/docs/miro-mcp",
+        "logo_key": "miro",
+        "category": "productivity",
+        "enabled": True,
+        "oauth_enabled": True,
+        "auth_strategy": "oauth_dcr",
+        "official_support_level": "official",
+        "oauth_mode": "dcr",
+        "oauth_metadata_url": "https://mcp.miro.com/.well-known/oauth-authorization-server",
+        "tool_discovery_mode": "runtime",
+        "vendor_notes": "OAuth-only via Miro com scopes boards:read e boards:write.",
+        "default_policy": "always_ask",
+        "metadata": {
+            "tagline": "Boards, diagramas e code-board generation",
+            "oauth_runtime_auth": {"type": "authorization_bearer"},
+            "auth_capabilities": {
+                "oauth_enabled": True,
+                "oauth_mode": "dcr",
+                "supports_manual": False,
+            },
+        },
+    },
 )
+
+
+def _infer_auth_flow_kind(entry: dict[str, Any]) -> str:
+    auth_strategy = str(entry.get("auth_strategy") or "no_auth")
+    oauth_mode = str(entry.get("oauth_mode") or "none")
+    transport_kind = str(entry.get("transport_kind") or "local")
+    oauth_enabled = bool(entry.get("oauth_enabled"))
+    if oauth_enabled and transport_kind == "remote" and oauth_mode == "dcr":
+        return "mcp_remote_oauth_dcr"
+    if oauth_enabled and transport_kind == "remote" and oauth_mode == "confidential":
+        return "mcp_remote_oauth_confidential"
+    if "oauth" in auth_strategy and transport_kind == "local":
+        return "provider_native_oauth"
+    if auth_strategy in {"api_key", "api_token"}:
+        return "api_key"
+    if auth_strategy == "local_session":
+        return "local_session"
+    if auth_strategy in {"manual_header", "header"}:
+        return "manual_header"
+    return "none"
 
 
 def authoritative_mcp_catalog_entries() -> list[dict[str, Any]]:
     """Return authoritative MCP catalog entries as mutable payloads."""
-    return [dict(entry) for entry in AUTHORITATIVE_MCP_CATALOG]
+    result: list[dict[str, Any]] = []
+    for entry in AUTHORITATIVE_MCP_CATALOG:
+        payload = dict(entry)
+        metadata = dict(payload.get("metadata") or {})
+        auth_capabilities = dict(metadata.get("auth_capabilities") or {})
+        auth_capabilities.setdefault("auth_flow_kind", _infer_auth_flow_kind(payload))
+        oauth_available = auth_capabilities["auth_flow_kind"] in {
+            "mcp_remote_oauth_dcr",
+            "mcp_remote_oauth_confidential",
+        }
+        auth_capabilities.setdefault(
+            "oauth_availability",
+            "available" if oauth_available else "not_available",
+        )
+        metadata["auth_capabilities"] = auth_capabilities
+        payload["metadata"] = metadata
+        result.append(payload)
+    return result

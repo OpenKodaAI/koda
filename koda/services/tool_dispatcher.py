@@ -5,37 +5,27 @@ import json
 import re
 import time as _time
 from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager, nullcontext
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import cast
 
 from koda.agent_contract import (
     evaluate_integration_grant,
-    resolve_gws_action,
     resolve_integration_action,
 )
 from koda.config import (
     AGENT_RESOURCE_ACCESS_POLICY,
     AGENT_TOOL_TIMEOUT,
     ALLOWED_GIT_CMDS,
-    BLOCKED_CONFLUENCE_PATTERN,
-    BLOCKED_GWS_PATTERN,
-    BLOCKED_JIRA_PATTERN,
-    BLOCKED_SHELL_PATTERN,
     BROWSER_FEATURES_ENABLED,
     BROWSER_TOOL_TIMEOUT,
-    CONFLUENCE_ENABLED,
     FILEOPS_BLOCKED_EXTENSIONS,
     FILEOPS_ENABLED,
     FILEOPS_MAX_READ_SIZE,
     GIT_ENABLED,
     GIT_META_CHARS,
-    GWS_CREDENTIALS_FILE,
-    GWS_ENABLED,
     INTER_AGENT_ENABLED,
-    JIRA_ENABLED,
     PLUGIN_SYSTEM_ENABLED,
     SHELL_ENABLED,
     SHELL_TIMEOUT,
@@ -46,6 +36,7 @@ from koda.config import (
 )
 from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
+from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
 from koda.utils.workdir import validate_work_dir
 
@@ -79,6 +70,18 @@ def _coerce_int(value: object) -> int:
 
 _AGENT_CMD_RE = re.compile(r'<agent_cmd\s+tool="([^"]+)">(.*?)</agent_cmd>', re.DOTALL)
 _ACTION_PLAN_RE = re.compile(r"<action_plan>.*?</action_plan>", re.DOTALL | re.IGNORECASE)
+
+# Native-fast block-pattern matchers. Sourced
+# from the central :mod:`koda.services.blocked_patterns` registry so
+# every site of the runtime — handlers, cli_runner, dispatcher — uses
+# the same compiled guard. Building once at module load: when the
+# ``koda_command_guard`` wheel is installed the matcher is a Rust DFA
+# (linear time, no GIL); otherwise it falls back to Python re.compile.
+# A grep gate in ``tests/test_open_source_hygiene.py`` enforces that
+# no caller bypasses the registry by using ``BLOCKED_*_PATTERN.search``
+# directly. The ``noqa: E402`` here keeps the comment block above the
+# import so the rationale is co-located with the wire-up site.
+_BLOCKED_SHELL = _blocked_patterns_module.SHELL_GUARD
 
 # Tools that modify state (require approval in supervised mode)
 _WRITE_TOOLS = frozenset(
@@ -228,31 +231,6 @@ def _configured_resource_access_policy() -> dict[str, object]:
     return dict(AGENT_RESOURCE_ACCESS_POLICY) if AGENT_RESOURCE_ACCESS_POLICY else {}
 
 
-def _gws_env_overrides() -> dict[str, str]:
-    if not GWS_CREDENTIALS_FILE:
-        return {}
-    return {
-        "GWS_CREDENTIALS_FILE": GWS_CREDENTIALS_FILE,
-        "GOOGLE_APPLICATION_CREDENTIALS": GWS_CREDENTIALS_FILE,
-    }
-
-
-@contextmanager
-def _gws_env_context() -> Iterator[dict[str, str]]:
-    from koda.config import AGENT_ID
-
-    current_agent = str(AGENT_ID or "").strip().upper()
-    if not current_agent:
-        with nullcontext(_gws_env_overrides()) as env:
-            yield env
-        return
-
-    from koda.services.core_connection_broker import get_core_connection_broker
-
-    with get_core_connection_broker().materialize_cli_environment("gws", agent_id=current_agent) as (_resolved, env):
-        yield env
-
-
 def is_known_tool(tool_id: str) -> bool:
     if tool_id in _TOOL_HANDLERS:
         return True
@@ -336,8 +314,6 @@ def _infer_tool_category(tool: str) -> str:
         return "fileops"
     if tool.startswith("db_"):
         return "db"
-    if tool in {"gws", "jira", "confluence"}:
-        return "cli"
     if tool.startswith("browser_"):
         return "browser"
     if tool.startswith("job_"):
@@ -449,7 +425,7 @@ def _record_runtime_integration_health(
     status: str,
     details: dict[str, object],
 ) -> None:
-    if integration_id not in {"browser", "gws", "jira", "confluence"}:
+    if integration_id != "browser":
         return
     try:
         from koda.control_plane.database import execute, json_dump, now_iso
@@ -496,7 +472,35 @@ async def execute_tool(
     *,
     policy_evaluation: PolicyEvaluation | None = None,
 ) -> AgentToolResult:
-    """Execute a single agent tool call with timeout and security checks."""
+    """Execute a single agent tool call with timeout and security checks.
+
+    Wraps the body in an OTel span so collectors see the full hierarchy
+    (queue_manager → tool_dispatcher → internal_rpc → sidecar).
+    ``start_span`` is a no-op when tracing is disabled
+    (``OTEL_EXPORTER_OTLP_ENDPOINT`` unset), so the overhead on quiet
+    hosts is a single attribute-dict construction per call.
+    """
+    from koda.config import AGENT_ID
+    from koda.observability import start_span
+
+    with start_span(
+        "tool_dispatcher.execute_tool",
+        tool=call.tool,
+        agent_id=AGENT_ID or "default",
+        task_id=ctx.task_id,
+        user_id=ctx.user_id,
+    ):
+        return await _execute_tool_traced(call, ctx, policy_evaluation=policy_evaluation)
+
+
+async def _execute_tool_traced(
+    call: AgentToolCall,
+    ctx: ToolContext,
+    *,
+    policy_evaluation: PolicyEvaluation | None = None,
+) -> AgentToolResult:
+    """Original execute_tool body — see ``execute_tool`` for the OTel
+    span wrapper that calls into here."""
     import time
 
     from koda.config import AGENT_ID
@@ -861,9 +865,7 @@ def _is_write_tool(tool: str, params: dict) -> bool:
     return resolution.access_level != "read"
 
 
-# ---------------------------------------------------------------------------
 # Tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_job_list(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -1065,7 +1067,7 @@ async def _handle_job_create(params: dict, ctx: ToolContext) -> AgentToolResult:
                 success=False,
                 output="shell_command requires trigger_type='cron', 'schedule_expr', and 'command'.",
             )
-        if BLOCKED_SHELL_PATTERN.search(command) or GIT_META_CHARS.search(command):
+        if (_BLOCKED_SHELL is not None and _BLOCKED_SHELL.is_blocked(command)) or GIT_META_CHARS.search(command):
             _audit_blocked("job_create", "dangerous_shell_pattern", user_id=ctx.user_id)
             return AgentToolResult(tool="job_create", success=False, output="Blocked: unsafe shell command.")
         try:
@@ -1260,202 +1262,6 @@ async def _handle_http_request(params: dict, ctx: ToolContext) -> AgentToolResul
     )
     success = not result.startswith("Error:")
     return AgentToolResult(tool="http_request", success=success, output=result)
-
-
-async def _handle_gws(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not GWS_ENABLED:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Google Workspace is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Missing required param: 'args'.",
-        )
-
-    if BLOCKED_GWS_PATTERN and BLOCKED_GWS_PATTERN.search(args):
-        _audit_blocked("gws", "blocked_gws_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Blocked: this GWS command is not allowed for safety reasons.",
-        )
-    resolution = resolve_gws_action(args)
-
-    from koda.services.cli_runner import run_cli_command_detailed
-    from koda.utils.approval import _execution_approved
-
-    token = _execution_approved.set(True)
-    try:
-        with _gws_env_context() as env:
-            command_result = await run_cli_command_detailed(
-                "gws",
-                args,
-                ctx.work_dir,
-                blocked_pattern=BLOCKED_GWS_PATTERN,
-                timeout=AGENT_TOOL_TIMEOUT,
-                env=env,
-            )
-    except RuntimeError as exc:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output=str(exc),
-        )
-    finally:
-        _execution_approved.reset(token)
-
-    success = not command_result.text.startswith(("Exit 1:", "Blocked:", "Error:", "Timeout"))
-    return AgentToolResult(
-        tool="gws",
-        success=success,
-        output=command_result.text,
-        metadata={
-            "category": "cli",
-            "binary": command_result.binary,
-            "args": command_result.args,
-            "exit_code": command_result.exit_code,
-            "timed_out": command_result.timed_out,
-            "truncated": command_result.truncated,
-            "action_id": resolution.action_id,
-            "resource_method": resolution.resource_method,
-        },
-    )
-
-
-async def _handle_jira(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not JIRA_ENABLED:
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Jira is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Missing required param: 'args' (e.g. 'issues search --jql ...').",
-        )
-
-    if BLOCKED_JIRA_PATTERN and BLOCKED_JIRA_PATTERN.search(args):
-        _audit_blocked("jira", "blocked_jira_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Blocked: this Jira command is not allowed for safety reasons.",
-        )
-
-    from koda.services.resilience import check_breaker, jira_breaker, record_failure, record_success
-
-    err = check_breaker(jira_breaker)
-    if err:
-        return AgentToolResult(tool="jira", success=False, output=err)
-
-    from koda.services.atlassian_client import get_jira_service, parse_atlassian_args
-    from koda.utils.approval import _execution_approved
-
-    try:
-        resource, action, parsed_params = parse_atlassian_args(args)
-    except ValueError as e:
-        return AgentToolResult(tool="jira", success=False, output=str(e))
-
-    token = _execution_approved.set(True)
-    try:
-        service = get_jira_service()
-        result = await service.execute(resource, action, parsed_params)
-    finally:
-        _execution_approved.reset(token)
-
-    success = not result.startswith("Exit 1:")
-    if success:
-        record_success(jira_breaker)
-    else:
-        record_failure(jira_breaker)
-    return AgentToolResult(
-        tool="jira",
-        success=success,
-        output=result,
-        metadata={
-            "category": "cli",
-            "binary": "jira",
-            "args": args,
-            "resource": resource,
-            "action": action,
-            "params": parsed_params,
-        },
-    )
-
-
-async def _handle_confluence(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not CONFLUENCE_ENABLED:
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Confluence is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Missing required param: 'args' (e.g. 'pages search --cql ...').",
-        )
-
-    if BLOCKED_CONFLUENCE_PATTERN and BLOCKED_CONFLUENCE_PATTERN.search(args):
-        _audit_blocked("confluence", "blocked_confluence_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Blocked: this Confluence command is not allowed for safety reasons.",
-        )
-
-    from koda.services.resilience import check_breaker, confluence_breaker, record_failure, record_success
-
-    err = check_breaker(confluence_breaker)
-    if err:
-        return AgentToolResult(tool="confluence", success=False, output=err)
-
-    from koda.services.atlassian_client import get_confluence_service, parse_atlassian_args
-    from koda.utils.approval import _execution_approved
-
-    try:
-        resource, action, parsed_params = parse_atlassian_args(args)
-    except ValueError as e:
-        return AgentToolResult(tool="confluence", success=False, output=str(e))
-
-    token = _execution_approved.set(True)
-    try:
-        service = get_confluence_service()
-        result = await service.execute(resource, action, parsed_params)
-    finally:
-        _execution_approved.reset(token)
-
-    success = not result.startswith("Exit 1:")
-    if success:
-        record_success(confluence_breaker)
-    else:
-        record_failure(confluence_breaker)
-    return AgentToolResult(
-        tool="confluence",
-        success=success,
-        output=result,
-        metadata={
-            "category": "cli",
-            "binary": "confluence",
-            "args": args,
-            "resource": resource,
-            "action": action,
-            "params": parsed_params,
-        },
-    )
 
 
 async def _handle_set_workdir(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -1772,9 +1578,7 @@ async def _handle_browser_cookies(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="browser_cookies", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Browser tab handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_tab_open(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -1904,7 +1708,7 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         selector = 'input[type="file"]'
     from koda.services.browser_manager import browser_manager
 
-    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path)
+    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path, allowed_root=ctx.work_dir)
     success = not result.startswith("Error")
     return AgentToolResult(tool="browser_upload", success=success, output=result)
 
@@ -1936,9 +1740,7 @@ async def _handle_browser_pdf(params: dict, ctx: ToolContext) -> AgentToolResult
     return AgentToolResult(tool="browser_pdf", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Script Library handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_script_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2085,9 +1887,7 @@ async def _handle_script_delete(params: dict, ctx: ToolContext) -> AgentToolResu
     )
 
 
-# ---------------------------------------------------------------------------
 # Cache management handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_cache_stats(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2143,9 +1943,7 @@ async def _handle_cache_clear(params: dict, ctx: ToolContext) -> AgentToolResult
     return AgentToolResult(tool="cache_clear", success=True, output=f"Cleared {count} cached entries.")
 
 
-# ---------------------------------------------------------------------------
 # Snapshot handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_snapshot_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2246,8 +2044,10 @@ async def _handle_snapshot_delete(params: dict, ctx: ToolContext) -> AgentToolRe
 
 async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResult:
     """Resolve a skill by name/alias/query and return its full content with instruction."""
-    from koda.skills._registry import get_shared_registry
-    from koda.skills._selector import get_shared_selector
+    from koda.skills._index import SkillEmbeddingIndex
+    from koda.skills._registry import build_skill_registry_from_custom_skills
+    from koda.skills._runtime import get_runtime_agent_spec, get_runtime_custom_skills, get_runtime_skill_policy
+    from koda.skills._selector import SkillSelector
     from koda.skills._telemetry import emit_skill_invocation
 
     query = str(params.get("query", "")).strip()
@@ -2258,7 +2058,16 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
             output="Please specify a skill name or description. Use /skill to list available skills.",
         )
 
-    registry = get_shared_registry()
+    agent_spec = get_runtime_agent_spec()
+    skill_policy = get_runtime_skill_policy(agent_spec) or None
+    registry = build_skill_registry_from_custom_skills(get_runtime_custom_skills(agent_spec), skill_policy)
+    skills = registry.get_all()
+    if not skills:
+        return AgentToolResult(
+            tool="request_skill",
+            success=False,
+            output="No expert skills configured for this agent.",
+        )
 
     # Try exact match or alias first
     skill_id = registry.resolve_alias(query.lower().replace(" ", "-"))
@@ -2278,19 +2087,21 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
     if skill is None:
         # Fall back to semantic search
         try:
-            selector = get_shared_selector()
-            matches = selector.select(query, max_skills=1)
+            skill_index = SkillEmbeddingIndex()
+            skill_index.rebuild(skills)
+            selector = SkillSelector(registry, skill_index)
+            matches = selector.select(query, max_skills=1, agent_skill_policy=skill_policy)
             if matches and matches[0].composite_score >= 0.4:
                 skill = matches[0].skill
         except Exception:
             pass
 
     if skill is None:
-        available = ", ".join(sorted(registry.get_all().keys()))
+        available = ", ".join(sorted(skills.keys()))
         return AgentToolResult(
             tool="request_skill",
             success=False,
-            output=f"No matching skill found for '{query}'. Available skills: {available}",
+            output=f"No matching skill found for '{query}'. Skills configured for this agent: {available}",
         )
 
     # Build response with instruction
@@ -2312,9 +2123,7 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
     return AgentToolResult(tool="request_skill", success=True, output="\n\n".join(parts))
 
 
-# ---------------------------------------------------------------------------
 # File operations handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_fileops_available(tool: str) -> AgentToolResult | None:
@@ -2655,9 +2464,7 @@ async def _handle_file_info(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="file_info", success=False, output=f"Error: {e}")
 
 
-# ---------------------------------------------------------------------------
 # Shell tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_shell_available(tool: str) -> AgentToolResult | None:
@@ -2737,7 +2544,7 @@ async def _handle_shell_status(params: dict, ctx: ToolContext) -> AgentToolResul
         return AgentToolResult(tool="shell_status", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    bg = bg_process_manager.get(handle_id)
+    bg = bg_process_manager.get(handle_id, user_id=ctx.user_id)
     if not bg:
         return AgentToolResult(tool="shell_status", success=False, output=f"No process with handle '{handle_id}'.")
     import time
@@ -2763,7 +2570,7 @@ async def _handle_shell_kill(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="shell_kill", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    error = await bg_process_manager.kill(handle_id)
+    error = await bg_process_manager.kill(handle_id, user_id=ctx.user_id)
     if error:
         return AgentToolResult(tool="shell_kill", success=False, output=error)
     return AgentToolResult(tool="shell_kill", success=True, output=f"Killed process: {handle_id}")
@@ -2778,7 +2585,7 @@ async def _handle_shell_output(params: dict, ctx: ToolContext) -> AgentToolResul
         return AgentToolResult(tool="shell_output", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    bg = bg_process_manager.get(handle_id)
+    bg = bg_process_manager.get(handle_id, user_id=ctx.user_id)
     if not bg:
         return AgentToolResult(tool="shell_output", success=False, output=f"No process with handle '{handle_id}'.")
     if not bg.finished:
@@ -2791,9 +2598,7 @@ async def _handle_shell_output(params: dict, ctx: ToolContext) -> AgentToolResul
     return AgentToolResult(tool="shell_output", success=True, output=f"Exit {bg.exit_code}:\n{output}")
 
 
-# ---------------------------------------------------------------------------
 # Git tool handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_git_available(tool: str) -> AgentToolResult | None:
@@ -2966,9 +2771,7 @@ async def _handle_git_pull(params: dict, ctx: ToolContext) -> AgentToolResult:
     return await _run_git("pull", args, ctx, timeout=60)
 
 
-# ---------------------------------------------------------------------------
 # Plugin handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_plugin_available(tool: str) -> AgentToolResult | None:
@@ -3103,9 +2906,7 @@ async def _handle_plugin_reload(params: dict, ctx: ToolContext) -> AgentToolResu
     return AgentToolResult(tool="plugin_reload", success=True, output=f"Plugin '{name}' reloaded.")
 
 
-# ---------------------------------------------------------------------------
 # Workflow handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_workflow_available(tool: str) -> AgentToolResult | None:
@@ -3226,9 +3027,7 @@ async def _handle_workflow_delete(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="workflow_delete", success=True, output=f"Workflow '{name}' deleted.")
 
 
-# ---------------------------------------------------------------------------
 # Inter-agent communication handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_inter_agent_available(tool: str) -> AgentToolResult | None:
@@ -3349,9 +3148,7 @@ async def _handle_agent_broadcast(params: dict, ctx: ToolContext) -> AgentToolRe
     return AgentToolResult(tool="agent_broadcast", success=True, output=f"Broadcast sent to {count} agents.")
 
 
-# ---------------------------------------------------------------------------
 # Webhook handlers
-# ---------------------------------------------------------------------------
 
 
 async def _check_webhook_available(tool: str) -> AgentToolResult | None:
@@ -3431,9 +3228,7 @@ async def _handle_event_wait(params: dict, ctx: ToolContext) -> AgentToolResult:
     )
 
 
-# ---------------------------------------------------------------------------
 # Browser network interception handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_network_capture_start(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3497,9 +3292,7 @@ async def _handle_browser_network_mock(params: dict, ctx: ToolContext) -> AgentT
     return AgentToolResult(tool="browser_network_mock", success=success, output=result)
 
 
-# ---------------------------------------------------------------------------
 # Browser session persistence handlers
-# ---------------------------------------------------------------------------
 
 
 async def _handle_browser_session_save(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3541,9 +3334,7 @@ async def _handle_browser_session_list(params: dict, ctx: ToolContext) -> AgentT
     return AgentToolResult(tool="browser_session_list", success=success, output=text, data=data, data_format="json")
 
 
-# ---------------------------------------------------------------------------
 # Handler registry
-# ---------------------------------------------------------------------------
 
 _ToolHandler = Callable[[dict, ToolContext], Awaitable[AgentToolResult]]
 
@@ -3562,9 +3353,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "web_search": _handle_web_search,
     "fetch_url": _handle_fetch_url,
     "http_request": _handle_http_request,
-    "gws": _handle_gws,
-    "jira": _handle_jira,
-    "confluence": _handle_confluence,
     "agent_set_workdir": _handle_set_workdir,
     "agent_get_status": _handle_get_status,
     "browser_navigate": _handle_browser_navigate,

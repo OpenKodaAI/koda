@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_runtime_snapshot_exports_only_compiled_prompt_contract(monkeypatch):
     import koda.control_plane.manager as manager_mod
@@ -60,9 +62,10 @@ def test_runtime_snapshot_exports_only_compiled_prompt_contract(monkeypatch):
     assert snapshot.persisted_to_disk is False
     assert snapshot.env["KOKORO_VOICES_PATH"] == "/tmp/kokoro-managed.bin"
     assert snapshot.env["AGENT_COMPILED_PROMPT_TEXT"] == expected_prompt
-    assert '"gws"' in snapshot.env["AGENT_RESOURCE_ACCESS_POLICY_JSON"]
+    assert "AGENT_RESOURCE_ACCESS_POLICY_JSON" not in snapshot.env
     assert "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON" in snapshot.env
     assert '"claude"' in snapshot.env["AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON"]
+    assert "SKILLS_JSON" not in snapshot.env
 
 
 def test_legacy_agent_discovery_uses_env_only(monkeypatch):
@@ -174,7 +177,7 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
             },
             "resource_access_policy": {
                 "integration_grants": {
-                    "gws": {"allow_actions": ["gmail.list"]},
+                    "mcp:atlassian": {"allow_actions": ["search_issues"]},
                 }
             },
             "memory_policy": {},
@@ -187,12 +190,15 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
     compiled_prompt = str(payload.get("compiled_prompt") or "")
     assert "`job_create`" in compiled_prompt
     assert "## Integration Grants" in compiled_prompt
-    assert "`gws`" in compiled_prompt
+    assert "`mcp:atlassian`" in compiled_prompt
 
 
-def test_runtime_access_ignores_legacy_runtime_token_secret():
+def test_runtime_access_uses_only_current_runtime_secret_key(monkeypatch):
     import koda.control_plane.manager as manager_mod
     import koda.control_plane.runtime_access as runtime_access_mod
+
+    monkeypatch.delenv("RUNTIME_LOCAL_UI_TOKEN", raising=False)
+    monkeypatch.delenv("ATLAS_RUNTIME_LOCAL_UI_TOKEN", raising=False)
 
     manager = object.__new__(manager_mod.ControlPlaneManager)
     manager._require_agent_row = lambda agent_id: (  # type: ignore[attr-defined]
@@ -275,6 +281,138 @@ def test_runtime_access_issues_scoped_request_tokens_without_exposing_secret():
     assert payload["runtime_request_capability"] == "attach"
     assert isinstance(payload["runtime_request_token"], str) and payload["runtime_request_token"]
     assert isinstance(payload["access_scope_token"], str) and payload["access_scope_token"]
+
+
+def test_runtime_access_issues_request_token_from_bootstrap_env(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+    import koda.control_plane.runtime_access as runtime_access_mod
+    from koda.services.runtime_access_service import RuntimeAccessService
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._require_agent_row = lambda agent_id: (  # type: ignore[attr-defined]
+        "ATLAS",
+        {
+            "id": "ATLAS",
+            "applied_version": 0,
+            "desired_version": 0,
+            "workspace_id": "",
+        },
+    )
+    manager.build_draft_snapshot = lambda agent_id: {  # type: ignore[attr-defined]
+        "agent": {"runtime_endpoint": {}},
+        "secrets": {},
+        "sections": {},
+    }
+
+    monkeypatch.setattr(runtime_access_mod, "fetch_one", lambda *_args, **_kwargs: None)
+    monkeypatch.delenv("ATLAS_RUNTIME_LOCAL_UI_TOKEN", raising=False)
+    monkeypatch.setenv("RUNTIME_LOCAL_UI_TOKEN", "env-runtime-secret")
+
+    payload = manager.get_runtime_access("atlas", capability="mutate")
+
+    token = str(payload["runtime_request_token"])
+    envelope = RuntimeAccessService("env-runtime-secret").authorize(
+        token,
+        agent_scope="ATLAS",
+        capability="mutate",
+    )
+    assert payload["runtime_token"] is None
+    assert payload["runtime_token_present"] is True
+    assert envelope is not None
+
+
+def test_runtime_access_prefers_agent_scoped_bootstrap_env(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+    import koda.control_plane.runtime_access as runtime_access_mod
+    from koda.services.runtime_access_service import RuntimeAccessService
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._require_agent_row = lambda agent_id: (  # type: ignore[attr-defined]
+        "ATLAS",
+        {
+            "id": "ATLAS",
+            "applied_version": 0,
+            "desired_version": 0,
+            "workspace_id": "",
+        },
+    )
+    manager.build_draft_snapshot = lambda agent_id: {  # type: ignore[attr-defined]
+        "agent": {"runtime_endpoint": {}},
+        "secrets": {},
+        "sections": {},
+    }
+
+    monkeypatch.setattr(runtime_access_mod, "fetch_one", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("RUNTIME_LOCAL_UI_TOKEN", "global-runtime-secret")
+    monkeypatch.setenv("ATLAS_RUNTIME_LOCAL_UI_TOKEN", "scoped-runtime-secret")
+
+    payload = manager.get_runtime_access("atlas")
+
+    token = str(payload["runtime_request_token"])
+    assert (
+        RuntimeAccessService("scoped-runtime-secret").authorize(
+            token,
+            agent_scope="ATLAS",
+            capability="read",
+        )
+        is not None
+    )
+    assert (
+        RuntimeAccessService("global-runtime-secret").authorize(
+            token,
+            agent_scope="ATLAS",
+            capability="read",
+        )
+        is None
+    )
+
+
+def test_removed_runtime_token_secret_is_not_visible_or_recreated():
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+
+    assert manager.get_global_secret_asset("RUNTIME_TOKEN") is None
+    with pytest.raises(ValueError, match="RUNTIME_TOKEN is no longer supported"):
+        manager.upsert_global_secret_asset("RUNTIME_TOKEN", {"value": "old-token"})
+
+
+def test_reconcile_global_secret_classification_deletes_removed_runtime_token(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    sections = {
+        "access": {
+            "global_secret_meta": {
+                "RUNTIME_TOKEN": {"description": "old", "usage_scope": "system_only"},
+                "OTHER_SECRET": {"description": "kept", "usage_scope": "agent_grant"},
+            }
+        }
+    }
+    deleted_ids: list[int] = []
+
+    def fake_execute(query: str, params: tuple[object, ...] = ()) -> int:
+        if "DELETE FROM cp_secret_values WHERE id = ?" in query:
+            deleted_ids.append(int(params[0]))
+        return 1
+
+    monkeypatch.setattr(
+        manager_mod,
+        "fetch_all",
+        lambda *_args, **_kwargs: [
+            {"id": 7, "secret_key": "RUNTIME_TOKEN", "encrypted_value": "old-encrypted-token"},
+            {"id": 8, "secret_key": "OTHER_SECRET", "encrypted_value": "kept-encrypted-token"},
+        ],
+    )
+    monkeypatch.setattr(manager_mod, "execute", fake_execute)
+    monkeypatch.setattr(manager, "_system_settings_sections", lambda: sections)
+    monkeypatch.setattr(manager, "_persist_global_default_version", lambda _sections: 1)
+
+    manager._reconcile_global_secret_classification()
+
+    assert deleted_ids == [7]
+    assert "RUNTIME_TOKEN" not in sections["access"]["global_secret_meta"]
+    assert "OTHER_SECRET" in sections["access"]["global_secret_meta"]
 
 
 def test_runtime_access_scope_includes_integration_grants():

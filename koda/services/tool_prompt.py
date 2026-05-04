@@ -13,12 +13,9 @@ from koda.config import (
     BROWSER_FEATURES_ENABLED,
     BROWSER_NETWORK_INTERCEPTION_ENABLED,
     BROWSER_SESSION_PERSISTENCE_ENABLED,
-    CONFLUENCE_ENABLED,
     FILEOPS_ENABLED,
     GIT_ENABLED,
-    GWS_ENABLED,
     INTER_AGENT_ENABLED,
-    JIRA_ENABLED,
     MCP_ENABLED,
     PLUGIN_SYSTEM_ENABLED,
     SHELL_ENABLED,
@@ -287,9 +284,6 @@ def build_agent_tools_prompt(
     sections: list[str] = []
     resolved_feature_flags = {
         "browser": BROWSER_FEATURES_ENABLED,
-        "jira": JIRA_ENABLED,
-        "confluence": CONFLUENCE_ENABLED,
-        "gws": GWS_ENABLED,
         "fileops": FILEOPS_ENABLED,
         "shell": SHELL_ENABLED,
         "git": GIT_ENABLED,
@@ -435,9 +429,9 @@ Initial validation auto-activates the job by default when it passes safely.
 ### Agent Management
 - `agent_set_workdir` — Change the agent's working directory. Params: `{"path": "/absolute/path"}`
 - `agent_get_status` — Get agent status (work_dir, model, session, mode, cost). Params: `{}`
-- `request_skill` — Request an expert skill by name, alias, or description.
-  Returns the full skill methodology with instructions.
-  Params: `{"query": "tdd"}` or `{"query": "security analysis"}` or `{"query": "code-review"}`""")
+- `request_skill` — Request one of this agent's configured skills by name, alias, or description.
+  Returns the full skill methodology with instructions when the current agent has a matching skill.
+  Params: `{"query": "review-api-contract"}` or `{"query": "security analysis"}`""")
 
     if BROWSER_FEATURES_ENABLED:
         sections.append("""
@@ -513,48 +507,6 @@ Save and restore browser sessions (cookies, local storage, session storage).
 - `browser_session_save` — Save the current browser session. Params: `{"name": "logged-in"}`
 - `browser_session_restore` — Restore a saved session. Params: `{"name": "logged-in"}`
 - `browser_session_list` — List saved sessions. Params: `{}`""")
-
-    if GWS_ENABLED:
-        sections.append("""
-### Google Workspace
-- `gws` — Execute a Google Workspace CLI command.
-  Params: `{"args": "gmail users.messages.list --params '{\"userId\": \"me\"}'"}"`
-  - Follow the same security tiers defined in the Google Workspace section of this prompt.
-  - Tier 3 operations (send, delete, share): ask user confirmation BEFORE invoking.""")
-
-    if JIRA_ENABLED:
-        sections.append("""
-### Jira
-- `jira` — Execute a Jira command. Params: `{"args": "issues search --jql 'project = PROJ'"}`
-  - `issues analyze --key PROJ-123` — Build the full issue dossier: metadata, description, comments, attachments,
-    media refs, URLs, linked pages, and proactive artifact extraction for PDFs, DOCX, spreadsheets, text, images,
-    audio, and videos, including public video URLs found inside the issue when they can be accessed safely
-  - `issues transitions --key PROJ-123` — List available transitions for an issue
-  - `issues comment_get --key PROJ-123 --comment-id 10000` — Read one specific comment
-  - `issues comment_edit --key PROJ-123 --comment-id 10000 --body "..."` —
-    Edit a comment authored by the service account
-  - `issues comment_delete --key PROJ-123 --comment-id 10000` — Delete a comment authored by the service account
-  - `issues comment_reply --key PROJ-123 --comment-id 10000 --body "..."` — Create a safe linked reply
-    as a new top-level comment
-  - `issues attachments --key PROJ-123` — List issue attachments
-  - `issues links --key PROJ-123` — List issue links and remote links
-  - `issues view_video --key PROJ-123 --attachment-id 12345`
-    — Download video attachment, extract frames, and analyze visually
-  - `issues view_image --key PROJ-123 --attachment-id 12345` — Download image attachment for visual analysis
-  - `issues view_audio --key PROJ-123 --attachment-id 12345` — Download and transcribe audio attachment
-  - Format: `<resource> <action> [--key value ...]`
-  - Mention syntax in comments: `[~accountId:ACCOUNT_ID]` — use `users search --query "name"` to find account IDs
-  - Replies are implemented as linked top-level comments for safety and documented API compatibility
-  - When a task mentions a Jira issue key, build the full issue dossier first and use it as grounding context
-  - If the dossier reports critical extraction gaps, keep the task read-only until the missing artifacts are resolved
-  - Follow the same security tiers defined in the Atlassian section of this prompt.""")
-
-    if CONFLUENCE_ENABLED:
-        sections.append("""
-### Confluence
-- `confluence` — Execute a Confluence command. Params: `{"args": "pages search --cql 'space = DEV'"}`
-  - Format: `<resource> <action> [--key value ...]`
-  - Follow the same security tiers defined in the Atlassian section of this prompt.""")
 
     if SCRIPT_LIBRARY_ENABLED:
         sections.append("""
@@ -744,8 +696,10 @@ All operations are validated against the allowed git commands list.
 2. For cron commands: validate that the cron expression makes sense for what the user asked.
    Example: "every day at 3am" = "0 3 * * *".
 3. Database access is MCP-only. Do NOT emit native database tool ids or request native DB access.
-4. Shell commands, git, GitHub CLI, Docker, pip, and npm are already available
-   through your native Bash/CLI tools. Do NOT use agent tools for those.
+4. Third-party SaaS/cloud systems are not native Koda tools. Use discovered MCP
+   tools for configured integrations; do not invent native tool ids or assume
+   core access for Jira, Confluence, Google Workspace, GitHub, GitLab, AWS, or
+   similar external services.
 5. Wait for <tool_result> before composing your final response to the user.
 </agent_tools>""")
 

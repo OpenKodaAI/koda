@@ -36,9 +36,7 @@ def _setup_pool(dbm, mock_pool=None):
     return mock_pool
 
 
-# ---------------------------------------------------------------------------
 # Initial state
-# ---------------------------------------------------------------------------
 
 
 def test_initial_state(dbm):
@@ -46,9 +44,7 @@ def test_initial_state(dbm):
     assert dbm._envs == {}
 
 
-# ---------------------------------------------------------------------------
 # Query validation
-# ---------------------------------------------------------------------------
 
 
 class TestValidateQuery:
@@ -136,9 +132,7 @@ class TestValidateQuery:
         assert "blocked" in result.lower()
 
 
-# ---------------------------------------------------------------------------
 # Query execution and formatting
-# ---------------------------------------------------------------------------
 
 
 class TestQuery:
@@ -222,9 +216,7 @@ class TestQuery:
         assert "Rows: 0" in result
 
 
-# ---------------------------------------------------------------------------
 # Schema
-# ---------------------------------------------------------------------------
 
 
 class TestSchema:
@@ -315,9 +307,7 @@ class TestSchema:
         assert "No tables found" in result
 
 
-# ---------------------------------------------------------------------------
 # Explain
-# ---------------------------------------------------------------------------
 
 
 class TestExplain:
@@ -407,9 +397,7 @@ class TestExplain:
         assert "EXPLAIN ANALYZE:" in result
 
 
-# ---------------------------------------------------------------------------
 # Start / Stop
-# ---------------------------------------------------------------------------
 
 
 class TestLifecycle:
@@ -433,9 +421,7 @@ class TestLifecycle:
         assert dbm._envs == {}
 
 
-# ---------------------------------------------------------------------------
 # SSL
-# ---------------------------------------------------------------------------
 
 
 def _make_config(**overrides):
@@ -503,9 +489,7 @@ class TestSSL:
             mock_chain.assert_called_once_with("/tmp/client.pem", "/tmp/client.key")
 
 
-# ---------------------------------------------------------------------------
 # SSH Tunnel
-# ---------------------------------------------------------------------------
 
 
 class TestSSHTunnel:
@@ -548,9 +532,7 @@ class TestSSHTunnel:
             mock_conn.forward_local_port.assert_awaited_once_with("127.0.0.1", 0, "db.internal", 5432)
 
 
-# ---------------------------------------------------------------------------
 # Integration: start with SSH / SSL
-# ---------------------------------------------------------------------------
 
 
 class TestStartIntegration:
@@ -692,9 +674,7 @@ class TestStartIntegration:
         assert dbm._envs == {}
 
 
-# ---------------------------------------------------------------------------
 # Multi-env
-# ---------------------------------------------------------------------------
 
 
 class TestMultiEnv:
@@ -793,9 +773,7 @@ class TestMultiEnv:
             assert _mock_asyncpg.create_pool.call_count == 2
 
 
-# ---------------------------------------------------------------------------
 # SSH key format validation (SEC-9)
-# ---------------------------------------------------------------------------
 
 
 class TestReadSSHKeyValidation:

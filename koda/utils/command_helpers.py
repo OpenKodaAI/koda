@@ -47,7 +47,6 @@ _FUNCTION_PROVIDER_ALIASES: dict[str, str] = {
     "whisper-cpp": "whispercpp",
     "whisper_cpp": "whispercpp",
     "whisper": "whispercpp",
-    "sora": "codex",
 }
 
 _KNOWN_GENERAL_PROVIDER_IDS: frozenset[str] = frozenset(

@@ -23,48 +23,12 @@ class TestBuildBotToolsPrompt:
         assert "tool_result" in prompt
         assert "do NOT tell the user to type" in prompt.lower() or "Do NOT instruct" in prompt
 
-    def test_gws_section_when_enabled(self):
-        with patch("koda.services.tool_prompt.GWS_ENABLED", True):
-            prompt = build_agent_tools_prompt()
-        assert "Google Workspace" in prompt
+    def test_prompt_never_lists_native_external_saas_tools(self):
+        prompt = build_agent_tools_prompt()
         assert "`gws`" not in prompt
-
-    def test_no_gws_section_when_disabled(self):
-        with patch("koda.services.tool_prompt.GWS_ENABLED", False):
-            prompt = build_agent_tools_prompt()
-        assert "Google Workspace" not in prompt
-
-    def test_jira_section_when_enabled(self):
-        with patch("koda.services.tool_prompt.JIRA_ENABLED", True):
-            prompt = build_agent_tools_prompt()
-        assert "Jira" in prompt
         assert "`jira`" not in prompt
-
-    def test_no_jira_section_when_disabled(self):
-        with patch("koda.services.tool_prompt.JIRA_ENABLED", False):
-            prompt = build_agent_tools_prompt()
-        assert "### Jira" not in prompt
-
-    def test_confluence_section_when_enabled(self):
-        with patch("koda.services.tool_prompt.CONFLUENCE_ENABLED", True):
-            prompt = build_agent_tools_prompt()
-        assert "Confluence" in prompt
-
-    def test_no_confluence_section_when_disabled(self):
-        with patch("koda.services.tool_prompt.CONFLUENCE_ENABLED", False):
-            prompt = build_agent_tools_prompt()
-        assert "### Confluence" not in prompt
-
-    def test_all_services_enabled(self):
-        with (
-            patch("koda.services.tool_prompt.GWS_ENABLED", True),
-            patch("koda.services.tool_prompt.JIRA_ENABLED", True),
-            patch("koda.services.tool_prompt.CONFLUENCE_ENABLED", True),
-        ):
-            prompt = build_agent_tools_prompt()
-        assert "Google Workspace" in prompt
-        assert "### Jira" in prompt
-        assert "### Confluence" in prompt
+        assert "`confluence`" not in prompt
+        assert "Third-party SaaS/cloud systems are not native Koda tools" in prompt
 
     def test_browser_section_when_enabled(self):
         with patch("koda.services.tool_prompt.BROWSER_FEATURES_ENABLED", True):
@@ -160,9 +124,8 @@ class TestBuildBotToolsPrompt:
             "koda.services.tool_prompt.AGENT_RESOURCE_ACCESS_POLICY",
             {
                 "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.list"],
-                        "allowed_domains": ["googleapis.com"],
+                    "mcp:atlassian": {
+                        "allow_actions": ["search_issues"],
                     }
                 }
             },
@@ -170,6 +133,5 @@ class TestBuildBotToolsPrompt:
             prompt = build_agent_tools_prompt()
 
         assert "## Integration Grants" in prompt
-        assert "`gws`" in prompt
-        assert "`gmail.list`" in prompt
-        assert "`googleapis.com`" in prompt
+        assert "`mcp:atlassian`" in prompt
+        assert "`search_issues`" in prompt

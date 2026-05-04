@@ -48,9 +48,7 @@ class MockAdapterB(MockAdapter):
     channel_type = "mock_b"
 
 
-# ---------------------------------------------------------------------------
 # detect_configured_channels
-# ---------------------------------------------------------------------------
 
 
 class TestDetectConfiguredChannels:
@@ -115,9 +113,7 @@ class TestDetectConfiguredChannels:
         assert "slack" not in result
 
 
-# ---------------------------------------------------------------------------
 # ChannelManager
-# ---------------------------------------------------------------------------
 
 
 class TestChannelManager:

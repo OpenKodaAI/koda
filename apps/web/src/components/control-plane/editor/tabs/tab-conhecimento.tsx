@@ -15,9 +15,7 @@ import {
   serializeMemoryPolicy,
 } from "@/lib/policy-serializers";
 
-/* -------------------------------------------------------------------------- */
 /*  Tab: Conhecimento (simplified)                                             */
-/* -------------------------------------------------------------------------- */
 
 export function TabConhecimento() {
   const {
@@ -131,7 +129,7 @@ export function TabConhecimento() {
           onChange={handleExtractionModelChange}
           providers={providerEntries}
           enabledProviders={enabledProviders}
-          emptyLabel="Herdar do modelo principal"
+          emptyLabel={tl("Herdar do modelo principal")}
         />
 
         <MarkdownEditorField

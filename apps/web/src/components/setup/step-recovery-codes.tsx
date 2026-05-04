@@ -47,12 +47,12 @@ export function StepRecoveryCodes({ codes, onConfirmed }: StepRecoveryCodesProps
   if (!codes.length) {
     return (
       <div className="flex flex-col gap-4">
-        <InlineAlert tone="warning">
-          {t("auth.setup.recovery_codes.already_shown_banner")}
+        <InlineAlert tone="danger">
+          {t("auth.setup.recovery_codes.missing_codes_error", {
+            defaultValue:
+              "Recovery codes were not issued. Please generate a new setup code and create the owner account again.",
+          })}
         </InlineAlert>
-        <Button variant="accent" size="lg" onClick={onConfirmed} className="auth-submit">
-          {t("auth.setup.recovery_codes.continue")}
-        </Button>
       </div>
     );
   }

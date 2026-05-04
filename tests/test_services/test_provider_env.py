@@ -1,8 +1,10 @@
 """Tests for subprocess environment sanitization helpers."""
 
+from unittest.mock import patch
+
 import pytest
 
-from koda.services.provider_env import build_llm_subprocess_env, build_tool_subprocess_env
+from koda.services.provider_env import build_llm_subprocess_env, build_tool_subprocess_env, validate_shell_command
 
 
 def test_llm_subprocess_env_keeps_provider_credentials_only():
@@ -77,3 +79,14 @@ def test_tool_subprocess_env_keeps_only_safe_base_env_plus_explicit_overrides():
     assert "HOME" not in env
     assert "OPENAI_API_KEY" not in env
     assert "AGENT_TOKEN" not in env
+
+
+def test_validate_shell_command_delegates_external_cli_to_security_guard():
+    command = "npx -y @googleworkspace/cli gmail users.messages.list"
+    with patch("koda.services.provider_env.get_security_guard_client") as guard_factory:
+        guard = guard_factory.return_value
+        guard.validate_shell_command.return_value = command
+
+        assert validate_shell_command(command) == command
+
+    guard.validate_shell_command.assert_called_once_with(command)

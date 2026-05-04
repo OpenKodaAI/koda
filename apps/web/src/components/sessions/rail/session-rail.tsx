@@ -10,12 +10,14 @@ import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { SessionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger, PopoverClose } from "@/components/ui/popover";
+import { AgentGlyph } from "@/components/ui/agent-glyph";
 
 interface SessionRailProps {
   sessions: SessionSummary[];
   selectedSessionId: string | null;
   onSelectSession: (session: SessionSummary) => void;
-  onNewChat: () => void;
+  onNewChat: (agentId?: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
   loading?: boolean;
@@ -129,20 +131,62 @@ function SessionRailImpl({
           {t("chat.rail.title", { defaultValue: "Conversations" })}
         </span>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNewChat}
-            aria-label={t("chat.rail.newSession", { defaultValue: "New conversation" })}
-            className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-full",
-              "bg-[var(--panel-strong)] text-[var(--text-primary)]",
-              "transition-[background-color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-              "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
-            )}
-          >
-            <Plus className="icon-sm" strokeWidth={1.75} aria-hidden />
-          </button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("chat.rail.newSession", { defaultValue: "New conversation" })}
+                className={cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full",
+                  "bg-[var(--panel-strong)] text-[var(--text-primary)]",
+                  "transition-[background-color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
+                )}
+              >
+                <Plus className="icon-sm" strokeWidth={1.75} aria-hidden />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" sideOffset={8} className="w-64 p-2">
+              <div className="mb-2 px-2 pt-1">
+                <span className="text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)]">
+                  {t("chat.rail.newChatAgent", { defaultValue: "Select an agent" })}
+                </span>
+              </div>
+              <div className="flex max-h-[300px] flex-col gap-1 overflow-y-auto">
+                {agents.map((agent) => {
+                  const showId =
+                    Boolean(agent.label) && agent.label !== agent.id;
+                  return (
+                    <PopoverClose asChild key={agent.id}>
+                      <button
+                        type="button"
+                        onClick={() => onNewChat(agent.id)}
+                        className="flex w-full items-center gap-3 rounded-[var(--radius-panel-sm)] p-2 text-left transition-colors hover:bg-[var(--hover-tint)]"
+                      >
+                        <AgentGlyph
+                          agentId={agent.id}
+                          color={agent.color}
+                          shape="orb"
+                          className="h-8 w-8 shrink-0"
+                        />
+                        <div className="flex min-w-0 flex-col">
+                          <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+                            {agent.label || agent.id}
+                          </span>
+                          {showId ? (
+                            <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                              {agent.id}
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                    </PopoverClose>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
           {onClose ? (
             <button
               type="button"

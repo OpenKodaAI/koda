@@ -53,9 +53,7 @@ def classify_url(url: str, jira_url: str, confluence_url: str) -> str:
     return "external"
 
 
-# ---------------------------------------------------------------------------
 # Internal rendering helpers
-# ---------------------------------------------------------------------------
 
 
 def _render_nodes(nodes: list[dict], list_level: int = 0) -> str:
@@ -303,9 +301,7 @@ def _render_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
 # URL collection
-# ---------------------------------------------------------------------------
 
 
 def _collect_urls(node: dict, urls: list[str]) -> None:
@@ -338,9 +334,7 @@ def _collect_urls(node: dict, urls: list[str]) -> None:
             _collect_urls(child, urls)
 
 
-# ---------------------------------------------------------------------------
 # Media reference extraction
-# ---------------------------------------------------------------------------
 
 
 def extract_media_refs_from_adf(adf_doc: dict | None) -> list[dict]:

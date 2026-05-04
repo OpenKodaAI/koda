@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import {
   buildSidebarFooterSections,
@@ -11,7 +11,6 @@ import {
   type SidebarNavItem,
 } from "@/components/layout/sidebar-nav";
 import { KodaMark } from "@/components/layout/koda-mark";
-import { useAppTour } from "@/hooks/use-app-tour";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { usePrefetchRouteData } from "@/hooks/use-prefetch-route-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
@@ -131,7 +130,6 @@ export function Sidebar({
   collapsed = false,
 }: SidebarProps) {
   const { t } = useAppI18n();
-  const { currentStep, status } = useAppTour();
   const pathname = usePathname();
   const prefetchRouteData = usePrefetchRouteData();
   const primaryItems = buildSidebarPrimarySections(t).flatMap((section) => section.items);
@@ -147,21 +145,16 @@ export function Sidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Close the mobile menu on route navigation (but only when pathname actually
+  // changes — not on initial mount). The previous version re-fired on every
+  // mount via RAF, which combined with the tour-route-bridge effect below
+  // caused the menu to "open and close instantly" on user clicks.
+  const lastPathnameRef = useRef(pathname);
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => onMobileOpenChange(false));
-    return () => window.cancelAnimationFrame(frame);
+    if (lastPathnameRef.current === pathname) return;
+    lastPathnameRef.current = pathname;
+    onMobileOpenChange(false);
   }, [onMobileOpenChange, pathname]);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-    if (typeof window === "undefined") return;
-    if (window.innerWidth >= 1024) return;
-    if (status !== "running") return;
-    if (currentStep?.anchor?.startsWith("shell.sidebar")) return;
-
-    const frame = window.requestAnimationFrame(() => onMobileOpenChange(false));
-    return () => window.cancelAnimationFrame(frame);
-  }, [currentStep?.anchor, mobileOpen, onMobileOpenChange, status]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -186,10 +179,10 @@ export function Sidebar({
     <>
       <div
         className={cn(
-          "app-overlay-backdrop bg-[var(--overlay-backdrop)] backdrop-blur-sm transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:hidden",
-          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
+          "app-overlay-backdrop transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:hidden",
+          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
-        style={{ zIndex: 40 }}
+        style={{ zIndex: 49 }}
         onClick={() => onMobileOpenChange(false)}
         aria-hidden="true"
       />
@@ -219,8 +212,8 @@ export function Sidebar({
                 collapsed && "lg:justify-center lg:px-0"
               )}
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center">
-                <KodaMark className="h-8 w-8" />
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+                <KodaMark className="h-7 w-7" />
               </span>
               <span className={cn("min-w-0", collapsed && "lg:hidden")}>
                 <span className="block max-w-[9.75rem] whitespace-nowrap text-[1.125rem] font-medium tracking-[-0.04em] text-[var(--text-primary)] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]">

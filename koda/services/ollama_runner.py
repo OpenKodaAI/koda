@@ -19,6 +19,7 @@ from koda.services.provider_auth import (
     PROVIDER_AUTH_MODE_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
     ollama_api_url,
+    provider_default_base_url,
     verify_provider_api_key,
     verify_provider_local_connection,
 )
@@ -45,8 +46,23 @@ def _configured_auth_mode() -> str:
     return str(os.environ.get(PROVIDER_AUTH_MODE_ENV_KEYS["ollama"], "local")).strip().lower()
 
 
-def _configured_base_url() -> str:
-    return str(os.environ.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"], "http://localhost:11434")).strip()
+def _configured_base_url(auth_mode: str | None = None) -> str:
+    """Resolve the Ollama base URL for the current auth mode.
+
+    The default fallback differs by mode: in ``api_key`` mode we target Ollama
+    Cloud (``https://ollama.com``) while ``local`` mode falls back to the
+    daemon address. Without this distinction, an unset ``OLLAMA_BASE_URL``
+    in the host process leaks ``http://localhost:11434`` into cloud calls,
+    yielding ``Connection refused (Errno 61)`` even though the operator
+    pasted a valid Cloud API key.
+    """
+    mode = (auth_mode or _configured_auth_mode() or "local").strip().lower()
+    raw = os.environ.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"], "").strip()
+    if mode == "api_key":
+        # Hardcode cloud in api_key mode so a stale ``OLLAMA_BASE_URL=http://localhost:11434``
+        # from a prior local-mode setup can never poison cloud requests.
+        return provider_default_base_url("ollama", "api_key")
+    return raw or provider_default_base_url("ollama", mode)
 
 
 def _request_headers(env: dict[str, str]) -> dict[str, str]:
@@ -85,7 +101,10 @@ def _cache_capability(capability: ProviderCapabilities) -> None:
 async def _probe_ollama_auth_status() -> ProviderCapabilities:
     env = build_llm_subprocess_env(provider="ollama")
     auth_mode = _configured_auth_mode()
-    base_url = _configured_base_url()
+    # Pass auth_mode so api_key probes target Ollama Cloud rather than the
+    # local default. `verify_provider_api_key` also guards this internally,
+    # but resolving correctly here makes the probe self-consistent.
+    base_url = _configured_base_url(auth_mode)
     if auth_mode == "api_key":
         api_key = str(env.get(PROVIDER_API_KEY_ENV_KEYS["ollama"]) or "").strip()
         if not api_key:
@@ -176,7 +195,15 @@ def _perform_chat_request(
 ) -> tuple[dict[str, Any], str]:
     env = build_llm_subprocess_env(provider="ollama")
     auth_mode = str(env.get(PROVIDER_AUTH_MODE_ENV_KEYS["ollama"]) or "local").strip().lower()
-    base_url = str(env.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or _configured_base_url()).strip()
+    # When auth_mode is api_key, force the cloud endpoint regardless of any
+    # stray ``OLLAMA_BASE_URL`` in the process env. ``_configured_base_url``
+    # already does this when the value isn't set in the subprocess env, but
+    # the env may carry a leftover localhost from a prior local-mode run.
+    raw_base_url = str(env.get(PROVIDER_BASE_URL_ENV_KEYS["ollama"]) or "").strip()
+    if auth_mode == "api_key":
+        base_url = provider_default_base_url("ollama", "api_key")
+    else:
+        base_url = raw_base_url or _configured_base_url(auth_mode)
     payload = {
         "model": model,
         "messages": _build_messages(query, system_prompt),

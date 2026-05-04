@@ -69,25 +69,23 @@ jobs:
         if: env.SNYK_TOKEN != ''
         run: uv sync --locked --all-groups --all-extras
 
+      - name: Expose Python virtualenv to Snyk
+        if: env.SNYK_TOKEN != ''
+        run: echo "${PWD}/.venv/bin" >> "${GITHUB_PATH}"
+
       - name: Install web dependencies
         if: env.SNYK_TOKEN != ''
         run: pnpm install --frozen-lockfile
 
-      - name: Export pinned Python requirements for Snyk
+      - name: Export installed Python requirements for Snyk
         if: env.SNYK_TOKEN != ''
         run: |
           mkdir -p artifacts/security/snyk
-          uv export \
-            --format requirements.txt \
-            --locked \
-            --all-groups \
-            --all-extras \
-            --no-editable \
-            --no-emit-project \
-            --no-emit-workspace \
-            --no-header \
-            --no-annotate \
-            --output-file artifacts/security/snyk/python-requirements.txt
+          python -m pip freeze \
+            --all \
+            --exclude-editable \
+            --exclude koda \
+            > artifacts/security/snyk/python-requirements.txt
 
       - name: Set up Snyk CLI
         if: env.SNYK_TOKEN != ''
@@ -102,7 +100,7 @@ jobs:
           snyk test \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release \
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/node-open-source.sarif
           status=$?
@@ -118,8 +116,7 @@ jobs:
           snyk test \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
-            --command=.venv/bin/python \
-            --skip-unresolved=true \
+            --command=python \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/python-open-source.sarif
           status=$?
@@ -140,42 +137,17 @@ jobs:
           sarif_file: artifacts/security/snyk/python-open-source.sarif
           category: snyk-open-source-python
 
-      - name: Monitor Node manifests in Snyk
+      - name: Monitor projects in Snyk
         if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        id: node_monitor
-        continue-on-error: true
         run: |
           snyk monitor \
             --all-projects \
             --detection-depth=5 \
-            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release \
-            --skip-unresolved=true
-
-      - name: Monitor exported Python requirements in Snyk
-        if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        id: python_monitor
-        continue-on-error: true
-        run: |
+            --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release
           snyk monitor \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
-            --command=.venv/bin/python \
-            --skip-unresolved=true
-
-      - name: Summarize Snyk monitor snapshot status
-        if: env.SNYK_TOKEN != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          if [[ "${{ steps.node_monitor.outcome }}" == "failure" || "${{ steps.python_monitor.outcome }}" == "failure" ]]; then
-            {
-              echo "## Snyk Monitor Warning"
-              echo
-              echo "At least one Snyk monitor snapshot failed. Security tests and SARIF uploads still completed, but the continuous-monitoring snapshot should be retried."
-              echo
-              echo "- Node monitor outcome: ${{ steps.node_monitor.outcome }}"
-              echo "- Python monitor outcome: ${{ steps.python_monitor.outcome }}"
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
+            --command=python
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''
@@ -190,11 +162,7 @@ jobs:
         if: env.SNYK_TOKEN != ''
         shell: bash
         run: |
-          node_status="${{ steps.node_scan.outputs.status }}"
-          python_status="${{ steps.python_scan.outputs.status }}"
-          if [ "${node_status}" != "0" ] || [ "${python_status}" != "0" ]; then
-            echo "Snyk Node scan status: ${node_status}" >&2
-            echo "Snyk Python scan status: ${python_status}" >&2
+          if [ "${{ steps.node_scan.outputs.status }}" != "0" ] || [ "${{ steps.python_scan.outputs.status }}" != "0" ]; then
             echo "Snyk reported high-severity issues or a scan failure." >&2
             exit 1
           fi

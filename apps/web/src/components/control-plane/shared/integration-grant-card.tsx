@@ -10,9 +10,7 @@ import { TagInputField } from "@/components/control-plane/shared/tag-input-field
 import { cn } from "@/lib/utils";
 import type { ControlPlaneCoreIntegration } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type IntegrationGrantValue = {
   enabled?: boolean;
@@ -28,9 +26,7 @@ interface IntegrationGrantCardProps {
   onUpdate: (integrationId: string, grant: IntegrationGrantValue) => void;
 }
 
-/* ------------------------------------------------------------------ */
 /*  Connection status badge                                            */
-/* ------------------------------------------------------------------ */
 
 function ConnectionBadge({ status }: { status: string | undefined }) {
   const { tl } = useAppI18n();
@@ -62,9 +58,7 @@ function ConnectionBadge({ status }: { status: string | undefined }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Toggle switch (inline, minimal)                                    */
-/* ------------------------------------------------------------------ */
 
 function GrantSwitch({
   checked,
@@ -99,9 +93,7 @@ function GrantSwitch({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Main card                                                          */
-/* ------------------------------------------------------------------ */
 
 export function IntegrationGrantCard({
   integration,

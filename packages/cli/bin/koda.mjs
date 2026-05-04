@@ -245,6 +245,15 @@ function runCommand(command, args, { cwd, stdio = "inherit", env } = {}) {
   return result;
 }
 
+function runCommandCapture(command, args, { cwd, env } = {}) {
+  return spawnSync(command, args, {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: env ? { ...process.env, ...env } : process.env,
+  });
+}
+
 function commandExists(command) {
   const result = spawnSync("sh", ["-lc", `command -v ${command}`], {
     stdio: "ignore",
@@ -301,8 +310,8 @@ async function collectDoctorPayload(installDir) {
     control_plane_url: loopbackUrl(controlPlanePort),
     health_url: loopbackUrl(controlPlanePort, "/health"),
     dashboard_url: dashboardUrl,
-    setup_url: loopbackUrl(controlPlanePort, "/setup"),
-    dashboard_setup_url: `${dashboardUrl}/control-plane/setup`,
+    setup_url: `${dashboardUrl}/setup`,
+    dashboard_setup_url: `${dashboardUrl}/setup`,
     legacy_setup_url: loopbackUrl(controlPlanePort, "/setup"),
   };
 
@@ -320,9 +329,13 @@ async function collectDoctorPayload(installDir) {
   const onboardingResponse = await fetch(`${payload.control_plane_url}/api/control-plane/onboarding/status`, {
     cache: "no-store",
   });
+  const onboardingPayload = await onboardingResponse.json().catch(() => ({}));
   checks.onboarding = {
     ok: onboardingResponse.ok,
     status: onboardingResponse.status,
+    has_owner: Boolean(onboardingPayload.has_owner),
+    bootstrap_required: Boolean(onboardingPayload.bootstrap_required),
+    bootstrap_file_path: onboardingPayload.bootstrap_file_path || null,
   };
   return {
     ok: Object.values(checks).every((item) => item.ok),
@@ -353,32 +366,95 @@ async function doctorCommand(args) {
   }
 }
 
+async function readBootstrapCodeFromContainer(installDir, env) {
+  const stateRoot = String(env.STATE_ROOT_DIR || "/var/lib/koda/state").trim() || "/var/lib/koda/state";
+  const bootstrapPath = `${stateRoot.replace(/\/$/, "")}/control_plane/bootstrap.txt`;
+  const result = runCommandCapture(
+    "docker",
+    [
+      ...composeArgs(installDir),
+      "exec",
+      "-T",
+      "app",
+      "sh",
+      "-lc",
+      `cat ${JSON.stringify(bootstrapPath)} 2>/dev/null`,
+    ],
+    { cwd: installDir },
+  );
+  const code = String(result.stdout || "").trim().split(/\s+/)[0] || "";
+  if (result.status === 0 && code) {
+    return {
+      code,
+      expires_at: null,
+      source: "bootstrap_file",
+      bootstrap_file_path: bootstrapPath,
+    };
+  }
+  return {
+    code: "",
+    error: String(result.stderr || result.stdout || `Could not read ${bootstrapPath} from the app container.`).trim(),
+    bootstrap_file_path: bootstrapPath,
+  };
+}
+
 async function issueBootstrapCode(installDir) {
   const env = await readInstallEnv(installDir);
   const controlPlanePort = env.CONTROL_PLANE_PORT || "8090";
   const webPort = env.WEB_PORT || "3000";
   const recoveryToken = String(env.CONTROL_PLANE_API_TOKEN || "").trim();
-  if (!recoveryToken) {
-    throw new Error("CONTROL_PLANE_API_TOKEN is required to issue a setup code.");
+  const failures = [];
+  if (recoveryToken) {
+    try {
+      const response = await fetch(loopbackUrl(controlPlanePort, "/api/control-plane/auth/bootstrap/codes"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${recoveryToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ label: "npm_cli" }),
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.code) {
+        return {
+          url: `${loopbackUrl(webPort)}/setup`,
+          code: payload.code,
+          expires_at: payload.expires_at || null,
+          source: "api",
+        };
+      }
+      failures.push(String(payload.error || `API returned HTTP ${response.status}.`));
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  } else {
+    failures.push("CONTROL_PLANE_API_TOKEN is missing.");
   }
-  const response = await fetch(loopbackUrl(controlPlanePort, "/api/control-plane/auth/bootstrap/codes"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${recoveryToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ label: "npm_cli" }),
+
+  await fetch(loopbackUrl(controlPlanePort, "/api/control-plane/onboarding/status"), {
     cache: "no-store",
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.code) {
-    throw new Error(String(payload.error || "Could not issue a setup code."));
+  }).catch(() => null);
+  const fallback = await readBootstrapCodeFromContainer(installDir, env);
+  if (fallback.code) {
+    return {
+      url: `${loopbackUrl(webPort)}/setup`,
+      code: fallback.code,
+      expires_at: fallback.expires_at,
+      source: fallback.source,
+      bootstrap_file_path: fallback.bootstrap_file_path,
+      warnings: failures,
+    };
   }
-  return {
-    url: `${loopbackUrl(webPort)}/control-plane/setup`,
-    code: payload.code,
-    expires_at: payload.expires_at || null,
-  };
+  failures.push(fallback.error);
+  throw new Error(
+    [
+      "Could not issue or read a setup code.",
+      ...failures.map((failure) => `- ${failure}`),
+      `Try: koda logs --dir ${installDir} app`,
+      `Bootstrap file inside the app container: ${fallback.bootstrap_file_path}`,
+    ].join("\n"),
+  );
 }
 
 function maybeOpenBrowser(url) {
@@ -426,6 +502,12 @@ async function installCommand(args) {
   console.log(`Koda ${manifest.version} installed.`);
   console.log(`Dashboard: ${bootstrap.url}`);
   console.log(`Setup code: ${bootstrap.code}`);
+  if (bootstrap.source === "bootstrap_file" && bootstrap.bootstrap_file_path) {
+    console.log(`Source: ${bootstrap.bootstrap_file_path}`);
+  }
+  for (const warning of bootstrap.warnings || []) {
+    console.log(`Note: ${warning}`);
+  }
   if (bootstrap.expires_at) {
     console.log(`Expires at: ${bootstrap.expires_at}`);
   }
@@ -469,6 +551,12 @@ async function authCommand(args) {
   const payload = await issueBootstrapCode(installDir);
   console.log(`Dashboard: ${payload.url}`);
   console.log(`Setup code: ${payload.code}`);
+  if (payload.source === "bootstrap_file" && payload.bootstrap_file_path) {
+    console.log(`Source: ${payload.bootstrap_file_path}`);
+  }
+  for (const warning of payload.warnings || []) {
+    console.log(`Note: ${warning}`);
+  }
   if (payload.expires_at) {
     console.log(`Expires at: ${payload.expires_at}`);
   }

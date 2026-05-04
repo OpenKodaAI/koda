@@ -22,7 +22,7 @@ from koda.agent_contract import (
 )
 from koda.control_plane.execution_policy import normalize_execution_policy, validate_execution_policy
 from koda.control_plane.settings import looks_like_secret_key
-from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog
+from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog, get_model_effort_capability
 
 _ALLOWED_MEMORY_EXTRACTION_FIELDS = frozenset({"query", "response", "max_items"})
 _ALLOWED_KNOWLEDGE_LAYERS = frozenset({"canonical_policy", "approved_runbook", "workspace_doc", "observed_pattern"})
@@ -169,6 +169,7 @@ _RESOURCE_ACCESS_POLICY_KEYS = frozenset(
         "local_env",
     }
 )
+_REMOVED_EXTERNAL_INTEGRATION_IDS = frozenset({"gws", "jira", "confluence", "gh", "glab", "aws"})
 _RESERVED_LOCAL_ENV_PREFIXES = (
     "RUNTIME_",
     "MEMORY_",
@@ -238,6 +239,7 @@ def normalize_custom_skills(value: Any) -> list[dict[str, Any]]:
                 "id": skill_id,
                 "name": name,
                 "content": content,
+                "enabled": _as_bool(item.get("enabled"), True),
                 "instruction": _trimmed(item.get("instruction")),
                 "category": _trimmed(item.get("category")) or "general",
                 "aliases": normalize_string_list(item.get("aliases")),
@@ -245,6 +247,27 @@ def normalize_custom_skills(value: Any) -> list[dict[str, Any]]:
                 "output_format_enforcement": _trimmed(item.get("output_format_enforcement")),
             }
         )
+    return normalized
+
+
+def normalize_skill_policy(value: Any) -> dict[str, Any]:
+    raw = _safe_json_object(value)
+    if not raw:
+        return {}
+    normalized: dict[str, Any] = {}
+    enabled = _as_bool(raw.get("enabled"))
+    if enabled is not None:
+        normalized["enabled"] = enabled
+    max_skills = _as_int(raw.get("max_skills"))
+    if max_skills is not None and max_skills > 0:
+        normalized["max_skills"] = max_skills
+    skill_budget_pct = _as_float(raw.get("skill_budget_pct"))
+    if skill_budget_pct is not None and skill_budget_pct > 0:
+        normalized["skill_budget_pct"] = skill_budget_pct
+    for key in ("enabled_skills", "disabled_skills"):
+        items = normalize_string_list(raw.get(key))
+        if items:
+            normalized[key] = items
     return normalized
 
 
@@ -645,6 +668,118 @@ def _normalize_functional_defaults(value: Any) -> dict[str, dict[str, str]]:
     return normalized
 
 
+def normalize_effort_overrides(value: Any) -> dict[str, Any]:
+    """Normalize per-model effort overrides keyed by ``provider:model``.
+
+    Accepts strings (enum kind) or ints (tokens kind). Silently drops entries
+    whose model has no effort capability or whose value is out of range, so
+    stale UI state cannot poison the runtime.
+    """
+    payload = _safe_json_object(value)
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in payload.items():
+        slug = _trimmed(raw_key).lower()
+        if not slug or ":" not in slug:
+            continue
+        provider_id, model_id = slug.split(":", 1)
+        provider_id = provider_id.strip()
+        model_id = model_id.strip()
+        if not provider_id or not model_id:
+            continue
+        cap = get_model_effort_capability(provider_id, model_id)
+        if cap is None:
+            continue
+        if cap["kind"] == "enum":
+            text_value = _trimmed(raw_value).lower()
+            if text_value and text_value in cap["values"]:
+                normalized[f"{provider_id}:{model_id}"] = text_value
+        elif cap["kind"] == "tokens":
+            int_value = _as_int(raw_value)
+            if int_value is None:
+                continue
+            if cap["min"] <= int_value <= cap["max"]:
+                normalized[f"{provider_id}:{model_id}"] = int_value
+    return normalized
+
+
+def normalize_model_effort_selection(
+    value: Any,
+    *,
+    provider_id: str | None = None,
+    model_id: str | None = None,
+) -> dict[str, Any]:
+    """Normalize a singular effort selection for one provider/model pair.
+
+    Legacy maps are intentionally handled by ``normalize_effort_overrides``;
+    this function accepts the new persisted shape:
+    ``{"provider_id": "...", "model_id": "...", "value": ...}``.
+    """
+    payload = _safe_json_object(value)
+    expected_provider = _trimmed(provider_id).lower()
+    expected_model = _trimmed(model_id)
+    normalized_provider = _trimmed(payload.get("provider_id") or expected_provider).lower()
+    normalized_model = _trimmed(payload.get("model_id") or expected_model)
+    if not normalized_provider or not normalized_model:
+        return {}
+    if expected_provider and normalized_provider != expected_provider:
+        return {}
+    if expected_model and normalized_model != expected_model:
+        return {}
+
+    cap = get_model_effort_capability(normalized_provider, normalized_model)
+    if cap is None:
+        return {}
+
+    raw_value = payload.get("value")
+    if cap["kind"] == "enum":
+        text_value = _trimmed(raw_value).lower()
+        if text_value and text_value in cap["values"]:
+            return {
+                "provider_id": normalized_provider,
+                "model_id": normalized_model,
+                "value": text_value,
+            }
+        return {}
+
+    if cap["kind"] == "tokens":
+        int_value = _as_int(raw_value)
+        if int_value is not None and cap["min"] <= int_value <= cap["max"]:
+            return {
+                "provider_id": normalized_provider,
+                "model_id": normalized_model,
+                "value": int_value,
+            }
+    return {}
+
+
+def normalize_legacy_effort_selection(value: Any, *, provider_id: str, model_id: str) -> dict[str, Any]:
+    """Convert the deprecated per-model effort map into the singular shape."""
+    normalized_provider = _trimmed(provider_id).lower()
+    normalized_model = _trimmed(model_id)
+    if not normalized_provider or not normalized_model:
+        return {}
+    slug = f"{normalized_provider}:{normalized_model}"
+    legacy = normalize_effort_overrides(value)
+    if slug not in legacy:
+        return {}
+    return {
+        "provider_id": normalized_provider,
+        "model_id": normalized_model,
+        "value": legacy[slug],
+    }
+
+
+def _general_effort_target_from_policy(policy: dict[str, Any]) -> tuple[str, str]:
+    functional_defaults = _safe_json_object(policy.get("functional_defaults"))
+    general_selection = _safe_json_object(functional_defaults.get("general"))
+    provider_id = (
+        _trimmed(general_selection.get("provider_id")).lower() or _trimmed(policy.get("default_provider")).lower()
+    )
+    default_models = _safe_json_object(policy.get("default_models"))
+    model_id = _trimmed(general_selection.get("model_id")) or _trimmed(default_models.get(provider_id))
+    return provider_id, model_id
+
+
 def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(_safe_json_object(policy))
     if not raw:
@@ -682,6 +817,24 @@ def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     max_total_budget = _as_float(raw.get("max_total_budget_usd"))
     if max_total_budget is not None:
         raw["max_total_budget_usd"] = max_total_budget
+    legacy_effort_overrides = normalize_effort_overrides(raw.get("effort_overrides"))
+    target_provider, target_model = _general_effort_target_from_policy(raw)
+    effort_override = normalize_model_effort_selection(
+        raw.get("effort_override"),
+        provider_id=target_provider,
+        model_id=target_model,
+    )
+    if not effort_override and legacy_effort_overrides and target_provider and target_model:
+        effort_override = normalize_legacy_effort_selection(
+            legacy_effort_overrides,
+            provider_id=target_provider,
+            model_id=target_model,
+        )
+    if effort_override:
+        raw["effort_override"] = effort_override
+    else:
+        raw.pop("effort_override", None)
+    raw.pop("effort_overrides", None)
     return _compact_mapping(raw)
 
 
@@ -870,6 +1023,7 @@ def normalize_agent_spec(agent_spec: dict[str, Any]) -> dict[str, Any]:
         "voice_policy": _compact_mapping(_safe_json_object(agent_spec.get("voice_policy"))),
         "image_analysis_policy": _compact_mapping(_safe_json_object(agent_spec.get("image_analysis_policy"))),
         "memory_extraction_schema": _compact_mapping(_safe_json_object(agent_spec.get("memory_extraction_schema"))),
+        "skill_policy": normalize_skill_policy(agent_spec.get("skill_policy")),
         "custom_skills": normalize_custom_skills(agent_spec.get("custom_skills")),
         "documents": {
             kind: _normalize_markdown_block(value)
@@ -912,6 +1066,8 @@ def build_agent_spec_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "execution_policy": _safe_json_object(runtime.get("execution_policy")),
             "voice_policy": _safe_json_object(prompting.get("voice_policy")),
             "image_analysis_policy": _safe_json_object(prompting.get("image_analysis_policy")),
+            "skill_policy": _safe_json_object(prompting.get("skill_policy")),
+            "custom_skills": _safe_json_list(prompting.get("custom_skills")),
             "memory_extraction_schema": _safe_json_object(memory.get("memory_extraction_schema")),
             "documents": documents,
         }
@@ -946,6 +1102,7 @@ def validate_agent_spec(
     enabled_providers: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate typed config, markdown projections, and publish safety rules."""
+    raw_resource_access_policy = _safe_json_object(_safe_json_object(agent_spec).get("resource_access_policy"))
     normalized_spec = normalize_agent_spec(agent_spec)
     errors: list[str] = []
     warnings: list[str] = []
@@ -1177,21 +1334,26 @@ def validate_agent_spec(
         if promotion_mode and promotion_mode not in PROMOTION_MODES:
             errors.append(f"knowledge_policy.promotion_mode is invalid: {promotion_mode}")
 
+    raw_grants = _safe_json_object(raw_resource_access_policy.get("integration_grants"))
+    unknown_integrations = sorted(
+        str(integration_id or "").strip().lower()
+        for integration_id in raw_grants
+        if str(integration_id or "").strip().lower()
+        and str(integration_id or "").strip().lower() not in _REMOVED_EXTERNAL_INTEGRATION_IDS
+        and str(integration_id or "").strip().lower() not in CORE_INTEGRATION_CATALOG
+        and not str(integration_id or "").strip().lower().startswith("mcp:")
+    )
+    if unknown_integrations:
+        errors.append(
+            "resource_access_policy.integration_grants contains unknown integrations: "
+            + ", ".join(unknown_integrations)
+        )
+
     if resource_access_policy:
         unexpected_keys = sorted(key for key in resource_access_policy if key not in _RESOURCE_ACCESS_POLICY_KEYS)
         if unexpected_keys:
             warnings.append(
                 "resource_access_policy contains unsupported keys that will be ignored: " + ", ".join(unexpected_keys)
-            )
-        unknown_integrations = sorted(
-            integration_id
-            for integration_id in normalize_integration_grants(resource_access_policy.get("integration_grants"))
-            if integration_id not in CORE_INTEGRATION_CATALOG
-        )
-        if unknown_integrations:
-            errors.append(
-                "resource_access_policy.integration_grants contains unknown integrations: "
-                + ", ".join(unknown_integrations)
             )
         for list_key in ("allowed_global_secret_keys", "allowed_shared_env_keys"):
             invalid_keys = [
@@ -1211,16 +1373,6 @@ def validate_agent_spec(
                 )
             if env_key.startswith(_RESERVED_LOCAL_ENV_PREFIXES):
                 errors.append(f"resource_access_policy.local_env.{env_key} uses a reserved core/provider prefix.")
-        integration_grants = normalize_integration_grants(resource_access_policy.get("integration_grants"))
-        unknown_integrations = sorted(
-            integration_id for integration_id in integration_grants if integration_id not in CORE_INTEGRATION_CATALOG
-        )
-        if unknown_integrations:
-            errors.append(
-                "resource_access_policy.integration_grants contains unknown integrations: "
-                + ", ".join(unknown_integrations)
-            )
-
     if memory_extraction_schema:
         template = _trimmed(
             memory_extraction_schema.get("template")
@@ -1300,9 +1452,7 @@ def parse_json_env_value(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-# ---------------------------------------------------------------------------
 # Hierarchical prompt spec: Workspace -> Squad -> Agent
-# ---------------------------------------------------------------------------
 
 WORKSPACE_SPEC_FIELDS: dict[str, set[str] | None] = {
     "hard_rules": {"non_negotiables", "forbidden_actions", "security_rules"},

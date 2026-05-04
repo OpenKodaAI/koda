@@ -17,6 +17,8 @@ import { useContentStable } from "@/hooks/use-content-stable";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ChatComposer } from "@/components/sessions/chat/chat-composer";
+import type { ChatCommand } from "@/lib/contracts/chat-commands";
+import type { Mention } from "@/lib/contracts/sessions";
 import { ChatHeader } from "@/components/sessions/chat/chat-header";
 import { ChatThread, type PendingChatMessage } from "@/components/sessions/chat/chat-thread";
 import { SessionContextDrawer } from "@/components/sessions/context/session-context-drawer";
@@ -101,6 +103,7 @@ function SessionsPageContent() {
   );
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [draft, setDraft] = useState("");
+  const [composerMentions, setComposerMentions] = useState<Mention[]>([]);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
@@ -440,8 +443,9 @@ function SessionsPageContent() {
     [availableBotIds, isDesktop]
   );
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((agentId?: string) => {
     setActiveBotId((current) => {
+      if (agentId) return normalizeSelectedBotId(agentId, availableBotIds);
       const candidate = selectedSummary?.bot_id ?? current;
       return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
     });
@@ -507,6 +511,7 @@ function SessionsPageContent() {
       });
 
       try {
+        const mentionsPayload = composerMentions.length > 0 ? composerMentions : undefined;
         const response = await mutateControlPlaneDashboardJson<SessionSendResponse>(
           `/agents/${sendBotId}/sessions/messages`,
           {
@@ -514,6 +519,7 @@ function SessionsPageContent() {
             body: {
               text: trimmedText,
               session_id: draftSessionId,
+              ...(mentionsPayload ? { mentions: mentionsPayload } : {}),
             } satisfies SessionSendRequest,
           }
         );
@@ -556,7 +562,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [effectiveBotId, composerSubmitting, detailQueryKey, queryClient, selectedSessionId, sessionsQueryKey, t]
+    [composerMentions, effectiveBotId, composerSubmitting, detailQueryKey, queryClient, selectedSessionId, sessionsQueryKey, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -584,6 +590,36 @@ function SessionsPageContent() {
   });
   useBodyScrollLock(mobileRailPresence.shouldRender);
   useEscapeToClose(mobileRailPresence.shouldRender, () => setMobileRailOpen(false));
+
+  const handleCommand = useCallback(
+    (command: ChatCommand) => {
+      const action = command.action;
+      if (action.kind !== "execute") return;
+      switch (action.type) {
+        case "new-session":
+        case "clear-thread":
+          handleNewChat();
+          return;
+        case "open-context":
+          if (selectedSummary) setContextDrawerOpen(true);
+          return;
+        case "summarize": {
+          const prompt =
+            (action.payload?.prompt as string | undefined) ??
+            t("chat.composer.summarizePrompt", {
+              defaultValue: "Summarize this conversation so far.",
+            });
+          void sendMessage(prompt);
+          return;
+        }
+        case "switch-agent":
+        case "rename-session":
+        default:
+          return;
+      }
+    },
+    [handleNewChat, selectedSummary, sendMessage, t],
+  );
 
   const composerDisabled = !effectiveBotId;
   const showThinking = Boolean(
@@ -684,6 +720,8 @@ function SessionsPageContent() {
                   if (composerError) setComposerError(null);
                 }}
                 onSubmit={() => void sendMessage(draft)}
+                onCommandExecute={handleCommand}
+                onMentionsChange={setComposerMentions}
                 agentId={effectiveBotId ?? null}
                 onAgentChange={handleAgentChange}
                 lockedAgent={Boolean(selectedSessionId && effectiveBotId)}
@@ -718,7 +756,7 @@ function SessionsPageContent() {
             aria-label={t("chat.rail.close", { defaultValue: "Close" })}
             onClick={() => setMobileRailOpen(false)}
             className={cn(
-              "fixed inset-0 z-[48] cursor-default border-0 bg-[color:var(--overlay-backdrop-bg)] backdrop-blur-[6px] transition-opacity md:hidden",
+              "app-overlay-backdrop !z-[48] cursor-default border-0 md:hidden",
               mobileRailPresence.isVisible ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           />

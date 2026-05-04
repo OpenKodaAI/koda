@@ -1,4 +1,4 @@
-"""Tests for periodic temp file cleanup (P1-3)."""
+"""Tests for periodic temp file cleanup."""
 
 import os
 import time

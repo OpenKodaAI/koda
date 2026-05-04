@@ -12,9 +12,7 @@ from koda.services.in_memory_vector_index import (
     InMemoryVectorCollection,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _unit_vector(angle_deg: float, dims: int = 3) -> list[float]:
@@ -37,9 +35,7 @@ def _make_collection(n: int = 5, *, name: str = "test") -> InMemoryVectorCollect
     return col
 
 
-# ---------------------------------------------------------------------------
 # Top-k correctness
-# ---------------------------------------------------------------------------
 
 
 class TestQueryTopK:
@@ -93,9 +89,7 @@ class TestQueryTopK:
         assert result["ids"][1][0] == "id-9"
 
 
-# ---------------------------------------------------------------------------
 # Metadata filtering with heap
-# ---------------------------------------------------------------------------
 
 
 class TestMetadataFiltering:
@@ -121,9 +115,7 @@ class TestMetadataFiltering:
         assert result["ids"][0] == ["id-0"]
 
 
-# ---------------------------------------------------------------------------
 # Size limit and eviction
-# ---------------------------------------------------------------------------
 
 
 class TestSizeLimit:

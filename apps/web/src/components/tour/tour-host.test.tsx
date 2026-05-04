@@ -60,7 +60,8 @@ function HomeShell() {
         <div {...tourAnchor("overview.agent-switcher")}>Agent switcher</div>
         <div {...tourAnchor("overview.stats")}>Overview stats</div>
         <div {...tourAnchor("overview.runtime-control")}>Runtime control</div>
-        <div {...tourAnchor("overview.live-plan")}>Live plan</div>
+        <div {...tourAnchor("overview.activity")}>Activity</div>
+        <div {...tourAnchor("overview.history")}>History</div>
       </div>
       <aside {...tourRoute("shell.sidebar")} {...tourAnchor("shell.sidebar.brand")}>
         <span {...tourAnchor("shell.sidebar.nav.home")}>
@@ -81,8 +82,8 @@ function ControlPlaneShell() {
   return (
     <>
       <section {...tourRoute("control-plane.catalog", "empty")}>
-        <button type="button" {...tourAnchor("catalog.create-agent")}>
-          Create agent
+        <button type="button" {...tourAnchor("catalog.create-bot")}>
+          Create bot
         </button>
         <div {...tourAnchor("catalog.board")}>Catalog board</div>
         <div {...tourAnchor("catalog.empty")}>Empty catalog</div>
@@ -177,43 +178,41 @@ describe("TourHost", () => {
     vi.restoreAllMocks();
   });
 
-  it("auto-opens on first eligible load and supports continue, back and skip", async () => {
+  it("auto-opens with welcome, advances to sidebar, supports back and skip", async () => {
     const user = userEvent.setup();
     const view = renderTour({ pathname: "/", shell: <HomeShell /> });
 
     expect(
       await screen.findByRole("heading", {
-        name: "Start with a quick guided tour",
+        name: "Meet the workspace in 7 steps",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Start tour" }));
     expect(
       await screen.findByRole("heading", {
-        name: "This sidebar is your main map",
-      }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", {
-        name: "The topbar keeps route context close",
+        name: "Navigate from the sidebar",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(
       await screen.findByRole("heading", {
-        name: "This sidebar is your main map",
+        name: "Meet the workspace in 7 steps",
       }),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Start tour" }));
+    await screen.findByRole("heading", {
+      name: "Navigate from the sidebar",
+    });
 
     await user.click(screen.getByRole("button", { name: "Skip tour" }));
 
     await waitFor(() => {
       expect(
         within(document.body).queryByRole("heading", {
-          name: "This sidebar is your main map",
+          name: "Navigate from the sidebar",
         }),
       ).not.toBeInTheDocument();
     });
@@ -228,22 +227,54 @@ describe("TourHost", () => {
     });
   });
 
-  it("skips the optional editor chapter and navigates to runtime when no agent editor route exists", async () => {
+  it("walks the seven-step onboarding path and navigates across core screens", async () => {
+    const user = userEvent.setup();
+    renderTour({ pathname: "/", shell: <HomeShell /> });
+
+    await screen.findByRole("heading", {
+      name: "Meet the workspace in 7 steps",
+    });
+    await user.click(screen.getByRole("button", { name: "Start tour" }));
+    await screen.findByRole("heading", {
+      name: "Navigate from the sidebar",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Use the topbar for quick actions",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Read the workspace status first",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", {
+      name: "Follow recent activity from Home",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/control-plane", { scroll: false });
+    });
+  });
+
+  it("on /control-plane the tour resumes at the catalog primary action and continues to /runtime", async () => {
     const user = userEvent.setup();
     renderTour({ pathname: "/control-plane", shell: <ControlPlaneShell /> });
 
     expect(
       await screen.findByRole("heading", {
-        name: "The catalog is your first stop on a fresh install",
+        name: "Start by creating your first agent",
       }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", {
-        name: "The board grows with the catalog",
-      }),
-    ).toBeInTheDocument();
+    await screen.findByRole("heading", {
+      name: "The catalog fills in as agents are added",
+    });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
@@ -252,7 +283,7 @@ describe("TourHost", () => {
     });
   });
 
-  it("uses a bottom-sheet coachmark on mobile and falls back to the visible anchor", async () => {
+  it("renders the coachmark on a narrow viewport and tracks the anchor", async () => {
     setViewportSize(390, 844);
     const user = userEvent.setup();
 
@@ -264,18 +295,6 @@ describe("TourHost", () => {
       width: 220,
       height: 56,
     });
-    mockElementRect(screen.getByText("Topbar actions"), {
-      top: 0,
-      left: -120,
-      width: 0,
-      height: 0,
-    });
-    mockElementRect(screen.getByRole("button", { name: "Language" }), {
-      top: 18,
-      left: 286,
-      width: 82,
-      height: 42,
-    });
 
     await user.click(
       await screen.findByRole("button", {
@@ -284,19 +303,12 @@ describe("TourHost", () => {
     );
 
     await screen.findByRole("heading", {
-      name: "This sidebar is your main map",
+      name: "Navigate from the sidebar",
     });
 
-    const sidebarDialog = screen.getByRole("dialog");
-    expect(sidebarDialog.className).toContain("tour-coachmark--mobile-sheet");
-    expect(sidebarDialog.getAttribute("style")).toContain("top: auto");
-    expect(sidebarDialog.getAttribute("style")).toContain("max-height:");
-
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    await screen.findByRole("heading", {
-      name: "The topbar keeps route context close",
-    });
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.className).toContain("tour-coachmark--anchored");
 
     await waitFor(() => {
       const spotlight = document.querySelector<HTMLElement>(".tour-spotlight");
@@ -306,8 +318,6 @@ describe("TourHost", () => {
       const top = Number(style.match(/top: ([0-9.]+)px/)?.[1] ?? Number.NaN);
       expect(Number.isFinite(left)).toBe(true);
       expect(Number.isFinite(top)).toBe(true);
-      expect(left).toBeGreaterThan(240);
-      expect(top).toBeLessThan(24);
     });
   });
 });

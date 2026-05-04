@@ -111,3 +111,11 @@ def mask_secret(value: str) -> str:
     if len(value) < 8:
         return "*" * len(value)
     return f"{value[:2]}{'*' * max(4, len(value) - 4)}{value[-2:]}"
+
+
+def get_signing_key() -> bytes:
+    """Return the master key bytes for HMAC-style signing operations.
+
+    Callers MUST treat the value as opaque and never log or expose it.
+    """
+    return _load_master_key()

@@ -3,7 +3,8 @@
 import { memo } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { deriveAgentState } from "@/components/ui/agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import type { AgentStats, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -104,12 +105,16 @@ function LiveAgentsListComponent({
                     "hover:text-[var(--text-primary)]",
                   )}
                 >
-                  <AgentGlyph
+                  <AgentSigil
                     agentId={entry.agent.id}
+                    label={entry.agent.label}
                     color={entry.agent.color}
-                    active={activeCount > 0}
-                    variant="list"
-                    className="h-6 w-6 shrink-0"
+                    state={deriveAgentState({
+                      activeTasks: activeCount,
+                      featuredStatus: featured?.status ?? null,
+                      dbExists: entry.stats?.dbExists,
+                    })}
+                    size="xs"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">

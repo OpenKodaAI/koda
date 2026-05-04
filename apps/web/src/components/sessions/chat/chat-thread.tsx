@@ -302,6 +302,7 @@ function ChatThreadImpl({
                     onOpenExecution={onOpenExecution}
                     agentId={agentId}
                     sessionId={sessionId}
+                    blocks={"blocks" in message ? message.blocks : undefined}
                   />
                 </MessageTurn>
               );

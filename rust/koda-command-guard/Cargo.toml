@@ -1,0 +1,25 @@
+[package]
+name = "koda-command-guard"
+version = "0.1.0"
+edition = "2021"
+description = "Native regex DFA matcher for koda's tool-dispatcher block patterns."
+license = "Apache-2.0"
+
+[lib]
+# cdylib for the maturin-built Python wheel; rlib so the matcher can be
+# unit-tested in pure Rust without going through Python.
+name = "koda_command_guard"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# ``cargo test`` builds with no features so libpython resolves through
+# pyo3's auto-detect (or the embedded interpreter on platforms where
+# that's available). ``maturin build`` enables ``extension-module`` so
+# the resulting .so/.pyd does NOT link libpython statically — Python
+# dlopen()s the module and provides the symbols at load time.
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py311"] }
+regex = "1.11"

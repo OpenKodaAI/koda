@@ -2,18 +2,19 @@
 
 import { createPortal } from "react-dom";
 import { Expand, X } from "lucide-react";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import type { ExecutionDetail, ExecutionSummary } from "@/lib/types";
-import { cn, truncateText } from "@/lib/utils";
 import {
   useAnimatedPresence,
   useBodyScrollLock,
   useEscapeToClose,
 } from "@/hooks/use-animated-presence";
-import { getAgentColor } from "@/lib/agent-constants";
+import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import {
   ExecutionDetailContent,
   getExecutionDisplayDetail,
 } from "./execution-detail-content";
+import { ExecutionStatusPill } from "./execution-status-pill";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 interface ExecutionDetailDrawerProps {
@@ -68,27 +69,21 @@ export function ExecutionDetailDrawer({
   return createPortal(
     <>
       <div
-        className={cn(
-          "app-overlay-backdrop",
-          presence.isVisible ? "opacity-100" : "pointer-events-none opacity-0"
-        )}
+        className="app-overlay-backdrop app-overlay-anim"
+        data-visible={presence.isVisible}
         onClick={onClose}
       />
       <div
-        className={cn(
-          "fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,720px)] xl:w-[620px] 2xl:w-[680px] transition-opacity duration-150 ease-out",
-          presence.isVisible
-            ? "opacity-100"
-            : "pointer-events-none opacity-0"
-        )}
+        className="app-drawer-anim-right fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,720px)] xl:w-[620px] 2xl:w-[680px]"
+        data-visible={presence.isVisible}
         role="dialog"
         aria-modal="true"
         aria-label={data ? `${t("common.details")} · ${t("tasks.detail.executionFallback", { id: data.task_id })}` : t("common.details")}
         >
         <div className="app-drawer-panel relative ml-auto flex h-full w-full flex-col overflow-hidden">
-          <div className="border-b border-[var(--border-subtle)] px-5 py-4 lg:px-6">
+          <header className="border-b border-[var(--border-subtle)] px-5 pb-5 pt-4 lg:px-6">
             {/* Action buttons row */}
-            <div className="flex items-center justify-end gap-1 mb-3">
+            <div className="mb-4 flex items-center justify-end gap-1">
               {onExpand && (
                 <button
                   type="button"
@@ -109,18 +104,40 @@ export function ExecutionDetailDrawer({
               </button>
             </div>
 
-            {/* Title */}
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="metric-label">{t("tasks.detail.executionFallback", { id: data.task_id })}</span>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: fallbackAgentColor }} />
-                <span className="font-mono text-xs text-[var(--text-tertiary)]">{data.bot_id}</span>
+            {/* Hero — orb + agent identity + status */}
+            <div className="flex items-center gap-4">
+              <AgentSigil
+                agentId={data.bot_id}
+                label={getAgentLabel(data.bot_id)}
+                color={fallbackAgentColor}
+                status={data.status}
+                size="md"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="m-0 truncate text-[1.0625rem] font-medium tracking-[-0.014em] text-[var(--text-primary)]">
+                    {getAgentLabel(data.bot_id)}
+                  </h2>
+                  <ExecutionStatusPill
+                    status={data.status}
+                    label={t(`runtime.labels.${data.status}`, {
+                      defaultValue: data.status,
+                    })}
+                  />
+                </div>
+                <p className="m-0 mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  #{data.task_id} · {data.bot_id}
+                </p>
               </div>
-              <h2 className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                {data.query_text ? truncateText(data.query_text, 88) : t("tasks.detail.executionFallback", { id: data.task_id })}
-              </h2>
             </div>
-          </div>
+
+            {/* Query — the action */}
+            {data.query_text ? (
+              <p className="m-0 mt-4 line-clamp-3 text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)]">
+                {data.query_text}
+              </p>
+            ) : null}
+          </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-6 lg:py-6">
             <ExecutionDetailContent

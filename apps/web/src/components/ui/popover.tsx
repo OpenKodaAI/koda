@@ -22,8 +22,8 @@ const PopoverContent = React.forwardRef<
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[12rem] rounded-[var(--radius-panel)] border border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-floating-bg)] p-2 text-[var(--text-primary)] shadow-[var(--overlay-floating-shadow)] outline-none",
-        "backdrop-blur-[22px] backdrop-saturate-[140%]",
+        // z-[90] keeps popovers above modals/drawers when nested inside them.
+        "app-floating-panel z-[90] min-w-[12rem] p-2 text-[var(--text-primary)] outline-none",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",

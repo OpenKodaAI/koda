@@ -144,4 +144,52 @@ describe("runtime task route security", () => {
       expect.any(String),
     );
   });
+
+  it("proxies trusted workspace mutations with the JSON body intact", async () => {
+    const { getWebOperatorTokenFromCookie } = await import("@/lib/web-operator-session");
+    const { isTrustedDashboardRequest } = await import("@/lib/request-origin");
+    const { runtimeFetchJson } = await import("@/lib/runtime-api");
+
+    vi.mocked(getWebOperatorTokenFromCookie).mockResolvedValue("operator-token");
+    vi.mocked(isTrustedDashboardRequest).mockReturnValue(true);
+    vi.mocked(runtimeFetchJson).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, path: "README.md" },
+    });
+
+    const body = { path: "README.md", content: "# Updated" };
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/runtime/agents/bot-1/tasks/7/workspace/write", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost",
+        },
+        body: JSON.stringify(body),
+      }),
+      {
+        params: Promise.resolve({
+          agentId: "agent-1",
+          taskId: "7",
+          resource: ["workspace", "write"],
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, path: "README.md" });
+    expect(runtimeFetchJson).toHaveBeenCalledWith(
+      "agent-1",
+      "/api/runtime/tasks/7/workspace/write",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      },
+      expect.any(URLSearchParams),
+      { capability: "mutate" },
+    );
+  });
 });

@@ -66,7 +66,14 @@ const TOAST_META: Record<ToastType, TypeMeta> = {
 
 export function ToastNotification() {
   const { toasts } = useToast();
-  const visible = toasts.slice(-MAX_VISIBLE);
+  // Persistent (in-progress) toasts always win the visible slots so a
+  // running download is never pushed off-screen by ephemeral notifications.
+  const sorted = [...toasts].sort((a, b) => {
+    const aPersist = a.persistent ? 1 : 0;
+    const bPersist = b.persistent ? 1 : 0;
+    return bPersist - aPersist;
+  });
+  const visible = sorted.slice(0, MAX_VISIBLE);
 
   return (
     <div
@@ -85,12 +92,26 @@ export function ToastNotification() {
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
 function ToastItem({ toast }: { toast: Toast }) {
   const { t } = useAppI18n();
   const { removeToast } = useToast();
   const meta = TOAST_META[toast.type];
   const Icon = meta.icon;
-  const showMessage = toast.type === "error" && Boolean(toast.message);
+  const hasProgress = toast.progress !== undefined;
+  const isDismissible = toast.dismissible ?? !toast.persistent;
+  // Show the message body whenever it carries information distinct from the
+  // type label. The previous rule restricted bodies to errors/progress/
+  // persistent, which silently swallowed warning/info messages — e.g. a
+  // non-OAuth connect failure landed as a bare "Warning" with no detail.
+  const showMessage = Boolean(toast.message);
 
   return (
     <motion.div
@@ -110,7 +131,8 @@ function ToastItem({ toast }: { toast: Toast }) {
         className={cn(
           "flex items-center gap-2 rounded-[var(--radius-pill)] py-1.5 pr-1.5 pl-3 shadow-[var(--shadow-floating)]",
           "text-[0.8125rem] leading-5",
-          showMessage && "rounded-[var(--radius-panel-sm)] items-start py-2 pr-2.5 pl-3",
+          (showMessage || hasProgress) &&
+            "rounded-[var(--radius-panel-sm)] items-start py-2 pr-2.5 pl-3 min-w-[320px]",
         )}
       >
         <Icon
@@ -118,9 +140,10 @@ function ToastItem({ toast }: { toast: Toast }) {
           className={cn(
             "icon-sm shrink-0",
             toast.type === "loading" && "animate-spin",
+            (showMessage || hasProgress) && "mt-0.5",
           )}
         />
-        <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">
             {toast.title ?? t(meta.titleKey)}
           </span>
@@ -129,16 +152,77 @@ function ToastItem({ toast }: { toast: Toast }) {
               {toast.message}
             </span>
           ) : null}
+          {hasProgress ? <ToastProgressBar toast={toast} /> : null}
         </div>
-        <button
-          type="button"
-          onClick={() => removeToast(toast.id)}
-          aria-label="Close"
-          className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
-        >
-          <X className="icon-xs" strokeWidth={1.75} />
-        </button>
+        {toast.action ? (
+          <button
+            type="button"
+            onClick={toast.action.onClick}
+            disabled={toast.action.disabled}
+            aria-label={toast.action.ariaLabel ?? toast.action.label}
+            className={cn(
+              "ml-2 inline-flex h-6 shrink-0 items-center justify-center rounded-full px-2.5",
+              "border border-current/20 text-[0.6875rem] font-medium leading-none opacity-85",
+              "transition-[opacity,background-color,border-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10",
+              "disabled:pointer-events-none disabled:opacity-45",
+            )}
+          >
+            {toast.action.label}
+          </button>
+        ) : null}
+        {isDismissible ? (
+          <button
+            type="button"
+            onClick={() => removeToast(toast.id)}
+            aria-label="Close"
+            className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+          >
+            <X className="icon-xs" strokeWidth={1.75} />
+          </button>
+        ) : null}
       </div>
     </motion.div>
+  );
+}
+
+function ToastProgressBar({ toast }: { toast: Toast }) {
+  const progress = toast.progress;
+  if (!progress) return null;
+  const { downloaded, total, label } = progress;
+  const indeterminate = total <= 0;
+  const percent = indeterminate ? 0 : Math.min(100, Math.max(0, (downloaded / total) * 100));
+  const formattedLabel =
+    label ??
+    (indeterminate
+      ? formatBytes(downloaded)
+      : `${formatBytes(downloaded)} / ${formatBytes(total)} · ${Math.round(percent)}%`);
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      <div
+        role="progressbar"
+        aria-valuenow={indeterminate ? undefined : Math.round(percent)}
+        aria-valuemin={0}
+        aria-valuemax={indeterminate ? undefined : 100}
+        className={cn(
+          "relative h-1 overflow-hidden rounded-full",
+          "bg-black/15 dark:bg-white/15",
+        )}
+      >
+        {indeterminate ? (
+          <div
+            className="absolute inset-y-0 w-1/3 animate-[toast-shimmer_1.4s_ease-in-out_infinite] rounded-full bg-current opacity-90"
+            data-testid="toast-progress-indeterminate"
+          />
+        ) : (
+          <div
+            className="h-full rounded-full bg-current opacity-90 transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{ width: `${percent}%` }}
+            data-testid="toast-progress-bar"
+          />
+        )}
+      </div>
+      <span className="text-[0.6875rem] font-mono opacity-75">{formattedLabel}</span>
+    </div>
   );
 }

@@ -10,9 +10,7 @@ import pytest
 
 import koda.control_plane.manager as manager_mod
 
-# ---------------------------------------------------------------------------
 # Lightweight in-memory DB stub
-# ---------------------------------------------------------------------------
 
 
 class _MemDB:
@@ -196,9 +194,7 @@ class _DictRow(dict):
         return super().keys()
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 def _run_coro_sync_stub(coro: Any) -> Any:
@@ -232,9 +228,7 @@ def mcp_manager(monkeypatch: pytest.MonkeyPatch):
     return mgr, db
 
 
-# ---------------------------------------------------------------------------
 # MCP Catalog tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPCatalog:
@@ -325,9 +319,7 @@ class TestMCPCatalog:
         assert len(db.tables["cp_mcp_tool_policies"]) == 0
 
 
-# ---------------------------------------------------------------------------
 # MCP Agent Connection tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPAgentConnections:
@@ -403,6 +395,31 @@ class TestMCPAgentConnections:
         env_json = json.loads(raw_row["env_values_json"])
         assert env_json["TOKEN"] == "ENC:secret123"
 
+    def test_null_env_values_are_ignored_not_stored_as_literal_secret(self, mcp_manager):
+        mgr, db = mcp_manager
+        self._seed_catalog(mgr)
+        mgr.upsert_mcp_agent_connection(
+            "agent-1",
+            "linear",
+            {
+                "env_values": {"TOKEN": None, "EMPTY": ""},
+            },
+        )
+        raw_row = db.tables["cp_mcp_agent_connections"][0]
+        assert json.loads(raw_row["env_values_json"]) == {}
+
+    def test_env_values_reject_non_string_values(self, mcp_manager):
+        mgr, _db = mcp_manager
+        self._seed_catalog(mgr)
+        with pytest.raises(ValueError, match="must be a string"):
+            mgr.upsert_mcp_agent_connection(
+                "agent-1",
+                "linear",
+                {
+                    "env_values": {"TOKEN": {"bad": "shape"}},
+                },
+            )
+
     def test_upsert_updates_existing_connection(self, mcp_manager):
         mgr, _db = mcp_manager
         self._seed_catalog(mgr)
@@ -427,7 +444,9 @@ class TestCanonicalConnections:
 
         payload = mgr.list_connection_catalog()
 
-        assert any(item["connection_key"] == "core:gws" for item in payload["items"])
+        legacy_core_keys = {"core:gws", "core:jira", "core:confluence", "core:gh", "core:glab", "core:aws"}
+        assert not any(item["connection_key"] in legacy_core_keys for item in payload["items"])
+        assert any(item["connection_key"] == "core:browser" for item in payload["items"])
         assert any(item["connection_key"] == "mcp:linear" for item in payload["items"])
 
     def test_generic_mcp_connection_round_trip(self, mcp_manager):
@@ -451,9 +470,7 @@ class TestCanonicalConnections:
         assert payload["connection_key"] == "core:browser"
 
 
-# ---------------------------------------------------------------------------
 # MCP Tool Policy tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPToolPolicies:
@@ -512,9 +529,7 @@ class TestMCPToolPolicies:
             assert result["policy"] == policy
 
 
-# ---------------------------------------------------------------------------
 # test_mcp_connection / discover_mcp_tools tests
-# ---------------------------------------------------------------------------
 
 
 class TestMCPTestConnection:

@@ -15,9 +15,7 @@ import {
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ToolItem = {
   id: string;
@@ -38,9 +36,7 @@ type ToolGroupSectionProps = {
   defaultExpanded?: boolean;
 };
 
-/* ------------------------------------------------------------------ */
 /*  Select options                                                     */
-/* ------------------------------------------------------------------ */
 
 const GROUP_POLICY_OPTIONS: { value: GroupPolicy; labelKey: string }[] = [
   { value: "always_allow", labelKey: "Sempre permitir" },
@@ -49,9 +45,7 @@ const GROUP_POLICY_OPTIONS: { value: GroupPolicy; labelKey: string }[] = [
   { value: "custom", labelKey: "Customizado" },
 ];
 
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export function ToolGroupSection({
   label,
@@ -112,7 +106,7 @@ export function ToolGroupSection({
           <SelectTrigger
             sizeVariant="sm"
             onClick={(e) => e.stopPropagation()}
-            className="w-auto max-w-[180px] shrink-0 text-[var(--text-secondary)]"
+            className="w-auto shrink-0 whitespace-nowrap text-[var(--text-secondary)]"
             title={tl("Politica do grupo")}
           >
             <SelectValue />

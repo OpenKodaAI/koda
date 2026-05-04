@@ -9,8 +9,6 @@
  * Handles both core integrations (Jira, AWS, gh, …) and MCP servers
  * (Supabase, Slack, Obsidian, …) in one component so the user experience
  * is consistent — shared header/footer shell, integration-aware body.
- *
- * See docs/ai/integrations/README.md for the strategy taxonomy.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -29,6 +27,8 @@ import {
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { SecretInput } from "@/components/ui/secret-controls";
 import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { renderIntegrationLogo } from "@/components/control-plane/system/integrations/integration-logos";
 import { requestJson } from "@/lib/http-client";
 import { cn } from "@/lib/utils";
@@ -42,9 +42,7 @@ import type {
   McpOAuthStatus,
 } from "@/lib/control-plane";
 
-/* ------------------------------------------------------------------ */
 /*  Props                                                              */
-/* ------------------------------------------------------------------ */
 
 export type ConnectionModalRouterProps = {
   entry: AgentIntegrationEntry;
@@ -58,9 +56,7 @@ export type ConnectionModalRouterProps = {
 
 type TestResult = { success: boolean; message: string } | null;
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function fieldsFromProfile(profile: ConnectionProfile | null | undefined): {
   primary: ConnectionField[];
@@ -75,6 +71,17 @@ function fieldsFromProfile(profile: ConnectionProfile | null | undefined): {
     readOnly: profile.read_only_toggle ?? null,
     pathArg: profile.path_argument ?? null,
   };
+}
+
+async function triggerCapabilityDiscovery(agentId: string, connectionKey: string): Promise<void> {
+  try {
+    await requestJson(
+      `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(connectionKey)}/capabilities/discover`,
+      { method: "POST" },
+    );
+  } catch {
+    // discovery is best-effort here — the parent re-fetches and surfaces errors.
+  }
 }
 
 function coreFieldPresence(
@@ -98,9 +105,7 @@ function mcpExistingEnvKeys(entry: AgentIntegrationEntry): Set<string> {
   return new Set(Object.keys(entry.mcpConnection?.env_values ?? {}));
 }
 
-/* ------------------------------------------------------------------ */
 /*  ModalShell                                                         */
-/* ------------------------------------------------------------------ */
 
 type ShellProps = {
   entry: AgentIntegrationEntry;
@@ -155,13 +160,13 @@ function ModalShell({
   return createPortal(
     <>
       <div
-        className="app-overlay-backdrop z-[70]"
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
         onClick={onClose}
         aria-hidden="true"
       />
       <div className="app-modal-frame z-[80] p-4">
         <div
-          className="app-modal-panel relative w-full max-w-lg max-h-[calc(100vh-4rem)] flex flex-col border-[var(--border-strong)]"
+          className="app-modal-panel app-modal-anim relative w-full max-w-lg max-h-[calc(100vh-4rem)] flex flex-col border-[var(--border-strong)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="connection-modal-title"
@@ -275,9 +280,7 @@ function ModalShell({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Field renderer                                                     */
-/* ------------------------------------------------------------------ */
 
 type FieldState = {
   value: string;
@@ -348,16 +351,16 @@ function FieldRow({
           }
         />
       ) : isTextarea ? (
-        <textarea
-          className="field-shell min-h-[6rem] px-4 py-2.5 text-sm text-[var(--text-primary)]"
+        <Textarea
+          rows={4}
+          className="min-h-[6rem]"
           value={state.value}
           onChange={(event) => onChange(event.target.value, false)}
           placeholder={tl("Preencha o valor")}
         />
       ) : (
-        <input
+        <Input
           type="text"
-          className="field-shell px-4 py-2.5 text-sm text-[var(--text-primary)]"
           value={state.value}
           onChange={(event) => onChange(event.target.value, false)}
           placeholder={tl("Preencha o valor")}
@@ -382,9 +385,7 @@ function FieldRow({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Save helpers                                                       */
-/* ------------------------------------------------------------------ */
 
 type FieldValues = Record<string, FieldState>;
 
@@ -494,9 +495,7 @@ async function saveCore(params: {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  The router                                                         */
-/* ------------------------------------------------------------------ */
 
 export function ConnectionModalRouter({
   entry,
@@ -587,6 +586,9 @@ export function ConnectionModalRouter({
           connectionKey: entry.connectionKey,
           envValues: filterNonEmpty(values),
         });
+        // Trigger discovery for any MCP profile that landed via save (no
+        // OAuth flow needed). Capability snapshot powers the detail view.
+        await triggerCapabilityDiscovery(agentId, entry.connectionKey);
       } else {
         await saveCore({
           agentId,
@@ -632,27 +634,30 @@ export function ConnectionModalRouter({
   let body: React.ReactNode;
   switch (profile.strategy) {
     case "none":
+    case "custom_stdio":
+    case "custom_http": {
       body = (
         <p className="text-sm text-[var(--text-tertiary)]">
-          {tl("Esta integração não precisa de credenciais. Ative para permitir que o agente use as ferramentas expostas.")}
+          {tl("Sem credenciais. Ative para o Koda iniciar e descobrir as capacidades.")}
         </p>
       );
       break;
+    }
 
     case "local_app":
       body = (
         <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] px-4 py-3 text-sm text-[var(--tone-info-text)]">
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3 text-sm">
             <div className="flex items-start gap-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
               <div className="flex flex-col gap-1">
-                <span className="font-medium">
+                <span className="font-medium text-[var(--text-secondary)]">
                   {tl("Depende do app local: {{app}}", {
                     app: profile.local_app_name ?? entry.label,
                   })}
                 </span>
                 {profile.local_app_detection_hint ? (
-                  <span className="text-[12px] text-[var(--text-secondary)]">
+                  <span className="text-[12px] text-[var(--text-tertiary)]">
                     {profile.local_app_detection_hint}
                   </span>
                 ) : null}
@@ -820,9 +825,9 @@ export function ConnectionModalRouter({
                 disabled={!onOAuthStart || isOAuthLoading}
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-xl",
-                  "bg-[var(--surface-elevated)] border border-[var(--border-strong)]",
+                  "border border-[var(--text-primary)] bg-transparent",
                   "px-4 py-2 text-sm font-medium text-[var(--text-primary)]",
-                  "transition-colors hover:bg-[var(--surface-hover-strong)]",
+                  "transition-colors hover:bg-[var(--surface-hover)]",
                   (isOAuthLoading || !onOAuthStart) && "opacity-60 cursor-wait",
                 )}
               >

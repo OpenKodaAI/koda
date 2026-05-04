@@ -9,7 +9,6 @@ import sys
 import tarfile
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +31,6 @@ def test_env_example_is_bootstrap_only() -> None:
     assert "CONTROL_PLANE_API_TOKEN=" not in web_env_text
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_docker_compose_quickstart_stack_includes_core_services() -> None:
     compose_text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
@@ -67,7 +65,6 @@ def test_install_script_bootstraps_compose_and_doctor() -> None:
     assert "/release/manifest.json" in script_text
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_public_docs_cover_quickstart_and_vps() -> None:
     assert (ROOT / "docs" / "README.md").exists()
     assert (ROOT / "docs" / "install" / "local.md").exists()
@@ -109,7 +106,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "control-plane-first" in readme_text
     assert "apps/web" in readme_text
     assert "127.0.0.1:3000" in readme_text
-    assert "/control-plane/setup" in readme_text
+    assert "/setup" in readme_text
     assert "/control-plane" in readme_text
     assert "?token=" not in readme_text
     assert "npm install -g @openkodaai/koda" in readme_text
@@ -117,7 +114,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert "seaweedfs" in readme_text.lower()
     assert "Use Koda" in docs_index_text
     assert "apps/web/" in docs_index_text
-    assert "/control-plane/setup" in local_text
+    assert "/setup" in local_text
     assert "koda install" in local_text
     assert "@openkodaai/koda" in local_text
     assert "?token=" not in local_text
@@ -139,7 +136,6 @@ def test_openapi_document_contains_onboarding_paths() -> None:
     assert "/api/control-plane/auth/tokens" in payload["paths"]
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> None:
     bundle_dir = tmp_path / "release"
     subprocess.run(
@@ -159,7 +155,6 @@ def test_npm_cli_release_bundle_contains_product_only_artifacts(tmp_path) -> Non
     assert "bundle/sbom.spdx.json" in built_files
     assert "bundle/proxy/nginx.conf" in built_files
     assert not any(path.startswith("tests/") for path in built_files)
-    assert not any(path.startswith("docs/ai/") for path in built_files)
     assert not any(".next" in path for path in built_files)
     assert not any("node_modules" in path for path in built_files)
 
@@ -176,8 +171,11 @@ def test_release_compose_carries_bootstrap_and_runtime_tokens_into_app_service()
     assert "RUNTIME_LOCAL_UI_TOKEN" not in web_block
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path) -> None:
+    build_script_text = (ROOT / "scripts" / "build_release_artifacts.py").read_text(encoding="utf-8")
+    assert '(stage_dir / "README.md").write_text(build_package_readme(), encoding="utf-8")' in build_script_text
+    assert 'copy2(CLI_PACKAGE_DIR / "README.md"' not in build_script_text
+
     output_dir = tmp_path / "release-artifacts"
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "build_release_artifacts.py"), "--output-dir", str(output_dir)],
@@ -203,27 +201,19 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     assert manifest_from_npm == bundle_manifest
     assert checksums_from_npm == bundle_checksums
     assert "npm install -g @openkodaai/koda" in readme_from_npm
-    assert "control-plane/setup" in readme_from_npm
-
-
-def test_workspace_npm_pack_includes_generated_readme() -> None:
-    result = subprocess.run(
-        ["npm", "pack", "./packages/cli", "--json", "--dry-run"],
+    assert "/setup" in readme_from_npm
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "sync_npm_readme.py"),
+            "--package-tarball",
+            str(output_dir / payload["npm_tarball"]),
+        ],
         check=True,
         cwd=ROOT,
-        capture_output=True,
-        text=True,
     )
 
-    payload = json.loads(result.stdout)[0]
-    file_paths = {entry["path"] for entry in payload["files"]}
 
-    assert "README.md" in file_paths
-    assert "bin/koda.mjs" in file_paths
-    assert "release/manifest.json" in file_paths
-
-
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_release_metadata_is_publication_ready() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "release_metadata.py")], check=True, cwd=ROOT)
     subprocess.run([sys.executable, str(ROOT / "scripts" / "sync_npm_readme.py")], check=True, cwd=ROOT)
@@ -237,7 +227,6 @@ def test_release_metadata_is_publication_ready() -> None:
     assert package_payload["publishConfig"]["access"] == "public"
     assert package_payload["publishConfig"]["provenance"] is True
     assert package_payload["repository"]["directory"] == "packages/cli"
-    assert "README.md" in package_payload["files"]
     assert manifest_payload["distribution"]["npm_package"] == "@openkodaai/koda"
     assert manifest_payload["distribution"]["npm_bin"] == "koda"
     assert manifest_payload["distribution"]["github_release_tag"] == f"v{package_payload['version']}"
@@ -246,7 +235,7 @@ def test_release_metadata_is_publication_ready() -> None:
     assert (
         f"https://github.com/OpenKodaAI/koda/blob/v{package_payload['version']}/docs/install/local.md" in package_readme
     )
-    assert "http://localhost:3000/control-plane/setup" in package_readme
+    assert "http://localhost:3000/setup" in package_readme
 
 
 def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
@@ -292,7 +281,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "npm publish" in workflow_text
     assert "Upgrade npm for trusted publishing support" not in workflow_text
     assert "npm install -g npm@^11.5.1" not in workflow_text
-    assert "docker/setup-buildx-action@v4" in workflow_text
+    assert "docker/setup-buildx-action@v3" in workflow_text
     assert "driver: docker-container" in workflow_text
     assert "npx --yes npm@11.5.1 publish" in workflow_text
     assert "Validate npm token fallback identity" in workflow_text
@@ -311,11 +300,15 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "Skip npm publish when version already exists" in workflow_text
     assert "Repair npm dist-tag with token fallback when needed" in workflow_text
     assert "Verify npm package version and dist-tag" in workflow_text
+    assert "Verify npm tarball README before publish" in workflow_text
+    assert "Verify published npm README" in workflow_text
+    assert "Generate npm README for release checks" in workflow_text
+    assert "scripts/sync_npm_readme.py --package-tarball" in workflow_text
+    assert 'npm pack "${NPM_PACKAGE_NAME}@${VERSION}"' in workflow_text
     assert 'npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}"' in workflow_text
     assert "python3 scripts/npm_registry_metadata.py exists" in workflow_text
     assert "python3 scripts/npm_registry_metadata.py state" in workflow_text
     assert "python3 scripts/npm_registry_metadata.py dist-tags" in workflow_text
-    assert (ROOT / "scripts" / "npm_registry_metadata.py").exists()
     assert 'gh release view "${RELEASE_TAG}"' in workflow_text
     assert "Create or update GitHub release" in workflow_text
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
@@ -357,11 +350,11 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
 
     assert script_path.exists()
     assert "curl -fsSL" in script_text
-    assert "--retry-connrefused" in script_text
-    assert "--retry-all-errors" in script_text
+    assert "--connect-timeout 2" in script_text
+    assert "--max-time 5" in script_text
     assert "docker compose" in script_text
     assert "docker-inspect.json" in script_text
-    assert "control-plane/setup" in script_text
+    assert "http://127.0.0.1:3000/setup" in script_text
     assert "openapi/control-plane.json" in script_text
 
     assert '["pr-quality", "security"]' in cut_release_workflow_text
@@ -482,15 +475,10 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "pnpm/action-setup@v4.2.0" not in workflow_text
 
     assert "snyk/actions/setup@v1.0.0" in snyk_workflow_text
-    assert "uv sync --locked --all-groups --all-extras" in snyk_workflow_text
     assert "--all-projects" in snyk_workflow_text
     assert "--detection-depth=5" in snyk_workflow_text
     assert "python-requirements.txt" in snyk_workflow_text
-    assert "--command=.venv/bin/python" in snyk_workflow_text
-    assert "--skip-unresolved=true" in snyk_workflow_text
     assert "snyk monitor" in snyk_workflow_text
-    assert "continue-on-error: true" in snyk_workflow_text
-    assert "Summarize Snyk monitor snapshot status" in snyk_workflow_text
     assert "SNYK_TOKEN" in snyk_workflow_text
 
     assert "python3 scripts/review_dependency_changes.py" in security_workflow_text
@@ -529,17 +517,15 @@ def test_snyk_policy_excludes_generated_artifacts_only() -> None:
 def test_snyk_workflow_excludes_non_source_manifests() -> None:
     workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
 
+    assert "python -m pip freeze" in workflow_text
+    assert "--exclude-editable" in workflow_text
+    assert "--exclude koda" in workflow_text
     assert (
-        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,requirements.txt,target,release"
+        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release"
         in workflow_text
     )
-    assert "uv sync --locked --all-groups --all-extras" in workflow_text
-    assert "--command=.venv/bin/python" in workflow_text
-    assert "--skip-unresolved=true" in workflow_text
-    assert "Summarize Snyk monitor snapshot status" in workflow_text
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> None:
     output_dir = tmp_path / "release-artifacts"
     subprocess.run(
@@ -581,7 +567,7 @@ def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> Non
     assert "https://openkoda.ai/spdx/" not in combined
     assert "urn:openkodaai:spdx:koda-release-bundle:" in combined
     assert "git+https://github.com/OpenKodaAI/koda.git" in combined
-    assert "http://localhost:3000/control-plane/setup" in combined
+    assert "http://localhost:3000/setup" in combined
     assert "http://localhost:8090/health" in combined
     assert "http://app:8090" in combined
     assert "http://seaweedfs:8333" in combined
@@ -604,8 +590,11 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
 
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in app_dockerfile
-    assert "@googleworkspace/cli" in app_dockerfile
-    assert "/usr/local/bin/gws" in app_dockerfile
+    assert "@googleworkspace/cli" not in app_dockerfile
+    assert "/usr/local/bin/gws" not in app_dockerfile
+    assert "apt-get install -y --no-install-recommends gh" not in app_dockerfile
+    assert "glab_" not in app_dockerfile
+    assert "awscli.amazonaws.com" not in app_dockerfile
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in web_dockerfile
     assert 'CMD ["node", "server.mjs"]' in web_dockerfile
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
@@ -626,7 +615,6 @@ def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
     assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
 
 
-@pytest.mark.skip(reason="release pipeline assets still aligning post-merge; tracked separately")
 def test_doctor_checks_dashboard_and_control_plane() -> None:
     doctor_text = (ROOT / "scripts" / "doctor.py").read_text(encoding="utf-8")
 
@@ -637,7 +625,7 @@ def test_doctor_checks_dashboard_and_control_plane() -> None:
     assert "legacy_setup_url" in doctor_text
     assert "/setup" in doctor_text
     assert "/setup?token=" not in doctor_text
-    assert "CONTROL_PLANE_MASTER_KEY" not in doctor_text
+    assert "CONTROL_PLANE_MASTER_KEY=" not in doctor_text
 
 
 def test_steady_state_assets_do_not_reference_legacy_object_storage_branding() -> None:

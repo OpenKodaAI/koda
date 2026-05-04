@@ -9,6 +9,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "../../proto/memory/v1/memory.proto",
             "../../proto/artifact/v1/artifact.proto",
             "../../proto/security/v1/security.proto",
+            // Production-roadmap services with shipped implementations.
+            "../../proto/bot_gateway/v1/bot_gateway.proto",
+            "../../proto/policy_engine/v1/policy_engine.proto",
         ],
         &["../../proto"],
     )?;

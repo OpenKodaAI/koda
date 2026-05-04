@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plug, Search } from "lucide-react";
+import { FilePlus2, Plug, Plus, Search } from "lucide-react";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
 import { useOAuthPopup } from "@/hooks/use-oauth-popup";
+import { Input } from "@/components/ui/input";
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import {
   useAgentIntegrationPermissions,
@@ -15,6 +16,7 @@ import {
 } from "@/hooks/use-agent-integration-permissions";
 import { ConnectionModalRouter } from "./connection/connection-modal-router";
 import { IntegrationPermissionDetail } from "./integration-permission-detail";
+import { McpCustomServerModal } from "./integrations/mcp-custom-server-modal";
 import {
   integrationCardRootClassName,
   IntegrationCardStatusIndicator,
@@ -31,7 +33,16 @@ import {
   CATEGORY_LABELS,
 } from "@/components/control-plane/system/integrations/integration-catalog-data";
 
-const VISIBLE_CORE_KEYS = new Set(["gws", "gh", "glab", "jira", "confluence"]);
+// Core integrations (CLI + REST hybrid runtime) are intentionally hidden
+// from the per-agent integrations tab. Every previously-visible core entry
+// has an MCP equivalent in the catalog (Atlassian → jira/confluence,
+// GitHub MCP → gh, GitLab MCP → glab, etc.), and the MCP path is uniform:
+// real OAuth where the platform supports it, no host CLI required, and
+// transport, sandbox, capabilities and policies are the same shape across
+// every integration. Keeping Core invisible avoids the credential-vs-
+// runtime mismatch that produced "X connection is not configured" errors
+// after a successful PUT.
+const VISIBLE_CORE_KEYS = new Set<string>();
 
 const ALL_CATEGORY_LABELS: Record<string, string> = {
   ...CATEGORY_LABELS,
@@ -82,9 +93,13 @@ export function TabIntegracoes() {
     loading: integrationsLoading,
     selectedEntry: selectedIntegration,
     selectEntry: selectIntegration,
-    discoverTools,
+    discoverCapabilities,
     disconnectMcp,
     updateMcpToolPolicy,
+    updateMcpCapabilityPolicy,
+    addCustomMcpServer,
+    importClaudeDesktopMcp,
+    removeCustomMcpServer,
     isDiscovering,
     refreshData: refreshIntegrations,
   } = useAgentIntegrationPermissions({
@@ -134,6 +149,11 @@ export function TabIntegracoes() {
 
   const [connectingMcpServer, setConnectingMcpServer] = useState<AgentIntegrationEntry | null>(null);
   const [editingCoreConnection, setEditingCoreConnection] = useState<AgentIntegrationEntry | null>(null);
+  const [customMcpModalMode, setCustomMcpModalMode] = useState<"form" | "json" | null>(null);
+  // Tracks which entry started the in-flight OAuth flow so we can land the
+  // user on its detail view as soon as the popup posts back. Cleared on
+  // success/error/cancel.
+  const [pendingOAuthEntryId, setPendingOAuthEntryId] = useState<string | null>(null);
 
   const {
     startOAuth,
@@ -142,13 +162,18 @@ export function TabIntegracoes() {
     agentId: agentId,
     onSuccess: async () => {
       await refreshIntegrations();
-      if (selectedIntegration) {
-        const id = selectedIntegration.id;
+      // Land the user on the detail view of whichever entry triggered the
+      // OAuth flow. Falls back to refreshing the currently selected entry
+      // (the legacy behavior when OAuth was started from the detail view).
+      const targetId = pendingOAuthEntryId ?? selectedIntegration?.id ?? null;
+      setPendingOAuthEntryId(null);
+      if (targetId) {
         selectIntegration(null);
-        setTimeout(() => selectIntegration(id), 150);
+        setTimeout(() => selectIntegration(targetId), 150);
       }
     },
     onError: (error) => {
+      setPendingOAuthEntryId(null);
       showToast(tl("Erro na conexao OAuth: {{error}}", { error }), "warning");
     },
   });
@@ -204,24 +229,6 @@ export function TabIntegracoes() {
       "resourceAccessPolicyJson",
       serializeResourceAccessPolicy({ ...resourcePolicy, ...patch }),
     );
-  }
-
-  function handleIntegrationToggle(integrationId: string, enabled: boolean) {
-    const nextGrants = { ...resourcePolicy.integration_grants };
-    if (enabled) {
-      nextGrants[integrationId] = {
-        ...(nextGrants[integrationId] || {}),
-        enabled: true,
-      };
-    } else {
-      if (nextGrants[integrationId]) {
-        nextGrants[integrationId] = {
-          ...nextGrants[integrationId],
-          enabled: false,
-        };
-      }
-    }
-    updateResourcePolicy({ integration_grants: nextGrants });
   }
 
   function handleIntegrationUpdate(integrationId: string, grant: IntegrationGrantValue) {
@@ -311,7 +318,6 @@ export function TabIntegracoes() {
                 <IntegrationPermissionDetail
                   entry={selectedIntegration}
                   onBack={() => selectIntegration(null)}
-                  onToggleEnabled={(enabled) => handleIntegrationToggle(selectedIntegration.key, enabled)}
                   onGrantConfigChange={(patch) => {
                     if (selectedIntegration.kind !== "core") return;
                     const currentGrant = resourcePolicy.integration_grants?.[selectedIntegration.key] ?? {};
@@ -342,8 +348,100 @@ export function TabIntegracoes() {
                       selectedIntegration.coreDefaultConnection?.connected &&
                       selectedIntegration.coreConnection?.source_origin !== "imported_default",
                   )}
-                  onConnectOAuth={selectedIntegration.oauth_supported ? () => startOAuth(selectedIntegration.connectionKey) : undefined}
-                  onConnectManual={selectedIntegration.kind === "mcp" && !selectedIntegration.mcpConnection ? () => setConnectingMcpServer(selectedIntegration) : undefined}
+                  onConnectOAuth={
+                    selectedIntegration.oauth_supported
+                      ? () => {
+                          setPendingOAuthEntryId(selectedIntegration.id);
+                          return startOAuth(selectedIntegration.connectionKey);
+                        }
+                      : undefined
+                  }
+                  onConnectInline={
+                    selectedIntegration.kind === "mcp" && !selectedIntegration.mcpConnection
+                      ? async (envValues) => {
+                          await requestJson(
+                            `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(
+                              selectedIntegration.connectionKey,
+                            )}`,
+                            {
+                              method: "PUT",
+                              body: JSON.stringify({ enabled: true, env_values: envValues }),
+                            },
+                          );
+                          await requestJson(
+                            `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(
+                              selectedIntegration.connectionKey,
+                            )}/capabilities/discover`,
+                            { method: "POST" },
+                          ).catch(() => null);
+                          await refreshIntegrations();
+                          // Re-select to surface the freshly-loaded capabilities
+                          const sid = selectedIntegration.id;
+                          selectIntegration(null);
+                          setTimeout(() => selectIntegration(sid), 120);
+                        }
+                      : selectedIntegration.kind === "core" && !selectedIntegration.coreConnection?.connected
+                        ? async (envValues) => {
+                            // Core integrations expect a `fields` array on
+                            // PUT, not env_values. Convert and also flip the
+                            // resource-policy grant on so the agent is
+                            // immediately allowed to use it.
+                            const fields = Object.entries(envValues).map(([key, value]) => ({
+                              key,
+                              value,
+                              clear: false,
+                            }));
+                            await requestJson(
+                              `/api/control-plane/agents/${agentId}/connections/${encodeURIComponent(
+                                selectedIntegration.connectionKey,
+                              )}`,
+                              {
+                                method: "PUT",
+                                body: JSON.stringify({
+                                  auth_method: "api_token",
+                                  source_origin: "agent_binding",
+                                  allow_local_session: false,
+                                  enabled: true,
+                                  fields,
+                                }),
+                              },
+                            );
+                            // Auto-enable grant so the integration is usable.
+                            const nextGrants = {
+                              ...resourcePolicy.integration_grants,
+                              [selectedIntegration.key]: {
+                                ...(resourcePolicy.integration_grants?.[selectedIntegration.key] ?? {}),
+                                enabled: true,
+                              },
+                            };
+                            updateResourcePolicy({ integration_grants: nextGrants });
+                            await verifyConnectionSilently(selectedIntegration);
+                            await refreshIntegrations();
+                            const sid = selectedIntegration.id;
+                            selectIntegration(null);
+                            setTimeout(() => selectIntegration(sid), 120);
+                          }
+                        : undefined
+                  }
+                  onConnectViaJson={
+                    selectedIntegration.kind === "mcp" && !selectedIntegration.mcpConnection
+                      ? async (rawJson) => {
+                          let parsed: unknown;
+                          try {
+                            parsed = JSON.parse(rawJson);
+                          } catch {
+                            throw new Error(tl("JSON inválido."));
+                          }
+                          if (!parsed || typeof parsed !== "object" || !("mcpServers" in (parsed as Record<string, unknown>))) {
+                            throw new Error(tl("Esperado um objeto com mcpServers."));
+                          }
+                          await importClaudeDesktopMcp(parsed as { mcpServers: Record<string, unknown> }, {
+                            agentScoped: true,
+                          });
+                          await refreshIntegrations();
+                        }
+                      : undefined
+                  }
                   oauthSupported={selectedIntegration.oauth_supported}
                   oauthStatus={selectedIntegration.oauthStatus}
                   isOAuthLoading={isOAuthLoading}
@@ -376,7 +474,30 @@ export function TabIntegracoes() {
                       }
                     }
                   }}
-                  onDiscoverTools={selectedIntegration.kind === "mcp" ? () => discoverTools(selectedIntegration.key) : undefined}
+                  onDiscoverTools={selectedIntegration.kind === "mcp" ? () => discoverCapabilities(selectedIntegration.key) : undefined}
+                  onCapabilityPolicyChange={
+                    selectedIntegration.kind === "mcp"
+                      ? (kind, name, policy, options) =>
+                          updateMcpCapabilityPolicy(
+                            selectedIntegration.key,
+                            kind,
+                            name,
+                            policy,
+                            options,
+                          )
+                      : undefined
+                  }
+                  onRemoveCustomServer={
+                    selectedIntegration.kind === "mcp" && selectedIntegration.isCustom
+                      ? async () => {
+                          await removeCustomMcpServer(selectedIntegration.key, {
+                            agentScoped: selectedIntegration.customScope === "agent",
+                          });
+                          showToast(tl("Servidor MCP removido."), "success");
+                          selectIntegration(null);
+                        }
+                      : undefined
+                  }
                   isDiscovering={isDiscovering}
                   sharedEnvOptions={sharedVarOptions}
                   secretOptions={globalSecretOptions}
@@ -394,18 +515,55 @@ export function TabIntegracoes() {
                   {tl("Integracoes nativas estao ativas por padrao. Aqui voce gerencia integracoes adicionais.")}
                 </p>
 
-                <div className="relative mb-4">
-                  <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]" />
-                  <input
-                    type="text"
-                    value={integrationSearch}
-                    onChange={(e) => setIntegrationSearch(e.target.value)}
-                    placeholder={tl("Buscar integracoes...")}
-                    className="field-shell pl-9 pr-3 text-[var(--text-primary)]"
-                  />
+                <div className="mb-4 flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]" />
+                    <Input
+                      type="text"
+                      value={integrationSearch}
+                      onChange={(e) => setIntegrationSearch(e.target.value)}
+                      placeholder={tl("Buscar integracoes...")}
+                      className="pl-9"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCustomMcpModalMode("form")}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                  >
+                    <Plus size={13} />
+                    <span>{tl("Adicionar servidor")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomMcpModalMode("json")}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                  >
+                    <FilePlus2 size={13} />
+                    <span>{tl("Importar JSON")}</span>
+                  </button>
                 </div>
 
-                {integrationEntries.length === 0 && !integrationsLoading ? (
+                {integrationsLoading && integrationEntries.length === 0 ? (
+                  // Skeleton mirrors the real grouped layout (category eyebrow
+                  // + 2-col card grid) so there's no jarring jump when data
+                  // arrives. Card height matches the integration-card height.
+                  <div className="flex flex-col gap-5" aria-hidden>
+                    {Array.from({ length: 3 }).map((_, groupIdx) => (
+                      <div key={groupIdx}>
+                        <span className="mb-2 block h-[10px] w-24 rounded bg-[var(--surface-panel-soft)]" />
+                        <div className="grid grid-cols-2 gap-2">
+                          {Array.from({ length: 6 }).map((__, idx) => (
+                            <div
+                              key={idx}
+                              className="h-[60px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] animate-pulse"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : integrationEntries.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
                     {tl("Nenhuma integracao adicional disponivel.")}
                   </div>
@@ -486,8 +644,48 @@ export function TabIntegracoes() {
               setTimeout(() => selectIntegration(connectingMcpServer.id), 100);
             }
           }}
+          onOAuthStart={
+            connectingMcpServer.oauth_supported
+              ? async () => {
+                  setPendingOAuthEntryId(connectingMcpServer.id);
+                  await startOAuth(connectingMcpServer.connectionKey);
+                }
+              : undefined
+          }
+          isOAuthLoading={isOAuthLoading}
+          oauthStatus={connectingMcpServer.oauthStatus}
         />
       ) : null}
+
+      {/* Custom MCP server modal — Form / JSON paste */}
+      <McpCustomServerModal
+        open={customMcpModalMode !== null}
+        defaultMode={customMcpModalMode ?? "form"}
+        onClose={() => setCustomMcpModalMode(null)}
+        agentLabel={state.displayName || agentId}
+        onSubmitForm={async ({ scope, payload }) => {
+          const result = await addCustomMcpServer(payload, { agentScoped: scope === "agent" });
+          showToast(tl("Servidor MCP adicionado."), "success");
+          return result;
+        }}
+        onSubmitImport={async ({ scope, raw }) => {
+          const result = await importClaudeDesktopMcp(raw, { agentScoped: scope === "agent" });
+          if (result.errors.length > 0) {
+            showToast(
+              tl("{{count}} servidor(es) com erro durante import.", { count: result.errors.length }),
+              "warning",
+            );
+          } else if (result.created.length || result.updated.length) {
+            showToast(
+              tl("Importação concluída: {{count}} servidor(es).", {
+                count: result.created.length + result.updated.length,
+              }),
+              "success",
+            );
+          }
+          return result;
+        }}
+      />
 
       {editingCoreConnection && editingCoreConnection.kind === "core" ? (
         <ConnectionModalRouter

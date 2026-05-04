@@ -1,46 +1,60 @@
 # Koda Documentation
 
-This directory contains the public documentation for Koda as a product, platform, and open-source repository.
+Koda is documented as an operator product first: install it, configure it from the dashboard, run agents, inspect the runtime, and keep the deployment safe.
 
-Use this index when you want to install, operate, evaluate, or contribute to Koda without reading implementation code first.
-
-![Koda logo](assets/brand/koda-logo.png)
+![Koda overview](assets/screenshots/overview.png)
 
 ## Use Koda
 
-- [Local install](install/local.md)
-- [VPS install](install/vps.md)
-- [Release distribution](reference/releases.md)
-- [Configuration reference](config/reference.md)
-- [API reference](reference/api.md)
-- the dashboard UI in `apps/web` is the main operator surface served on port `3000`
+- [Local install](install/local.md) — run Koda on your machine.
+- [VPS install](install/vps.md) — single-node self-hosting path.
+- [Configuration reference](config/reference.md) — what belongs in `.env` vs the control plane.
+- [API reference](reference/api.md) — operator-facing HTTP surface.
 
-## Operate Koda
+## Understand The Platform
 
 - [Architecture overview](architecture/overview.md)
 - [Runtime architecture](architecture/runtime.md)
-- [Security readiness](security/README.md)
 - [Object storage migration](install/object-storage-migration.md)
-- [`docs/openapi/control-plane.json`](openapi/control-plane.json)
+- [Demo data and screenshots](demo-data.md)
+- [`openapi/control-plane.json`](openapi/control-plane.json)
 
-## Extend Koda
+```text
+Dashboard
+   -> Control Plane API
+      -> Postgres + object storage
+      -> Rust sidecars
+      -> agent workers + provider CLIs
+```
 
-- [Architecture overview](architecture/overview.md)
-- [Runtime architecture](architecture/runtime.md)
-- [Configuration reference](config/reference.md)
-- [AI guidance layer](ai/repo-map.yaml)
+## Operate Safely
 
-## Contribute To Koda
+- [Operations runbooks](operations/README.md)
+- [Backup and restore](operations/backup-restore.md)
+- [Upgrade guide](operations/upgrade.md)
+- [Hardening](operations/hardening.md)
+- [Incident response](operations/incident-response.md)
+- [Security readiness](security/README.md)
 
-- [Contributing guide](../CONTRIBUTING.md)
-- [Security policy](../SECURITY.md)
-- [Code of conduct](../CODE_OF_CONDUCT.md)
-- [Repository agent guide](../AGENTS.md)
+## Refresh Demo Screenshots
 
-## Documentation Conventions
+```bash
+docker compose exec app python scripts/seed_demo_data.py --apply
+python3 scripts/capture_docs_screenshots.py \
+  --base-url http://127.0.0.1:3000 \
+  --out docs/assets/screenshots
+```
 
-- Public product and operator documentation lives in `docs/`.
-- Repository guidance for agents, code assistants, and AI tooling lives in `docs/ai/`.
-- The Python platform lives at the repository root and the official web UI lives in `apps/web/`.
-- The maintained public HTTP contract lives in [`openapi/control-plane.json`](openapi/control-plane.json).
-- Screenshots and diagrams in `docs/assets/` reflect real current product surfaces or architecture that exists in this repository today.
+The seeded dataset is local-only and tagged with `koda-docs-demo`, so it can be cleared without touching real operator records:
+
+```bash
+docker compose exec app python scripts/seed_demo_data.py --clear
+```
+
+## Contributor Notes
+
+- Python backend: repository root.
+- Web dashboard: `apps/web/`.
+- Web design guide: `apps/web/CLAUDE.md` until `apps/web/AGENTS.md` exists.
+- Public screenshots and diagrams: `docs/assets`.
+- Contributor guide: [CONTRIBUTING.md](../CONTRIBUTING.md).

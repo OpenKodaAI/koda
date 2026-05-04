@@ -23,6 +23,7 @@
     "build:release:bundle": "python3 scripts/build_release_bundle.py",
     "lint:web": "pnpm --filter koda-web lint",
     "test:web": "pnpm --filter koda-web test",
+    "test:web:ci": "pnpm --filter koda-web test:ci",
     "build:web": "pnpm --filter koda-web build"
   }
 }

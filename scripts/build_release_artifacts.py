@@ -13,7 +13,7 @@ from pathlib import Path
 
 from build_release_bundle import build_release_bundle
 from release_metadata import NPM_PACKAGE_NAME, load_release_metadata, sync_release_metadata
-from sync_npm_readme import sync_npm_readme
+from sync_npm_readme import build_package_readme, package_tarball_readme_matches
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI_PACKAGE_DIR = ROOT / "packages" / "cli"
@@ -48,7 +48,7 @@ def build_npm_tarball(output_dir: Path, *, bundle_dir: Path) -> Path:
     try:
         shutil.copytree(CLI_PACKAGE_DIR / "bin", stage_dir / "bin")
         shutil.copy2(CLI_PACKAGE_DIR / "package.json", stage_dir / "package.json")
-        shutil.copy2(CLI_PACKAGE_DIR / "README.md", stage_dir / "README.md")
+        (stage_dir / "README.md").write_text(build_package_readme(), encoding="utf-8")
         shutil.copytree(bundle_dir, stage_dir / "release")
 
         result = run(["npm", "pack", "--pack-destination", str(output_dir)], cwd=stage_dir)
@@ -56,6 +56,8 @@ def build_npm_tarball(output_dir: Path, *, bundle_dir: Path) -> Path:
         tarball_path = output_dir / tarball_name
         if not tarball_path.exists():
             raise RuntimeError(f"npm pack did not produce {tarball_path}")
+        if not package_tarball_readme_matches(tarball_path):
+            raise RuntimeError(f"npm pack produced a tarball with stale README: {tarball_path}")
         return tarball_path
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
@@ -67,8 +69,6 @@ def build_release_artifacts(output_dir: Path, *, published_at: str | None = None
         raise RuntimeError(
             "release metadata drift detected: " + ", ".join(path.relative_to(ROOT).as_posix() for path in drift)
         )
-    if sync_npm_readme(write=False):
-        raise RuntimeError("npm package README drift detected: packages/cli/README.md")
 
     published = published_at or utc_now_rfc3339()
     metadata = load_release_metadata(published_at=published)

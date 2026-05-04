@@ -120,8 +120,11 @@ export default function OAuthCallbackPage() {
 
     void (async () => {
       try {
+        // mode=json forces the backend to return JSON instead of issuing a
+        // 302 redirect to the frontend callback URL — fetch would otherwise
+        // follow the redirect back to /oauth/callback and we'd parse HTML.
         const payload = await requestJson<OAuthCallbackResponse>(
-          `/api/control-plane/connections/oauth/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}`,
+          `/api/control-plane/connections/oauth/callback?mode=json&state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}`,
         );
         if (!payload.success) {
           finishWithError(payload.error || "Falha ao concluir autenticacao.");

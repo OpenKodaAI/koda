@@ -27,11 +27,6 @@ def validate_startup_config() -> list[str]:
         DEFAULT_PROVIDER,
         ELEVENLABS_API_KEY,
         ELEVENLABS_ENABLED,
-        GWS_CREDENTIALS_FILE,
-        GWS_ENABLED,
-        JIRA_API_TOKEN,
-        JIRA_ENABLED,
-        JIRA_URL,
         KOKORO_ENABLED,
         KOKORO_VOICES_PATH,
         OLLAMA_BASE_URL,
@@ -76,18 +71,6 @@ def validate_startup_config() -> list[str]:
             f"({', '.join(sorted(valid_policies))}). Codex may reject or misinterpret it."
         )
 
-    # --- Integration credential checks ---
-    if GWS_ENABLED and not GWS_CREDENTIALS_FILE:
-        warnings.append("GWS_ENABLED=true but GWS_CREDENTIALS_FILE is not set. Google Workspace commands will fail.")
-
-    if GWS_ENABLED and GWS_CREDENTIALS_FILE and not os.path.isfile(GWS_CREDENTIALS_FILE):
-        warnings.append(
-            f"GWS_CREDENTIALS_FILE='{GWS_CREDENTIALS_FILE}' does not exist. Google Workspace commands will fail."
-        )
-
-    if JIRA_ENABLED and (not JIRA_URL or not JIRA_API_TOKEN):
-        warnings.append("JIRA_ENABLED=true but JIRA_URL or JIRA_API_TOKEN is empty. Jira commands will fail.")
-
     if ELEVENLABS_ENABLED and not ELEVENLABS_API_KEY:
         warnings.append("ELEVENLABS_ENABLED=true but ELEVENLABS_API_KEY is not set. ElevenLabs TTS will not work.")
 
@@ -116,10 +99,6 @@ def validate_startup_config() -> list[str]:
     enabled_features: list[str] = []
     if POSTGRES_ENABLED:
         enabled_features.append("postgres")
-    if GWS_ENABLED:
-        enabled_features.append("gws")
-    if JIRA_ENABLED:
-        enabled_features.append("jira")
     if ELEVENLABS_ENABLED:
         enabled_features.append("elevenlabs")
     if KOKORO_ENABLED:

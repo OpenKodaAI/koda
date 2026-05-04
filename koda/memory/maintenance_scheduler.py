@@ -10,6 +10,7 @@ from koda.memory.config import MEMORY_MAINTENANCE_HOUR
 from koda.memory.maintenance import run_maintenance
 from koda.memory.napkin import get_last_maintenance
 from koda.memory.store import MemoryStore
+from koda.state.agent_scope import normalize_agent_scope
 
 log = get_logger(__name__)
 
@@ -29,11 +30,13 @@ async def start_maintenance_loop(store: MemoryStore) -> None:
     On startup: if last maintenance was >24h ago, runs immediately.
     Then loops: sleep until next target hour, run maintenance.
     """
-    log.info("maintenance_loop_started", hour=MEMORY_MAINTENANCE_HOUR)
+    raw_agent_id = getattr(store, "agent_id", None)
+    agent_id = normalize_agent_scope(raw_agent_id if isinstance(raw_agent_id, str) else None, fallback="default")
+    log.info("maintenance_loop_started", hour=MEMORY_MAINTENANCE_HOUR, agent_id=agent_id)
 
     try:
         # Check if we need to run immediately
-        last = get_last_maintenance()
+        last = get_last_maintenance(agent_id=agent_id)
         if last:
             last_dt = datetime.fromisoformat(last)
             hours_since = (datetime.now() - last_dt).total_seconds() / 3600

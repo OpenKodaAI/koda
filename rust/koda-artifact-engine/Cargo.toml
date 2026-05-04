@@ -9,6 +9,7 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
 koda-observability = { path = "../koda-observability" }
+koda-postgres = { path = "../koda-postgres" }
 koda-proto = { path = "../koda-proto" }
 koda-security-core = { path = "../koda-security-core" }
 sha2.workspace = true

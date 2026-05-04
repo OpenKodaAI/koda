@@ -127,7 +127,6 @@ def test_normalize_provider_accepts_brand_aliases():
 def test_normalize_feature_provider_accepts_function_aliases():
     assert normalize_feature_provider("whisper") == "whispercpp"
     assert normalize_feature_provider("whisper-cpp") == "whispercpp"
-    assert normalize_feature_provider("sora") == "codex"
 
 
 @pytest.mark.asyncio

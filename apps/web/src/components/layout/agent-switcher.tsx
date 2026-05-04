@@ -6,11 +6,12 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, Loader2, Plus, Search } from "lucide-react";
+import { AgentGlyph } from "@/components/ui/agent-glyph";
+import { AgentGlyphGroup } from "@/components/ui/agent-glyph-group";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useCreateAgent } from "@/hooks/use-create-agent";
@@ -108,7 +109,6 @@ export function AgentSwitcher({
 
   const shouldShowSearch = showSearch ?? true;
 
-  const activeSingleAgent = multiple ? selectedAgents[0] ?? null : selectedAgents[0] ?? null;
   const allSelected = multiple && resolvedBotIds.length === agents.length && agents.length > 0;
 
   const summaryLabel = multiple
@@ -280,21 +280,26 @@ export function AgentSwitcher({
           }
         >
           <span className="flex min-w-0 items-center gap-2.5">
-            {activeSingleAgent ? (
-              <span
-                className="agent-swatch agent-swatch--animated h-6 w-6 shrink-0"
-                aria-hidden="true"
-                style={
-                  { "--agent-orb-color": activeSingleAgent.color } as CSSProperties
-                }
-              >
-                <span className="agent-swatch__halo" />
-                <span className="agent-swatch__base" />
-                <span className="agent-swatch__swirl" />
-                <span className="agent-swatch__shine" />
-                <span className="agent-swatch__grain" />
-              </span>
-            ) : null}
+            {(() => {
+              // In multi mode, "All agents" / empty selection means every
+              // available agent is implicitly active — preview the full
+              // catalog so the user sees every color joined in one orb.
+              // Otherwise preview only the explicitly selected ones.
+              const previewAgents =
+                multiple && (allSelected || resolvedBotIds.length === 0)
+                  ? agents
+                  : selectedAgents;
+              if (previewAgents.length === 0) return null;
+              return (
+                <AgentGlyphGroup
+                  agents={previewAgents.map((agent) => ({
+                    id: agent.id,
+                    color: agent.color,
+                  }))}
+                  className="h-6 w-6 shrink-0"
+                />
+              );
+            })()}
             <span className="block min-w-0 truncate text-sm font-medium text-[var(--text-primary)]">
               {summaryLabel}
             </span>
@@ -398,10 +403,12 @@ export function AgentSwitcher({
                         )}
                         onClick={handleSelectAll}
                       >
-                        <span
-                          className="agent-board-ws-selector__dot"
-                          aria-hidden="true"
-                          style={{ backgroundColor: "var(--text-quaternary)" }}
+                        <AgentGlyphGroup
+                          agents={agents.map((a) => ({
+                            id: a.id,
+                            color: a.color,
+                          }))}
+                          className="h-5 w-5 shrink-0"
                         />
                         <span className="min-w-0 flex-1 truncate">
                           {t("agentSwitcher.allAgents")}
@@ -427,10 +434,10 @@ export function AgentSwitcher({
                             )}
                             onClick={() => handleToggle(agent.id)}
                           >
-                            <span
-                              className="agent-board-ws-selector__dot"
-                              aria-hidden="true"
-                              style={{ backgroundColor: agent.color }}
+                            <AgentGlyph
+                              agentId={agent.id}
+                              color={agent.color}
+                              className="h-5 w-5 shrink-0"
                             />
                             <span className="min-w-0 flex-1 truncate">
                               {agent.label}

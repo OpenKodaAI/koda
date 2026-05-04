@@ -3,17 +3,18 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle,
   Eye,
   MonitorPlay,
   RefreshCcw,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useToast } from "@/hooks/use-toast";
 import { translate } from "@/lib/i18n";
 import { humanizeRuntimeAttachError } from "@/lib/runtime-errors";
 import type { RuntimeBrowserState } from "@/lib/runtime-types";
 import { buildClientWebSocketUrl, getRuntimeLabel } from "@/lib/runtime-ui";
-import { cn } from "@/lib/utils";
 
 type RuntimeMutate = (
   resourcePath: string,
@@ -46,7 +47,8 @@ export function RuntimeBrowserPanel({
   browser,
   mutate,
 }: RuntimeBrowserPanelProps) {
-  const { t } = useAppI18n();
+  const { t, tl } = useAppI18n();
+  const { showToast } = useToast();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const snapshotSocketRef = useRef<WebSocket | null>(null);
   const rfbRef = useRef<{ disconnect?: () => void } | null>(null);
@@ -68,6 +70,18 @@ export function RuntimeBrowserPanel({
   useEffect(() => {
     setSnapshot((current) => ({ ...current, ...browser }));
   }, [browser]);
+
+  useEffect(() => {
+    if (!error) return;
+    showToast(error, "error", { id: `runtime-browser:${taskId}:error` });
+  }, [error, showToast, taskId]);
+
+  useEffect(() => {
+    if (!screenshotError) return;
+    showToast(screenshotError, "warning", {
+      id: `runtime-browser:${taskId}:visual-warning`,
+    });
+  }, [screenshotError, showToast, taskId]);
 
   const releaseScreenshot = useCallback(() => {
     if (screenshotUrlRef.current) {
@@ -308,13 +322,8 @@ export function RuntimeBrowserPanel({
     <div className="space-y-4">
       <div className="runtime-surface-header">
         <div className="runtime-surface-header__main">
-          <span className="runtime-live-badge runtime-live-badge--subtle">
-            <span
-              className={cn(
-                "runtime-live-badge__dot",
-                snapshot.status !== "running" && "runtime-live-badge__dot--idle"
-              )}
-            />
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+            <StatusDot tone={snapshot.status === "running" ? "info" : "neutral"} pulse={snapshot.status === "running"} />
             {connectionLabel}
           </span>
           <div className="runtime-surface-header__title">
@@ -323,18 +332,20 @@ export function RuntimeBrowserPanel({
           </div>
         </div>
 
-        <button
+        <Button
           type="button"
           onClick={() => {
             void connectBrowser().catch((attachError: unknown) => {
               void handleAttachFailure(attachError);
             });
           }}
-          className="runtime-ghost-button"
+          variant="secondary"
+          size="sm"
+          className="h-8 px-3 text-[0.8125rem]"
         >
           <RefreshCcw className="h-4 w-4" />
           {t("common.reconnect")}
-        </button>
+        </Button>
       </div>
 
       <div className="runtime-stat-strip runtime-stat-strip--compact">
@@ -358,22 +369,15 @@ export function RuntimeBrowserPanel({
         ) : null}
       </div>
 
-      {error ? (
-        <div className="runtime-inline-alert runtime-inline-alert--danger">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      ) : null}
-
       <div className="runtime-browser-shell overflow-hidden">
         <div
           ref={viewportRef}
-          className="relative flex h-[52vh] min-h-[420px] items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_48%),linear-gradient(180deg,#0a0a0a_0%,#050505_100%)]"
+          className="relative flex h-[clamp(360px,calc(100dvh-330px),640px)] min-h-[360px] items-center justify-center bg-[var(--terminal-background)]"
         >
           {snapshot.novnc_port == null && screenshotUrl ? (
             <Image
               src={screenshotUrl}
-              alt="Browser runtime"
+              alt={tl("Browser runtime")}
               fill
               unoptimized
               className="object-contain"

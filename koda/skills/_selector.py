@@ -12,9 +12,7 @@ from koda.skills._registry import SkillDefinition, SkillRegistry
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # SkillMatch
-# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -29,9 +27,7 @@ class SkillMatch:
     selection_reason: str  # Human-readable explanation
 
 
-# ---------------------------------------------------------------------------
 # Word-boundary helper
-# ---------------------------------------------------------------------------
 
 _WORD_SPLIT_RE = re.compile(r"[\s,;:.!?/\-]+")
 
@@ -41,9 +37,7 @@ def _normalize_words(text: str) -> set[str]:
     return {w for w in _WORD_SPLIT_RE.split(text.lower()) if w}
 
 
-# ---------------------------------------------------------------------------
 # SkillSelector
-# ---------------------------------------------------------------------------
 
 
 class SkillSelector:
@@ -310,9 +304,7 @@ class SkillSelector:
         return matches + extra
 
 
-# ---------------------------------------------------------------------------
 # Internal accumulator
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -323,9 +315,7 @@ class _CandidateInfo:
     alias_label: str = ""
 
 
-# ---------------------------------------------------------------------------
 # Module-level singleton
-# ---------------------------------------------------------------------------
 
 _shared_selector: SkillSelector | None = None
 

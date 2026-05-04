@@ -39,6 +39,11 @@ services:
       ARTIFACT_GRPC_TARGET: "artifact:50064"
       RETRIEVAL_GRPC_TARGET: "retrieval:50062"
       RUNTIME_KERNEL_GRPC_TARGET: "runtime-kernel:50061"
+      RUNTIME_KERNEL_SOCKET: "runtime-kernel:50061"
+      BOT_GATEWAY_GRPC_TARGET: "bot-gateway:50066"
+      BOT_GATEWAY_ENABLED: "${BOT_GATEWAY_ENABLED:-false}"
+      POLICY_ENGINE_GRPC_TARGET: "policy-engine:50067"
+      POLICY_ENGINE_ENABLED: "${POLICY_ENGINE_ENABLED:-false}"
       HEALTHCHECK_URL: "http://127.0.0.1:${CONTROL_PLANE_PORT:-8090}/health"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
@@ -66,7 +71,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'))\""
+          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'), timeout=4)\""
         ]
       interval: 30s
       timeout: 5s
@@ -224,9 +229,80 @@ services:
     restart: unless-stopped
     environment:
       RUNTIME_KERNEL_GRPC_TARGET: "0.0.0.0:50061"
+      RUNTIME_KERNEL_SOCKET: "0.0.0.0:50061"
       RUNTIME_KERNEL_ROOT: "${RUNTIME_KERNEL_ROOT:-/tmp/koda-runtime/default/kernel}"
+    volumes:
+      - koda-state:/var/lib/koda/state
+      - koda-runtime:/var/lib/koda/runtime
+      - koda-artifacts:/var/lib/koda/artifacts
+      - tmp-images:/app/tmp_images
     tmpfs:
       - /tmp/koda-runtime
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # Phase 1C — Quotas, rate limits, spend caps per workspace
+  # (P2-7/P2-8 of production roadmap). Workers consult on the message
+  # ingest hot path and after every billed LLM call.
+  policy-engine:
+    # Opt-in. Default ``docker compose up`` skips this service. Enable
+    # by passing ``--profile policy-engine`` or setting
+    # ``COMPOSE_PROFILES=policy-engine``. The Python runtime falls
+    # through permissively when POLICY_ENGINE_ENABLED=false, so a
+    # deployment that never sets per-workspace quotas pays no cost
+    # for this container.
+    profiles: ["policy-engine"]
+    build:
+      context: .
+      dockerfile: Dockerfile.policy-engine
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POLICY_ENGINE_BIND: "0.0.0.0:50067"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  # Phase 1B — Telegram fan-in service. Useful when running many
+  # agents on the same host (each agent's worker stops opening its
+  # own long-poll TCP connection to api.telegram.org). Single-agent
+  # deployments don't need this — the legacy ``app.run_polling()``
+  # path is fine.
+  #
+  # Opt-in. Default ``docker compose up`` skips this service. Enable
+  # by passing ``--profile bot-gateway`` or setting
+  # ``COMPOSE_PROFILES=bot-gateway``.
+  bot-gateway:
+    profiles: ["bot-gateway"]
+    build:
+      context: .
+      dockerfile: Dockerfile.bot-gateway
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BOT_GATEWAY_BIND: "0.0.0.0:50066"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+      BOT_GATEWAY_TELEGRAM_BASE_URL: "${BOT_GATEWAY_TELEGRAM_BASE_URL:-https://api.telegram.org}"
+      BOT_GATEWAY_POLL_TIMEOUT_SECONDS: "${BOT_GATEWAY_POLL_TIMEOUT_SECONDS:-25}"
+      BOT_GATEWAY_POLL_BATCH_LIMIT: "${BOT_GATEWAY_POLL_BATCH_LIMIT:-100}"
     networks:
       - backend
     deploy:
@@ -330,4 +406,3 @@ volumes:
   postgres-data:
   seaweedfs-data:
   tmp-images:
-

@@ -36,6 +36,8 @@ export function Drawer({
     side === "right"
       ? "right-0 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right-4 data-[state=closed]:slide-out-to-right-4"
       : "left-0 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left-4 data-[state=closed]:slide-out-to-left-4";
+  const sideStyle =
+    side === "right" ? { right: 0, left: "auto" } : { left: 0, right: "auto" };
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={modal}>
@@ -43,7 +45,7 @@ export function Drawer({
         {modal ? (
           <DialogPrimitive.Overlay
             className={cn(
-              "fixed inset-0 z-[70] bg-[rgba(0,0,0,0.72)] backdrop-blur-[8px]",
+              "app-overlay-backdrop fixed inset-0 z-[70]",
               "data-[state=open]:animate-in data-[state=closed]:animate-out",
               "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
             )}
@@ -54,7 +56,7 @@ export function Drawer({
             aria-label={closeLabel}
             onClick={() => onOpenChange(false)}
             className={cn(
-              "fixed inset-0 z-[70] cursor-default border-0 bg-[rgba(0,0,0,0.55)] backdrop-blur-[6px] transition-opacity",
+              "app-overlay-backdrop fixed inset-0 z-[70] cursor-default border-0 transition-opacity",
               open ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           />
@@ -62,13 +64,19 @@ export function Drawer({
         <DialogPrimitive.Content
           aria-describedby={description ? undefined : undefined}
           className={cn(
-            "fixed inset-y-0 z-[71] flex h-full flex-col border-l border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-modal-bg)] shadow-[var(--shadow-floating)] outline-none",
-            "backdrop-blur-[24px] backdrop-saturate-[150%]",
+            "app-drawer-panel fixed inset-y-0 z-[71] flex h-full flex-col rounded-none border-l border-[color:var(--overlay-surface-border)] outline-none",
             positionClass,
             "duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             className,
           )}
-          style={{ width, maxWidth: "100vw" }}
+          style={{
+            position: "fixed",
+            top: 0,
+            bottom: 0,
+            width,
+            maxWidth: "100vw",
+            ...sideStyle,
+          }}
         >
           <header className="flex items-start justify-between gap-3 border-b border-[var(--divider-hair)] px-5 py-4">
             <div className="min-w-0 flex-1">

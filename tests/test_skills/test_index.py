@@ -15,9 +15,7 @@ from koda.skills._index import (
 )
 from koda.skills._registry import SkillDefinition
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_skill(
@@ -60,9 +58,7 @@ def _reset_shared_index(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.skills._index._shared_index", None)
 
 
-# ---------------------------------------------------------------------------
 # TF-IDF fallback
-# ---------------------------------------------------------------------------
 
 
 class TestTfidfVector:
@@ -81,9 +77,7 @@ class TestTfidfVector:
         assert a == b
 
 
-# ---------------------------------------------------------------------------
 # Index unit tests
-# ---------------------------------------------------------------------------
 
 
 class TestRebuild:
@@ -218,9 +212,7 @@ class TestSharedIndex:
         assert a is b
 
 
-# ---------------------------------------------------------------------------
 # Integration tests — skipped when SentenceTransformer is unavailable
-# ---------------------------------------------------------------------------
 
 _st_available = False
 try:

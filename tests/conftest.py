@@ -9,6 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import grpc
 import pytest
 
+# Pull in real-Postgres fixtures so any test marked
+# ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
+# ``db_connection`` fixtures. The module also auto-skips marked
+# tests when no DSN is configured and testcontainers/Docker is
+# unreachable, so a contributor without Docker still gets a clean
+# pytest run.
+pytest_plugins = ["tests.postgres_fixtures", "tests._provider_plugin"]
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 # Set env vars before importing config. Use explicit assignments so CI job-level
@@ -206,6 +214,16 @@ def _reset_approval_runtime_state():
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
     _APPROVAL_GRANTS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_internal_rpc_breakers():
+    """Keep process-local sidecar breaker state from leaking between tests."""
+    from koda.internal_rpc.circuit_breaker import reset_registry_for_tests
+
+    reset_registry_for_tests()
+    yield
+    reset_registry_for_tests()
 
 
 @pytest.fixture

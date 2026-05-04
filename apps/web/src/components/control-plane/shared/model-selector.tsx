@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search, Server, Zap, Brain, HardDrive } from "lucide-react";
@@ -19,27 +20,19 @@ import {
   type ModelMeta,
 } from "./model-metadata";
 
-/* ------------------------------------------------------------------ */
 /*  Provider visual config                                             */
-/* ------------------------------------------------------------------ */
+/* Logos / accents / icon components live in the shared provider-brand
+ * module so every UI surface (system settings, agent editor, model
+ * picker) renders the same brand treatment for every provider.        */
 
-const PROVIDER_LOGOS: Record<string, string> = {
-  claude: "/providers/anthropic.svg",
-  codex: "/providers/openai.svg",
-  gemini: "/providers/google.svg",
-  ollama: "/providers/ollama.svg",
-};
+import {
+  PROVIDER_LOGOS,
+  PROVIDER_ICON_COMPONENTS,
+  PROVIDER_DISPLAY_NAMES as PROVIDER_DISPLAY,
+  COLORED_BRAND_LOGO_PROVIDERS,
+} from "./provider-brand";
 
-const PROVIDER_DISPLAY: Record<string, string> = {
-  claude: "Anthropic",
-  codex: "OpenAI",
-  gemini: "Google",
-  ollama: "Ollama",
-};
-
-/* ------------------------------------------------------------------ */
 /*  Inline provider logo                                               */
-/* ------------------------------------------------------------------ */
 
 function ProviderIcon({
   providerId,
@@ -48,10 +41,39 @@ function ProviderIcon({
   providerId: string;
   size?: number;
 }) {
+  // Local-runtime providers (Ollama, Kokoro) get a CPU glyph in the
+  // theme's primary text color so on-device inference stays visually
+  // distinct from cloud providers without parsing model IDs.
+  const Icon = PROVIDER_ICON_COMPONENTS[providerId];
+  if (Icon) {
+    return (
+      <Icon
+        width={size}
+        height={size}
+        className="shrink-0 text-[var(--text-secondary)]"
+      />
+    );
+  }
+
   const logo = PROVIDER_LOGOS[providerId];
   if (!logo) {
     return <Server size={size} className="text-[var(--text-quaternary)]" />;
   }
+
+  // Colored brand logos render as a real image so the original palette
+  // is preserved across all states. Monochrome logos are mask-tinted.
+  if (COLORED_BRAND_LOGO_PROVIDERS.has(providerId)) {
+    return (
+      <Image
+        src={logo}
+        alt={PROVIDER_DISPLAY[providerId] ?? providerId}
+        width={size}
+        height={size}
+        className="shrink-0 object-contain"
+      />
+    );
+  }
+
   return (
     <span
       className="block shrink-0"
@@ -72,9 +94,7 @@ function ProviderIcon({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Metric bar                                                         */
-/* ------------------------------------------------------------------ */
 
 function MetricBar({
   label,
@@ -108,9 +128,7 @@ function MetricBar({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Detail card                                                        */
-/* ------------------------------------------------------------------ */
 
 function formatSizeBytes(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
@@ -134,6 +152,7 @@ function ModelDetailCard({
     size_bytes?: number;
   };
 }) {
+  const { tl } = useAppI18n();
   const isOllama = providerLabel === "Ollama";
   const hasCost = meta?.inputCostPer1M != null && meta.inputCostPer1M > 0;
 
@@ -152,66 +171,66 @@ function ModelDetailCard({
 
       {meta && (
         <div className="flex flex-col gap-2">
-          <MetricBar label="Velocidade" value={meta.speed} icon={Zap} />
-          <MetricBar label="Inteligencia" value={meta.intelligence} icon={Brain} />
+          <MetricBar label={tl("Velocidade")} value={meta.speed} icon={Zap} />
+          <MetricBar label={tl("Inteligência")} value={meta.intelligence} icon={Brain} />
         </div>
       )}
 
       <div className="flex flex-col gap-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">Provider</span>
+          <span className="text-[var(--text-quaternary)]">{tl("Provider")}</span>
           <span className="text-[var(--text-secondary)]">{providerLabel}</span>
         </div>
         {ollamaMeta?.family && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Familia</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Família")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.family}</span>
           </div>
         )}
         {ollamaMeta?.parameter_size && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Parametros</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Parâmetros")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.parameter_size}</span>
           </div>
         )}
         {ollamaMeta?.quantization_level && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Quantizacao</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Quantização")}</span>
             <span className="font-mono text-[var(--text-secondary)]">{ollamaMeta.quantization_level}</span>
           </div>
         )}
         {ollamaMeta?.size_bytes != null && ollamaMeta.size_bytes > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Disco</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Disco")}</span>
             <span className="text-[var(--text-secondary)]">{formatSizeBytes(ollamaMeta.size_bytes)}</span>
           </div>
         )}
         {meta?.contextWindow != null && meta.contextWindow > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Contexto</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Contexto")}</span>
             <span className="text-[var(--text-secondary)]">{formatContextWindow(meta.contextWindow)}</span>
           </div>
         )}
         {hasCost && (
           <>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">Custo input</span>
+              <span className="text-[var(--text-quaternary)]">{tl("Custo input")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.inputCostPer1M!)} / 1M</span>
             </div>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">Custo output</span>
+              <span className="text-[var(--text-quaternary)]">{tl("Custo output")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.outputCostPer1M!)} / 1M</span>
             </div>
           </>
         )}
         {isOllama && !hasCost && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">Custo</span>
-            <span className="text-[var(--text-secondary)]">Gratuito (local)</span>
+            <span className="text-[var(--text-quaternary)]">{tl("Custo")}</span>
+            <span className="text-[var(--text-secondary)]">{tl("Gratuito (local)")}</span>
           </div>
         )}
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">Model ID</span>
+          <span className="text-[var(--text-quaternary)]">{tl("Model ID")}</span>
           <span className="font-mono text-[var(--text-quaternary)]">{modelId}</span>
         </div>
       </div>
@@ -219,9 +238,7 @@ function ModelDetailCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Model row — always shows tooltip on hover                          */
-/* ------------------------------------------------------------------ */
 
 function buildMergedMeta(opt: ModelOption): ModelMeta | null {
   const api = opt.apiMeta;
@@ -303,9 +320,7 @@ function ModelRow({
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function prettifyModelId(modelId: string) {
   if (!modelId) return "";
@@ -318,9 +333,7 @@ function prettifyModelId(modelId: string) {
     .replace(/\bQwen\b/g, "Qwen");
 }
 
-/* ------------------------------------------------------------------ */
 /*  Types                                                              */
-/* ------------------------------------------------------------------ */
 
 type ModelOption = {
   providerId: string;
@@ -354,9 +367,7 @@ export type ModelSelectorProps = {
   functionId?: string;
 };
 
-/* ------------------------------------------------------------------ */
 /*  ModelSelector                                                      */
-/* ------------------------------------------------------------------ */
 
 const PANEL_MAX_H = 368; // search bar (~52) + list (~320)
 

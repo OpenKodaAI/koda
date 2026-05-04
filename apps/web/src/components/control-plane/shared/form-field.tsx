@@ -20,9 +20,7 @@ import {
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { formatCost } from "@/lib/utils";
 
-/* -------------------------------------------------------------------------- */
 /*  FormField                                                                  */
-/* -------------------------------------------------------------------------- */
 
 interface FormFieldProps {
   label: string;
@@ -67,9 +65,7 @@ export function FormField({
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  FormInput                                                                  */
-/* -------------------------------------------------------------------------- */
 
 interface FormInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
@@ -104,9 +100,7 @@ export function FormInput({
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  FormCurrencyInput                                                          */
-/* -------------------------------------------------------------------------- */
 
 interface FormCurrencyInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> {
@@ -197,9 +191,7 @@ export function FormCurrencyInput({
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  FormSelect                                                                 */
-/* -------------------------------------------------------------------------- */
 
 interface FormSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label: string;
@@ -338,9 +330,7 @@ export function FormSelect({
   );
 }
 
-/* -------------------------------------------------------------------------- */
 /*  FormTextarea                                                               */
-/* -------------------------------------------------------------------------- */
 
 interface FormTextareaProps
   extends TextareaHTMLAttributes<HTMLTextAreaElement> {

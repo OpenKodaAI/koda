@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
+import {
+  jsonErrorResponse,
+  parseSchemaOrThrow,
+  upstreamFetch,
+} from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   setOwnerExistsHintCookie,
@@ -37,7 +41,7 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid registration payload.",
     );
-    const upstream = await fetch(
+    const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/register-owner`,
       {
         method: "POST",
@@ -45,6 +49,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(payload),
         cache: "no-store",
       },
+      { label: "Setup service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok || typeof data.session_token !== "string" || !data.session_token.trim()) {
@@ -53,12 +58,21 @@ export async function POST(request: NextRequest) {
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    const recoveryCodes = Array.isArray(data.recovery_codes)
+      ? data.recovery_codes.filter((code): code is string => typeof code === "string" && code.trim().length > 0)
+      : [];
+    if (recoveryCodes.length === 0) {
+      return NextResponse.json(
+        { error: "Owner account setup did not issue recovery codes. Please generate a new setup code and retry." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const response = NextResponse.json(
       {
         ok: true,
         auth: data.auth || null,
         operator: data.operator || null,
-        recovery_codes: Array.isArray(data.recovery_codes) ? data.recovery_codes : [],
+        recovery_codes: recoveryCodes,
       },
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );

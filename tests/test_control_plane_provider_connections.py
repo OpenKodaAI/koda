@@ -8,6 +8,8 @@ import time
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from koda.agent_contract import resolve_core_provider_catalog
 from koda.provider_models import build_function_model_catalog
 from koda.services.provider_auth import (
@@ -129,14 +131,44 @@ def _make_manager(monkeypatch):
     return manager, rows, meta, secrets, login_sessions
 
 
-def test_core_provider_catalog_exposes_connection_flags_and_hides_sora():
+def test_core_provider_catalog_exposes_connection_flags():
     catalog = {item["id"]: item for item in resolve_core_provider_catalog()}
 
     assert catalog["ollama"]["supports_local_connection"] is True
     assert catalog["ollama"]["connection_managed"] is True
     assert catalog["claude"]["connection_managed"] is True
     assert catalog["kokoro"]["connection_managed"] is False
-    assert catalog["sora"]["show_in_settings"] is False
+
+
+def test_function_model_catalog_preserves_resolved_ollama_models():
+    catalog = build_function_model_catalog(
+        {
+            "ollama": {
+                "title": "Ollama",
+                "vendor": "Ollama",
+                "category": "general",
+                "enabled": True,
+                "command_present": True,
+                "available_models": ["llama3.2:latest"],
+                "functional_models": [
+                    {
+                        "provider_id": "ollama",
+                        "model_id": "llama3.2:latest",
+                        "title": "Llama 3.2 Latest",
+                        "function_id": "general",
+                        "description": "Familia llama, 3B parametros.",
+                        "family": "llama",
+                        "parameter_size": "3B",
+                    }
+                ],
+            }
+        }
+    )
+
+    ollama_item = next(item for item in catalog["general"] if item["provider_id"] == "ollama")
+    assert ollama_item["model_id"] == "llama3.2:latest"
+    assert ollama_item["family"] == "llama"
+    assert ollama_item["parameter_size"] == "3B"
 
 
 def test_function_model_catalog_skips_hidden_standalone_providers():
@@ -144,7 +176,11 @@ def test_function_model_catalog_skips_hidden_standalone_providers():
 
     functional_catalog = build_function_model_catalog(catalog)
 
-    assert all(item["provider_id"] != "sora" for item in functional_catalog["video"])
+    # Hidden providers (show_in_settings=False) are filtered out of every functional bucket.
+    visible_ids = {payload["id"] for payload in catalog.values() if payload.get("show_in_settings", True)}
+    for entries in functional_catalog.values():
+        for entry in entries:
+            assert entry["provider_id"] in visible_ids
 
 
 def test_verify_provider_connection_flips_enabled_flag(monkeypatch):
@@ -277,6 +313,145 @@ def test_ollama_local_connection_round_trip_preserves_local_mode(monkeypatch):
     assert disconnected["connection"]["base_url"] == "http://127.0.0.1:11434"
 
 
+def test_ollama_api_key_mode_ignores_local_base_url_overrides(monkeypatch):
+    """`_resolve_ollama_base_url` must hardcode the cloud endpoint in api_key mode.
+
+    Regression: when an operator first connected Ollama in `local` mode, the
+    local URL got persisted in meta. Switching to `api_key` mode would still
+    reuse that meta — the cloud verify hit `localhost:11434` and failed with
+    `Connection refused`. The same happened when the host environment had
+    a stray ``OLLAMA_BASE_URL=http://localhost:11434``.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    # Simulate the worst case: meta carries a local URL from a prior local-mode
+    # setup AND the host env exports OLLAMA_BASE_URL pointing at localhost.
+    manager._load_global_sections = lambda: {  # type: ignore[attr-defined]
+        "access": {
+            "provider_connection_meta": {
+                "OLLAMA": {"base_url": "http://localhost:11434"},
+            }
+        }
+    }
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    api_key_url = manager_mod.ControlPlaneManager._resolve_ollama_base_url(manager, auth_mode="api_key")
+    assert api_key_url == "https://ollama.com", f"api_key mode must always target Ollama Cloud, got {api_key_url!r}"
+
+    # Even with an env override that explicitly tries to inject a local URL
+    # via the per-call env arg (e.g. from `_merged_global_env()` polluted by
+    # legacy state), api_key mode stays on the cloud endpoint.
+    api_key_url_with_env = manager_mod.ControlPlaneManager._resolve_ollama_base_url(
+        manager,
+        auth_mode="api_key",
+        env={"OLLAMA_BASE_URL": "http://host.docker.internal:11434"},
+    )
+    assert api_key_url_with_env == "https://ollama.com"
+
+    # Local mode still honors the persisted meta — operators rely on this to
+    # point Koda at their local daemon when running outside Docker.
+    local_url = manager_mod.ControlPlaneManager._resolve_ollama_base_url(manager, auth_mode="local")
+    assert local_url == "http://localhost:11434"
+
+
+def test_ollama_api_key_connect_does_not_pollute_local_meta(monkeypatch):
+    """Connecting via API key must leave the local meta intact.
+
+    Regression: the previous flow wrote `https://ollama.com` into meta on
+    api_key connect, wiping the operator's local URL. Switching back to
+    local mode then pointed at the cloud and broke the local daemon flow.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, meta, _secrets, _sessions = _make_manager(monkeypatch)
+    meta["ollama"] = {"base_url": "http://127.0.0.1:11434"}
+
+    # Stub the verify call so we don't try to hit the network during the test.
+    monkeypatch.setattr(
+        manager_mod,
+        "verify_provider_api_key",
+        lambda provider_id, api_key, project_id="", base_url="": ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="api_key",
+            verified=True,
+            account_label="Ollama Cloud",
+            checked_via="api_key",
+            details={"provider": provider_id},
+        ),
+    )
+
+    manager_mod.ControlPlaneManager.put_provider_api_key_connection(
+        manager,
+        "ollama",
+        {"api_key": "sk-ollama-cloud"},
+    )
+
+    assert meta["ollama"]["base_url"] == "http://127.0.0.1:11434", (
+        f"local-mode meta base_url must survive an api_key connect; got {meta['ollama']['base_url']!r}"
+    )
+
+
+def test_ollama_api_key_verify_targets_cloud_endpoint(monkeypatch):
+    """End-to-end: verifying an Ollama api_key connection must hit the cloud.
+
+    Asserts the URL that reaches `verify_provider_api_key` is
+    `https://ollama.com`, not a local URL coming from prior local-mode meta
+    or a stale `OLLAMA_BASE_URL` in the host environment.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, rows, meta, _secrets, _sessions = _make_manager(monkeypatch)
+    # Replace the mocked `_resolve_ollama_base_url` from `_make_manager` with
+    # the real implementation so we exercise the auth_mode branch that we
+    # just hardened.
+    del manager._resolve_ollama_base_url  # type: ignore[attr-defined]
+    manager._load_global_sections = lambda: {  # type: ignore[attr-defined]
+        "access": {
+            "provider_connection_meta": {
+                "OLLAMA": {"base_url": "http://localhost:11434"},
+            }
+        }
+    }
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    rows["ollama"]["auth_mode"] = "api_key"
+    rows["ollama"]["configured"] = 1
+    meta["ollama"] = {"base_url": "http://localhost:11434"}
+
+    captured: dict[str, str] = {}
+
+    def _capture_verify(provider_id, api_key, project_id="", base_url=""):
+        captured["base_url"] = base_url
+        return ProviderVerificationResult(
+            provider_id=provider_id,
+            auth_mode="api_key",
+            verified=True,
+            account_label="Ollama Cloud",
+            checked_via="api_key",
+            details={"provider": provider_id},
+        )
+
+    monkeypatch.setattr(manager_mod, "verify_provider_api_key", _capture_verify)
+
+    # Stub the side-effect helpers that the verify path touches but that we
+    # don't care about for this assertion.
+    manager._mark_provider_enabled = lambda provider_id, *, enabled: None  # type: ignore[attr-defined]
+    manager._provider_login_session_dict = lambda state: {}  # type: ignore[attr-defined]
+    monkeypatch.setattr(manager_mod, "fetch_one", lambda *args, **kwargs: None)
+
+    manager_mod.ControlPlaneManager.put_provider_api_key_connection(
+        manager,
+        "ollama",
+        {"api_key": "sk-ollama-cloud", "verify_after_save": True},
+    )
+
+    assert captured["base_url"] == "https://ollama.com", (
+        "api_key verify must target Ollama Cloud regardless of local meta or "
+        f"stray OLLAMA_BASE_URL env; got {captured['base_url']!r}"
+    )
+
+
 def test_postgres_is_not_exposed_as_native_core_integration(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
@@ -371,313 +546,16 @@ def test_browser_connection_default_round_trip_and_system_toggle_do_not_depend_o
     assert disconnected["connection"]["status"] == "not_configured"
 
 
-def test_jira_connection_default_persists_credentials_and_connection_default(monkeypatch):
+def test_removed_external_core_connections_are_rejected(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
     manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
-    integration_rows: dict[str, dict[str, object]] = {}
-    persisted_sections: dict[str, dict[str, object]] = {section: {} for section in manager_mod.AGENT_SECTIONS}
-    persisted_secrets: dict[str, str] = {}
 
-    def fake_fetch_one(query, params=()):
-        if "FROM cp_connection_defaults" not in query:
-            return None
-        connection_key = str(params[0]) if params else ""
-        integration_id = connection_key.removeprefix("core:")
-        row = integration_rows.get(integration_id)
-        if row is None:
-            return None
-        return {
-            "connection_key": connection_key,
-            "kind": "core",
-            "integration_key": integration_id,
-            "auth_method": str(row.get("auth_mode") or "none"),
-            "configured": 1 if row.get("configured") else 0,
-            "verified": 1 if row.get("verified") else 0,
-            "account_label": str(row.get("account_label") or ""),
-            "provider_account_id": str(row.get("provider_account_id") or ""),
-            "expires_at": str(row.get("expires_at") or ""),
-            "source_origin": "system_default",
-            "last_verified_at": str(row.get("last_verified_at") or ""),
-            "last_error": str(row.get("last_error") or ""),
-            "auth_expired": 1 if row.get("auth_expired") else 0,
-            "checked_via": str(row.get("checked_via") or ""),
-            "metadata_json": json.dumps(row.get("metadata") or {}),
-        }
-
-    def fake_execute(query, params=()):
-        if "INSERT INTO cp_connection_defaults" not in query:
-            return None
-        integration_rows[str(params[2])] = {
-            "auth_mode": str(params[3]),
-            "configured": bool(params[4]),
-            "verified": bool(params[5]),
-            "account_label": str(params[6]),
-            "provider_account_id": str(params[7]),
-            "expires_at": str(params[8]),
-            "last_verified_at": str(params[10]),
-            "last_error": str(params[11]),
-            "auth_expired": bool(params[12]),
-            "checked_via": str(params[13]),
-            "metadata": json.loads(str(params[14]) or "{}"),
-        }
-        return None
-
-    manager._provider_connection_env = lambda: {}  # type: ignore[attr-defined]
-    manager._merged_global_env_base = (  # type: ignore[attr-defined]
-        lambda: manager_mod.ControlPlaneManager._merged_global_env_base(manager)
-    )
-    manager._merged_global_env = lambda: manager_mod.ControlPlaneManager._merged_global_env(manager)  # type: ignore[attr-defined]
-    manager._load_global_sections = lambda: json.loads(json.dumps(persisted_sections))  # type: ignore[attr-defined]
-    manager._persist_global_sections = (  # type: ignore[attr-defined]
-        lambda sections: persisted_sections.clear() or persisted_sections.update(json.loads(json.dumps(sections))) or 1
-    )
-    manager.upsert_global_secret_asset = (  # type: ignore[attr-defined]
-        lambda secret_key, payload, persist_sections=False: (
-            persisted_secrets.__setitem__(
-                secret_key,
-                str(payload["value"]),
-            )
-            or {"secret_key": secret_key, "preview": "tok-***"}
-        )
-    )
-    manager.delete_global_secret_asset = (  # type: ignore[attr-defined]
-        lambda secret_key, persist_sections=False: persisted_secrets.pop(secret_key, None) is not None
-    )
-    manager._record_integration_health_check = lambda *args, **kwargs: None  # type: ignore[attr-defined]
-    manager.get_system_settings = lambda: {  # type: ignore[attr-defined]
-        "integrations": {"jira_enabled": True},
-        "general": {},
-        "scheduler": {},
-        "providers": {},
-        "tools": {},
-        "memory": {},
-        "knowledge": {},
-        "shared_variables": [],
-        "additional_env_vars": [],
-    }
-    manager._integration_configured = (  # type: ignore[attr-defined]
-        lambda integration_id: (
-            (
-                integration_id == "jira"
-                and bool(persisted_sections["integrations"].get("env", {}).get("JIRA_URL"))
-                and bool(persisted_sections["integrations"].get("env", {}).get("JIRA_USERNAME"))
-                and bool(persisted_secrets.get("JIRA_API_TOKEN"))
-            )
-            or integration_id == "browser"
-        )
-    )
-
-    monkeypatch.setattr(manager_mod, "fetch_one", fake_fetch_one)
-    monkeypatch.setattr(manager_mod, "execute", fake_execute)
-    monkeypatch.setattr(
-        manager_mod.ControlPlaneManager,
-        "_global_secret_value",
-        lambda self, secret_key: persisted_secrets.get(secret_key, ""),
-    )
-    monkeypatch.setattr(
-        manager_mod.ControlPlaneManager,
-        "_global_secret_preview_state",
-        lambda self, secret_key: (
-            bool(persisted_secrets.get(secret_key)),
-            "tok-***" if persisted_secrets.get(secret_key) else "",
-        ),
-    )
-    monkeypatch.setattr(
-        manager_mod.ControlPlaneManager,
-        "_verify_integration_configuration",
-        lambda self, integration_id: {
-            "verified": True,
-            "account_label": "Ada Lovelace",
-            "last_error": "",
-            "checked_via": "jira_myself",
-            "auth_expired": False,
-            "details": {"account": "ada@example.com"},
-        },
-    )
-
-    connected = manager_mod.ControlPlaneManager.put_connection_default(
-        manager,
-        "core:jira",
-        {
-            "fields": [
-                {"key": "JIRA_URL", "value": "https://example.atlassian.net"},
-                {"key": "JIRA_USERNAME", "value": "ada@example.com"},
-                {"key": "JIRA_API_TOKEN", "value": "jira-token"},
-            ]
-        },
-    )
-    assert connected["connected"] is True
-    assert connected["auth_method"] == "api_token"
-    assert connected["status"] == "configured"
-    assert persisted_sections["integrations"]["env"]["JIRA_URL"] == "https://example.atlassian.net"
-    assert persisted_sections["integrations"]["env"]["JIRA_USERNAME"] == "ada@example.com"
-    assert persisted_secrets["JIRA_API_TOKEN"] == "jira-token"
-
-    verified = manager_mod.ControlPlaneManager.verify_connection_default(manager, "core:jira")
-    assert verified["connection"]["metadata"]["verified"] is True
-    assert verified["connection"]["auth_method"] == "api_token"
-    assert verified["verification"]["checked_via"] == "jira_myself"
-
-    default_connection = manager_mod.ControlPlaneManager.get_connection_default(manager, "core:jira")
-    assert default_connection["connected"] is True
-    assert default_connection["account_label"] == "Ada Lovelace"
-    assert default_connection["status"] == "verified"
-
-    disconnected = manager_mod.ControlPlaneManager.delete_connection_default(manager, "core:jira")
-    assert disconnected["connection"]["connected"] is False
-    assert disconnected["connection"]["status"] == "not_configured"
-    assert "JIRA_API_TOKEN" not in persisted_secrets
-    assert "JIRA_URL" not in persisted_sections["integrations"].get("env", {})
-    assert "JIRA_USERNAME" not in persisted_sections["integrations"].get("env", {})
-
-
-def test_import_agent_connection_default_copies_system_credentials_into_agent_binding(monkeypatch):
-    import koda.control_plane.manager as manager_mod
-
-    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
-    captured_fields: list[dict[str, object]] = []
-    persisted_row: dict[str, object] = {}
-
-    manager._require_agent_row = lambda agent_id: ("ATLAS", {"id": "ATLAS"})  # type: ignore[attr-defined]
-    manager._integration_connection_row = lambda integration_id: (
-        {  # type: ignore[attr-defined]
-            "configured": 1,
-            "auth_method": "api_token",
-            "metadata_json": "{}",
-        }
-        if integration_id == "jira"
-        else None
-    )
-    manager._system_settings_sections = lambda: {  # type: ignore[attr-defined]
-        "integrations": {
-            "env": {
-                "JIRA_URL": "https://example.atlassian.net",
-                "JIRA_USERNAME": "ada@example.com",
-            }
-        }
-    }
-
-    def persist_fields(agent_id: str, integration_id: str, payload_fields: list[dict[str, object]]):
-        del agent_id, integration_id
-        captured_fields.extend(payload_fields)
-        return {
-            "JIRA_URL": "https://example.atlassian.net",
-            "JIRA_USERNAME": "ada@example.com",
-        }
-
-    manager._persist_agent_core_connection_fields = persist_fields  # type: ignore[attr-defined]
-    manager._resolve_agent_core_auth_method = (  # type: ignore[attr-defined]
-        lambda agent_id, integration_id, requested_auth_method=None: "api_token"
-    )
-    manager._agent_core_connection_configured = lambda agent_id, integration_id: True  # type: ignore[attr-defined]
-    manager._persist_core_agent_connection_row = (  # type: ignore[attr-defined]
-        lambda agent_id, integration_id, **payload: persisted_row.update(
-            {"agent_id": agent_id, "integration_id": integration_id, **payload}
-        )
-    )
-    manager._serialize_agent_core_connection_payload = lambda agent_id, integration_id: {  # type: ignore[attr-defined]
-        "connection_key": "core:jira",
-        "kind": "core",
-        "integration_key": integration_id,
-        "auth_method": "api_token",
-        "source_origin": "imported_default",
-        "status": "configured",
-        "connected": True,
-    }
-
-    monkeypatch.setattr(
-        manager_mod,
-        "fetch_one",
-        lambda query, params=(): {"encrypted_value": "enc-jira-token"} if "cp_secret_values" in query else None,
-    )
-    monkeypatch.setattr(
-        manager_mod,
-        "decrypt_secret",
-        lambda value: "jira-token" if value == "enc-jira-token" else str(value),
-    )
-
-    result = manager_mod.ControlPlaneManager.import_agent_connection_default(
-        manager,
-        "atlas",
-        "core:jira",
-    )
-
-    assert captured_fields == [
-        {"key": "JIRA_URL", "value": "https://example.atlassian.net"},
-        {"key": "JIRA_USERNAME", "value": "ada@example.com"},
-        {"key": "JIRA_API_TOKEN", "value": "jira-token"},
-    ]
-    assert persisted_row["agent_id"] == "ATLAS"
-    assert persisted_row["integration_id"] == "jira"
-    assert persisted_row["auth_method"] == "api_token"
-    assert persisted_row["source_origin"] == "imported_default"
-    assert persisted_row["enabled"] is True
-    assert persisted_row["configured"] is True
-    assert result["connection"]["connection_key"] == "core:jira"
-    assert result["connection"]["source_origin"] == "imported_default"
-
-
-def test_verify_agent_connection_persists_verified_state_for_core_binding(monkeypatch):
-    import koda.control_plane.manager as manager_mod
-
-    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
-    persisted_row: dict[str, object] = {}
-
-    manager._require_agent_row = lambda agent_id: ("ATLAS", {"id": "ATLAS"})  # type: ignore[attr-defined]
-    manager._core_agent_connection_row = lambda agent_id, integration_id: {  # type: ignore[attr-defined]
-        "enabled": 1,
-        "source_origin": "imported_default",
-        "metadata_json": json.dumps({"seed": "default"}),
-    }
-    manager._verify_agent_core_connection_configuration = (  # type: ignore[attr-defined]
-        lambda agent_id, integration_id: {
-            "verified": True,
-            "account_label": "Ada Lovelace",
-            "last_error": "",
-            "checked_via": "jira_myself",
-            "auth_expired": False,
-            "details": {
-                "account": "ada@example.com",
-                "provider_account_id": "ada@example.com",
-            },
-        }
-    )
-    manager._resolve_agent_core_auth_method = lambda agent_id, integration_id: "api_token"  # type: ignore[attr-defined]
-    manager._agent_core_connection_configured = lambda agent_id, integration_id: True  # type: ignore[attr-defined]
-    manager._agent_core_connection_config = lambda agent_id, integration_id: {  # type: ignore[attr-defined]
-        "JIRA_URL": "https://example.atlassian.net",
-        "JIRA_USERNAME": "ada@example.com",
-    }
-    manager._persist_core_agent_connection_row = (  # type: ignore[attr-defined]
-        lambda agent_id, integration_id, **payload: persisted_row.update(
-            {"agent_id": agent_id, "integration_id": integration_id, **payload}
-        )
-    )
-    manager._serialize_agent_core_connection_payload = lambda agent_id, integration_id: {  # type: ignore[attr-defined]
-        "connection_key": "core:jira",
-        "kind": "core",
-        "integration_key": integration_id,
-        "auth_method": "api_token",
-        "source_origin": "imported_default",
-        "status": "verified",
-        "connected": True,
-    }
-
-    result = manager_mod.ControlPlaneManager.verify_agent_connection(manager, "atlas", "core:jira")
-
-    assert result["connection"]["connection_key"] == "core:jira"
-    assert result["connection"]["status"] == "verified"
-    assert result["verification"]["checked_via"] == "jira_myself"
-    assert persisted_row["agent_id"] == "ATLAS"
-    assert persisted_row["integration_id"] == "jira"
-    assert persisted_row["source_origin"] == "imported_default"
-    assert persisted_row["account_label"] == "Ada Lovelace"
-    assert persisted_row["provider_account_id"] == "ada@example.com"
-    assert persisted_row["verified"] is True
-    assert persisted_row["enabled"] is True
-    assert persisted_row["metadata"]["seed"] == "default"
-    assert persisted_row["metadata"]["account"] == "ada@example.com"
+    for connection_key in ("core:jira", "core:confluence", "core:gws", "core:gh", "core:glab", "core:aws"):
+        with pytest.raises(KeyError):
+            manager_mod.ControlPlaneManager.get_connection_default(manager, connection_key)
+        with pytest.raises(KeyError):
+            manager_mod.ControlPlaneManager.put_connection_default(manager, connection_key, {})
 
 
 def test_start_provider_login_tracks_session_and_disconnect_cancels_it(monkeypatch):

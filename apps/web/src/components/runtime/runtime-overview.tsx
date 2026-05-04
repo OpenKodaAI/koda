@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Bot as AgentIcon, Search } from "lucide-react";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
-import { AgentGlyph } from "@/components/dashboard/agent-glyph";
+import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -21,13 +21,13 @@ import {
 import type { RuntimeOverview } from "@/lib/runtime-types";
 import { getRuntimeLabel, getRuntimeTone } from "@/lib/runtime-ui";
 import type { SemanticTone } from "@/lib/theme-semantic";
-import { InlineAlert } from "@/components/ui/inline-alert";
 import { SoftTabs } from "@/components/ui/soft-tabs";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import {
   PageMetricStrip,
   PageMetricStripItem,
 } from "@/components/ui/page-primitives";
+import { useToast } from "@/hooks/use-toast";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 
 function toneToStatusDot(tone: SemanticTone): StatusDotTone {
@@ -95,21 +95,24 @@ function LiveRow({ row, index }: { row: RuntimeRoomRow; index: number }) {
     <Link
       href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
       className={cn(
-        "group grid w-full gap-4 px-3 py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "grid-cols-[auto_auto_auto_1fr_auto] items-center",
+        "group grid w-full gap-x-3 gap-y-1.5 px-3 py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "grid-cols-[auto_1fr_auto] items-center sm:grid-cols-[auto_auto_auto_1fr_auto]",
         "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] rounded-[var(--radius-panel-sm)]",
         index > 0 && "border-t border-[color:var(--divider-hair)]",
       )}
     >
       <StatusDot color={agentColor} />
-      <span className="font-mono text-[0.75rem] text-[var(--text-secondary)]">
+      <span className="hidden font-mono text-[0.75rem] text-[var(--text-secondary)] sm:inline">
         {getAgentLabel(row.agentId)}
       </span>
-      <span className="font-mono text-[0.75rem] text-[var(--text-quaternary)]">
+      <span className="hidden font-mono text-[0.75rem] text-[var(--text-quaternary)] sm:inline">
         #{row.taskId}
       </span>
       <span className="flex min-w-0 items-center gap-2">
+        <span className="font-mono text-[0.75rem] text-[var(--text-secondary)] sm:hidden">
+          {getAgentLabel(row.agentId)} #{row.taskId}
+        </span>
         <StatusDot tone={phaseTone} pulse={isLive} />
         <span className="text-[0.75rem] text-[var(--text-tertiary)]">{phaseLabel}</span>
         <span className="mx-1 text-[var(--text-quaternary)]">·</span>
@@ -119,6 +122,32 @@ function LiveRow({ row, index }: { row: RuntimeRoomRow; index: number }) {
         {row.updatedAt ? formatRelativeTime(row.updatedAt) : t("common.now")}
       </span>
     </Link>
+  );
+}
+
+function RuntimeLayerPill({
+  label,
+  status,
+}: {
+  label: string;
+  status: string;
+}) {
+  const tone: StatusDotTone =
+    status === "available"
+      ? "success"
+      : status === "partial" || status === "unknown"
+        ? "warning"
+        : status === "unavailable" || status === "offline" || status === "disabled"
+          ? "danger"
+          : toneToStatusDot(getRuntimeTone(status));
+  return (
+    <span
+      className="inline-flex min-w-0 items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 py-1 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]"
+      title={`${label}: ${getRuntimeLabel(status)}`}
+    >
+      <StatusDot tone={tone} />
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -142,32 +171,47 @@ function AgentRailRow({
     live ? "info" : getRuntimeTone(overview.availability.runtime),
   );
   const label = live ? t("runtime.overview.live") : getRuntimeLabel(overview.availability.runtime);
+  const layers = [
+    { label: "RT", status: overview.availability.runtime },
+    { label: "DB", status: overview.availability.database },
+    { label: "BR", status: overview.availability.browser },
+    { label: "AT", status: overview.availability.attach },
+  ];
 
   return (
     <div
       className={cn(
-        "grid items-center gap-3 px-3 py-2.5",
-        "grid-cols-[auto_1fr_auto]",
+        "grid items-start gap-3 px-3 py-3",
+        "grid-cols-[auto_1fr]",
         index > 0 && "border-t border-[color:var(--divider-hair)]",
       )}
     >
-      <AgentGlyph
+      <AgentSigil
         agentId={overview.agentId}
+        label={overview.agentLabel}
         color={overview.agentColor}
-        variant="list"
-        shape="swatch"
-        className="h-6 w-6 shrink-0"
+        status={live ? "running" : undefined}
+        size="xs"
       />
       <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
-          {overview.agentLabel}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              {overview.agentLabel}
+            </span>
+            <StatusDot tone={runtimeTone} pulse={live} />
+            <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{label}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {layers.map((item) => (
+              <RuntimeLayerPill key={item.label} label={item.label} status={item.status} />
+            ))}
+          </div>
+        </div>
+        <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+          {activeCount}·{retainedCount}·{attentionCount}
         </span>
-        <StatusDot tone={runtimeTone} pulse={live} />
-        <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{label}</span>
       </div>
-      <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
-        {activeCount}·{retainedCount}·{attentionCount}
-      </span>
     </div>
   );
 }
@@ -178,7 +222,10 @@ export function RuntimeOverviewScreen({
   initialBotIds?: string[];
 }) {
   const { t } = useAppI18n();
+  const { showToast } = useToast();
   const { agents } = useAgentCatalog();
+  const lastErrorToastRef = useRef<string | null>(null);
+  const incidentToastKeysRef = useRef<Set<string>>(new Set());
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>(initialBotIds ?? []);
   const [statusFilter, setStatusFilter] = useState<RuntimeRoomFilter>("all");
   const [search, setSearch] = useState("");
@@ -260,6 +307,25 @@ export function RuntimeOverviewScreen({
   const attentionCount = totals.recovery + totals.cleanup + incidentEntries.length;
   const visibleRows = roomRows.slice(0, 10);
 
+  useEffect(() => {
+    if (!error || lastErrorToastRef.current === error) return;
+    lastErrorToastRef.current = error;
+    showToast(error, "error", { id: "runtime-overview:error" });
+  }, [error, showToast]);
+
+  useEffect(() => {
+    const nextKeys = new Set<string>();
+    for (const entry of incidentEntries) {
+      const key = `${entry.agentId}:${entry.incident}`;
+      nextKeys.add(key);
+      if (incidentToastKeysRef.current.has(key)) continue;
+      showToast(`${entry.agentLabel} · ${entry.incident}`, "warning", {
+        id: `runtime-overview:incident:${key}`,
+      });
+    }
+    incidentToastKeysRef.current = nextKeys;
+  }, [incidentEntries, showToast]);
+
   if (loading && selectedOverviews.length === 0) {
     return <RuntimeOverviewSkeleton />;
   }
@@ -288,22 +354,30 @@ export function RuntimeOverviewScreen({
     >
       {/* Header */}
       <div
-        className="flex flex-wrap items-center justify-between gap-3"
+        className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"
         {...tourAnchor("runtime.header")}
       >
-        <div className="w-[200px]" {...tourAnchor("runtime.agent-switcher")}>
-          <AgentSwitcher
-            multiple
-            singleRow
-            selectedBotIds={selectedBotIds}
-            onSelectionChange={setSelectedBotIds}
-            className="agent-switcher--compact"
-          />
+        <div className="min-w-0">
+          <p className="eyebrow">{t("runtime.overview.title")}</p>
+          <h1 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            {t("runtime.controlCard.title", { defaultValue: "Runtime operations" })}
+          </h1>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
+          <div className="w-full sm:w-[220px]" {...tourAnchor("runtime.agent-switcher")}>
+            <AgentSwitcher
+              multiple
+              singleRow
+              fullWidth
+              selectedBotIds={selectedBotIds}
+              onSelectionChange={setSelectedBotIds}
+              className="agent-switcher--compact"
+            />
+          </div>
+
           <label
-            className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] focus-within:border-[var(--accent)]"
+            className="inline-flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] focus-within:border-[var(--accent)] sm:w-auto"
             {...tourAnchor("runtime.search")}
           >
             <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
@@ -311,7 +385,7 @@ export function RuntimeOverviewScreen({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("runtime.overview.searchPlaceholder")}
-              className="w-44 bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+              className="w-full bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)] sm:w-44"
             />
           </label>
 
@@ -341,6 +415,11 @@ export function RuntimeOverviewScreen({
             hint={t("runtime.overview.metrics.executionsHint")}
           />
           <PageMetricStripItem
+            label={t("runtime.overview.filters.retained")}
+            value={String(totals.retained)}
+            tone={totals.retained > 0 ? "success" : "neutral"}
+          />
+          <PageMetricStripItem
             label={t("runtime.overview.metrics.attention")}
             value={String(attentionCount)}
             tone={attentionCount > 0 ? "warning" : "neutral"}
@@ -348,17 +427,6 @@ export function RuntimeOverviewScreen({
           />
         </PageMetricStrip>
       </div>
-
-      {/* Alerts */}
-      {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
-
-      {incidentEntries.slice(0, 2).map((entry) => (
-        <InlineAlert key={`${entry.agentId}-${entry.incident}`} tone="warning">
-          <span className="font-semibold text-[var(--text-primary)]">{entry.agentLabel}</span>
-          <span className="mx-2 text-[var(--text-quaternary)]">·</span>
-          <span>{entry.incident}</span>
-        </InlineAlert>
-      ))}
 
       {/* Main grid */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_320px]">

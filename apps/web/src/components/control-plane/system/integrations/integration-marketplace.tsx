@@ -8,7 +8,8 @@ import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
 import { requestJson, toErrorMessage } from "@/lib/http-client";
 import { cn } from "@/lib/utils";
-import { buildSuggestedMcpCatalogEntry } from "@/components/control-plane/system/mcp/mcp-catalog-data";
+import { buildSuggestedMcpCatalogEntry } from "@/components/control-plane/system/mcp/mcp-catalog-utils";
+import { useMcpCatalogSuggestions } from "@/hooks/use-mcp-catalog-suggestions";
 import { McpServerEditorModal } from "@/components/control-plane/system/mcp/mcp-server-editor-modal";
 import { IntegrationConnectionModal } from "./integration-connection-modal";
 import { IntegrationCard } from "./integration-card";
@@ -77,6 +78,7 @@ type McpEditorState = {
 function MarketplaceGrid({
   entries,
   mcpCatalogLoading,
+  suggestedLoading,
   mcpCatalogError,
   onRetryMcpCatalog,
   onSelect,
@@ -84,6 +86,8 @@ function MarketplaceGrid({
 }: {
   entries: UnifiedIntegrationEntry[];
   mcpCatalogLoading: boolean;
+  /** True while the curated MCP catalog is being fetched from the API. */
+  suggestedLoading: boolean;
   mcpCatalogError: string | null;
   onRetryMcpCatalog: () => void;
   onSelect: (entryId: string) => void;
@@ -211,7 +215,16 @@ function MarketplaceGrid({
         </div>
       </div>
 
-      {grouped.length === 0 ? (
+      {grouped.length === 0 && (suggestedLoading || mcpCatalogLoading) ? (
+        <div className="mt-4 grid grid-cols-2 gap-2" aria-hidden>
+          {Array.from({ length: 8 }).map((_, idx) => (
+            <div
+              key={idx}
+              className="h-[5.5rem] animate-pulse rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]"
+            />
+          ))}
+        </div>
+      ) : grouped.length === 0 ? (
         <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
           {tl("Nenhuma integração ou servidor MCP encontrado.")}
         </div>
@@ -334,17 +347,22 @@ export function IntegrationMarketplace() {
     void fetchMcpCatalog();
   }, [fetchMcpCatalog]);
 
+  const { servers: suggestedMcpServers, isLoading: suggestedLoading } =
+    useMcpCatalogSuggestions();
+
   const unifiedEntries = useMemo(
     () =>
       buildUnifiedIntegrationEntries({
         integrations: draft.values.resources.integrations ?? {},
         integrationConnections,
         mcpCatalog,
+        suggestedMcpServers,
       }),
     [
       draft.values.resources.integrations,
       integrationConnections,
       mcpCatalog,
+      suggestedMcpServers,
     ],
   );
 
@@ -477,6 +495,7 @@ export function IntegrationMarketplace() {
               key="grid"
               entries={unifiedEntries}
               mcpCatalogLoading={mcpCatalogLoading}
+              suggestedLoading={suggestedLoading}
               mcpCatalogError={mcpCatalogError}
               onRetryMcpCatalog={() => {
                 void fetchMcpCatalog();

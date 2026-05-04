@@ -7,9 +7,12 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from koda.internal_rpc.memory_engine import build_memory_engine_client
+from koda.logging_config import get_logger
 from koda.services.audit import AuditEvent, emit
 from koda.state.agent_scope import normalize_agent_scope
 from koda.state.primary import require_primary_state_backend, run_coro_sync
+
+log = get_logger(__name__)
 
 _ENGINE_REVIEW_ACTIONS = {
     "approve",
@@ -19,6 +22,43 @@ _ENGINE_REVIEW_ACTIONS = {
     "expire",
     "archive",
 }
+
+_CURATION_CANCEL_STATUSES = {"superseded", "rejected", "stale", "invalidated"}
+
+
+def _apply_curation_side_effects(agent_id: str, memory_ids: list[int], operations: list[dict[str, Any]]) -> None:
+    if not memory_ids:
+        return
+    try:
+        from koda.memory.embedding_queue import cancel_embedding_job
+        from koda.memory.napkin import batch_get_entries
+        from koda.memory.recall import clear_recall_cache
+
+        entries = batch_get_entries(memory_ids)
+        affected_users = {entry.user_id for entry in entries.values()}
+        for user_id in affected_users:
+            clear_recall_cache(user_id)
+
+        cancel_ids: set[int] = set()
+        for operation in operations:
+            ids = [
+                int(item) for item in operation.get("memory_ids") or [] if isinstance(item, int) or str(item).isdigit()
+            ]
+            memory_id = operation.get("memory_id")
+            if memory_id is not None and str(memory_id).isdigit():
+                ids.append(int(memory_id))
+            memory_status = _stringify(operation.get("memory_status")).strip().lower()
+            is_active = operation.get("is_active")
+            if (
+                operation.get("op") == "batch_deactivate"
+                or is_active is False
+                or memory_status in _CURATION_CANCEL_STATUSES
+            ):
+                cancel_ids.update(item for item in ids if item > 0)
+        for memory_id in cancel_ids:
+            cancel_embedding_job(memory_id, agent_id=agent_id)
+    except Exception:
+        log.exception("memory_curation_side_effects_failed", agent_id=agent_id, memory_ids=memory_ids)
 
 
 def _scope(agent_id: str) -> str:
@@ -377,6 +417,8 @@ def apply_memory_curation_action(agent_id: str, payload: dict[str, Any]) -> dict
             },
         )
     )
+
+    _apply_curation_side_effects(scope, rpc_memory_ids or target_ids, operations)
 
     return {
         "ok": True,

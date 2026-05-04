@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koda"
-version = "1.0.10"
+version = "1.0.11"
 description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,7 +18,6 @@ dependencies = [
     "croniter>=2.0,<3.0",
     "beautifulsoup4>=4.12,<5.0",
     "boto3>=1.35,<2.0",
-    "atlassian-python-api>=3.41,<4.0",
     "asyncpg>=0.30.0,<1.0",
     "asyncssh>=2.14.0,<3.0",
     "argon2-cffi>=23.1,<24.0",
@@ -45,6 +44,7 @@ dev = [
     "pytest>=9.0.3,<10.0",
     "pytest-asyncio>=1.1,<2.0",
     "pytest-cov>=4.0,<5.0",
+    "hypothesis>=6.148,<7.0",
     "ruff>=0.3,<1.0",
     "mypy>=1.8,<2.0",
     "types-PyYAML>=6.0.12,<7.0",
@@ -82,6 +82,21 @@ addopts = "-v --tb=short"
 filterwarnings = []
 markers = [
     "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
+    "postgres: requires a real Postgres instance (testcontainers or POSTGRES_TEST_DSN env)",
+    "mcp: spawns a real MCP server subprocess (npx postgres_mcp etc.)",
+    "rust_engine: spawns a real Rust gRPC engine binary",
+    "s3: requires moto S3 fixture",
+    "golden: golden-dataset quality test (recall@K, extraction, dossier)",
+    "bench: performance/throughput benchmark; opt-in only",
+    "chaos: failure injection / fault-tolerance test",
+    "eval: multi-provider evaluation (tools quality, etc.)",
+    "audio_fixtures: requires audio fixtures and ffmpeg",
+    "acoustic: real Kokoro+Whisper acoustic round-trip (gated by KODA_TEST_ACOUSTIC=1)",
+    "slow: long-running test (>60s); skipped on PR fast tier",
+    "local_only: only runs on developer machines; skipped in CI",
+    "flags: parametrized over feature flags",
+    "security: adversarial guardrail and permission-boundary tests",
+    "guardrail: focused tests for security blocking/approval behavior",
 ]
 
 [tool.coverage.report]
@@ -107,15 +122,12 @@ disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = [
-    "koda.handlers.atlassian",
     "koda.handlers.automation",
     "koda.handlers.browser",
     "koda.handlers.devops",
     "koda.handlers.fileops",
-    "koda.handlers.google_workspace",
     "koda.handlers.messages",
     "koda.handlers.packages",
-    "koda.services.atlassian_client",
 ]
 ignore_errors = true
 
@@ -130,7 +142,6 @@ module = [
     "telegram.*",
     "boto3.*",
     "botocore.*",
-    "atlassian.*",
     "playwright.*",
     "psycopg2.*",
     "psycopg.*",
@@ -159,6 +170,7 @@ dev = [
     "pytest>=9.0.3,<10.0",
     "pytest-asyncio>=1.1,<2.0",
     "pytest-cov>=4.0,<5.0",
+    "hypothesis>=6.148,<7.0",
     "ruff>=0.3,<1.0",
     "mypy>=1.8,<2.0",
     "types-PyYAML>=6.0.12,<7.0",

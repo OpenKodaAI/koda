@@ -64,9 +64,7 @@ def ready_capability() -> ProviderCapabilities:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Pure-function tests
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestPayloadBuilder:
@@ -134,6 +132,103 @@ class TestPayloadBuilder:
         user_content = payload["messages"][0]["content"]
         assert isinstance(user_content, str)
         assert user_content == "describe"
+
+    def test_effort_enum_injects_reasoning_effort(self):
+        from koda.services.openai_compatible_runner import get_provider_profile
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("perplexity"),
+            model="sonar-reasoning",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="high",
+        )
+        assert payload["reasoning_effort"] == "high"
+        assert "thinking" not in payload
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("deepseek"),
+            model="deepseek-v4-pro",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="max",
+        )
+        assert payload["reasoning_effort"] == "max"
+        assert payload["thinking"] == {"type": "enabled"}
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("xai"),
+            model="grok-4.20-multi-agent",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="xhigh",
+        )
+        assert payload["reasoning"] == {"effort": "xhigh"}
+        assert "reasoning_effort" not in payload
+
+    def test_effort_skipped_when_model_has_no_capability(self, mistral_profile):
+        payload = _build_chat_payload(
+            profile=mistral_profile,
+            model="mistral-large-latest",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="high",
+        )
+        assert "reasoning_effort" not in payload
+        assert "thinking" not in payload
+
+    def test_effort_skipped_when_value_is_invalid(self):
+        from koda.services.openai_compatible_runner import get_provider_profile
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("perplexity"),
+            model="sonar-reasoning",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="WRONG",
+        )
+        assert "reasoning_effort" not in payload
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("deepseek"),
+            model="deepseek-v4-pro",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="low",
+        )
+        assert "thinking" not in payload
+        assert "reasoning_effort" not in payload
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("xai"),
+            model="grok-4.20-multi-agent",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="max",
+        )
+        assert "reasoning" not in payload
+        assert "reasoning_effort" not in payload
 
 
 class TestUsageAndCost:
@@ -257,9 +352,7 @@ class TestCitations:
         assert "[1] https://a.com" in result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Integration tests with mocked HTTP
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRunOpenAICompatible:

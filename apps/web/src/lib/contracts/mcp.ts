@@ -2,9 +2,7 @@ import { z } from "zod";
 import { registerBodySchema } from "@/lib/contracts/proxy-body-schemas";
 import { safeText } from "@/lib/contracts/sanitizers";
 
-/* ------------------------------------------------------------------ */
 /*  Schemas                                                            */
-/* ------------------------------------------------------------------ */
 
 export const updateMcpServerBodySchema = z
   .object({
@@ -26,9 +24,7 @@ export const updateMcpPolicyBodySchema = z
 
 const emptyBodySchema = z.object({}).passthrough();
 
-/* ------------------------------------------------------------------ */
 /*  Registration                                                       */
-/* ------------------------------------------------------------------ */
 
 // PUT /mcp/catalog/{serverKey}
 registerBodySchema({

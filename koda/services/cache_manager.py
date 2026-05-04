@@ -12,7 +12,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from koda.config import AGENT_ID, STATE_BACKEND
+from koda.config import (
+    AGENT_ID,
+    SEMANTIC_CACHE_THRESHOLD,
+    STATE_BACKEND,
+)
 from koda.logging_config import get_logger
 from koda.services.cache_config import (
     CACHE_ENABLED,
@@ -40,11 +44,24 @@ _MANAGERS: OrderedDict[str, CacheManager] = OrderedDict()
 
 
 def _build_sentence_transformer() -> Any:
-    from sentence_transformers import SentenceTransformer
+    """Load the shared sentence transformer (auto MPS / CUDA / CPU device).
 
-    from koda.memory.config import MEMORY_EMBEDDING_MODEL
+    Delegates to :func:`koda.utils.embeddings.load_sentence_transformer` so
+    that all embedding callers in the runtime use the same instance and the
+    same device. This is what gives the cache the MPS speedup on Apple
+    Silicon — without it, the cache used to spawn a separate CPU-only model.
+    """
+    from koda.memory.config import MEMORY_EMBEDDING_MODEL  # noqa: PLC0415
+    from koda.utils.embeddings import load_sentence_transformer  # noqa: PLC0415
 
-    return SentenceTransformer(MEMORY_EMBEDDING_MODEL)
+    model = load_sentence_transformer(MEMORY_EMBEDDING_MODEL)
+    if model is None:
+        # Fall back to direct instantiation so a hard failure surfaces with
+        # the original ImportError instead of a silent NoneType later.
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+        return SentenceTransformer(MEMORY_EMBEDDING_MODEL)
+    return model
 
 
 _CONVERSATIONAL_PREFIXES = re.compile(
@@ -142,6 +159,9 @@ class CacheManager:
         self._model: Any = None
         self._model_lock = asyncio.Lock()
         self._initialized = False
+        self._vector_index_lock = asyncio.Lock()
+        self._vector_index_loaded = False
+        self._vector_index_dim: int | None = None
 
     def _agent_scope(self) -> str:
         return normalize_agent_scope(self._agent_id, fallback=AGENT_ID)
@@ -250,6 +270,80 @@ class CacheManager:
             model_family=model_family,
         )
 
+    async def _vector_match(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        query_embedding: list[float],
+        original_query: str = "",
+    ) -> tuple[dict[str, Any] | None, float]:
+        """FAISS-backed paraphrase match with optional cross-encoder rerank.
+
+        Returns the best candidate among the FAISS top-K, optionally re-scored
+        by the cross-encoder reranker. The cosine similarity reported is
+        always the original FAISS one (so callers can keep their threshold
+        semantics intact); the reranker only changes which of the top-K is
+        chosen as best, which catches cases where multiple cached entries
+        all score above the cosine threshold but only one is a real
+        paraphrase of the query.
+        """
+        from koda.services.semantic_cache_index import get_semantic_cache_index  # noqa: PLC0415
+
+        if not query_embedding:
+            return None, 0.0
+        dim = len(query_embedding)
+        index = get_semantic_cache_index(self._agent_scope(), dim)
+        if not index.is_available:
+            return None, 0.0
+        try:
+            import numpy as np  # noqa: PLC0415
+        except ImportError:
+            return None, 0.0
+        if not index.is_loaded() or index.size() == 0:
+            async with self._vector_index_lock:
+                if not index.is_loaded() or index.size() == 0:
+                    queries = [normalize_query(str(row.get("query_text") or "")) for row in rows]
+                    loop = asyncio.get_running_loop()
+                    embeddings = await loop.run_in_executor(None, partial(self._embed_sync_batch, queries))
+                    entries = [
+                        (int(row.get("id") or 0), np.asarray(emb, dtype=np.float32))
+                        for row, emb in zip(rows, embeddings, strict=False)
+                        if row.get("id")
+                    ]
+                    index.bulk_load(entries)
+                    self._vector_index_loaded = True
+                    self._vector_index_dim = dim
+        hits = index.search(
+            np.asarray(query_embedding, dtype=np.float32),
+            k=5,
+            threshold=SEMANTIC_CACHE_THRESHOLD,
+        )
+        if not hits:
+            return None, 0.0
+        rows_by_id = {int(row.get("id") or 0): row for row in rows if row.get("id")}
+
+        # Cosine candidates above threshold, in cosine order.
+        candidates: list[tuple[dict[str, Any], float]] = []
+        for cache_id, similarity in hits:
+            row = rows_by_id.get(int(cache_id))
+            if row is not None:
+                candidates.append((row, similarity))
+        if not candidates:
+            return None, 0.0
+
+        # Rerank top-K when the reranker is available. The cross-encoder
+        # picks the actual best paraphrase among cosine-close candidates;
+        # silent fallback to cosine ordering when reranker disabled / fails.
+        if original_query and len(candidates) >= 2:
+            from koda.services.reranker import rerank_top_k_indices  # noqa: PLC0415
+
+            cand_texts = [normalize_query(str(row.get("query_text") or "")) for row, _ in candidates]
+            new_order = rerank_top_k_indices(original_query, cand_texts, top_k=len(candidates))
+            if new_order is not None:
+                candidates = [candidates[i] for i in new_order]
+
+        return candidates[0]
+
     async def _lookup_primary_semantic(
         self,
         *,
@@ -282,6 +376,31 @@ class CacheManager:
         await self._get_model()
         loop = asyncio.get_running_loop()
         query_embedding = await loop.run_in_executor(None, partial(self._embed_sync, normalized))
+
+        from koda.services.runtime_capabilities import effective_semantic_cache_backend  # noqa: PLC0415
+
+        if effective_semantic_cache_backend() == "vector":
+            row, similarity = await self._vector_match(
+                rows=rows, query_embedding=query_embedding, original_query=normalized
+            )
+            if row is not None:
+                canonical_row = cache_get_by_id(int(row["id"]), agent_id=self._agent_scope())
+                if canonical_row is None:
+                    cache_invalidate_entry(int(row["id"]), agent_id=self._agent_scope())
+                else:
+                    response, cost_usd = canonical_row
+                    response = str(response or "")
+                    if response and not looks_like_provider_error_response(response):
+                        cache_record_hit(int(row["id"]), agent_id=self._agent_scope())
+                        return CacheLookupResult(
+                            cache_id=int(row["id"]),
+                            response=response,
+                            match_type="semantic_vector",
+                            similarity=similarity,
+                            original_cost_usd=float(cost_usd or 0.0),
+                        )
+                    cache_invalidate_entry(int(row["id"]), agent_id=self._agent_scope())
+            # Fall through: legacy chunked path still rescues if vector missed.
 
         # Process candidates in chunks with early termination
         chunk_size = max(1, CACHE_SEMANTIC_CHUNK_SIZE)
@@ -349,7 +468,7 @@ class CacheManager:
         )
         qhash = scoped_query_hash(normalized, scope_fingerprint=scope_fingerprint)
         expires_at = (datetime.now() + timedelta(days=CACHE_TTL_DAYS)).isoformat()
-        return cache_upsert(
+        cache_id = cache_upsert(
             user_id,
             qhash,
             query,
@@ -360,6 +479,34 @@ class CacheManager:
             expires_at,
             agent_id=self._agent_scope(),
         )
+        if cache_id is not None and self._vector_index_loaded:
+            from koda.services.runtime_capabilities import effective_semantic_cache_backend  # noqa: PLC0415
+
+            if effective_semantic_cache_backend() == "vector":
+                await self._index_new_entry(cache_id, normalized)
+        return cache_id
+
+    async def _index_new_entry(self, cache_id: int, normalized: str) -> None:
+        """Push a freshly-stored entry into the FAISS index, best-effort."""
+        try:
+            import numpy as np  # noqa: PLC0415
+
+            from koda.services.semantic_cache_index import get_semantic_cache_index  # noqa: PLC0415
+        except ImportError:
+            return
+        if self._vector_index_dim is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            embedding = await loop.run_in_executor(None, partial(self._embed_sync, normalized))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cache_vector_index_embed_failed", error=str(exc))
+            return
+        index = get_semantic_cache_index(self._agent_scope(), self._vector_index_dim)
+        try:
+            index.add(int(cache_id), np.asarray(embedding, dtype=np.float32))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cache_vector_index_add_failed", error=str(exc))
 
     async def invalidate_user(self, user_id: int) -> int:
         return cache_invalidate_user(user_id, agent_id=self._agent_scope())

@@ -227,9 +227,7 @@ class TestCallbackApproval:
         await callback_approval(update, context)
 
 
-# ---------------------------------------------------------------------------
 # Agent-cmd approval callback tests
-# ---------------------------------------------------------------------------
 
 
 def _add_agent_cmd_op(op_id, user_id=111, timestamp=None, requests=None):

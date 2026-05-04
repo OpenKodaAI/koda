@@ -13,12 +13,52 @@ GENERATED_PROTO_ROOT = Path(__file__).resolve().parent / "generated"
 
 
 def resolve_grpc_target(raw_target: str) -> tuple[str, str]:
+    """Normalize a target string into a (target, transport_tag) tuple.
+
+    Accepts a comma-separated list of host:port endpoints, e.g.
+    ``"sidecar-a:50063,sidecar-b:50063"``. Multi-target strings are
+    translated to gRPC's ``ipv4:`` resolver scheme so the channel
+    natively load-balances across the configured pool — workers stop
+    being pinned to one sidecar replica and a single hung instance can
+    no longer freeze every caller. UDS targets stay untouched: a UDS
+    path inherently points at one process so the pool concept does not
+    apply there.
+    """
     target = raw_target.strip()
+    if not target.startswith(("unix://", "/")) and "," in target:
+        endpoints = [chunk.strip() for chunk in target.split(",") if chunk.strip()]
+        if len(endpoints) > 1:
+            return f"ipv4:{','.join(endpoints)}", "grpc-tcp-pool"
+        if endpoints:
+            target = endpoints[0]
     if target.startswith("unix://"):
         return target, "grpc-uds"
     if target.startswith("/"):
         return f"unix://{target}", "grpc-uds"
     return target, "grpc-tcp"
+
+
+def _grpc_pool_options() -> list[tuple[str, str]]:
+    """Channel options that enable client-side round-robin balancing
+    across the addresses returned by the ``ipv4:`` resolver. The
+    service-config JSON is the formal way to set the LB policy in
+    grpc-python and is honored by both ``grpc`` and ``grpc.aio``."""
+    return [
+        ("grpc.lb_policy_name", "round_robin"),
+        ("grpc.service_config", '{"loadBalancingPolicy":"round_robin"}'),
+    ]
+
+
+# When grpc-python connects to a ``unix://`` target it derives the HTTP/2
+# ``:authority`` header from the URL path, which url-encodes the slashes
+# and produces a header that tonic rejects with PROTOCOL_ERROR. Forcing a
+# benign authority sidesteps the validation. ``localhost`` is the canonical
+# choice — services on a UDS socket are by definition the local host.
+_UDS_AUTHORITY_OPTION: tuple[str, str] = ("grpc.default_authority", "localhost")
+
+
+def _uds_options() -> list[tuple[str, str]]:
+    return [_UDS_AUTHORITY_OPTION]
 
 
 def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
@@ -66,11 +106,44 @@ def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
 
         _log.info("grpc_tls_channel_created", extra={"target": target, "mtls": private_key is not None})
 
+        # only pass ``options`` when the target is a multi-
+        # endpoint pool. Keeping the single-target call signature
+        # untouched preserves backward compatibility with test stubs
+        # that mocked ``insecure_channel`` as ``lambda target, ...``
+        # before the LB plumbing existed.
+        if target.startswith("ipv4:"):
+            options = _grpc_pool_options()
+            if async_channel:
+                return grpc_aio.secure_channel(target, credentials, options=options)
+            return grpc.secure_channel(target, credentials, options=options)
+        if target.startswith("unix:"):
+            options = _uds_options()
+            if async_channel:
+                return grpc_aio.secure_channel(target, credentials, options=options)
+            return grpc.secure_channel(target, credentials, options=options)
         if async_channel:
             return grpc_aio.secure_channel(target, credentials)
         return grpc.secure_channel(target, credentials)
 
     # TLS disabled — backward-compatible insecure channel.
+    if target.startswith("ipv4:"):
+        options = _grpc_pool_options()
+        if async_channel:
+            import grpc.aio as grpc_aio
+
+            return grpc_aio.insecure_channel(target, options=options)
+        import grpc
+
+        return grpc.insecure_channel(target, options=options)
+    if target.startswith("unix:"):
+        options = _uds_options()
+        if async_channel:
+            import grpc.aio as grpc_aio
+
+            return grpc_aio.insecure_channel(target, options=options)
+        import grpc
+
+        return grpc.insecure_channel(target, options=options)
     if async_channel:
         import grpc.aio as grpc_aio
 
@@ -87,6 +160,32 @@ def ensure_generated_proto_path() -> Path:
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
     return root
+
+
+def make_internal_breaker(name: str) -> Any:
+    """Process-local circuit breaker for an internal RPC.
+
+    Each gRPC client constructs one breaker keyed by the upstream
+    service name (``"runtime_kernel"``, ``"memory_engine"`` etc.).
+    The breaker registry is process-local: repeat calls with the same
+    name return the same instance so all sites of one client share
+    state, and the open/closed transitions are coherent across the
+    worker.
+
+    The numeric thresholds are sourced from
+    ``koda.config.INTERNAL_RPC_BREAKER_*`` so an operator can widen
+    or tighten them without code changes. The default values were
+    picked to match the cascading-deadlock incident the breaker is
+    designed to break out of.
+    """
+    from koda.internal_rpc.circuit_breaker import get_breaker
+
+    return get_breaker(
+        name,
+        failure_threshold=int(config.INTERNAL_RPC_BREAKER_THRESHOLD),
+        window_seconds=float(config.INTERNAL_RPC_BREAKER_WINDOW_SECONDS),
+        open_seconds=float(config.INTERNAL_RPC_BREAKER_OPEN_SECONDS),
+    )
 
 
 def parse_boolish(value: object, *, default: bool = False) -> bool:

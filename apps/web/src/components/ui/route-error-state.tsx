@@ -3,6 +3,7 @@
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { ActionButton } from "@/components/ui/action-button";
 import { PageEmptyState, PageSection } from "@/components/ui/page-primitives";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export function RouteErrorState({
   title,
@@ -13,6 +14,7 @@ export function RouteErrorState({
   description: string;
   onRetry?: () => void;
 }) {
+  const { tl } = useAppI18n();
   return (
     <PageSection className="min-h-[420px]">
       <PageEmptyState
@@ -28,7 +30,7 @@ export function RouteErrorState({
               onClick={onRetry}
               leading={<RotateCw className="h-4 w-4" />}
             >
-              Try again
+              {tl("Try again")}
             </ActionButton>
           ) : null
         }

@@ -1,0 +1,73 @@
+# Phase D — multi-supervisor cluster overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose-cluster.yml up -d
+#
+# What this overlay changes vs the single-host base:
+#   - Activates KODA_CLUSTER_MODE=cluster on the existing ``app`` service
+#     (so each container becomes a supervisor pod that claims agents via
+#     ``cp_agent_assignments`` in Postgres).
+#   - Scales ``app`` to 3 replicas so claims actually distribute. Each
+#     replica reads ``KODA_SUPERVISOR_ID`` from its container hostname
+#     (set automatically by Docker), so a ``docker compose up --scale
+#     app=N`` lands N distinct supervisor IDs in
+#     ``cp_supervisor_runtimes``.
+#   - Scales the heavy sidecars (memory, retrieval) so a single hung
+#     replica does not bring the cluster down. Workers consume the pool
+#     via the Phase 2B service-discovery layer (``ipv4:`` resolver +
+#     gRPC round_robin LB).
+#   - Caps per-workspace OS-level resources (``KODA_AGENT_DEFAULT_*``)
+#     so a noisy team cannot starve the others. cgroup v2 limits apply
+#     automatically on Linux hosts; macOS dev hosts no-op.
+#
+# When NOT to use this overlay:
+#   - Single host, <100 agents → the base compose is simpler.
+#   - You don't have a Postgres that can sustain 3+ supervisor
+#     connections concurrently → tune ``max_connections`` first.
+#
+# See ``docs/operations/cluster-mode.md`` for the operational story
+# and the blue/green drain protocol used during deploys.
+
+services:
+  app:
+    environment:
+      # Cluster bootstrap. Each replica picks up the container's
+      # hostname as its supervisor_id; ``cp_supervisor_runtimes``
+      # rows differentiate naturally.
+      KODA_CLUSTER_MODE: "cluster"
+      KODA_SUPERVISOR_ID: "sup_${HOSTNAME}"
+      KODA_SUPERVISOR_CAPACITY: "${KODA_SUPERVISOR_CAPACITY:-50}"
+      KODA_CLUSTER_HEARTBEAT_STALE_SECONDS: "${KODA_CLUSTER_HEARTBEAT_STALE_SECONDS:-30}"
+      # Per-workspace OS-level limits (cgroup v2 on Linux). Defaults
+      # are conservative; tune per deployment.
+      KODA_AGENT_DEFAULT_MEMORY_MB: "${KODA_AGENT_DEFAULT_MEMORY_MB:-512}"
+      KODA_AGENT_DEFAULT_CPU_FRACTION: "${KODA_AGENT_DEFAULT_CPU_FRACTION:-0.5}"
+      KODA_AGENT_DEFAULT_PIDS_MAX: "${KODA_AGENT_DEFAULT_PIDS_MAX:-128}"
+      # Pool the heavy sidecars across replicas via Phase 2B service
+      # discovery. The compose DNS round-robin returns multiple A
+      # records; the ``ipv4:`` resolver plus the ``round_robin`` LB
+      # policy load-balance per-call.
+      MEMORY_GRPC_TARGET: "memory:50063"
+      RETRIEVAL_GRPC_TARGET: "retrieval:50062"
+    deploy:
+      replicas: ${APP_REPLICAS:-3}
+      resources:
+        limits:
+          cpus: "${APP_CPU_LIMIT:-2.0}"
+          memory: "${APP_MEMORY_LIMIT:-2G}"
+
+  memory:
+    deploy:
+      replicas: ${MEMORY_REPLICAS:-2}
+
+  retrieval:
+    deploy:
+      replicas: ${RETRIEVAL_REPLICAS:-2}
+
+  # bot-gateway and policy-engine are intentionally NOT scaled here.
+  # bot-gateway: Telegram polling per-token cannot be load-balanced
+  # without consensus on which replica polls which bot — that's a
+  # Phase 2 follow-up (consistent-hashing + leader election).
+  # policy-engine: stateless decisions but the in-memory rate-limit
+  # buckets need consistent state across replicas; sharing via
+  # Postgres is also a Phase 2 follow-up.

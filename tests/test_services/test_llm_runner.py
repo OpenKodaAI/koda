@@ -43,7 +43,7 @@ class TestRunLLM:
                 new=AsyncMock(return_value=_capability("ollama", "new_turn", supports_native_resume=False)),
             ),
             patch(
-                "koda.services.llm_runner.run_ollama",
+                "koda.services.ollama_runner.run_ollama",
                 new=AsyncMock(return_value={"result": "ok", "session_id": None, "error": False}),
             ) as mock_run_ollama,
         ):
@@ -66,7 +66,7 @@ class TestRunLLM:
                 new=AsyncMock(return_value=_capability("codex", "resume_turn")),
             ),
             patch(
-                "koda.services.llm_runner.run_codex",
+                "koda.services.codex_runner.run_codex",
                 new=AsyncMock(return_value={"result": "ok", "session_id": "thread-1", "error": False}),
             ) as mock_run_codex,
         ):

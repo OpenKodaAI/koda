@@ -57,6 +57,7 @@ DEFAULT_TTL_DAYS: dict[MemoryType, int] = {
 
 DEFAULT_ORIGIN_KIND = "conversation"
 DEFAULT_EMBEDDING_STATUS = "pending"
+LEXICAL_READY_EMBEDDING_STATUS = "lexical_ready"
 DEFAULT_MEMORY_STATUS = MemoryStatus.ACTIVE.value
 
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -39,7 +41,15 @@ from koda.config import (
 )
 from koda.internal_rpc.artifact_engine import build_artifact_engine_client
 from koda.internal_rpc.common import parse_boolish
-from koda.internal_rpc.runtime_kernel import build_runtime_kernel_client
+from koda.internal_rpc.runtime_kernel import (
+    RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS as _RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS,
+)
+from koda.internal_rpc.runtime_kernel import (
+    RUNTIME_KERNEL_CAPABILITY_DEFAULTS as _RUNTIME_KERNEL_CAPABILITY_DEFAULTS,
+)
+from koda.internal_rpc.runtime_kernel import (
+    build_runtime_kernel_client,
+)
 from koda.logging_config import get_logger
 from koda.services.metrics import (
     RUNTIME_ACTIVE_ENVS,
@@ -69,44 +79,24 @@ from koda.state.history_store import create_task
 
 log = get_logger(__name__)
 
-_RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
-    "workspace-provisioning",
-    "workspace-cleanup",
-    "environment-tracking",
-    "process-spawn",
-    "command-execution",
-    "terminal-streaming",
-    "interactive-terminal-sessions",
-    "terminal-input-write",
-    "terminal-resize",
-    "terminal-close",
-    "signal-termination",
-    "browser-session-registry",
-    "checkpoint-persistence",
-    "checkpoint-retrieval",
-    "checkpoint-restore",
-    "snapshot-collection",
-    "reconcile",
-)
-_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
-    "create_environment",
-    "start_task",
-    "execute_command",
-    "stream_terminal",
-    "open_terminal",
-    "write_terminal",
-    "resize_terminal",
-    "close_terminal",
-    "stream_terminal_session",
-    "terminate_task",
-    "cleanup_environment",
-    "start_browser_session",
-    "stop_browser_session",
-    "get_browser_session",
-    "save_checkpoint",
-    "get_checkpoint",
-    "restore_checkpoint",
-)
+_WORKSPACE_SEARCH_IGNORED_DIRS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "dist",
+    "node_modules",
+}
+
+_RUNTIME_KERNEL_OPERATION_ALIASES: dict[str, str] = {
+    "finalize": "finalize_task",
+    "pause": "pause_task",
+    "resume": "resume_task",
+}
 
 
 class RuntimeController:
@@ -426,8 +416,6 @@ class RuntimeController:
             authoritative_operations = [str(item).strip() for item in authoritative_ops_value if str(item).strip()]
         else:
             authoritative_operations = []
-        if rust_mode and not authoritative_operations:
-            authoritative_operations = list(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         full_authority = parse_boolish(
             raw.get("full_authority", details.get("full_authority")),
             default=authoritative and rust_mode,
@@ -436,6 +424,8 @@ class RuntimeController:
             raw.get("partial_authority", details.get("partial_authority")),
             default=False,
         )
+        if rust_mode and not authoritative_operations and (authoritative or full_authority or partial_authority):
+            authoritative_operations = list(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         cutover_state = "remote" if remote else "in_process"
         if remote and not connected:
             cutover_state = "remote_disconnected"
@@ -508,16 +498,23 @@ class RuntimeController:
         }
 
     def _runtime_kernel_operation_required(self, operation: str, runtime_kernel: Mapping[str, Any]) -> bool:
-        if bool(runtime_kernel.get("forwarding_authoritative", False)):
-            return True
         if str(runtime_kernel.get("mode") or "").strip().lower() != "rust":
             return False
         authoritative_operations = {
             str(item).strip() for item in runtime_kernel.get("authoritative_operations") or [] if str(item).strip()
         }
+        kernel_authoritative = any(
+            bool(runtime_kernel.get(flag)) for flag in ("authoritative", "full_authority", "partial_authority")
+        )
         if not authoritative_operations:
             authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
-        return operation in authoritative_operations
+            if not kernel_authoritative:
+                authoritative_operations.discard("pause_task")
+                authoritative_operations.discard("resume_task")
+        return (
+            operation in authoritative_operations
+            or _RUNTIME_KERNEL_OPERATION_ALIASES.get(operation) in authoritative_operations
+        )
 
     def _runtime_kernel_browser_authoritative(self, runtime_kernel: Mapping[str, Any] | None = None) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
@@ -528,15 +525,8 @@ class RuntimeController:
 
     def _runtime_kernel_terminal_authoritative(self, runtime_kernel: Mapping[str, Any] | None = None) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
-        if str(payload.get("mode") or "").strip().lower() != "rust":
-            return False
-        authoritative_operations = {
-            str(item).strip() for item in payload.get("authoritative_operations") or [] if str(item).strip()
-        }
-        if not authoritative_operations:
-            authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         return any(
-            operation in authoritative_operations
+            self._runtime_kernel_operation_required(operation, payload)
             for operation in (
                 "open_terminal",
                 "write_terminal",
@@ -551,15 +541,8 @@ class RuntimeController:
         runtime_kernel: Mapping[str, Any] | None = None,
     ) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
-        if str(payload.get("mode") or "").strip().lower() != "rust":
-            return False
-        authoritative_operations = {
-            str(item).strip() for item in payload.get("authoritative_operations") or [] if str(item).strip()
-        }
-        if not authoritative_operations:
-            authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         checkpoint_ops = {"save_checkpoint", "get_checkpoint", "restore_checkpoint"}
-        return any(operation in authoritative_operations for operation in checkpoint_ops)
+        return any(self._runtime_kernel_operation_required(operation, payload) for operation in checkpoint_ops)
 
     def _terminal_kernel_session_id(self, terminal: Mapping[str, Any] | None) -> str:
         if not isinstance(terminal, Mapping):
@@ -592,6 +575,12 @@ class RuntimeController:
         if target != root and root not in target.parents:
             raise ValueError("path escapes workspace")
         return target
+
+    def _require_workspace_relative_path(self, relative_path: str) -> str:
+        path = str(relative_path or "").strip()
+        if not path or path in {".", "/"}:
+            raise ValueError("missing path")
+        return path
 
     def _list_workspace_tree(
         self,
@@ -626,12 +615,107 @@ class RuntimeController:
         path = self._resolve_workspace_target(workspace_path, relative_path)
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(relative_path)
-        content = path.read_text(encoding="utf-8", errors="ignore")
+        raw_content = path.read_bytes()
         truncated = False
-        if len(content) > max_chars:
-            content = content[:max_chars]
+        if len(raw_content) > max_chars:
+            raw_content = raw_content[:max_chars]
             truncated = True
+        if b"\0" in raw_content:
+            return {"path": relative_path, "content": "\0", "truncated": truncated}
+        try:
+            content = raw_content.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"path": relative_path, "content": "\0", "truncated": truncated}
         return {"path": relative_path, "content": content, "truncated": truncated}
+
+    def _write_workspace_file_payload(
+        self,
+        workspace_path: str,
+        *,
+        relative_path: str,
+        content: str,
+    ) -> dict[str, object]:
+        relative_path = self._require_workspace_relative_path(relative_path)
+        path = self._resolve_workspace_target(workspace_path, relative_path)
+        if not path.exists():
+            raise FileNotFoundError(relative_path)
+        if not path.is_file():
+            raise IsADirectoryError(relative_path)
+        path.write_text(content, encoding="utf-8")
+        return {"ok": True, "path": relative_path, "size": path.stat().st_size}
+
+    def _create_workspace_entry(
+        self,
+        workspace_path: str,
+        *,
+        relative_path: str,
+        kind: str,
+        content: str = "",
+    ) -> dict[str, object]:
+        relative_path = self._require_workspace_relative_path(relative_path)
+        normalized_kind = str(kind or "file").strip().lower()
+        if normalized_kind not in {"file", "directory"}:
+            raise ValueError("kind must be file or directory")
+
+        path = self._resolve_workspace_target(workspace_path, relative_path)
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(relative_path)
+
+        if normalized_kind == "directory":
+            path.mkdir(parents=True, exist_ok=False)
+            size: int | None = None
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            size = path.stat().st_size
+
+        return {"ok": True, "path": relative_path, "kind": normalized_kind, "size": size}
+
+    def _delete_workspace_entry(
+        self,
+        workspace_path: str,
+        *,
+        relative_path: str,
+    ) -> dict[str, object]:
+        relative_path = self._require_workspace_relative_path(relative_path)
+        root = Path(workspace_path).resolve()
+        path = self._resolve_workspace_target(workspace_path, relative_path)
+        if path == root:
+            raise ValueError("cannot delete workspace root")
+        if not path.exists() and not path.is_symlink():
+            raise FileNotFoundError(relative_path)
+
+        kind = "directory" if path.is_dir() and not path.is_symlink() else "file"
+        if kind == "directory":
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        return {"ok": True, "path": relative_path, "kind": kind}
+
+    def _rename_workspace_entry(
+        self,
+        workspace_path: str,
+        *,
+        from_path: str,
+        to_path: str,
+    ) -> dict[str, object]:
+        from_path = self._require_workspace_relative_path(from_path)
+        to_path = self._require_workspace_relative_path(to_path)
+        root = Path(workspace_path).resolve()
+        source = self._resolve_workspace_target(workspace_path, from_path)
+        target = self._resolve_workspace_target(workspace_path, to_path)
+        if source == root or target == root:
+            raise ValueError("cannot rename workspace root")
+        if not source.exists() and not source.is_symlink():
+            raise FileNotFoundError(from_path)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(to_path)
+        if not target.parent.exists():
+            raise FileNotFoundError(str(Path(to_path).parent))
+
+        source.rename(target)
+        kind = "directory" if target.is_dir() and not target.is_symlink() else "file"
+        return {"ok": True, "from_path": from_path, "to_path": to_path, "kind": kind}
 
     def _workspace_git_status(self, workspace_path: str) -> dict[str, object]:
         root = Path(workspace_path).resolve()
@@ -651,16 +735,150 @@ class RuntimeController:
         max_chars: int = 200_000,
     ) -> dict[str, object]:
         root = Path(workspace_path).resolve()
-        cmd = ["git", "-C", str(root), "diff", "--no-ext-diff", "--binary"]
+        cmd = ["git", "-C", str(root), "diff", "--no-ext-diff", "--no-color", "HEAD"]
+        target: Path | None = None
         if relative_path:
-            cmd.extend(["--", relative_path])
+            target = self._resolve_workspace_target(workspace_path, relative_path)
+            cmd.extend(["--", str(target.relative_to(root))])
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        text = result.stdout.strip() or result.stderr.strip()
+        if result.returncode not in {0, 1}:
+            fallback_cmd = ["git", "-C", str(root), "diff", "--no-ext-diff", "--no-color"]
+            if target is not None:
+                fallback_cmd.extend(["--", str(target.relative_to(root))])
+            result = subprocess.run(fallback_cmd, capture_output=True, text=True, check=False)
+
+        text = result.stdout.strip()
+        generated_patch = False
+        if not text and target is not None and target.exists() and target.is_file():
+            rel = str(target.relative_to(root))
+            tracked = subprocess.run(
+                ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if tracked.returncode != 0:
+                raw = target.read_bytes()
+                if b"\0" in raw:
+                    text = (
+                        f"diff --git a/{rel} b/{rel}\nnew file mode 100644\nBinary files /dev/null and b/{rel} differ"
+                    )
+                else:
+                    content = raw.decode("utf-8", errors="replace").splitlines()
+                    text = "diff --git a/{rel} b/{rel}\nnew file mode 100644\n{patch}".format(
+                        rel=rel,
+                        patch="\n".join(
+                            difflib.unified_diff(
+                                [],
+                                content,
+                                fromfile="/dev/null",
+                                tofile=f"b/{rel}",
+                                lineterm="",
+                            )
+                        ),
+                    ).strip()
+                generated_patch = True
+        if not text:
+            text = result.stderr.strip()
         truncated = False
         if len(text) > max_chars:
             text = text[:max_chars]
             truncated = True
-        return {"ok": result.returncode == 0, "text": text, "truncated": truncated}
+        return {"ok": generated_patch or result.returncode in {0, 1}, "text": text, "truncated": truncated}
+
+    def _search_workspace_payload(
+        self,
+        workspace_path: str,
+        *,
+        query: str,
+        case_sensitive: bool = False,
+        whole_word: bool = False,
+        regex: bool = False,
+        max_results: int = 100,
+        max_files: int = 2_000,
+        max_file_bytes: int = 500_000,
+    ) -> dict[str, object]:
+        root = Path(workspace_path).resolve()
+        raw_query = str(query or "")
+        if not raw_query.strip():
+            return {"ok": True, "query": raw_query, "items": [], "truncated": False, "searched_files": 0}
+
+        source = raw_query if regex else re.escape(raw_query)
+        if whole_word:
+            source = rf"\b(?:{source})\b"
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(source, flags)
+        except re.error as exc:
+            raise ValueError(f"invalid regex: {exc}") from exc
+
+        items: list[dict[str, object]] = []
+        searched_files = 0
+        truncated = False
+
+        for directory, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if name not in _WORKSPACE_SEARCH_IGNORED_DIRS and not (Path(directory) / name).is_symlink()
+            ]
+            for filename in sorted(filenames):
+                path = Path(directory) / filename
+                if path.is_symlink() or not path.is_file():
+                    continue
+                if searched_files >= max_files:
+                    truncated = True
+                    break
+                try:
+                    if path.stat().st_size > max_file_bytes:
+                        continue
+                    raw = path.read_bytes()
+                except OSError:
+                    continue
+                if b"\0" in raw:
+                    continue
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+
+                searched_files += 1
+                relative_path = str(path.relative_to(root))
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    for match in pattern.finditer(line):
+                        if not match.group(0):
+                            continue
+                        items.append(
+                            {
+                                "path": relative_path,
+                                "line_number": line_number,
+                                "column": match.start() + 1,
+                                "line": line,
+                                "preview": line.strip(),
+                                "match": match.group(0),
+                                "start": match.start(),
+                                "end": match.end(),
+                            }
+                        )
+                        if len(items) >= max_results:
+                            truncated = True
+                            return {
+                                "ok": True,
+                                "query": raw_query,
+                                "items": items,
+                                "truncated": truncated,
+                                "searched_files": searched_files,
+                            }
+            if truncated:
+                break
+
+        return {
+            "ok": True,
+            "query": raw_query,
+            "items": items,
+            "truncated": truncated,
+            "searched_files": searched_files,
+        }
 
     def _get_terminal_row(self, *, task_id: int, terminal_id: int) -> dict[str, Any] | None:
         return next(
@@ -2279,6 +2497,78 @@ class RuntimeController:
         if env is None:
             return None
         return self._read_workspace_file_payload(str(env["workspace_path"]), relative_path=relative_path)
+
+    def search_workspace(
+        self,
+        task_id: int,
+        *,
+        query: str,
+        case_sensitive: bool = False,
+        whole_word: bool = False,
+        regex: bool = False,
+        max_results: int = 100,
+    ) -> dict[str, object] | None:
+        env = self.store.get_environment_by_task(task_id)
+        if env is None:
+            return None
+        return self._search_workspace_payload(
+            str(env["workspace_path"]),
+            query=query,
+            case_sensitive=case_sensitive,
+            whole_word=whole_word,
+            regex=regex,
+            max_results=max_results,
+        )
+
+    def write_workspace_file(self, task_id: int, *, relative_path: str, content: str) -> dict[str, object] | None:
+        env = self.store.get_environment_by_task(task_id)
+        if env is None:
+            return None
+        return self._write_workspace_file_payload(
+            str(env["workspace_path"]),
+            relative_path=relative_path,
+            content=content,
+        )
+
+    def create_workspace_entry(
+        self,
+        task_id: int,
+        *,
+        relative_path: str,
+        kind: str,
+        content: str = "",
+    ) -> dict[str, object] | None:
+        env = self.store.get_environment_by_task(task_id)
+        if env is None:
+            return None
+        return self._create_workspace_entry(
+            str(env["workspace_path"]),
+            relative_path=relative_path,
+            kind=kind,
+            content=content,
+        )
+
+    def delete_workspace_entry(self, task_id: int, *, relative_path: str) -> dict[str, object] | None:
+        env = self.store.get_environment_by_task(task_id)
+        if env is None:
+            return None
+        return self._delete_workspace_entry(str(env["workspace_path"]), relative_path=relative_path)
+
+    def rename_workspace_entry(
+        self,
+        task_id: int,
+        *,
+        from_path: str,
+        to_path: str,
+    ) -> dict[str, object] | None:
+        env = self.store.get_environment_by_task(task_id)
+        if env is None:
+            return None
+        return self._rename_workspace_entry(
+            str(env["workspace_path"]),
+            from_path=from_path,
+            to_path=to_path,
+        )
 
     def get_workspace_status(self, task_id: int) -> dict[str, object]:
         env = self.store.get_environment_by_task(task_id)

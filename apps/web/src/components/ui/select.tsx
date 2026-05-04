@@ -51,8 +51,8 @@ const SelectTrigger = React.forwardRef<
       "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-primary)]",
       "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
       "hover:border-[var(--border-strong)]",
-      "focus:outline-none focus-visible:border-[var(--accent)]",
-      "data-[state=open]:border-[var(--accent)]",
+      "focus:outline-none focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--panel)]",
+      "data-[state=open]:border-[var(--border-strong)] data-[state=open]:bg-[var(--panel)]",
       "data-[placeholder]:text-[var(--text-quaternary)]",
       "disabled:cursor-not-allowed disabled:opacity-60",
       invalid && "border-[var(--tone-danger-border)] focus-visible:border-[var(--tone-danger-border)]",
@@ -108,8 +108,9 @@ const SelectContent = React.forwardRef<
       sideOffset={sideOffset}
       position={position}
       className={cn(
-        "relative z-50 min-w-[10rem] overflow-hidden rounded-[var(--radius-panel)] border border-[color:var(--overlay-surface-border)] bg-[color:var(--overlay-floating-bg)] text-[var(--text-primary)] shadow-[var(--overlay-floating-shadow)]",
-        "backdrop-blur-[22px] backdrop-saturate-[140%]",
+        // z-[90] keeps the dropdown above modals/drawers (z-[70..80]). Without
+        // this bump, Selects rendered inside modals get clipped behind them.
+        "app-floating-panel relative z-[90] min-w-[10rem] overflow-hidden text-[var(--text-primary)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
         className,

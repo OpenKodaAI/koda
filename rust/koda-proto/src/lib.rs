@@ -33,3 +33,15 @@ pub mod security {
         tonic::include_proto!("koda.security.v1");
     }
 }
+
+pub mod bot_gateway {
+    pub mod v1 {
+        tonic::include_proto!("koda.bot_gateway.v1");
+    }
+}
+
+pub mod policy_engine {
+    pub mod v1 {
+        tonic::include_proto!("koda.policy_engine.v1");
+    }
+}

@@ -6,11 +6,13 @@ import { cn } from "@/lib/utils";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { AnimatedSwitch } from "@/components/control-plane/system/shared/animated-switch";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
-import { MCP_CATEGORY_LABELS, type McpCategory } from "./mcp-catalog-data";
+import {
+  MCP_CATEGORY_KEYS,
+  MCP_CATEGORY_LABELS,
+  type McpCategory,
+} from "./mcp-catalog-utils";
 
-/* ------------------------------------------------------------------ */
 /*  Transport badge                                                    */
-/* ------------------------------------------------------------------ */
 
 function TransportBadge({ type }: { type: "stdio" | "http_sse" }) {
   const isStdio = type === "stdio";
@@ -29,9 +31,7 @@ function TransportBadge({ type }: { type: "stdio" | "http_sse" }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /*  MCP Server Card                                                    */
-/* ------------------------------------------------------------------ */
 
 export function McpServerCard({
   server,
@@ -44,9 +44,12 @@ export function McpServerCard({
   onDelete: () => void;
   onToggle: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
+  const cat = server.category as McpCategory;
   const categoryLabel =
-    MCP_CATEGORY_LABELS[server.category as McpCategory] ?? server.category;
+    cat in MCP_CATEGORY_KEYS
+      ? t(MCP_CATEGORY_KEYS[cat], { defaultValue: MCP_CATEGORY_LABELS[cat] })
+      : server.category;
 
   return (
     <motion.div

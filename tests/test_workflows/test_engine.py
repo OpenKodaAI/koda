@@ -10,9 +10,7 @@ import pytest
 from koda.workflows.engine import WorkflowEngine, _evaluate_condition, _resolve_variables
 from koda.workflows.model import Workflow, WorkflowStep
 
-# ---------------------------------------------------------------------------
 # Variable resolution
-# ---------------------------------------------------------------------------
 
 
 class TestResolveVariables:
@@ -49,9 +47,7 @@ class TestResolveVariables:
         assert out == {"outer": {"inner": "x"}}
 
 
-# ---------------------------------------------------------------------------
 # Condition evaluation
-# ---------------------------------------------------------------------------
 
 
 class TestEvaluateCondition:
@@ -67,9 +63,7 @@ class TestEvaluateCondition:
         assert _evaluate_condition("{{ steps.missing.success }}", {}) is False
 
 
-# ---------------------------------------------------------------------------
 # Engine execution
-# ---------------------------------------------------------------------------
 
 
 @dataclass

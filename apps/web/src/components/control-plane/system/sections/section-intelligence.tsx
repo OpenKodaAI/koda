@@ -7,6 +7,7 @@ import { SettingsSectionShell } from "@/components/control-plane/system/settings
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { ToggleField } from "@/components/control-plane/shared/toggle-field";
+import { EmbeddingModelPicker } from "@/components/control-plane/system/sections/embedding-model-picker";
 import {
   Select,
   SelectContent,
@@ -104,8 +105,8 @@ export function SectionIntelligence() {
       {/* ── Memory ──────────────────────────────────────────────────────── */}
       <SettingsFieldGroup title={tl("Memory")}>
         <ToggleField
-          label="Memory enabled"
-          description="Enable persistent memory and recall for bots."
+          label={tl("Memory enabled")}
+          description={tl("Enable persistent memory and recall for agents.")}
           checked={mk.memory_enabled}
           onChange={(next) => update({ memory_enabled: next })}
         />
@@ -136,25 +137,35 @@ export function SectionIntelligence() {
         </FieldShell>
 
         <ToggleField
-          label="Procedural memory"
-          description="Enable storage of procedural knowledge and learned workflows."
+          label={tl("Procedural memory")}
+          description={tl("Enable storage of procedural knowledge and learned workflows.")}
           checked={mk.procedural_enabled}
           onChange={(next) => update({ procedural_enabled: next })}
         />
 
         <ToggleField
-          label="Proactive memory"
-          description="Allow bots to proactively surface relevant memories."
+          label={tl("Proactive memory")}
+          description={tl("Allow agents to proactively surface relevant memories.")}
           checked={mk.proactive_enabled}
           onChange={(next) => update({ proactive_enabled: next })}
         />
+
+        <FieldShell
+          label={tl("Modelo de embedding")}
+          description={tl(
+            "O modelo usado para indexar memórias, knowledge base e cache semântico. " +
+              "Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.",
+          )}
+        >
+          <EmbeddingModelPicker memoryEnabled={mk.memory_enabled} />
+        </FieldShell>
       </SettingsFieldGroup>
 
       {/* ── Knowledge ───────────────────────────────────────────────────── */}
       <SettingsFieldGroup title={tl("Knowledge")}>
         <ToggleField
-          label="Knowledge enabled"
-          description="Enable knowledge grounding and RAG for bots."
+          label={tl("Knowledge enabled")}
+          description={tl("Enable knowledge grounding and RAG for agents.")}
           checked={mk.knowledge_enabled}
           onChange={(next) => update({ knowledge_enabled: next })}
         />

@@ -8,8 +8,11 @@ import { I18nProvider } from "@/components/providers/i18n-provider";
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
 
+const searchParamsGetMock = vi.fn<(name: string) => string | null>(() => null);
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock, refresh: refreshMock }),
+  useSearchParams: () => ({ get: searchParamsGetMock }),
 }));
 
 vi.mock("@/lib/http-client", async () => {
@@ -109,6 +112,24 @@ describe("SetupScreen (create account step)", () => {
     await user.click(screen.getByRole("button", { name: /create account|criar conta/i }));
     await screen.findByText(/aaaa-bbbb-cccc/);
     expect(screen.getByText(/dddd-eeee-ffff/)).toBeInTheDocument();
+  });
+
+  it("does not advance when registration returns no recovery codes", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      recovery_codes: [],
+      operator: null,
+      auth: null,
+    });
+    const user = userEvent.setup();
+    renderSetup();
+    await user.type(screen.getByLabelText(/email/i), "owner@example.com");
+    const passwordFields = screen.getAllByLabelText(/password|senha/i);
+    await user.type(passwordFields[0], "CorrectHorseBattery!9");
+    await user.type(passwordFields[1], "CorrectHorseBattery!9");
+    await user.click(screen.getByRole("button", { name: /create account|criar conta/i }));
+    expect(await screen.findByText(/recovery codes were not issued/i)).toBeInTheDocument();
+    expect(screen.queryByText(/save your recovery codes|salve seus códigos/i)).not.toBeInTheDocument();
   });
 
   it("requires the acknowledge checkbox before leaving recovery codes", async () => {

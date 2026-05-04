@@ -360,6 +360,12 @@ export interface SessionMessage {
   session_id: string;
   error: boolean;
   linked_execution?: ExecutionSummary | null;
+  /**
+   * Generative-UI blocks attached to this message. Each entry is an opaque
+   * payload validated by `generativeBlockSchema` (see contracts/generative-ui).
+   * Older messages omit this field — UI must treat it as optional.
+   */
+  blocks?: unknown[];
 }
 
 export interface SessionHistoryPage {
@@ -385,6 +391,8 @@ export interface SessionDetail {
 export interface SessionSendRequest {
   text: string;
   session_id?: string | null;
+  mentions?: Array<{ kind: "skill" | "mcp"; slug: string }>;
+  command?: { id: string; payload?: Record<string, unknown> };
 }
 
 export interface SessionSendResponse {
@@ -406,7 +414,7 @@ export interface CostOverview {
   total_queries: number;
   total_executions: number;
   top_model: string | null;
-  top_bot: string | null;
+  top_agent: string | null;
   top_task_type: string | null;
 }
 
@@ -414,12 +422,12 @@ export interface CostTimePoint {
   bucket: string;
   label: string;
   total_cost_usd: number;
-  by_bot: Record<string, number>;
+  by_agent: Record<string, number>;
   by_model: Record<string, number>;
 }
 
 export interface CostByAgentItem {
-  bot_id: string;
+  agent_id: string;
   cost_usd: number;
   share_pct: number;
   resolved_conversations: number;
@@ -447,7 +455,7 @@ export interface CostByTaskTypeItem {
 }
 
 export interface ResolvedConversationCostItem {
-  bot_id: string;
+  agent_id: string;
   session_id: string;
   name: string | null;
   cost_usd: number;
@@ -459,7 +467,7 @@ export interface ResolvedConversationCostItem {
 }
 
 export interface CostConversationRow {
-  bot_id: string;
+  agent_id: string;
   session_id: string;
   name: string | null;
   status: "resolved" | "running" | "failed" | "queued" | "open";
@@ -476,8 +484,8 @@ export interface CostConversationRow {
 }
 
 export interface CostFiltersApplied {
-  bot_id: string | "all";
-  bot_ids: string[];
+  agent_id: string | "all";
+  agent_ids: string[];
   period: string;
   from: string | null;
   to: string | null;
@@ -500,7 +508,7 @@ export interface CostPeakBucket {
   bucket: string;
   label: string;
   cost_usd: number;
-  top_bot: string | null;
+  top_agent: string | null;
   top_model: string | null;
   top_task_type: string | null;
 }
@@ -510,7 +518,7 @@ export interface CostInsightsResponse {
   comparison: CostComparison;
   peak_bucket: CostPeakBucket | null;
   time_series: CostTimePoint[];
-  by_bot: CostByAgentItem[];
+  by_agent: CostByAgentItem[];
   by_model: CostByModelItem[];
   by_task_type: CostByTaskTypeItem[];
   resolved_conversations: ResolvedConversationCostItem[];

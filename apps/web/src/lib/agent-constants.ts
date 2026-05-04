@@ -25,7 +25,8 @@ export function getAgentDisplayMap() {
   return buildAgentDisplayMap();
 }
 
-export function getAgentDisplay(agentId: string) {
+export function getAgentDisplay(agentId: string | null | undefined) {
+  if (!agentId) return null;
   const map = buildAgentDisplayMap();
   const direct = map[agentId];
   if (direct) return direct;
@@ -37,14 +38,14 @@ export function getAgentDisplay(agentId: string) {
   return agentCatalog.find((agent) => agent.id.toLowerCase() === lower) ?? null;
 }
 
-export function getAgentColor(agentId: string): string {
+export function getAgentColor(agentId: string | null | undefined): string {
   return getAgentDisplay(agentId)?.color ?? "#7A8799";
 }
 
-export function getAgentChartColor(agentId: string): string {
+export function getAgentChartColor(agentId: string | null | undefined): string {
   return getAgentColor(agentId);
 }
 
-export function getAgentLabel(agentId: string): string {
-  return getAgentDisplay(agentId)?.label ?? agentId;
+export function getAgentLabel(agentId: string | null | undefined): string {
+  return getAgentDisplay(agentId)?.label ?? (agentId ?? "—");
 }

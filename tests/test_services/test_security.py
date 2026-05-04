@@ -3,10 +3,7 @@
 import pytest
 
 from koda.config import (
-    BLOCKED_CONFLUENCE_PATTERN,
     BLOCKED_DOCKER_PATTERN,
-    BLOCKED_GWS_PATTERN,
-    BLOCKED_JIRA_PATTERN,
     BLOCKED_SHELL_PATTERN,
     GIT_META_CHARS,
 )
@@ -169,11 +166,11 @@ class TestCliRunnerUsesExec:
         with patch("koda.services.cli_runner.asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             from koda.services.cli_runner import run_cli_command
 
-            result = await run_cli_command("gh", "pr list", "/tmp")
+            result = await run_cli_command("docker", "ps", "/tmp")
 
         mock_exec.assert_called_once()
         call_args = mock_exec.call_args[0]
-        assert call_args == ("gh", "pr", "list")
+        assert call_args == ("docker", "ps")
         assert "Exit 0" in result
 
     @pytest.mark.asyncio
@@ -187,20 +184,20 @@ class TestCliRunnerUsesExec:
         with patch("koda.services.cli_runner.asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             from koda.services.cli_runner import run_cli_command
 
-            await run_cli_command("gh", 'pr create --title "My PR"', "/tmp")
+            await run_cli_command("docker", 'run --name "My Container" image', "/tmp")
 
         call_args = mock_exec.call_args[0]
-        assert call_args == ("gh", "pr", "create", "--title", "My PR")
+        assert call_args == ("docker", "run", "--name", "My Container", "image")
 
     @pytest.mark.asyncio
     async def test_new_metachar_blocked(self):
         """New metacharacters like < > should be blocked."""
         from koda.services.cli_runner import run_cli_command
 
-        result = await run_cli_command("gh", "pr list > /tmp/out", "/tmp")
+        result = await run_cli_command("docker", "ps > /tmp/out", "/tmp")
         assert "meta-characters" in result.lower()
 
-        result = await run_cli_command("gh", "pr list\nrm -rf /", "/tmp")
+        result = await run_cli_command("docker", "ps\nrm -rf /", "/tmp")
         assert "meta-characters" in result.lower()
 
 
@@ -243,145 +240,6 @@ class TestBlockedDockerPattern:
         assert BLOCKED_DOCKER_PATTERN.search("run --Net=Host myimage")
 
 
-class TestBlockedJiraPattern:
-    """Test BLOCKED_JIRA_PATTERN blocks destructive Jira operations."""
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "projects delete PROJ",
-            "projects create",
-            "permissions get",
-            "schemes delete 123",
-            "scheme create",
-            "webhooks delete 456",
-            "webhook create",
-            "bulk delete",
-            "users delete john",
-            "groups delete admins",
-            "roles delete role1",
-            "workflows delete flow1",
-            "fields delete customfield",
-            "global settings",
-            "reindex",
-        ],
-    )
-    def test_destructive_jira_blocked(self, cmd):
-        assert BLOCKED_JIRA_PATTERN is not None
-        assert BLOCKED_JIRA_PATTERN.search(cmd), f"Jira command not blocked: {cmd}"
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "issues search JQL",
-            "issues get PROJ-123",
-            "issues list",
-            "issue transition PROJ-123",
-        ],
-    )
-    def test_safe_jira_commands_pass(self, cmd):
-        assert BLOCKED_JIRA_PATTERN is not None
-        assert BLOCKED_JIRA_PATTERN.search(cmd) is None, f"Safe Jira command blocked: {cmd}"
-
-    def test_case_insensitive(self):
-        assert BLOCKED_JIRA_PATTERN is not None
-        assert BLOCKED_JIRA_PATTERN.search("PROJECTS DELETE PROJ")
-        assert BLOCKED_JIRA_PATTERN.search("Bulk Delete")
-
-
-class TestBlockedConfluencePattern:
-    """Test BLOCKED_CONFLUENCE_PATTERN blocks destructive Confluence operations."""
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "spaces delete MYSPACE",
-            "spaces create",
-            "spaces permissions",
-            "users create john",
-            "users delete john",
-            "groups delete admins",
-            "group create team",
-            "bulk delete",
-            "templates delete 123",
-            "global settings",
-        ],
-    )
-    def test_destructive_confluence_blocked(self, cmd):
-        assert BLOCKED_CONFLUENCE_PATTERN is not None
-        assert BLOCKED_CONFLUENCE_PATTERN.search(cmd), f"Confluence command not blocked: {cmd}"
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "pages get 12345",
-            "pages list",
-            "pages search query",
-            "content get 789",
-        ],
-    )
-    def test_safe_confluence_commands_pass(self, cmd):
-        assert BLOCKED_CONFLUENCE_PATTERN is not None
-        assert BLOCKED_CONFLUENCE_PATTERN.search(cmd) is None, f"Safe Confluence command blocked: {cmd}"
-
-    def test_case_insensitive(self):
-        assert BLOCKED_CONFLUENCE_PATTERN is not None
-        assert BLOCKED_CONFLUENCE_PATTERN.search("SPACES DELETE MYSPACE")
-        assert BLOCKED_CONFLUENCE_PATTERN.search("Bulk Delete")
-
-
-class TestBlockedGwsPattern:
-    """Test BLOCKED_GWS_PATTERN blocks dangerous Google Workspace operations."""
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "admin directory.users.delete user@example.com",
-            "admin directory.users.insert",
-            "admin directory.users.update",
-            "admin directory.users.makeAdmin",
-            "admin directory.orgunits.delete",
-            "admin directory.groups.delete",
-            "admin directory.members.delete",
-            "admin directory.domains",
-            "admin directory.customers",
-            "admin directory.schemas",
-            "admin roles",
-            "admin datatransfer",
-            "gmail users.settings.delegates",
-            "gmail users.settings.forwardingAddresses",
-            "gmail users.settings.sendAs.create",
-            "gmail users.settings.sendAs.update",
-            "drive drives.delete",
-            "drive files.emptyTrash",
-            "chat spaces.delete",
-        ],
-    )
-    def test_dangerous_gws_blocked(self, cmd):
-        assert BLOCKED_GWS_PATTERN is not None
-        assert BLOCKED_GWS_PATTERN.search(cmd), f"GWS command not blocked: {cmd}"
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "gmail users.messages.list",
-            "gmail users.messages.get",
-            "drive files.list",
-            "drive files.get",
-            "calendar events.list",
-            "chat spaces.list",
-        ],
-    )
-    def test_safe_gws_commands_pass(self, cmd):
-        assert BLOCKED_GWS_PATTERN is not None
-        assert BLOCKED_GWS_PATTERN.search(cmd) is None, f"Safe GWS command blocked: {cmd}"
-
-    def test_case_insensitive(self):
-        assert BLOCKED_GWS_PATTERN is not None
-        assert BLOCKED_GWS_PATTERN.search("ADMIN DIRECTORY.USERS.DELETE user@example.com")
-        assert BLOCKED_GWS_PATTERN.search("Drive Drives.Delete")
-
-
 class TestInformationDisclosure:
     """SEC-6: Verify that user-facing error messages do not leak internal details."""
 
@@ -410,16 +268,16 @@ class TestInformationDisclosure:
         from koda.services.cli_runner import run_cli_command
 
         result = await run_cli_command(
-            "gh",
+            "docker",
             "evil-cmd foo",
             "/tmp",
-            allowed_cmds={"pr", "issue", "repo"},
+            allowed_cmds={"ps", "logs", "inspect"},
         )
         assert "not allowed" in result.lower()
         assert "Allowed:" not in result
-        assert "pr" not in result
-        assert "issue" not in result
-        assert "repo" not in result
+        assert "ps" not in result
+        assert "logs" not in result
+        assert "inspect" not in result
 
     @pytest.mark.asyncio
     async def test_blocked_cli_subcommand_detailed_hides_allowed_list(self):
@@ -427,11 +285,11 @@ class TestInformationDisclosure:
         from koda.services.cli_runner import run_cli_command_detailed
 
         result = await run_cli_command_detailed(
-            "gh",
+            "docker",
             "evil-cmd foo",
             "/tmp",
-            allowed_cmds={"pr", "issue", "repo"},
+            allowed_cmds={"ps", "logs", "inspect"},
         )
         assert result.blocked is True
         assert "Allowed:" not in result.text
-        assert "pr" not in result.text
+        assert "ps" not in result.text

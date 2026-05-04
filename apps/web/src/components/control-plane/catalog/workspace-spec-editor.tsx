@@ -98,12 +98,13 @@ export function WorkspaceSpecIndicator({
 }: {
   hasPrompt: boolean;
 }) {
+  const { tl } = useAppI18n();
   if (!hasPrompt) return null;
 
   return (
     <span
       className="agent-board-lane__prompt-indicator"
-      title="System prompt do espaco de trabalho configurado"
+      title={tl("System prompt do espaço de trabalho configurado")}
     >
       <FileText size={10} />
     </span>

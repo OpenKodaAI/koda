@@ -567,6 +567,191 @@ def _build_controller(
     return controller_module.RuntimeController(runtime_root=tmp_path / "runtime")
 
 
+def _workspace_controller(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> tuple[controller_module.RuntimeController, Path]:
+    workspace_path = tmp_path / "workspace"
+    workspace_path.mkdir()
+    store = _StoreStub(
+        env={
+            "id": 41,
+            "task_id": 1,
+            "status": "active",
+            "current_phase": "executing",
+            "workspace_path": str(workspace_path),
+            "runtime_dir": str(tmp_path / "runtime" / "tasks" / "1"),
+        }
+    )
+    controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=_KernelStub())
+    return controller, workspace_path
+
+
+def test_runtime_kernel_operation_required_uses_reported_operation_set(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller = _build_controller(
+        monkeypatch,
+        tmp_path,
+        store=_StoreStub(),
+        kernel=_KernelStub(
+            health_payload={
+                "mode": "rust",
+                "transport": "grpc-uds",
+                "connected": True,
+                "ready": True,
+                "authoritative": True,
+                "production_ready": True,
+                "authoritative_operations": ["stream_terminal"],
+            }
+        ),
+    )
+
+    runtime_kernel = controller.get_runtime_kernel_health()
+
+    assert runtime_kernel["forwarding_authoritative"] is True
+    assert controller._runtime_kernel_operation_required("stream_terminal", runtime_kernel) is True
+    assert controller._runtime_kernel_operation_required("save_checkpoint", runtime_kernel) is False
+
+
+def test_workspace_write_updates_existing_file_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    target = workspace_path / "notes.md"
+    target.write_text("draft", encoding="utf-8")
+
+    result = controller.write_workspace_file(1, relative_path="notes.md", content="updated")
+
+    assert result == {"ok": True, "path": "notes.md", "size": len("updated")}
+    assert target.read_text(encoding="utf-8") == "updated"
+    with pytest.raises(FileNotFoundError):
+        controller.write_workspace_file(1, relative_path="missing/notes.md", content="x")
+
+
+def test_workspace_read_marks_binary_file_as_not_editable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    (workspace_path / "archive.bin").write_bytes(b"\xff\x00\x01")
+
+    result = controller.read_workspace_file(1, relative_path="archive.bin")
+
+    assert result == {"path": "archive.bin", "content": "\0", "truncated": False}
+
+
+def test_workspace_create_file_and_directory_rejects_escape_and_existing_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+
+    file_result = controller.create_workspace_entry(
+        1,
+        relative_path="docs/readme.md",
+        kind="file",
+        content="# Docs",
+    )
+    dir_result = controller.create_workspace_entry(1, relative_path="scratch/logs", kind="directory")
+
+    assert file_result == {"ok": True, "path": "docs/readme.md", "kind": "file", "size": len("# Docs")}
+    assert (workspace_path / "docs" / "readme.md").read_text(encoding="utf-8") == "# Docs"
+    assert dir_result == {"ok": True, "path": "scratch/logs", "kind": "directory", "size": None}
+    assert (workspace_path / "scratch" / "logs").is_dir()
+    with pytest.raises(FileExistsError):
+        controller.create_workspace_entry(1, relative_path="docs/readme.md", kind="file")
+    with pytest.raises(ValueError, match="escapes workspace"):
+        controller.create_workspace_entry(1, relative_path="../outside.txt", kind="file")
+
+
+def test_workspace_delete_file_and_directory_without_allowing_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    (workspace_path / "notes.md").write_text("draft", encoding="utf-8")
+    nested = workspace_path / "tmp" / "cache"
+    nested.mkdir(parents=True)
+    (nested / "item.txt").write_text("cached", encoding="utf-8")
+
+    file_result = controller.delete_workspace_entry(1, relative_path="notes.md")
+    dir_result = controller.delete_workspace_entry(1, relative_path="tmp")
+
+    assert file_result == {"ok": True, "path": "notes.md", "kind": "file"}
+    assert dir_result == {"ok": True, "path": "tmp", "kind": "directory"}
+    assert not (workspace_path / "notes.md").exists()
+    assert not (workspace_path / "tmp").exists()
+    with pytest.raises(ValueError, match="missing path"):
+        controller.delete_workspace_entry(1, relative_path="")
+
+
+def test_workspace_rename_requires_existing_source_and_destination_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    (workspace_path / "notes.md").write_text("draft", encoding="utf-8")
+    (workspace_path / "docs").mkdir()
+    (workspace_path / "docs" / "taken.md").write_text("taken", encoding="utf-8")
+
+    result = controller.rename_workspace_entry(
+        1,
+        from_path="notes.md",
+        to_path="docs/notes.md",
+    )
+
+    assert result == {"ok": True, "from_path": "notes.md", "to_path": "docs/notes.md", "kind": "file"}
+    assert not (workspace_path / "notes.md").exists()
+    assert (workspace_path / "docs" / "notes.md").read_text(encoding="utf-8") == "draft"
+    with pytest.raises(FileExistsError):
+        controller.rename_workspace_entry(1, from_path="docs/notes.md", to_path="docs/taken.md")
+    with pytest.raises(FileNotFoundError):
+        controller.rename_workspace_entry(1, from_path="docs/notes.md", to_path="missing/notes.md")
+    with pytest.raises(ValueError, match="escapes workspace"):
+        controller.rename_workspace_entry(1, from_path="docs/notes.md", to_path="../notes.md")
+
+
+def test_workspace_search_scans_text_files_with_matching_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    (workspace_path / "src").mkdir()
+    (workspace_path / "src" / "app.ts").write_text("const Runtime = true;\nconst runtimeValue = 1;\n", encoding="utf-8")
+    (workspace_path / "archive.bin").write_bytes(b"\xff\x00\x01")
+
+    insensitive = controller.search_workspace(1, query="runtime", case_sensitive=False)
+    sensitive = controller.search_workspace(1, query="runtime", case_sensitive=True)
+    whole_word = controller.search_workspace(1, query="runtime", whole_word=True)
+
+    assert insensitive is not None
+    assert [item["line_number"] for item in insensitive["items"]] == [1, 2]
+    assert sensitive is not None
+    assert [item["line_number"] for item in sensitive["items"]] == [2]
+    assert whole_word is not None
+    assert [item["line_number"] for item in whole_word["items"]] == [1]
+    with pytest.raises(ValueError, match="invalid regex"):
+        controller.search_workspace(1, query="[", regex=True)
+
+
+def test_workspace_diff_returns_untracked_text_patch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller, workspace_path = _workspace_controller(monkeypatch, tmp_path)
+    (workspace_path / "script.sh").write_text("echo before\necho after\n", encoding="utf-8")
+
+    result = controller.get_workspace_diff(1, relative_path="script.sh")
+
+    assert result["ok"] is True
+    assert "diff --git a/script.sh b/script.sh" in str(result["text"])
+    assert "--- /dev/null" in str(result["text"])
+    assert "+echo before" in str(result["text"])
+
+
 def test_runtime_health_snapshot_keeps_kernel_payload_consistent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

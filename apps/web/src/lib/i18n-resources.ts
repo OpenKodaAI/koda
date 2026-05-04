@@ -60,6 +60,25 @@ export const resources = {
         resolved: "Resolved",
         failed: "Failed",
       },
+      modelEffort: {
+        title: "Model effort",
+        descriptionEnum: "Higher effort means deeper reasoning and slower, costlier responses.",
+        descriptionTokens: "Thinking budget in tokens. Higher values let the model reason longer.",
+        inheritGlobal: "Inherit global default",
+        customValue: "Override",
+        tokensUnit: "tokens",
+        notSupported: "This model does not expose effort tuning.",
+        sectionTitle: "Effort defaults",
+        sectionDescription: "Pick the effort level for the selected default model. Each agent can override.",
+        enumNone: "None",
+        enumDefault: "Default",
+        enumMinimal: "Minimal",
+        enumLow: "Low",
+        enumMedium: "Medium",
+        enumHigh: "High",
+        enumXHigh: "Extra-high",
+        enumMax: "Max",
+      },
       routeMeta: {
         system: {
           eyebrow: "Koda",
@@ -138,8 +157,7 @@ export const resources = {
           sessions: "Sessions",
           costs: "Costs",
           memory: "Memory",
-          schedules: "Schedules",
-          dlq: "Dead letter queue",
+          routines: "Routines",
           generalSettings: "General settings",
         },
         loading: {
@@ -150,8 +168,7 @@ export const resources = {
           sessions: "Opening sessions",
           costs: "Opening costs",
           memory: "Opening memory",
-          schedules: "Opening schedules",
-          dlq: "Opening dead letter queue",
+          routines: "Opening routines",
           generalSettings: "Opening general settings",
         },
       },
@@ -284,49 +301,49 @@ export const resources = {
           resumeDescription: "Jump back into the current walkthrough from the point where you stopped.",
         },
         welcome: {
-          title: "Start with a quick guided tour",
+          title: "Meet the workspace in 7 steps",
           description:
-            "Koda will walk you through the main screens, how to move between them and what each area means. The flow stays objective and you can leave at any time.",
+            "Koda will point to the controls you use first: navigation, Home, the agent catalog and Runtime. The tour stays short and you can leave at any time.",
         },
         steps: {
           shellSidebar: {
-            title: "This sidebar is your main map",
+            title: "Navigate from the sidebar",
             description:
-              "Use it to move between overview, runtime, catalog and operational views without losing context.",
+              "This is the stable map for the app. Use it to move between Home, Control Plane, Runtime and the operational areas without losing context.",
           },
           shellTopbar: {
-            title: "The topbar keeps route context close",
+            title: "Use the topbar for quick actions",
             description:
-              "Here you see the active page summary, quick tools, language switcher and the shortcut to reopen this tour later.",
+              "The topbar keeps workspace actions close: language, notifications, account controls and the shortcut to reopen this tour later.",
           },
           overviewMetrics: {
-            title: "Overview summarizes the operational pulse",
+            title: "Read the workspace status first",
             description:
-              "This first block condenses activity, demand and cost so you can understand what changed before drilling down.",
-            emptyTitle: "Overview starts as your empty operational pulse",
+              "These cards summarize agents, activity, executions and cost signals so you can decide whether to inspect setup or live operations.",
+            emptyTitle: "Home starts as your status surface",
             emptyDescription:
-              "Even before activity appears, this page is where you will return to get the fastest summary of the workspace state.",
+              "Before the workspace has activity, this area is still where the first health, execution and cost signals will appear.",
           },
           overviewLivePlan: {
-            title: "This section highlights the next live moves",
+            title: "Follow recent activity from Home",
             description:
-              "Use it to spot what is running now, what needs attention and where to continue the investigation.",
+              "The activity and history area shows what just happened and what may need attention, giving you a quick path from summary into investigation.",
           },
           controlPlanePrimaryAction: {
-            title: "The catalog is where setup starts",
+            title: "Create and manage agents here",
             description:
-              "Create bots and workspaces here, then open a bot to configure identity, behavior, resources and publication.",
-            emptyTitle: "The catalog is your first stop on a fresh install",
+              "Use the primary action to add a new agent. After creation, the editor lets you define identity, instructions, tools, channels and publishing.",
+            emptyTitle: "Start by creating your first agent",
             emptyDescription:
-              "If the instance is empty, start here by creating a workspace or a bot. The editor opens right after that.",
+              "On a fresh workspace, this is the first setup action. Create an agent, then use the editor to make it useful and publishable.",
           },
           controlPlaneBoard: {
-            title: "The board explains how the catalog is organized",
+            title: "Understand the agent catalog",
             description:
-              "Workspaces, squads and bots stay grouped here so governance and ownership are visible at a glance.",
-            emptyTitle: "The board grows with the catalog",
+              "The board groups agents and workspaces so you can scan ownership, status and configuration entry points without opening every agent.",
+            emptyTitle: "The catalog fills in as agents are added",
             emptyDescription:
-              "Once bots exist, this area becomes the visual map of teams, workspaces and operational ownership.",
+              "When agents exist, this area becomes the visual map for setup state, ownership and quick access to each agent editor.",
           },
           controlPlaneEditorHeader: {
             title: "The editor is the bot control center",
@@ -344,15 +361,15 @@ export const resources = {
               "Use these actions to persist draft changes and move toward the publication review when the bot is ready.",
           },
           runtimeHeader: {
-            title: "Runtime is the live control room",
+            title: "Watch live operations in Runtime",
             description:
-              "This screen concentrates execution health, live activity and filters to focus on the bots you care about now.",
-            emptyTitle: "Runtime becomes useful as soon as activity appears",
+              "Runtime is where published agents surface health, live work, queues and operational signals after they are connected.",
+            emptyTitle: "Runtime lights up after agents run",
             emptyDescription:
-              "When there are no live environments yet, treat this page as the place that will surface live activity first.",
-            unavailableTitle: "Runtime also signals availability problems quickly",
+              "If nothing is running yet, this page is still the place where live activity and health signals will appear first.",
+            unavailableTitle: "Runtime shows connection problems clearly",
             unavailableDescription:
-              "If runtime connectivity is degraded, this surface is where the app exposes that state before deeper inspection.",
+              "When runtime data cannot be reached, this screen should show the problem clearly before you inspect deeper details.",
           },
           runtimeLiveList: {
             title: "Metrics tell you how much attention runtime needs",
@@ -424,9 +441,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "You are ready to explore Koda",
+          title: "You are ready to use Koda",
           description:
-            "Reopen the tour anytime from Docs if you want a refresher or want to visit a secondary chapter.",
+            "You now know the first path through Koda: read Home, configure agents in Control Plane and monitor live work in Runtime. Reopen the tour from the topbar anytime.",
         },
       },
       agentSwitcher: {
@@ -602,6 +619,8 @@ export const resources = {
           submitting: "Signing in...",
           forgot_link: "Lost my password or recovery code?",
           generic_error: "Invalid credentials. Please try again.",
+          service_unavailable:
+            "Sign-in service is temporarily unavailable. Please try again in a moment.",
         },
         forgot: {
           title: "Recover access",
@@ -618,6 +637,8 @@ export const resources = {
           password_too_short: "Password must be at least {{n}} characters long.",
           password_mismatch: "The passwords do not match.",
           generic_error: "The information provided is invalid or expired. Please try again.",
+          service_unavailable:
+            "Recovery service is temporarily unavailable. Please try again in a moment.",
         },
         setup: {
           create_account: {
@@ -637,7 +658,11 @@ export const resources = {
               email_invalid: "Enter a valid email address.",
               password_too_short: "Password must be at least {{n}} characters long.",
               password_mismatch: "The passwords do not match.",
+              recovery_codes_missing:
+                "Recovery codes were not issued. Please generate a new setup code and retry.",
               generic: "We could not create the account. Please try again.",
+              service_unavailable:
+                "Setup service is temporarily unavailable. Please try again in a moment.",
             },
           },
           recovery_codes: {
@@ -651,6 +676,8 @@ export const resources = {
             saved_checkbox: "I saved the recovery codes in a safe place.",
             continue: "Continue to the workspace",
             already_shown_banner: "These codes will not be shown again.",
+            missing_codes_error:
+              "Recovery codes were not issued. Please generate a new setup code and create the owner account again.",
           },
         },
         settings: {
@@ -661,6 +688,12 @@ export const resources = {
             regenerate_codes: "Regenerate recovery codes",
             codes_remaining: "{{count}} recovery codes remaining",
           },
+        },
+        session_expired: "Your session has expired. Sign in again to continue.",
+        account_menu: {
+          trigger_label: "Open account menu",
+          account: "Account",
+          sign_out: "Sign out",
         },
       },
     },
@@ -723,6 +756,25 @@ export const resources = {
         paused: "Pausado",
         resolved: "Resolvida",
         failed: "Falhou",
+      },
+      modelEffort: {
+        title: "Effort do modelo",
+        descriptionEnum: "Maior effort significa raciocínio mais profundo, respostas mais lentas e caras.",
+        descriptionTokens: "Budget de pensamento em tokens. Valores maiores deixam o modelo raciocinar mais.",
+        inheritGlobal: "Herdar default global",
+        customValue: "Sobrescrever",
+        tokensUnit: "tokens",
+        notSupported: "Este modelo não expõe ajuste de effort.",
+        sectionTitle: "Effort padrão",
+        sectionDescription: "Defina o effort do modelo padrão selecionado. Cada agente pode sobrescrever.",
+        enumNone: "Nenhum",
+        enumDefault: "Padrão",
+        enumMinimal: "Mínimo",
+        enumLow: "Baixo",
+        enumMedium: "Médio",
+        enumHigh: "Alto",
+        enumXHigh: "Muito alto",
+        enumMax: "Máximo",
       },
       routeMeta: {
         system: {
@@ -802,8 +854,7 @@ export const resources = {
           sessions: "Sessões",
           costs: "Custos",
           memory: "Memória",
-          schedules: "Agendamentos",
-          dlq: "Fila morta",
+          routines: "Rotinas",
           generalSettings: "Configurações gerais",
         },
         loading: {
@@ -814,8 +865,7 @@ export const resources = {
           sessions: "Abrindo sessões",
           costs: "Abrindo custos",
           memory: "Abrindo memória",
-          schedules: "Abrindo agendamentos",
-          dlq: "Abrindo fila morta",
+          routines: "Abrindo rotinas",
           generalSettings: "Abrindo configurações gerais",
         },
       },
@@ -947,49 +997,49 @@ export const resources = {
           resumeDescription: "Volte para o walkthrough atual do ponto em que voce parou.",
         },
         welcome: {
-          title: "Comece com um tour rapido",
+          title: "Conheca o workspace em 7 passos",
           description:
-            "O Koda vai apresentar as telas principais, como navegar entre elas e o significado de cada area. O fluxo e objetivo e voce pode sair quando quiser.",
+            "O Koda vai apontar os controles que voce usa primeiro: navegacao, Home, catalogo de agentes e Runtime. O tour e curto e voce pode sair quando quiser.",
         },
         steps: {
           shellSidebar: {
-            title: "Esta sidebar e o seu mapa principal",
+            title: "Navegue pela sidebar",
             description:
-              "Use-a para circular entre overview, runtime, catalogo e superficies operacionais sem perder contexto.",
+              "Este e o mapa estavel do app. Use a sidebar para ir entre Home, Control Plane, Runtime e areas operacionais sem perder contexto.",
           },
           shellTopbar: {
-            title: "O topbar concentra o contexto da rota",
+            title: "Use o topbar para acoes rapidas",
             description:
-              "Aqui voce ve o resumo da tela ativa, ferramentas rapidas, seletor de idioma e o atalho para reabrir este tour depois.",
+              "O topbar deixa por perto acoes do workspace: idioma, notificacoes, conta e o atalho para reabrir este tour depois.",
           },
           overviewMetrics: {
-            title: "A overview resume o pulso operacional",
+            title: "Leia primeiro o estado do workspace",
             description:
-              "Este primeiro bloco condensa atividade, demanda e custo para voce entender o que mudou antes de aprofundar.",
-            emptyTitle: "A overview ja nasce como seu pulso operacional",
+              "Estes cards resumem agentes, atividade, execucoes e sinais de custo para voce decidir se deve olhar setup ou operacao ao vivo.",
+            emptyTitle: "A Home comeca como sua superficie de status",
             emptyDescription:
-              "Mesmo antes de existir atividade, e aqui que voce volta para ler o resumo mais rapido do estado do workspace.",
+              "Antes de existir atividade no workspace, esta area ainda e onde os primeiros sinais de saude, execucao e custo vao aparecer.",
           },
           overviewLivePlan: {
-            title: "Esta secao destaca os proximos movimentos ao vivo",
+            title: "Acompanhe a atividade recente pela Home",
             description:
-              "Use-a para enxergar o que esta rodando agora, o que pede atencao e por onde seguir a investigacao.",
+              "A area de atividade e historico mostra o que acabou de acontecer e o que pode pedir atencao, criando um caminho rapido do resumo para a investigacao.",
           },
           controlPlanePrimaryAction: {
-            title: "O catalogo e onde a configuracao comeca",
+            title: "Crie e gerencie agentes aqui",
             description:
-              "Crie bots e workspaces aqui e depois abra um bot para configurar identidade, comportamento, recursos e publicacao.",
-            emptyTitle: "O catalogo e o ponto de partida numa instalacao nova",
+              "Use a acao principal para criar um novo agente. Depois disso, o editor permite definir identidade, instrucoes, ferramentas, canais e publicacao.",
+            emptyTitle: "Comece criando seu primeiro agente",
             emptyDescription:
-              "Se a instancia estiver vazia, comece aqui criando um workspace ou um bot. O editor entra logo em seguida.",
+              "Em um workspace novo, esta e a primeira acao de setup. Crie um agente e use o editor para deixa-lo util e pronto para publicar.",
           },
           controlPlaneBoard: {
-            title: "O board explica como o catalogo esta organizado",
+            title: "Entenda o catalogo de agentes",
             description:
-              "Workspaces, squads e bots ficam agrupados aqui para que governanca e ownership aparecam de imediato.",
-            emptyTitle: "O board cresce junto com o catalogo",
+              "O board agrupa agentes e workspaces para voce ler ownership, status e pontos de configuracao sem abrir cada agente.",
+            emptyTitle: "O catalogo preenche conforme agentes entram",
             emptyDescription:
-              "Quando os bots existirem, esta area vira o mapa visual de times, workspaces e ownership operacional.",
+              "Quando existirem agentes, esta area vira o mapa visual do estado de setup, ownership e acesso rapido ao editor de cada agente.",
           },
           controlPlaneEditorHeader: {
             title: "O editor e o centro de controle do bot",
@@ -1007,15 +1057,15 @@ export const resources = {
               "Use estas acoes para persistir o rascunho e avancar para a revisao de publicacao quando o bot estiver pronto.",
           },
           runtimeHeader: {
-            title: "Runtime e a sala de controle ao vivo",
+            title: "Monitore a operacao ao vivo no Runtime",
             description:
-              "Esta tela concentra saude das execucoes, atividade ao vivo e filtros para focar nos bots que importam agora.",
-            emptyTitle: "Runtime fica util assim que a atividade aparece",
+              "Runtime e onde agentes publicados mostram saude, trabalho ao vivo, filas e sinais operacionais depois de conectados.",
+            emptyTitle: "Runtime acende quando agentes rodam",
             emptyDescription:
-              "Quando ainda nao existem ambientes vivos, trate esta pagina como a superficie que primeiro vai mostrar atividade.",
-            unavailableTitle: "Runtime tambem sinaliza indisponibilidade rapido",
+              "Se nada estiver rodando ainda, esta pagina continua sendo onde atividade ao vivo e sinais de saude vao aparecer primeiro.",
+            unavailableTitle: "Runtime mostra problemas de conexao com clareza",
             unavailableDescription:
-              "Se a conectividade do runtime degradar, e aqui que o app expoe esse estado antes da inspecao profunda.",
+              "Quando os dados do runtime nao puderem ser acessados, esta tela deve mostrar o problema antes de uma inspecao mais profunda.",
           },
           runtimeLiveList: {
             title: "As metricas mostram o quanto o runtime pede atencao",
@@ -1087,9 +1137,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Voce ja pode explorar o Koda",
+          title: "Voce ja pode usar o Koda",
           description:
-            "Reabra o tour a qualquer momento em Docs se quiser revisar o fluxo ou visitar um capitulo secundario.",
+            "Agora voce conhece o primeiro caminho no Koda: ler a Home, configurar agentes no Control Plane e monitorar trabalho ao vivo no Runtime. Reabra o tour pelo topbar quando quiser.",
         },
       },
       agentSwitcher: {
@@ -1264,6 +1314,8 @@ export const resources = {
           submitting: "Entrando...",
           forgot_link: "Esqueceu a senha ou o código de recuperação?",
           generic_error: "As credenciais informadas não conferem. Tente novamente.",
+          service_unavailable:
+            "O serviço de login está temporariamente indisponível. Tente novamente em instantes.",
         },
         forgot: {
           title: "Recuperar acesso",
@@ -1280,6 +1332,8 @@ export const resources = {
           password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
           password_mismatch: "As senhas não coincidem.",
           generic_error: "As informações fornecidas são inválidas ou expiraram. Tente novamente.",
+          service_unavailable:
+            "O serviço de recuperação está temporariamente indisponível. Tente novamente em instantes.",
         },
         setup: {
           create_account: {
@@ -1299,7 +1353,11 @@ export const resources = {
               email_invalid: "Informe um endereço de e-mail válido.",
               password_too_short: "A senha deve ter pelo menos {{n}} caracteres.",
               password_mismatch: "As senhas não coincidem.",
+              recovery_codes_missing:
+                "Os códigos de recuperação não foram emitidos. Gere um novo código de configuração e tente novamente.",
               generic: "Não conseguimos criar a conta. Tente novamente.",
+              service_unavailable:
+                "O serviço de configuração está temporariamente indisponível. Tente novamente em instantes.",
             },
           },
           recovery_codes: {
@@ -1313,6 +1371,8 @@ export const resources = {
             saved_checkbox: "Guardei os códigos de recuperação em local seguro.",
             continue: "Continuar para o espaço de trabalho",
             already_shown_banner: "Estes códigos não serão exibidos novamente.",
+            missing_codes_error:
+              "Os códigos de recuperação não foram emitidos. Gere um novo código de configuração e crie a conta novamente.",
           },
         },
         settings: {
@@ -1323,6 +1383,12 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperação",
             codes_remaining: "{{count}} códigos de recuperação restantes",
           },
+        },
+        session_expired: "Sua sessão expirou. Entre novamente para continuar.",
+        account_menu: {
+          trigger_label: "Abrir menu da conta",
+          account: "Conta",
+          sign_out: "Sair",
         },
       },
     },
@@ -1464,8 +1530,7 @@ export const resources = {
           sessions: "Sesiones",
           costs: "Costos",
           memory: "Memoria",
-          schedules: "Programaciones",
-          dlq: "Cola muerta",
+          routines: "Rutinas",
           generalSettings: "Configuración general",
         },
         loading: {
@@ -1476,8 +1541,7 @@ export const resources = {
           sessions: "Abriendo sesiones",
           costs: "Abriendo costos",
           memory: "Abriendo memoria",
-          schedules: "Abriendo programaciones",
-          dlq: "Abriendo cola muerta",
+          routines: "Abriendo rutinas",
           generalSettings: "Abriendo configuración general",
         },
       },
@@ -1609,49 +1673,49 @@ export const resources = {
           resumeDescription: "Vuelve al walkthrough actual desde el punto en el que lo dejaste.",
         },
         welcome: {
-          title: "Comienza con un tour rapido",
+          title: "Conoce el workspace en 7 pasos",
           description:
-            "Koda te mostrara las pantallas principales, como navegar entre ellas y que significa cada superficie. El flujo es objetivo y puedes salir cuando quieras.",
+            "Koda señalara los controles que usas primero: navegacion, Home, catalogo de agentes y Runtime. El tour es breve y puedes salir cuando quieras.",
         },
         steps: {
           shellSidebar: {
-            title: "Esta barra lateral es tu mapa principal",
+            title: "Navega desde la barra lateral",
             description:
-              "Usala para moverte entre overview, runtime, catalogo y superficies operativas sin perder contexto.",
+              "Este es el mapa estable de la app. Usalo para moverte entre Home, Control Plane, Runtime y areas operativas sin perder contexto.",
           },
           shellTopbar: {
-            title: "La barra superior concentra el contexto de la ruta",
+            title: "Usa la barra superior para acciones rapidas",
             description:
-              "Aqui ves el resumen de la pantalla activa, herramientas rapidas, selector de idioma y el atajo para reabrir este tour despues.",
+              "La barra superior mantiene cerca acciones del workspace: idioma, notificaciones, cuenta y el atajo para reabrir este tour despues.",
           },
           overviewMetrics: {
-            title: "Overview resume el pulso operativo",
+            title: "Lee primero el estado del workspace",
             description:
-              "Este primer bloque condensa actividad, demanda y costo para entender que cambio antes de profundizar.",
-            emptyTitle: "Overview nace como tu pulso operativo",
+              "Estas tarjetas resumen agentes, actividad, ejecuciones y señales de costo para decidir si debes revisar setup u operacion en vivo.",
+            emptyTitle: "Home empieza como tu superficie de estado",
             emptyDescription:
-              "Incluso antes de que exista actividad, aqui volveras para leer el resumen mas rapido del estado del workspace.",
+              "Antes de que exista actividad en el workspace, esta area sigue siendo donde apareceran las primeras señales de salud, ejecucion y costo.",
           },
           overviewLivePlan: {
-            title: "Esta seccion destaca los proximos movimientos en vivo",
+            title: "Sigue la actividad reciente desde Home",
             description:
-              "Usala para ver que esta corriendo ahora, que requiere atencion y por donde continuar la investigacion.",
+              "El area de actividad e historial muestra lo que acaba de ocurrir y lo que puede requerir atencion, creando un camino rapido del resumen a la investigacion.",
           },
           controlPlanePrimaryAction: {
-            title: "El catalogo es donde empieza la configuracion",
+            title: "Crea y gestiona agentes aqui",
             description:
-              "Crea bots y workspaces aqui y despues abre un bot para configurar identidad, comportamiento, recursos y publicacion.",
-            emptyTitle: "El catalogo es el primer paso en una instalacion nueva",
+              "Usa la accion principal para crear un nuevo agente. Despues, el editor permite definir identidad, instrucciones, herramientas, canales y publicacion.",
+            emptyTitle: "Empieza creando tu primer agente",
             emptyDescription:
-              "Si la instancia esta vacia, comienza aqui creando un workspace o un bot. El editor se abre enseguida.",
+              "En un workspace nuevo, esta es la primera accion de setup. Crea un agente y usa el editor para hacerlo util y publicable.",
           },
           controlPlaneBoard: {
-            title: "El board explica como se organiza el catalogo",
+            title: "Entiende el catalogo de agentes",
             description:
-              "Workspaces, squads y bots se agrupan aqui para que gobernanza y ownership sean visibles de inmediato.",
-            emptyTitle: "El board crece junto con el catalogo",
+              "El board agrupa agentes y workspaces para leer ownership, estado y puntos de configuracion sin abrir cada agente.",
+            emptyTitle: "El catalogo se llena a medida que agregas agentes",
             emptyDescription:
-              "Cuando existan bots, esta area se convierte en el mapa visual de equipos, workspaces y ownership operativo.",
+              "Cuando existan agentes, esta area se convierte en el mapa visual del estado de setup, ownership y acceso rapido al editor de cada agente.",
           },
           controlPlaneEditorHeader: {
             title: "El editor es el centro de control del bot",
@@ -1669,15 +1733,15 @@ export const resources = {
               "Usa estas acciones para persistir el borrador y avanzar hacia la revision de publicacion cuando el bot este listo.",
           },
           runtimeHeader: {
-            title: "Runtime es la sala de control en vivo",
+            title: "Monitorea la operacion en vivo en Runtime",
             description:
-              "Esta pantalla concentra la salud de las ejecuciones, la actividad en vivo y filtros para enfocarte en los bots que importan ahora.",
-            emptyTitle: "Runtime se vuelve util apenas aparece actividad",
+              "Runtime es donde los agentes publicados muestran salud, trabajo en vivo, colas y señales operativas despues de conectarse.",
+            emptyTitle: "Runtime se activa cuando los agentes corren",
             emptyDescription:
-              "Cuando todavia no existen entornos vivos, toma esta pagina como la superficie que mostrara primero la actividad real.",
-            unavailableTitle: "Runtime tambien señala la indisponibilidad rapidamente",
+              "Si todavia no hay nada corriendo, esta pagina sigue siendo donde apareceran primero la actividad en vivo y las señales de salud.",
+            unavailableTitle: "Runtime muestra problemas de conexion con claridad",
             unavailableDescription:
-              "Si la conectividad del runtime se degrada, aqui es donde la app expone ese estado antes de una inspeccion profunda.",
+              "Cuando no se pueda acceder a los datos de runtime, esta pantalla debe mostrar el problema antes de una inspeccion mas profunda.",
           },
           runtimeLiveList: {
             title: "Las metricas muestran cuanta atencion necesita runtime",
@@ -1749,9 +1813,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Ya puedes explorar Koda",
+          title: "Ya puedes usar Koda",
           description:
-            "Reabre el tour en Docs cuando quieras repasar el flujo o visitar un capitulo secundario.",
+            "Ahora conoces el primer camino en Koda: leer Home, configurar agentes en Control Plane y monitorear trabajo en vivo en Runtime. Reabre el tour desde la barra superior cuando quieras.",
         },
       },
       agentSwitcher: {
@@ -1926,6 +1990,8 @@ export const resources = {
           submitting: "Iniciando sesión...",
           forgot_link: "¿Olvidaste la contraseña o el código de recuperación?",
           generic_error: "Las credenciales no coinciden. Inténtalo de nuevo.",
+          service_unavailable:
+            "El servicio de inicio de sesión está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
         },
         forgot: {
           title: "Recuperar acceso",
@@ -1942,6 +2008,8 @@ export const resources = {
           password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
           password_mismatch: "Las contraseñas no coinciden.",
           generic_error: "La información es inválida o ha caducado. Inténtalo de nuevo.",
+          service_unavailable:
+            "El servicio de recuperación está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
         },
         setup: {
           create_account: {
@@ -1961,7 +2029,11 @@ export const resources = {
               email_invalid: "Introduce un correo válido.",
               password_too_short: "La contraseña debe tener al menos {{n}} caracteres.",
               password_mismatch: "Las contraseñas no coinciden.",
+              recovery_codes_missing:
+                "No se emitieron códigos de recuperación. Genera un nuevo código de configuración e inténtalo de nuevo.",
               generic: "No pudimos crear la cuenta. Inténtalo de nuevo.",
+              service_unavailable:
+                "El servicio de configuración está temporalmente no disponible. Inténtalo de nuevo en unos instantes.",
             },
           },
           recovery_codes: {
@@ -1975,6 +2047,8 @@ export const resources = {
             saved_checkbox: "He guardado los códigos de recuperación en un lugar seguro.",
             continue: "Continuar al espacio de trabajo",
             already_shown_banner: "Estos códigos no se volverán a mostrar.",
+            missing_codes_error:
+              "No se emitieron códigos de recuperación. Genera un nuevo código de configuración y crea la cuenta de nuevo.",
           },
         },
         settings: {
@@ -1985,6 +2059,12 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperación",
             codes_remaining: "{{count}} códigos de recuperación restantes",
           },
+        },
+        session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
+        account_menu: {
+          trigger_label: "Abrir menú de cuenta",
+          account: "Cuenta",
+          sign_out: "Cerrar sesión",
         },
       },
     },
@@ -2126,8 +2206,7 @@ export const resources = {
           sessions: "Sessions",
           costs: "Coûts",
           memory: "Mémoire",
-          schedules: "Planifications",
-          dlq: "File des messages non distribués",
+          routines: "Routines",
           generalSettings: "Paramètres généraux",
         },
         loading: {
@@ -2138,8 +2217,7 @@ export const resources = {
           sessions: "Ouverture des sessions",
           costs: "Ouverture des coûts",
           memory: "Ouverture de la mémoire",
-          schedules: "Ouverture des planifications",
-          dlq: "Ouverture de la file des messages non distribués",
+          routines: "Ouverture des routines",
           generalSettings: "Ouverture des paramètres généraux",
         },
       },
@@ -2272,49 +2350,49 @@ export const resources = {
           resumeDescription: "Reprenez la visite en cours à partir de l'endroit où vous vous êtes arrêté.",
         },
         welcome: {
-          title: "Commencez par une visite guidée rapide",
+          title: "Découvrez l'espace de travail en 7 étapes",
           description:
-            "Koda vous présente les écrans principaux, comment passer de l'un à l'autre et ce que chaque zone signifie. Le parcours reste concis et vous pouvez quitter à tout moment.",
+            "Koda pointe les contrôles que vous utiliserez en premier : navigation, Home, catalogue d'agents et Runtime. La visite reste courte et vous pouvez quitter à tout moment.",
         },
         steps: {
           shellSidebar: {
-            title: "Cette barre latérale est votre carte principale",
+            title: "Naviguez depuis la barre latérale",
             description:
-              "Utilisez-la pour passer entre aperçu, runtime, catalogue et vues opérationnelles sans perdre le contexte.",
+              "C'est la carte stable de l'application. Utilisez-la pour passer entre Home, Control Plane, Runtime et les zones opérationnelles sans perdre le contexte.",
           },
           shellTopbar: {
-            title: "La barre supérieure garde le contexte d'itinéraire à proximité",
+            title: "Utilisez la barre supérieure pour les actions rapides",
             description:
-              "Ici s'affichent le résumé de la page active, les outils rapides, le sélecteur de langue et le raccourci pour rouvrir cette visite plus tard.",
+              "La barre supérieure garde à portée les actions de l'espace de travail : langue, notifications, compte et raccourci pour rouvrir cette visite plus tard.",
           },
           overviewMetrics: {
-            title: "Aperçu résume le pouls opérationnel",
+            title: "Lisez d'abord l'état de l'espace de travail",
             description:
-              "Ce premier bloc condense activité, demande et coût pour vous permettre de comprendre ce qui a changé avant d'analyser plus en détail.",
-            emptyTitle: "Aperçu démarre comme votre pouls opérationnel vide",
+              "Ces cartes résument agents, activité, exécutions et signaux de coût afin de décider s'il faut inspecter la configuration ou l'opération en direct.",
+            emptyTitle: "Home démarre comme votre surface d'état",
             emptyDescription:
-              "Même avant que l'activité n'apparaisse, cette page est l'endroit où vous reviendrez pour un résumé rapide de l'état de l'espace de travail.",
+              "Avant toute activité dans l'espace de travail, cette zone reste l'endroit où apparaîtront les premiers signaux de santé, d'exécution et de coût.",
           },
           overviewLivePlan: {
-            title: "Cette section met en avant les prochaines actions en direct",
+            title: "Suivez l'activité récente depuis Home",
             description:
-              "Utilisez-la pour repérer ce qui tourne maintenant, ce qui nécessite de l'attention et où continuer l'investigation.",
+              "La zone d'activité et d'historique montre ce qui vient de se passer et ce qui peut demander attention, pour passer vite du résumé à l'investigation.",
           },
           controlPlanePrimaryAction: {
-            title: "Le catalogue est le point de départ de la configuration",
+            title: "Créez et gérez les agents ici",
             description:
-              "Créez ici des bots et espaces de travail, puis ouvrez un bot pour configurer identité, comportement, ressources et publication.",
-            emptyTitle: "Le catalogue est votre premier arrêt sur une installation neuve",
+              "Utilisez l'action principale pour ajouter un agent. Ensuite, l'éditeur permet de définir identité, instructions, outils, canaux et publication.",
+            emptyTitle: "Commencez par créer votre premier agent",
             emptyDescription:
-              "Si l'instance est vide, commencez ici en créant un espace de travail ou un bot. L'éditeur s'ouvre juste après.",
+              "Dans un espace de travail neuf, c'est la première action de configuration. Créez un agent, puis utilisez l'éditeur pour le rendre utile et publiable.",
           },
           controlPlaneBoard: {
-            title: "Le tableau explique comment le catalogue est organisé",
+            title: "Comprenez le catalogue d'agents",
             description:
-              "Espaces de travail, escouades et bots restent groupés ici pour que gouvernance et responsabilité soient visibles d'un coup d'œil.",
-            emptyTitle: "Le tableau s'étoffe avec le catalogue",
+              "Le tableau groupe agents et espaces de travail pour lire ownership, état et points de configuration sans ouvrir chaque agent.",
+            emptyTitle: "Le catalogue se remplit à mesure que les agents arrivent",
             emptyDescription:
-              "Dès que des bots existent, cette zone devient la carte visuelle des équipes, espaces de travail et responsabilités opérationnelles.",
+              "Quand des agents existent, cette zone devient la carte visuelle de l'état de configuration, de l'ownership et de l'accès rapide à chaque éditeur.",
           },
           controlPlaneEditorHeader: {
             title: "L'éditeur est le centre de contrôle du bot",
@@ -2332,15 +2410,15 @@ export const resources = {
               "Utilisez ces actions pour enregistrer les modifications en brouillon et avancer vers la revue de publication quand le bot est prêt.",
           },
           runtimeHeader: {
-            title: "Runtime est la salle de contrôle en direct",
+            title: "Surveillez l'opération en direct dans Runtime",
             description:
-              "Cet écran concentre la santé des exécutions, l'activité en direct et les filtres pour vous concentrer sur les bots qui importent maintenant.",
-            emptyTitle: "Runtime devient utile dès que l'activité apparaît",
+              "Runtime est l'endroit où les agents publiés affichent santé, travail en direct, files et signaux opérationnels après connexion.",
+            emptyTitle: "Runtime s'allume quand les agents s'exécutent",
             emptyDescription:
-              "Quand aucun environnement n'est encore en direct, considérez cette page comme l'endroit où l'activité en direct apparaîtra en premier.",
-            unavailableTitle: "Runtime signale aussi rapidement les problèmes de disponibilité",
+              "Si rien ne tourne encore, cette page reste l'endroit où l'activité en direct et les signaux de santé apparaîtront en premier.",
+            unavailableTitle: "Runtime montre clairement les problèmes de connexion",
             unavailableDescription:
-              "Si la connectivité runtime est dégradée, cette surface est l'endroit où l'application expose cet état avant une inspection plus approfondie.",
+              "Quand les données runtime ne sont pas accessibles, cet écran doit afficher le problème avant une inspection plus approfondie.",
           },
           runtimeLiveList: {
             title: "Les métriques indiquent à quel point le runtime a besoin d'attention",
@@ -2412,9 +2490,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Vous êtes prêt à explorer Koda",
+          title: "Vous êtes prêt à utiliser Koda",
           description:
-            "Rouvrez la visite à tout moment depuis Docs si vous voulez un rappel ou visiter un chapitre secondaire.",
+            "Vous connaissez maintenant le premier parcours dans Koda : lire Home, configurer les agents dans Control Plane et surveiller le travail en direct dans Runtime. Rouvrez la visite depuis la barre supérieure à tout moment.",
         },
       },
       agentSwitcher: {
@@ -2590,6 +2668,8 @@ export const resources = {
           submitting: "Connexion...",
           forgot_link: "Mot de passe ou code de récupération oublié ?",
           generic_error: "Les identifiants fournis ne correspondent pas. Veuillez réessayer.",
+          service_unavailable:
+            "Le service de connexion est temporairement indisponible. Veuillez réessayer dans un instant.",
         },
         forgot: {
           title: "Récupérer l'accès",
@@ -2606,6 +2686,8 @@ export const resources = {
           password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
           password_mismatch: "Les mots de passe ne correspondent pas.",
           generic_error: "Les informations fournies sont invalides ou expirées. Veuillez réessayer.",
+          service_unavailable:
+            "Le service de récupération est temporairement indisponible. Veuillez réessayer dans un instant.",
         },
         setup: {
           create_account: {
@@ -2625,7 +2707,11 @@ export const resources = {
               email_invalid: "Saisissez une adresse e-mail valide.",
               password_too_short: "Le mot de passe doit contenir au moins {{n}} caractères.",
               password_mismatch: "Les mots de passe ne correspondent pas.",
+              recovery_codes_missing:
+                "Les codes de récupération n'ont pas été émis. Générez un nouveau code de configuration et réessayez.",
               generic: "Nous n'avons pas pu créer le compte. Veuillez réessayer.",
+              service_unavailable:
+                "Le service de configuration est temporairement indisponible. Veuillez réessayer dans un instant.",
             },
           },
           recovery_codes: {
@@ -2639,6 +2725,8 @@ export const resources = {
             saved_checkbox: "J'ai enregistré les codes de récupération dans un endroit sûr.",
             continue: "Continuer vers l'espace de travail",
             already_shown_banner: "Ces codes ne seront plus affichés.",
+            missing_codes_error:
+              "Les codes de récupération n'ont pas été émis. Générez un nouveau code de configuration et recréez le compte.",
           },
         },
         settings: {
@@ -2649,6 +2737,12 @@ export const resources = {
             regenerate_codes: "Régénérer les codes de récupération",
             codes_remaining: "{{count}} codes de récupération restants",
           },
+        },
+        session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
+        account_menu: {
+          trigger_label: "Ouvrir le menu du compte",
+          account: "Compte",
+          sign_out: "Se déconnecter",
         },
       },
     },
@@ -2790,8 +2884,7 @@ export const resources = {
           sessions: "Sitzungen",
           costs: "Kosten",
           memory: "Speicher",
-          schedules: "Zeitpläne",
-          dlq: "Dead-Letter-Queue",
+          routines: "Routinen",
           generalSettings: "Allgemeine Einstellungen",
         },
         loading: {
@@ -2802,8 +2895,7 @@ export const resources = {
           sessions: "Sitzungen werden geöffnet",
           costs: "Kosten werden geöffnet",
           memory: "Speicher wird geöffnet",
-          schedules: "Zeitpläne werden geöffnet",
-          dlq: "Dead-Letter-Queue wird geöffnet",
+          routines: "Routinen werden geöffnet",
           generalSettings: "Allgemeine Einstellungen werden geöffnet",
         },
       },
@@ -2936,49 +3028,49 @@ export const resources = {
           resumeDescription: "Setzen Sie die aktuelle Tour an der Stelle fort, an der Sie aufgehört haben.",
         },
         welcome: {
-          title: "Beginnen Sie mit einer kurzen geführten Tour",
+          title: "Lernen Sie den Arbeitsbereich in 7 Schritten kennen",
           description:
-            "Koda führt Sie durch die Hauptbildschirme, wie Sie zwischen ihnen wechseln und was jeder Bereich bedeutet. Der Ablauf bleibt zielgerichtet und Sie können jederzeit abbrechen.",
+            "Koda zeigt die Steuerelemente, die Sie zuerst nutzen: Navigation, Home, Agentenkatalog und Runtime. Die Tour bleibt kurz und Sie können jederzeit aussteigen.",
         },
         steps: {
           shellSidebar: {
-            title: "Diese Seitenleiste ist Ihre Hauptkarte",
+            title: "Navigieren Sie über die Seitenleiste",
             description:
-              "Nutzen Sie sie, um zwischen Übersicht, Laufzeit, Katalog und operativen Ansichten zu wechseln, ohne den Kontext zu verlieren.",
+              "Dies ist die stabile Karte der App. Nutzen Sie sie, um zwischen Home, Control Plane, Runtime und operativen Bereichen zu wechseln, ohne den Kontext zu verlieren.",
           },
           shellTopbar: {
-            title: "Die obere Leiste hält den Routenkontext nah",
+            title: "Nutzen Sie die obere Leiste für Schnellaktionen",
             description:
-              "Hier sehen Sie die Zusammenfassung der aktiven Seite, Schnellwerkzeuge, den Sprachumschalter und die Verknüpfung, um diese Tour später erneut zu öffnen.",
+              "Die obere Leiste hält Arbeitsbereichsaktionen nah: Sprache, Benachrichtigungen, Konto und die Verknüpfung, um diese Tour später erneut zu öffnen.",
           },
           overviewMetrics: {
-            title: "Übersicht fasst den operativen Puls zusammen",
+            title: "Lesen Sie zuerst den Arbeitsbereichsstatus",
             description:
-              "Dieser erste Block verdichtet Aktivität, Nachfrage und Kosten, damit Sie verstehen, was sich geändert hat, bevor Sie tiefer einsteigen.",
-            emptyTitle: "Übersicht startet als Ihr leerer operativer Puls",
+              "Diese Karten fassen Agenten, Aktivität, Ausführungen und Kostensignale zusammen, damit Sie Setup oder Live-Betrieb gezielt prüfen können.",
+            emptyTitle: "Home startet als Ihre Statusfläche",
             emptyDescription:
-              "Schon bevor Aktivität erscheint, ist diese Seite der Ort, an den Sie für die schnellste Zusammenfassung des Arbeitsbereichs zurückkehren.",
+              "Bevor im Arbeitsbereich Aktivität entsteht, ist dieser Bereich weiterhin der Ort, an dem erste Gesundheits-, Ausführungs- und Kostensignale erscheinen.",
           },
           overviewLivePlan: {
-            title: "Dieser Abschnitt hebt die nächsten Live-Aktionen hervor",
+            title: "Verfolgen Sie aktuelle Aktivität über Home",
             description:
-              "Nutzen Sie ihn, um zu erkennen, was jetzt läuft, was Aufmerksamkeit braucht und wo die Untersuchung fortgesetzt werden sollte.",
+              "Der Aktivitäts- und Verlaufsbereich zeigt, was gerade passiert ist und was Aufmerksamkeit brauchen kann, damit Sie schnell vom Überblick zur Untersuchung wechseln.",
           },
           controlPlanePrimaryAction: {
-            title: "Der Katalog ist der Startpunkt der Einrichtung",
+            title: "Erstellen und verwalten Sie Agenten hier",
             description:
-              "Erstellen Sie hier Bots und Arbeitsbereiche und öffnen Sie dann einen Bot, um Identität, Verhalten, Ressourcen und Veröffentlichung zu konfigurieren.",
-            emptyTitle: "Der Katalog ist Ihr erster Halt bei einer neuen Installation",
+              "Nutzen Sie die primäre Aktion, um einen neuen Agenten anzulegen. Danach können Sie im Editor Identität, Anweisungen, Tools, Kanäle und Veröffentlichung definieren.",
+            emptyTitle: "Beginnen Sie mit Ihrem ersten Agenten",
             emptyDescription:
-              "Wenn die Instanz leer ist, beginnen Sie hier, indem Sie einen Arbeitsbereich oder einen Bot erstellen. Der Editor öffnet sich direkt danach.",
+              "In einem neuen Arbeitsbereich ist dies die erste Setup-Aktion. Erstellen Sie einen Agenten und nutzen Sie den Editor, um ihn nützlich und veröffentlichbar zu machen.",
           },
           controlPlaneBoard: {
-            title: "Das Board erklärt, wie der Katalog organisiert ist",
+            title: "Verstehen Sie den Agentenkatalog",
             description:
-              "Arbeitsbereiche, Squads und Bots bleiben hier gruppiert, damit Governance und Verantwortung auf einen Blick sichtbar sind.",
-            emptyTitle: "Das Board wächst mit dem Katalog",
+              "Das Board gruppiert Agenten und Arbeitsbereiche, damit Sie Ownership, Status und Konfigurationseinstiege sehen, ohne jeden Agenten zu öffnen.",
+            emptyTitle: "Der Katalog füllt sich, wenn Agenten hinzukommen",
             emptyDescription:
-              "Sobald Bots existieren, wird dieser Bereich zur visuellen Karte von Teams, Arbeitsbereichen und operativer Verantwortung.",
+              "Sobald Agenten existieren, wird dieser Bereich zur visuellen Karte für Setup-Status, Ownership und schnellen Zugriff auf jeden Agenteneditor.",
           },
           controlPlaneEditorHeader: {
             title: "Der Editor ist das Kontrollzentrum des Bots",
@@ -2996,15 +3088,15 @@ export const resources = {
               "Nutzen Sie diese Aktionen, um Entwurfsänderungen zu persistieren und zur Veröffentlichungsprüfung voranzuschreiten, wenn der Bot bereit ist.",
           },
           runtimeHeader: {
-            title: "Laufzeit ist der Live-Kontrollraum",
+            title: "Überwachen Sie Live-Betrieb in Runtime",
             description:
-              "Dieser Bildschirm bündelt Ausführungsgesundheit, Live-Aktivität und Filter, damit Sie sich auf die aktuell wichtigen Bots konzentrieren können.",
-            emptyTitle: "Laufzeit wird nützlich, sobald Aktivität erscheint",
+              "Runtime ist der Ort, an dem veröffentlichte Agenten nach der Verbindung Gesundheit, Live-Arbeit, Warteschlangen und operative Signale anzeigen.",
+            emptyTitle: "Runtime wird aktiv, sobald Agenten laufen",
             emptyDescription:
-              "Wenn es noch keine Live-Umgebungen gibt, betrachten Sie diese Seite als den Ort, an dem Live-Aktivität zuerst erscheint.",
-            unavailableTitle: "Laufzeit signalisiert auch Verfügbarkeitsprobleme schnell",
+              "Wenn noch nichts läuft, ist diese Seite weiterhin der Ort, an dem Live-Aktivität und Gesundheitssignale zuerst erscheinen.",
+            unavailableTitle: "Runtime zeigt Verbindungsprobleme klar",
             unavailableDescription:
-              "Wenn die Laufzeitkonnektivität beeinträchtigt ist, ist diese Oberfläche der Ort, an dem die App diesen Zustand vor tieferer Analyse offenlegt.",
+              "Wenn Runtime-Daten nicht erreichbar sind, sollte dieser Bildschirm das Problem zeigen, bevor Sie tiefer prüfen.",
           },
           runtimeLiveList: {
             title: "Metriken zeigen, wie viel Aufmerksamkeit die Laufzeit benötigt",
@@ -3076,9 +3168,9 @@ export const resources = {
           },
         },
         complete: {
-          title: "Sie sind bereit, Koda zu erkunden",
+          title: "Sie sind bereit, Koda zu nutzen",
           description:
-            "Öffnen Sie die Tour jederzeit aus Docs erneut, wenn Sie eine Auffrischung oder ein Nebenkapitel möchten.",
+            "Sie kennen jetzt den ersten Weg durch Koda: Home lesen, Agenten im Control Plane konfigurieren und Live-Arbeit in Runtime überwachen. Öffnen Sie die Tour jederzeit über die obere Leiste erneut.",
         },
       },
       agentSwitcher: {
@@ -3254,6 +3346,8 @@ export const resources = {
           submitting: "Anmeldung...",
           forgot_link: "Passwort oder Wiederherstellungscode vergessen?",
           generic_error: "Die angegebenen Zugangsdaten stimmen nicht überein. Bitte erneut versuchen.",
+          service_unavailable:
+            "Der Anmeldedienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
         },
         forgot: {
           title: "Zugriff wiederherstellen",
@@ -3270,6 +3364,8 @@ export const resources = {
           password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
           password_mismatch: "Die Passwörter stimmen nicht überein.",
           generic_error: "Die angegebenen Informationen sind ungültig oder abgelaufen. Bitte erneut versuchen.",
+          service_unavailable:
+            "Der Wiederherstellungsdienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
         },
         setup: {
           create_account: {
@@ -3289,7 +3385,11 @@ export const resources = {
               email_invalid: "Geben Sie eine gültige E-Mail-Adresse ein.",
               password_too_short: "Das Passwort muss mindestens {{n}} Zeichen lang sein.",
               password_mismatch: "Die Passwörter stimmen nicht überein.",
+              recovery_codes_missing:
+                "Es wurden keine Wiederherstellungscodes ausgegeben. Erzeugen Sie einen neuen Einrichtungscode und versuchen Sie es erneut.",
               generic: "Das Konto konnte nicht erstellt werden. Bitte erneut versuchen.",
+              service_unavailable:
+                "Der Einrichtungsdienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             },
           },
           recovery_codes: {
@@ -3303,6 +3403,8 @@ export const resources = {
             saved_checkbox: "Ich habe die Wiederherstellungscodes sicher aufbewahrt.",
             continue: "Weiter zum Arbeitsbereich",
             already_shown_banner: "Diese Codes werden nicht erneut angezeigt.",
+            missing_codes_error:
+              "Es wurden keine Wiederherstellungscodes ausgegeben. Erzeugen Sie einen neuen Einrichtungscode und erstellen Sie das Konto erneut.",
           },
         },
         settings: {
@@ -3313,6 +3415,12 @@ export const resources = {
             regenerate_codes: "Wiederherstellungscodes neu generieren",
             codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
+        },
+        session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+        account_menu: {
+          trigger_label: "Kontomenü öffnen",
+          account: "Konto",
+          sign_out: "Abmelden",
         },
       },
     },
@@ -8975,7 +9083,7 @@ mutableResources["en-US"].translation.runtime.room = {
     phase: "Phase",
     cpu: "CPU",
     memory: "Memory",
-    now: "Now",
+    now: "Heartbeat",
     noHeartbeat: "no heartbeat",
   },
   tabs: {
@@ -8993,12 +9101,16 @@ mutableResources["en-US"].translation.runtime.room = {
   openErrorDescription: "The task did not respond to the bot runtime.",
   trackingLabel: "Execution tracking",
   switchSurface: "Switch surface",
+  expandSurface: "Expand surface",
+  exitFullscreen: "Exit fullscreen",
+  executionActions: "Execution actions",
   pause: "Pause",
   resume: "Resume",
   saveSnapshot: "Save snapshot",
   cancelExecution: "Cancel execution",
   cancelExecutionConfirm: "Cancel this execution now?",
   more: "More",
+  moreMenuLabel: "More runtime actions",
   refresh: "Refresh",
   retry: "Retry",
   recover: "Recover",
@@ -9044,6 +9156,7 @@ mutableResources["en-US"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Runtime environment update recorded.",
   completed: "{{label}} completed.",
+  liveSample: "Live sample",
 };
 
 mutableResources["pt-BR"].translation.runtime.room = {
@@ -9053,7 +9166,7 @@ mutableResources["pt-BR"].translation.runtime.room = {
     phase: "Etapa",
     cpu: "CPU",
     memory: "Memória",
-    now: "Agora",
+    now: "Pulso",
     noHeartbeat: "sem pulso",
   },
   tabs: {
@@ -9071,12 +9184,16 @@ mutableResources["pt-BR"].translation.runtime.room = {
   openErrorDescription: "A tarefa não respondeu ao runtime do bot.",
   trackingLabel: "Acompanhamento da execução",
   switchSurface: "Alternar superfície",
+  expandSurface: "Expandir superfície",
+  exitFullscreen: "Recolher superfície",
+  executionActions: "Ações da execução",
   pause: "Pausar",
   resume: "Retomar",
   saveSnapshot: "Salvar snapshot",
   cancelExecution: "Cancelar execução",
   cancelExecutionConfirm: "Cancelar esta execução agora?",
   more: "Mais",
+  moreMenuLabel: "Mais ações do runtime",
   refresh: "Atualizar",
   retry: "Retentar",
   recover: "Recuperar",
@@ -9122,6 +9239,7 @@ mutableResources["pt-BR"].translation.runtime.room = {
   phasePreview: "Etapa {{value}}.",
   environmentUpdateRecorded: "Atualização do ambiente registrada pelo runtime.",
   completed: "{{label}} concluído.",
+  liveSample: "Amostra ao vivo",
 };
 
 mutableResources["fr-FR"].translation.runtime.room = {
@@ -9131,7 +9249,7 @@ mutableResources["fr-FR"].translation.runtime.room = {
     phase: "Phase",
     cpu: "CPU",
     memory: "Mémoire",
-    now: "Maintenant",
+    now: "Signal",
     noHeartbeat: "aucun heartbeat",
   },
   tabs: {
@@ -9149,12 +9267,16 @@ mutableResources["fr-FR"].translation.runtime.room = {
   openErrorDescription: "La tâche n'a pas répondu au runtime du bot.",
   trackingLabel: "Suivi de l'exécution",
   switchSurface: "Changer de surface",
+  expandSurface: "Agrandir la surface",
+  exitFullscreen: "Quitter le plein écran",
+  executionActions: "Actions d'exécution",
   pause: "Mettre en pause",
   resume: "Reprendre",
   saveSnapshot: "Enregistrer le snapshot",
   cancelExecution: "Annuler l'exécution",
   cancelExecutionConfirm: "Annuler cette exécution maintenant ?",
   more: "Plus",
+  moreMenuLabel: "Plus d'actions runtime",
   refresh: "Actualiser",
   retry: "Réessayer",
   recover: "Récupérer",
@@ -9200,6 +9322,7 @@ mutableResources["fr-FR"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Mise à jour de l'environnement runtime enregistrée.",
   completed: "{{label}} terminé.",
+  liveSample: "Échantillon live",
 };
 
 mutableResources["de-DE"].translation.runtime.room = {
@@ -9209,7 +9332,7 @@ mutableResources["de-DE"].translation.runtime.room = {
     phase: "Phase",
     cpu: "CPU",
     memory: "Speicher",
-    now: "Jetzt",
+    now: "Signal",
     noHeartbeat: "kein Heartbeat",
   },
   tabs: {
@@ -9227,12 +9350,16 @@ mutableResources["de-DE"].translation.runtime.room = {
   openErrorDescription: "Die Aufgabe hat nicht auf das Bot-Runtime reagiert.",
   trackingLabel: "Ausführungsverfolgung",
   switchSurface: "Oberfläche wechseln",
+  expandSurface: "Oberfläche erweitern",
+  exitFullscreen: "Vollbild verlassen",
+  executionActions: "Ausführungsaktionen",
   pause: "Pausieren",
   resume: "Fortsetzen",
   saveSnapshot: "Snapshot speichern",
   cancelExecution: "Ausführung abbrechen",
   cancelExecutionConfirm: "Diese Ausführung jetzt abbrechen?",
   more: "Mehr",
+  moreMenuLabel: "Weitere Runtime-Aktionen",
   refresh: "Aktualisieren",
   retry: "Erneut versuchen",
   recover: "Wiederherstellen",
@@ -9278,6 +9405,7 @@ mutableResources["de-DE"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Runtime-Umgebungsupdate erfasst.",
   completed: "{{label}} abgeschlossen.",
+  liveSample: "Live-Sample",
 };
 
 mutableResources["es-ES"].translation.runtime.room = {
@@ -9287,7 +9415,7 @@ mutableResources["es-ES"].translation.runtime.room = {
     phase: "Fase",
     cpu: "CPU",
     memory: "Memoria",
-    now: "Ahora",
+    now: "Latido",
     noHeartbeat: "sin latido",
   },
   tabs: {
@@ -9305,12 +9433,16 @@ mutableResources["es-ES"].translation.runtime.room = {
   openErrorDescription: "La tarea no respondió al runtime del bot.",
   trackingLabel: "Seguimiento de la ejecución",
   switchSurface: "Cambiar superficie",
+  expandSurface: "Expandir superficie",
+  exitFullscreen: "Salir de pantalla completa",
+  executionActions: "Acciones de ejecución",
   pause: "Pausar",
   resume: "Reanudar",
   saveSnapshot: "Guardar snapshot",
   cancelExecution: "Cancelar ejecución",
   cancelExecutionConfirm: "¿Cancelar esta ejecución ahora?",
   more: "Más",
+  moreMenuLabel: "Más acciones del runtime",
   refresh: "Actualizar",
   retry: "Reintentar",
   recover: "Recuperar",
@@ -9356,111 +9488,327 @@ mutableResources["es-ES"].translation.runtime.room = {
   phasePreview: "Fase {{value}}.",
   environmentUpdateRecorded: "Actualización del entorno registrada por el runtime.",
   completed: "{{label}} completado.",
+  liveSample: "Muestra en vivo",
 };
 
 mutableResources["en-US"].translation.runtime.files = {
+  explorer: "Explorer",
   discardUnsaved: "Discard unsaved changes?",
   saveFailure: "Save failed",
+  operationFailed: "Operation failed",
+  diffUnavailable: "Diff unavailable",
   deleteFileConfirm: 'Delete "{{path}}"?',
+  deleteFolderConfirm: 'Delete folder "{{path}}" and all contents?',
   folder: "folder",
   file: "file",
   collapseSidebar: "Collapse sidebar",
   expandSidebar: "Expand sidebar",
   new: "New",
+  newFile: "New file",
+  newFolder: "New folder",
+  refreshWorkspace: "Refresh workspace",
+  openEditors: "Open editors",
+  workspace: "Workspace",
+  changes: "Changes",
+  noChanges: "No changes",
+  showDiffFor: "Show diff for {{path}}",
+  showDiff: "Show diff",
+  refreshFile: "Refresh file",
+  search: "Search",
+  inlineName: "Name",
+  rename: "Rename",
+  folderActions: "Folder actions",
+  fileActions: "File actions",
   createPathPlaceholder: "path/file-name.ext",
   createFile: "Create",
   noVisibleFiles: "No visible files here.",
   loadingFile: "Loading file...",
+  loadingDiff: "Loading diff...",
   sourceCode: "Source code",
   deleteFile: "Delete file",
+  deleteFolder: "Delete folder",
   searchPlaceholder: "Search...",
+  searchOptions: "Search options",
+  matchCase: "Match case",
+  matchWholeWord: "Match whole word",
+  useRegex: "Use regular expression",
+  projectSearch: "Search workspace",
+  projectSearchPlaceholder: "Search files across workspace...",
+  projectSearchResults: "Workspace matches",
+  searchResultCount: "{{count}} matches",
+  noSearchResults: "No matches found.",
+  searchTruncated: "Results truncated. Refine the search.",
+  searching: "Searching",
+  searchFailed: "Search failed",
   truncatedFile: "Truncated file — editing disabled.",
   binaryFile: "Binary file — preview not available.",
   openFileToView: "Open a file to see its contents.",
+  closeEditor: "Close editor",
+  noSelection: "No file",
+  diffTab: "Diff {{path}}",
+  diff: "Diff",
+  before: "Before",
+  after: "After",
+  noDiff: "No diff for this file.",
+  truncated: "Truncated",
+  unsaved: "Unsaved",
+  saved: "Saved",
 };
 
 mutableResources["pt-BR"].translation.runtime.files = {
+  explorer: "Explorer",
   discardUnsaved: "Descartar alterações não salvas?",
   saveFailure: "Falha ao salvar",
+  operationFailed: "Operação falhou",
+  diffUnavailable: "Diff indisponível",
   deleteFileConfirm: 'Deletar "{{path}}"?',
+  deleteFolderConfirm: 'Deletar pasta "{{path}}" e todo o conteúdo?',
   folder: "pasta",
   file: "arquivo",
   collapseSidebar: "Colapsar sidebar",
   expandSidebar: "Expandir sidebar",
   new: "Novo",
+  newFile: "Novo arquivo",
+  newFolder: "Nova pasta",
+  refreshWorkspace: "Atualizar workspace",
+  openEditors: "Editores abertos",
+  workspace: "Workspace",
+  changes: "Alterações",
+  noChanges: "Sem alterações",
+  showDiffFor: "Ver diff de {{path}}",
+  showDiff: "Ver diff",
+  refreshFile: "Atualizar arquivo",
+  search: "Buscar",
+  inlineName: "Nome",
+  rename: "Renomear",
+  folderActions: "Ações da pasta",
+  fileActions: "Ações do arquivo",
   createPathPlaceholder: "caminho/nome-do-arquivo.ext",
   createFile: "Criar",
   noVisibleFiles: "Sem arquivos visíveis aqui.",
   loadingFile: "Carregando arquivo...",
+  loadingDiff: "Carregando diff...",
   sourceCode: "Código fonte",
   deleteFile: "Deletar arquivo",
+  deleteFolder: "Deletar pasta",
   searchPlaceholder: "Buscar...",
+  searchOptions: "Opções de busca",
+  matchCase: "Diferenciar maiúsculas/minúsculas",
+  matchWholeWord: "Corresponder palavra inteira",
+  useRegex: "Usar expressão regular",
+  projectSearch: "Buscar no workspace",
+  projectSearchPlaceholder: "Buscar arquivos no workspace...",
+  projectSearchResults: "Correspondências no workspace",
+  searchResultCount: "{{count}} resultados",
+  noSearchResults: "Nenhuma correspondência encontrada.",
+  searchTruncated: "Resultados truncados. Refine a busca.",
+  searching: "Buscando",
+  searchFailed: "Falha na busca",
   truncatedFile: "Arquivo truncado — edição desabilitada.",
   binaryFile: "Arquivo binário — visualização não disponível.",
   openFileToView: "Abra um arquivo para ver o conteúdo.",
+  closeEditor: "Fechar editor",
+  noSelection: "Nenhum arquivo",
+  diffTab: "Diff {{path}}",
+  diff: "Diff",
+  before: "Antes",
+  after: "Depois",
+  noDiff: "Sem diff para este arquivo.",
+  truncated: "Truncado",
+  unsaved: "Não salvo",
+  saved: "Salvo",
 };
 
 mutableResources["es-ES"].translation.runtime.files = {
+  explorer: "Explorador",
   discardUnsaved: "¿Descartar cambios no guardados?",
   saveFailure: "Falló al guardar",
+  operationFailed: "La operación falló",
+  diffUnavailable: "Diff no disponible",
   deleteFileConfirm: '¿Eliminar "{{path}}"?',
+  deleteFolderConfirm: '¿Eliminar la carpeta "{{path}}" y todo su contenido?',
   folder: "carpeta",
   file: "archivo",
   collapseSidebar: "Colapsar sidebar",
   expandSidebar: "Expandir sidebar",
   new: "Nuevo",
+  newFile: "Nuevo archivo",
+  newFolder: "Nueva carpeta",
+  refreshWorkspace: "Actualizar workspace",
+  openEditors: "Editores abiertos",
+  workspace: "Workspace",
+  changes: "Cambios",
+  noChanges: "Sin cambios",
+  showDiffFor: "Ver diff de {{path}}",
+  showDiff: "Ver diff",
+  refreshFile: "Actualizar archivo",
+  search: "Buscar",
+  inlineName: "Nombre",
+  rename: "Renombrar",
+  folderActions: "Acciones de carpeta",
+  fileActions: "Acciones de archivo",
   createPathPlaceholder: "ruta/nombre-del-archivo.ext",
   createFile: "Crear",
   noVisibleFiles: "No hay archivos visibles aquí.",
   loadingFile: "Cargando archivo...",
+  loadingDiff: "Cargando diff...",
   sourceCode: "Código fuente",
   deleteFile: "Eliminar archivo",
+  deleteFolder: "Eliminar carpeta",
   searchPlaceholder: "Buscar...",
+  searchOptions: "Opciones de búsqueda",
+  matchCase: "Distinguir mayúsculas/minúsculas",
+  matchWholeWord: "Coincidir palabra completa",
+  useRegex: "Usar expresión regular",
+  projectSearch: "Buscar en workspace",
+  projectSearchPlaceholder: "Buscar archivos en el workspace...",
+  projectSearchResults: "Coincidencias en workspace",
+  searchResultCount: "{{count}} resultados",
+  noSearchResults: "No se encontraron coincidencias.",
+  searchTruncated: "Resultados truncados. Refina la búsqueda.",
+  searching: "Buscando",
+  searchFailed: "Falló la búsqueda",
   truncatedFile: "Archivo truncado: edición deshabilitada.",
   binaryFile: "Archivo binario: vista previa no disponible.",
   openFileToView: "Abre un archivo para ver su contenido.",
+  closeEditor: "Cerrar editor",
+  noSelection: "Ningún archivo",
+  diffTab: "Diff {{path}}",
+  diff: "Diff",
+  before: "Antes",
+  after: "Después",
+  noDiff: "Sin diff para este archivo.",
+  truncated: "Truncado",
+  unsaved: "Sin guardar",
+  saved: "Guardado",
 };
 
 mutableResources["fr-FR"].translation.runtime.files = {
+  explorer: "Explorateur",
   discardUnsaved: "Rejeter les modifications non enregistrées ?",
   saveFailure: "Échec de l'enregistrement",
+  operationFailed: "L'opération a échoué",
+  diffUnavailable: "Diff indisponible",
   deleteFileConfirm: 'Supprimer "{{path}}" ?',
+  deleteFolderConfirm: 'Supprimer le dossier "{{path}}" et tout son contenu ?',
   folder: "dossier",
   file: "fichier",
   collapseSidebar: "Réduire la barre latérale",
   expandSidebar: "Étendre la barre latérale",
   new: "Nouveau",
+  newFile: "Nouveau fichier",
+  newFolder: "Nouveau dossier",
+  refreshWorkspace: "Actualiser le workspace",
+  openEditors: "Éditeurs ouverts",
+  workspace: "Workspace",
+  changes: "Modifications",
+  noChanges: "Aucune modification",
+  showDiffFor: "Voir le diff de {{path}}",
+  showDiff: "Voir le diff",
+  refreshFile: "Actualiser le fichier",
+  search: "Rechercher",
+  inlineName: "Nom",
+  rename: "Renommer",
+  folderActions: "Actions du dossier",
+  fileActions: "Actions du fichier",
   createPathPlaceholder: "chemin/nom-du-fichier.ext",
   createFile: "Créer",
   noVisibleFiles: "Aucun fichier visible ici.",
   loadingFile: "Chargement du fichier...",
+  loadingDiff: "Chargement du diff...",
   sourceCode: "Code source",
   deleteFile: "Supprimer le fichier",
+  deleteFolder: "Supprimer le dossier",
   searchPlaceholder: "Rechercher...",
+  searchOptions: "Options de recherche",
+  matchCase: "Respecter la casse",
+  matchWholeWord: "Mot entier",
+  useRegex: "Utiliser une expression régulière",
+  projectSearch: "Rechercher dans le workspace",
+  projectSearchPlaceholder: "Rechercher des fichiers dans le workspace...",
+  projectSearchResults: "Correspondances du workspace",
+  searchResultCount: "{{count}} résultats",
+  noSearchResults: "Aucune correspondance trouvée.",
+  searchTruncated: "Résultats tronqués. Affinez la recherche.",
+  searching: "Recherche",
+  searchFailed: "La recherche a échoué",
   truncatedFile: "Fichier tronqué — édition désactivée.",
   binaryFile: "Fichier binaire — aperçu indisponible.",
   openFileToView: "Ouvrez un fichier pour voir son contenu.",
+  closeEditor: "Fermer l'éditeur",
+  noSelection: "Aucun fichier",
+  diffTab: "Diff {{path}}",
+  diff: "Diff",
+  before: "Avant",
+  after: "Après",
+  noDiff: "Aucun diff pour ce fichier.",
+  truncated: "Tronqué",
+  unsaved: "Non enregistré",
+  saved: "Enregistré",
 };
 
 mutableResources["de-DE"].translation.runtime.files = {
+  explorer: "Explorer",
   discardUnsaved: "Nicht gespeicherte Änderungen verwerfen?",
   saveFailure: "Speichern fehlgeschlagen",
+  operationFailed: "Vorgang fehlgeschlagen",
+  diffUnavailable: "Diff nicht verfügbar",
   deleteFileConfirm: '"{{path}}" löschen?',
+  deleteFolderConfirm: 'Ordner "{{path}}" und alle Inhalte löschen?',
   folder: "Ordner",
   file: "Datei",
   collapseSidebar: "Seitenleiste einklappen",
   expandSidebar: "Seitenleiste erweitern",
   new: "Neu",
+  newFile: "Neue Datei",
+  newFolder: "Neuer Ordner",
+  refreshWorkspace: "Workspace aktualisieren",
+  openEditors: "Offene Editoren",
+  workspace: "Workspace",
+  changes: "Änderungen",
+  noChanges: "Keine Änderungen",
+  showDiffFor: "Diff für {{path}} anzeigen",
+  showDiff: "Diff anzeigen",
+  refreshFile: "Datei aktualisieren",
+  search: "Suchen",
+  inlineName: "Name",
+  rename: "Umbenennen",
+  folderActions: "Ordneraktionen",
+  fileActions: "Dateiaktionen",
   createPathPlaceholder: "pfad/dateiname.ext",
   createFile: "Erstellen",
   noVisibleFiles: "Keine sichtbaren Dateien hier.",
   loadingFile: "Datei wird geladen...",
+  loadingDiff: "Diff wird geladen...",
   sourceCode: "Quellcode",
   deleteFile: "Datei löschen",
+  deleteFolder: "Ordner löschen",
   searchPlaceholder: "Suchen...",
+  searchOptions: "Suchoptionen",
+  matchCase: "Groß-/Kleinschreibung beachten",
+  matchWholeWord: "Ganzes Wort",
+  useRegex: "Regulären Ausdruck verwenden",
+  projectSearch: "Workspace durchsuchen",
+  projectSearchPlaceholder: "Dateien im Workspace suchen...",
+  projectSearchResults: "Workspace-Treffer",
+  searchResultCount: "{{count}} Treffer",
+  noSearchResults: "Keine Treffer gefunden.",
+  searchTruncated: "Ergebnisse gekürzt. Suche verfeinern.",
+  searching: "Suche läuft",
+  searchFailed: "Suche fehlgeschlagen",
   truncatedFile: "Gekürzte Datei — Bearbeitung deaktiviert.",
   binaryFile: "Binärdatei — Vorschau nicht verfügbar.",
   openFileToView: "Öffnen Sie eine Datei, um den Inhalt zu sehen.",
+  closeEditor: "Editor schließen",
+  noSelection: "Keine Datei",
+  diffTab: "Diff {{path}}",
+  diff: "Diff",
+  before: "Vorher",
+  after: "Nachher",
+  noDiff: "Kein Diff für diese Datei.",
+  truncated: "Gekürzt",
+  unsaved: "Ungespeichert",
+  saved: "Gespeichert",
 };
 
 mutableResources["en-US"].translation.toast = {
@@ -12585,7 +12933,7 @@ mutableResources["en-US"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Connect to a channel",
   title: "Getting started",
 };
 
@@ -13019,7 +13367,7 @@ mutableResources["pt-BR"].translation.dashboard.checklist = {
   dismiss: "Dispensar",
   provider: "Configure um provedor",
   subtitle: "Finalize a configuração do workspace para liberar automações.",
-  telegram: "Conectar Telegram",
+  telegram: "Conectar a um canal",
   title: "Primeiros passos",
 };
 
@@ -13453,7 +13801,7 @@ mutableResources["es-ES"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Conectar a un canal",
   title: "Getting started",
 };
 
@@ -13887,7 +14235,7 @@ mutableResources["fr-FR"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Connecter un canal",
   title: "Getting started",
 };
 
@@ -14321,7 +14669,7 @@ mutableResources["de-DE"].translation.dashboard.checklist = {
   dismiss: "Dismiss",
   provider: "Configure a provider",
   subtitle: "Finish the workspace setup to unlock automations.",
-  telegram: "Connect Telegram",
+  telegram: "Kanal verbinden",
   title: "Getting started",
 };
 
@@ -14466,10 +14814,1025 @@ mutableResources["de-DE"].translation.settings.sections = {
   navigation: "Navigation",
 };
 
+mutableResources["en-US"].translation.routines = {
+  title: "Routines",
+  description: "Schedules and dead-letter queue for automated runs.",
+  tabs: {
+    schedules: "Schedules",
+    dlq: "Dead letter queue",
+    ariaLabel: "Routines view",
+  },
+  editor: {
+    eyebrow: "Routine",
+    createTitle: "New routine",
+    editTitle: "Edit routine #{{id}}",
+    createSubtitle: "Configure a recurring or one-off automation for one of your agents.",
+    editSubtitle: "Update what runs and when. Changes take effect on the next eligible run.",
+    name: "Name",
+    namePlaceholder: "e.g., Daily code review",
+    instructions: "Instructions",
+    instructionsPlaceholder: "Describe what the agent should do on each run",
+    agent: "Agent",
+    model: "Model",
+    modelPlaceholder: "claude-opus-4-7 (optional)",
+    triggerHeading: "Select a trigger",
+    triggers: {
+      schedule: {
+        title: "Schedule",
+        description: "Run on a recurring cron schedule or once at a future time.",
+      },
+      githubEvent: {
+        title: "GitHub event",
+        description: "Run when a GitHub webhook event fires.",
+      },
+      api: {
+        title: "API",
+        description: "Trigger from your own code by sending a POST request.",
+      },
+      comingSoon: "Coming soon",
+    },
+    when: "When",
+    dateTime: "Date & time",
+    date: "Date",
+    timezone: "Timezone",
+    recurrence: {
+      once: "Once",
+      recurring: "Recurring",
+    },
+    presets: {
+      hourly: "Hourly",
+      daily: "Daily",
+      weekly: "Weekly",
+      monthly: "Monthly",
+      custom: "Custom",
+    },
+    presetsLabel: "Recurrence preset",
+    timeOfDay: "Time of day",
+    weekday: "Day of week",
+    dayOfMonth: "Day of month",
+    weekdays: {
+      sunday: "Sunday",
+      monday: "Monday",
+      tuesday: "Tuesday",
+      wednesday: "Wednesday",
+      thursday: "Thursday",
+      friday: "Friday",
+      saturday: "Saturday",
+    },
+    customCron: "Cron expression",
+    customCronHint: "Each cell uses cron syntax: number, range, list, step, or * for any.",
+    cron: {
+      minute: "min",
+      hour: "hour",
+      day: "day",
+      month: "month",
+      weekday: "weekday",
+    },
+    cronErrors: {
+      invalidChar: "Invalid character in {{cell}}",
+      dayOutOfRange: "Day must be between 1 and 31",
+      monthOutOfRange: "Month must be between 1 and 12",
+      weekdayOutOfRange: "Weekday must be between 0 (Sun) and 6 (Sat)",
+    },
+    summary: "Runs",
+    humanized: {
+      hourly: "Every hour, on the hour",
+      daily: "Every day at {{time}}",
+      weekly: "Every {{weekday}} at {{time}}",
+      monthly: "Day {{day}} of each month at {{time}}",
+      custom: "Custom expression",
+    },
+    cronExpression: "Cron expression",
+    nextRuns: "Next runs",
+    nextRunsUnavailable: "Preview unavailable for custom expressions.",
+    tabs: {
+      connectors: "Connectors",
+      behavior: "Behavior",
+      permissions: "Permissions",
+      label: "Routine settings",
+    },
+    connectors: {
+      description: "Integrations available to the agent during each run.",
+      empty: "No connectors selected. Add one to expose its tools to this routine.",
+      addAction: "Add connector",
+      searchPlaceholder: "Search connectors",
+      searchEmpty: "No connectors match your search.",
+      remove: "Remove {{label}}",
+    },
+    behavior: {
+      notification: "Notification mode",
+      verification: "Verification mode",
+      notificationModes: {
+        summary_complete: "Summary on completion",
+        failures_only: "Failures only",
+        none: "Silent",
+      },
+      verificationModes: {
+        post_write_if_any: "Verify only when writes happen",
+        task_success: "Verify on every successful run",
+      },
+    },
+    permissions: {
+      readOnly: "Read-only mode",
+      readOnlyDescription: "Block any writes during the run, even if the agent attempts them.",
+      allowedPaths: "Allowed paths",
+      allowedPathsPlaceholder: "/repo/src\n/repo/docs",
+      allowedPathsHint: "One path per line. Empty means no restriction.",
+    },
+    actions: {
+      cancel: "Cancel",
+      create: "Create routine",
+      save: "Save changes",
+      delete: "Delete routine",
+      newRoutine: "New routine",
+      createFirst: "Create your first routine",
+      next: "Next",
+      back: "Back",
+    },
+    steps: {
+      basics: "Basics",
+      schedule: "Schedule",
+      refine: "Refine",
+    },
+    agentPlaceholder: "Pick an agent",
+    messages: {
+      createdPreview: "Routine drafted (UI preview — backend wiring pending).",
+      created: "Routine created.",
+      updated: "Routine updated.",
+      deleted: "Routine deleted.",
+      createFailed: "Could not create routine.",
+      updateFailed: "Could not update routine.",
+      deleteFailed: "Could not delete routine.",
+      networkError: "Network error. Please try again.",
+    },
+    errors: {
+      conflict: "Schedule changed elsewhere. Please review and retry.",
+      unauthorized: "You don't have permission to manage this routine.",
+      workDirInvalid: "Work directory is not allowed.",
+    },
+    delete: {
+      confirmTitle: "Delete routine?",
+      confirmDescription: "This action cannot be undone.",
+      confirmAction: "Delete",
+    },
+    validation: {
+      nameRequired: "Name is required.",
+      instructionsRequired: "Instructions are required.",
+      agentRequired: "Pick an agent for this routine.",
+      triggerUnavailable: "This trigger is not available yet.",
+      dateTimeRequired: "Pick a date and time for the one-shot run.",
+      customCronRequired: "Provide a cron expression.",
+      cronInvalid: "Cron expression has invalid values.",
+    },
+  },
+};
+
+mutableResources["pt-BR"].translation.routines = {
+  title: "Rotinas",
+  description: "Agendamentos e fila morta de execuções automatizadas.",
+  tabs: {
+    schedules: "Agendamentos",
+    dlq: "Fila morta",
+    ariaLabel: "Visualização de rotinas",
+  },
+  editor: {
+    eyebrow: "Rotina",
+    createTitle: "Nova rotina",
+    editTitle: "Editar rotina #{{id}}",
+    createSubtitle: "Configure uma automação recorrente ou única para um dos seus agentes.",
+    editSubtitle: "Atualize o que executa e quando. Mudanças valem a partir da próxima execução elegível.",
+    name: "Nome",
+    namePlaceholder: "ex.: Revisão diária de código",
+    instructions: "Instruções",
+    instructionsPlaceholder: "Descreva o que o agente deve fazer em cada execução",
+    agent: "Agente",
+    model: "Modelo",
+    modelPlaceholder: "claude-opus-4-7 (opcional)",
+    triggerHeading: "Escolha um gatilho",
+    triggers: {
+      schedule: {
+        title: "Agendamento",
+        description: "Executa em cron recorrente ou uma vez em um horário futuro.",
+      },
+      githubEvent: {
+        title: "Evento do GitHub",
+        description: "Executa quando um webhook do GitHub é disparado.",
+      },
+      api: {
+        title: "API",
+        description: "Dispare via POST do seu próprio código.",
+      },
+      comingSoon: "Em breve",
+    },
+    when: "Quando",
+    dateTime: "Data e hora",
+    date: "Data",
+    timezone: "Fuso horário",
+    recurrence: {
+      once: "Uma vez",
+      recurring: "Recorrente",
+    },
+    presets: {
+      hourly: "A cada hora",
+      daily: "Diária",
+      weekly: "Semanal",
+      monthly: "Mensal",
+      custom: "Personalizada",
+    },
+    presetsLabel: "Recorrência",
+    timeOfDay: "Horário",
+    weekday: "Dia da semana",
+    dayOfMonth: "Dia do mês",
+    weekdays: {
+      sunday: "Domingo",
+      monday: "Segunda",
+      tuesday: "Terça",
+      wednesday: "Quarta",
+      thursday: "Quinta",
+      friday: "Sexta",
+      saturday: "Sábado",
+    },
+    customCron: "Expressão cron",
+    customCronHint: "Cada célula aceita sintaxe cron: número, intervalo, lista, passo, ou * para qualquer.",
+    cron: {
+      minute: "min",
+      hour: "hora",
+      day: "dia",
+      month: "mês",
+      weekday: "semana",
+    },
+    cronErrors: {
+      invalidChar: "Caractere inválido em {{cell}}",
+      dayOutOfRange: "Dia deve estar entre 1 e 31",
+      monthOutOfRange: "Mês deve estar entre 1 e 12",
+      weekdayOutOfRange: "Dia da semana deve estar entre 0 (Dom) e 6 (Sáb)",
+    },
+    summary: "Executa",
+    humanized: {
+      hourly: "A cada hora cheia",
+      daily: "Todo dia às {{time}}",
+      weekly: "Toda {{weekday}} às {{time}}",
+      monthly: "Dia {{day}} de cada mês às {{time}}",
+      custom: "Expressão personalizada",
+    },
+    cronExpression: "Expressão cron",
+    nextRuns: "Próximas execuções",
+    nextRunsUnavailable: "Prévia indisponível para expressões personalizadas.",
+    tabs: {
+      connectors: "Conectores",
+      behavior: "Comportamento",
+      permissions: "Permissões",
+      label: "Configurações da rotina",
+    },
+    connectors: {
+      description: "Integrações disponíveis para o agente durante cada execução.",
+      empty: "Nenhum conector selecionado. Adicione um para expor suas ferramentas a esta rotina.",
+      addAction: "Adicionar conector",
+      searchPlaceholder: "Buscar conectores",
+      searchEmpty: "Nenhum conector corresponde à sua busca.",
+      remove: "Remover {{label}}",
+    },
+    behavior: {
+      notification: "Modo de notificação",
+      verification: "Modo de verificação",
+      notificationModes: {
+        summary_complete: "Resumo ao concluir",
+        failures_only: "Apenas falhas",
+        none: "Silencioso",
+      },
+      verificationModes: {
+        post_write_if_any: "Verifica só quando há escrita",
+        task_success: "Verifica em todas as execuções bem-sucedidas",
+      },
+    },
+    permissions: {
+      readOnly: "Modo somente leitura",
+      readOnlyDescription: "Bloqueia qualquer escrita durante a execução, mesmo que o agente tente.",
+      allowedPaths: "Caminhos permitidos",
+      allowedPathsPlaceholder: "/repo/src\n/repo/docs",
+      allowedPathsHint: "Um caminho por linha. Vazio = sem restrição.",
+    },
+    actions: {
+      cancel: "Cancelar",
+      create: "Criar rotina",
+      save: "Salvar alterações",
+      delete: "Excluir rotina",
+      newRoutine: "Nova rotina",
+      createFirst: "Crie sua primeira rotina",
+      next: "Avançar",
+      back: "Voltar",
+    },
+    steps: {
+      basics: "Básico",
+      schedule: "Agendamento",
+      refine: "Refinar",
+    },
+    agentPlaceholder: "Escolher agente",
+    messages: {
+      createdPreview: "Rotina rascunhada (prévia de UI — integração com backend pendente).",
+      created: "Rotina criada.",
+      updated: "Rotina atualizada.",
+      deleted: "Rotina excluída.",
+      createFailed: "Não foi possível criar a rotina.",
+      updateFailed: "Não foi possível atualizar a rotina.",
+      deleteFailed: "Não foi possível excluir a rotina.",
+      networkError: "Erro de rede. Tente novamente.",
+    },
+    errors: {
+      conflict: "A rotina foi alterada em outro lugar. Revise e tente novamente.",
+      unauthorized: "Você não tem permissão para gerenciar esta rotina.",
+      workDirInvalid: "Diretório de trabalho não permitido.",
+    },
+    delete: {
+      confirmTitle: "Excluir rotina?",
+      confirmDescription: "Esta ação não pode ser desfeita.",
+      confirmAction: "Excluir",
+    },
+    validation: {
+      nameRequired: "O nome é obrigatório.",
+      instructionsRequired: "As instruções são obrigatórias.",
+      agentRequired: "Escolha um agente para esta rotina.",
+      triggerUnavailable: "Este gatilho ainda não está disponível.",
+      dateTimeRequired: "Escolha uma data e hora para a execução única.",
+      customCronRequired: "Forneça uma expressão cron.",
+      cronInvalid: "A expressão cron tem valores inválidos.",
+    },
+  },
+};
+
+mutableResources["es-ES"].translation.routines = {
+  title: "Rutinas",
+  description: "Programaciones y cola muerta de ejecuciones automatizadas.",
+  tabs: {
+    schedules: "Programaciones",
+    dlq: "Cola muerta",
+    ariaLabel: "Vista de rutinas",
+  },
+  editor: {
+    eyebrow: "Rutina",
+    createTitle: "Nueva rutina",
+    editTitle: "Editar rutina #{{id}}",
+    createSubtitle: "Configura una automatización recurrente o única para uno de tus agentes.",
+    editSubtitle: "Actualiza qué se ejecuta y cuándo. Los cambios surten efecto en la próxima ejecución elegible.",
+    name: "Nombre",
+    namePlaceholder: "p. ej., Revisión diaria de código",
+    instructions: "Instrucciones",
+    instructionsPlaceholder: "Describe lo que el agente debe hacer en cada ejecución",
+    agent: "Agente",
+    model: "Modelo",
+    modelPlaceholder: "claude-opus-4-7 (opcional)",
+    triggerHeading: "Selecciona un disparador",
+    triggers: {
+      schedule: {
+        title: "Programación",
+        description: "Ejecuta con un cron recurrente o una vez a futuro.",
+      },
+      githubEvent: {
+        title: "Evento de GitHub",
+        description: "Ejecuta cuando un webhook de GitHub se dispara.",
+      },
+      api: {
+        title: "API",
+        description: "Dispara desde tu propio código con un POST.",
+      },
+      comingSoon: "Pronto",
+    },
+    when: "Cuándo",
+    dateTime: "Fecha y hora",
+    date: "Fecha",
+    timezone: "Zona horaria",
+    recurrence: {
+      once: "Una vez",
+      recurring: "Recurrente",
+    },
+    presets: {
+      hourly: "Cada hora",
+      daily: "Diaria",
+      weekly: "Semanal",
+      monthly: "Mensual",
+      custom: "Personalizada",
+    },
+    presetsLabel: "Recurrencia",
+    timeOfDay: "Hora",
+    weekday: "Día de la semana",
+    dayOfMonth: "Día del mes",
+    weekdays: {
+      sunday: "Domingo",
+      monday: "Lunes",
+      tuesday: "Martes",
+      wednesday: "Miércoles",
+      thursday: "Jueves",
+      friday: "Viernes",
+      saturday: "Sábado",
+    },
+    customCron: "Expresión cron",
+    customCronHint: "Cada celda acepta sintaxis cron: número, rango, lista, paso o * para cualquiera.",
+    cron: {
+      minute: "min",
+      hour: "hora",
+      day: "día",
+      month: "mes",
+      weekday: "semana",
+    },
+    cronErrors: {
+      invalidChar: "Carácter inválido en {{cell}}",
+      dayOutOfRange: "El día debe estar entre 1 y 31",
+      monthOutOfRange: "El mes debe estar entre 1 y 12",
+      weekdayOutOfRange: "El día de la semana debe estar entre 0 (Dom) y 6 (Sáb)",
+    },
+    summary: "Ejecuta",
+    humanized: {
+      hourly: "Cada hora en punto",
+      daily: "Todos los días a las {{time}}",
+      weekly: "Cada {{weekday}} a las {{time}}",
+      monthly: "Día {{day}} de cada mes a las {{time}}",
+      custom: "Expresión personalizada",
+    },
+    cronExpression: "Expresión cron",
+    nextRuns: "Próximas ejecuciones",
+    nextRunsUnavailable: "Vista previa no disponible para expresiones personalizadas.",
+    tabs: {
+      connectors: "Conectores",
+      behavior: "Comportamiento",
+      permissions: "Permisos",
+      label: "Ajustes de la rutina",
+    },
+    connectors: {
+      description: "Integraciones disponibles para el agente durante cada ejecución.",
+      empty: "Sin conectores seleccionados. Agrega uno para exponer sus herramientas a esta rutina.",
+      addAction: "Agregar conector",
+      searchPlaceholder: "Buscar conectores",
+      searchEmpty: "Ningún conector coincide con la búsqueda.",
+      remove: "Quitar {{label}}",
+    },
+    behavior: {
+      notification: "Modo de notificación",
+      verification: "Modo de verificación",
+      notificationModes: {
+        summary_complete: "Resumen al completar",
+        failures_only: "Solo fallos",
+        none: "Silencioso",
+      },
+      verificationModes: {
+        post_write_if_any: "Verificar solo cuando hay escritura",
+        task_success: "Verificar en cada ejecución exitosa",
+      },
+    },
+    permissions: {
+      readOnly: "Modo solo lectura",
+      readOnlyDescription: "Bloquea cualquier escritura durante la ejecución, aunque el agente lo intente.",
+      allowedPaths: "Rutas permitidas",
+      allowedPathsPlaceholder: "/repo/src\n/repo/docs",
+      allowedPathsHint: "Una ruta por línea. Vacío = sin restricción.",
+    },
+    actions: {
+      cancel: "Cancelar",
+      create: "Crear rutina",
+      save: "Guardar cambios",
+      delete: "Eliminar rutina",
+      newRoutine: "Nueva rutina",
+      createFirst: "Crea tu primera rutina",
+      next: "Siguiente",
+      back: "Atrás",
+    },
+    steps: {
+      basics: "Básico",
+      schedule: "Programación",
+      refine: "Refinar",
+    },
+    agentPlaceholder: "Elegir agente",
+    messages: {
+      createdPreview: "Rutina creada (vista previa de UI — integración pendiente).",
+      created: "Rutina creada.",
+      updated: "Rutina actualizada.",
+      deleted: "Rutina eliminada.",
+      createFailed: "No se pudo crear la rutina.",
+      updateFailed: "No se pudo actualizar la rutina.",
+      deleteFailed: "No se pudo eliminar la rutina.",
+      networkError: "Error de red. Vuelve a intentarlo.",
+    },
+    errors: {
+      conflict: "La rutina cambió en otro lugar. Revisa e intenta de nuevo.",
+      unauthorized: "No tienes permiso para gestionar esta rutina.",
+      workDirInvalid: "Directorio de trabajo no permitido.",
+    },
+    delete: {
+      confirmTitle: "¿Eliminar rutina?",
+      confirmDescription: "Esta acción no se puede deshacer.",
+      confirmAction: "Eliminar",
+    },
+    validation: {
+      nameRequired: "El nombre es obligatorio.",
+      instructionsRequired: "Las instrucciones son obligatorias.",
+      agentRequired: "Elige un agente para esta rutina.",
+      triggerUnavailable: "Este disparador aún no está disponible.",
+      dateTimeRequired: "Elige fecha y hora para la ejecución única.",
+      customCronRequired: "Proporciona una expresión cron.",
+      cronInvalid: "La expresión cron tiene valores inválidos.",
+    },
+  },
+};
+
+mutableResources["fr-FR"].translation.routines = {
+  title: "Routines",
+  description: "Planifications et file des messages non distribués des exécutions automatisées.",
+  tabs: {
+    schedules: "Planifications",
+    dlq: "File des messages non distribués",
+    ariaLabel: "Vue des routines",
+  },
+  editor: {
+    eyebrow: "Routine",
+    createTitle: "Nouvelle routine",
+    editTitle: "Modifier la routine #{{id}}",
+    createSubtitle: "Configurez une automatisation récurrente ou ponctuelle pour un de vos agents.",
+    editSubtitle: "Mettez à jour quoi exécuter et quand. Les changements s'appliquent à la prochaine exécution éligible.",
+    name: "Nom",
+    namePlaceholder: "ex. Revue de code quotidienne",
+    instructions: "Instructions",
+    instructionsPlaceholder: "Décrivez ce que l'agent doit faire à chaque exécution",
+    agent: "Agent",
+    model: "Modèle",
+    modelPlaceholder: "claude-opus-4-7 (optionnel)",
+    triggerHeading: "Choisissez un déclencheur",
+    triggers: {
+      schedule: {
+        title: "Planification",
+        description: "Exécute en cron récurrent ou une fois à un horaire futur.",
+      },
+      githubEvent: {
+        title: "Événement GitHub",
+        description: "Exécute quand un webhook GitHub se déclenche.",
+      },
+      api: {
+        title: "API",
+        description: "Déclenchez depuis votre propre code via POST.",
+      },
+      comingSoon: "Bientôt",
+    },
+    when: "Quand",
+    dateTime: "Date et heure",
+    date: "Date",
+    timezone: "Fuseau horaire",
+    recurrence: {
+      once: "Une fois",
+      recurring: "Récurrent",
+    },
+    presets: {
+      hourly: "Toutes les heures",
+      daily: "Quotidien",
+      weekly: "Hebdomadaire",
+      monthly: "Mensuel",
+      custom: "Personnalisé",
+    },
+    presetsLabel: "Récurrence",
+    timeOfDay: "Heure",
+    weekday: "Jour de la semaine",
+    dayOfMonth: "Jour du mois",
+    weekdays: {
+      sunday: "Dimanche",
+      monday: "Lundi",
+      tuesday: "Mardi",
+      wednesday: "Mercredi",
+      thursday: "Jeudi",
+      friday: "Vendredi",
+      saturday: "Samedi",
+    },
+    customCron: "Expression cron",
+    customCronHint: "Chaque cellule accepte la syntaxe cron : nombre, plage, liste, pas, ou * pour tous.",
+    cron: {
+      minute: "min",
+      hour: "heure",
+      day: "jour",
+      month: "mois",
+      weekday: "semaine",
+    },
+    cronErrors: {
+      invalidChar: "Caractère invalide dans {{cell}}",
+      dayOutOfRange: "Le jour doit être entre 1 et 31",
+      monthOutOfRange: "Le mois doit être entre 1 et 12",
+      weekdayOutOfRange: "Le jour de la semaine doit être entre 0 (Dim) et 6 (Sam)",
+    },
+    summary: "Exécute",
+    humanized: {
+      hourly: "Chaque heure pile",
+      daily: "Tous les jours à {{time}}",
+      weekly: "Chaque {{weekday}} à {{time}}",
+      monthly: "Le {{day}} de chaque mois à {{time}}",
+      custom: "Expression personnalisée",
+    },
+    cronExpression: "Expression cron",
+    nextRuns: "Prochaines exécutions",
+    nextRunsUnavailable: "Aperçu indisponible pour les expressions personnalisées.",
+    tabs: {
+      connectors: "Connecteurs",
+      behavior: "Comportement",
+      permissions: "Permissions",
+      label: "Paramètres de la routine",
+    },
+    connectors: {
+      description: "Intégrations disponibles pour l'agent à chaque exécution.",
+      empty: "Aucun connecteur sélectionné. Ajoutez-en un pour exposer ses outils à cette routine.",
+      addAction: "Ajouter un connecteur",
+      searchPlaceholder: "Rechercher des connecteurs",
+      searchEmpty: "Aucun connecteur ne correspond à votre recherche.",
+      remove: "Retirer {{label}}",
+    },
+    behavior: {
+      notification: "Mode de notification",
+      verification: "Mode de vérification",
+      notificationModes: {
+        summary_complete: "Résumé à la fin",
+        failures_only: "Échecs uniquement",
+        none: "Silencieux",
+      },
+      verificationModes: {
+        post_write_if_any: "Vérifier uniquement en cas d'écriture",
+        task_success: "Vérifier à chaque exécution réussie",
+      },
+    },
+    permissions: {
+      readOnly: "Mode lecture seule",
+      readOnlyDescription: "Bloque toute écriture pendant l'exécution, même si l'agent essaie.",
+      allowedPaths: "Chemins autorisés",
+      allowedPathsPlaceholder: "/repo/src\n/repo/docs",
+      allowedPathsHint: "Un chemin par ligne. Vide = sans restriction.",
+    },
+    actions: {
+      cancel: "Annuler",
+      create: "Créer la routine",
+      save: "Enregistrer",
+      delete: "Supprimer la routine",
+      newRoutine: "Nouvelle routine",
+      createFirst: "Créez votre première routine",
+      next: "Suivant",
+      back: "Retour",
+    },
+    steps: {
+      basics: "Bases",
+      schedule: "Planification",
+      refine: "Affiner",
+    },
+    agentPlaceholder: "Choisir un agent",
+    messages: {
+      createdPreview: "Routine créée (aperçu UI — intégration backend en attente).",
+      created: "Routine créée.",
+      updated: "Routine mise à jour.",
+      deleted: "Routine supprimée.",
+      createFailed: "Impossible de créer la routine.",
+      updateFailed: "Impossible de mettre à jour la routine.",
+      deleteFailed: "Impossible de supprimer la routine.",
+      networkError: "Erreur réseau. Réessayez.",
+    },
+    errors: {
+      conflict: "La routine a été modifiée ailleurs. Vérifiez et réessayez.",
+      unauthorized: "Vous n'avez pas la permission de gérer cette routine.",
+      workDirInvalid: "Répertoire de travail non autorisé.",
+    },
+    delete: {
+      confirmTitle: "Supprimer la routine ?",
+      confirmDescription: "Cette action est irréversible.",
+      confirmAction: "Supprimer",
+    },
+    validation: {
+      nameRequired: "Le nom est requis.",
+      instructionsRequired: "Les instructions sont requises.",
+      agentRequired: "Choisissez un agent pour cette routine.",
+      triggerUnavailable: "Ce déclencheur n'est pas encore disponible.",
+      dateTimeRequired: "Choisissez une date et une heure.",
+      customCronRequired: "Indiquez une expression cron.",
+      cronInvalid: "L'expression cron contient des valeurs invalides.",
+    },
+  },
+};
+
+mutableResources["de-DE"].translation.routines = {
+  title: "Routinen",
+  description: "Zeitpläne und Dead-Letter-Queue für automatisierte Ausführungen.",
+  tabs: {
+    schedules: "Zeitpläne",
+    dlq: "Dead-Letter-Queue",
+    ariaLabel: "Routinen-Ansicht",
+  },
+  editor: {
+    eyebrow: "Routine",
+    createTitle: "Neue Routine",
+    editTitle: "Routine #{{id}} bearbeiten",
+    createSubtitle: "Konfiguriere eine wiederkehrende oder einmalige Automatisierung für einen deiner Agenten.",
+    editSubtitle: "Aktualisiere, was wann läuft. Änderungen wirken ab der nächsten zulässigen Ausführung.",
+    name: "Name",
+    namePlaceholder: "z. B. Tägliches Code-Review",
+    instructions: "Anweisungen",
+    instructionsPlaceholder: "Beschreibe, was der Agent bei jeder Ausführung tun soll",
+    agent: "Agent",
+    model: "Modell",
+    modelPlaceholder: "claude-opus-4-7 (optional)",
+    triggerHeading: "Trigger wählen",
+    triggers: {
+      schedule: {
+        title: "Zeitplan",
+        description: "Cron-Wiederholung oder einmalige Ausführung in der Zukunft.",
+      },
+      githubEvent: {
+        title: "GitHub-Ereignis",
+        description: "Läuft, wenn ein GitHub-Webhook ausgelöst wird.",
+      },
+      api: {
+        title: "API",
+        description: "Aus eigenem Code per POST auslösen.",
+      },
+      comingSoon: "Bald verfügbar",
+    },
+    when: "Wann",
+    dateTime: "Datum & Uhrzeit",
+    date: "Datum",
+    timezone: "Zeitzone",
+    recurrence: {
+      once: "Einmalig",
+      recurring: "Wiederkehrend",
+    },
+    presets: {
+      hourly: "Stündlich",
+      daily: "Täglich",
+      weekly: "Wöchentlich",
+      monthly: "Monatlich",
+      custom: "Benutzerdefiniert",
+    },
+    presetsLabel: "Wiederholung",
+    timeOfDay: "Uhrzeit",
+    weekday: "Wochentag",
+    dayOfMonth: "Tag des Monats",
+    weekdays: {
+      sunday: "Sonntag",
+      monday: "Montag",
+      tuesday: "Dienstag",
+      wednesday: "Mittwoch",
+      thursday: "Donnerstag",
+      friday: "Freitag",
+      saturday: "Samstag",
+    },
+    customCron: "Cron-Ausdruck",
+    customCronHint: "Jede Zelle akzeptiert Cron-Syntax: Zahl, Bereich, Liste, Schritt oder * für alles.",
+    cron: {
+      minute: "min",
+      hour: "Std.",
+      day: "Tag",
+      month: "Monat",
+      weekday: "Woche",
+    },
+    cronErrors: {
+      invalidChar: "Ungültiges Zeichen in {{cell}}",
+      dayOutOfRange: "Tag muss zwischen 1 und 31 liegen",
+      monthOutOfRange: "Monat muss zwischen 1 und 12 liegen",
+      weekdayOutOfRange: "Wochentag muss zwischen 0 (So) und 6 (Sa) liegen",
+    },
+    summary: "Läuft",
+    humanized: {
+      hourly: "Stündlich zur vollen Stunde",
+      daily: "Täglich um {{time}}",
+      weekly: "Jeden {{weekday}} um {{time}}",
+      monthly: "Am {{day}}. jedes Monats um {{time}}",
+      custom: "Benutzerdefinierter Ausdruck",
+    },
+    cronExpression: "Cron-Ausdruck",
+    nextRuns: "Nächste Ausführungen",
+    nextRunsUnavailable: "Vorschau für benutzerdefinierte Ausdrücke nicht verfügbar.",
+    tabs: {
+      connectors: "Konnektoren",
+      behavior: "Verhalten",
+      permissions: "Berechtigungen",
+      label: "Routine-Einstellungen",
+    },
+    connectors: {
+      description: "Integrationen, die dem Agenten bei jeder Ausführung zur Verfügung stehen.",
+      empty: "Keine Konnektoren ausgewählt. Füge einen hinzu, damit seine Tools dieser Routine zur Verfügung stehen.",
+      addAction: "Konnektor hinzufügen",
+      searchPlaceholder: "Konnektoren suchen",
+      searchEmpty: "Kein Konnektor passt zur Suche.",
+      remove: "{{label}} entfernen",
+    },
+    behavior: {
+      notification: "Benachrichtigungsmodus",
+      verification: "Verifikationsmodus",
+      notificationModes: {
+        summary_complete: "Zusammenfassung am Ende",
+        failures_only: "Nur Fehler",
+        none: "Stumm",
+      },
+      verificationModes: {
+        post_write_if_any: "Nur bei Schreibvorgängen prüfen",
+        task_success: "Bei jeder erfolgreichen Ausführung prüfen",
+      },
+    },
+    permissions: {
+      readOnly: "Schreibgeschützter Modus",
+      readOnlyDescription: "Blockiert alle Schreibvorgänge während der Ausführung, auch wenn der Agent sie versucht.",
+      allowedPaths: "Erlaubte Pfade",
+      allowedPathsPlaceholder: "/repo/src\n/repo/docs",
+      allowedPathsHint: "Ein Pfad pro Zeile. Leer = keine Einschränkung.",
+    },
+    actions: {
+      cancel: "Abbrechen",
+      create: "Routine erstellen",
+      save: "Änderungen speichern",
+      delete: "Routine löschen",
+      newRoutine: "Neue Routine",
+      createFirst: "Erstelle deine erste Routine",
+      next: "Weiter",
+      back: "Zurück",
+    },
+    steps: {
+      basics: "Grundlagen",
+      schedule: "Zeitplan",
+      refine: "Verfeinern",
+    },
+    agentPlaceholder: "Agent wählen",
+    messages: {
+      createdPreview: "Routine entworfen (UI-Vorschau — Backend-Anbindung ausstehend).",
+      created: "Routine erstellt.",
+      updated: "Routine aktualisiert.",
+      deleted: "Routine gelöscht.",
+      createFailed: "Routine konnte nicht erstellt werden.",
+      updateFailed: "Routine konnte nicht aktualisiert werden.",
+      deleteFailed: "Routine konnte nicht gelöscht werden.",
+      networkError: "Netzwerkfehler. Bitte erneut versuchen.",
+    },
+    errors: {
+      conflict: "Die Routine wurde anderswo geändert. Bitte prüfen und erneut versuchen.",
+      unauthorized: "Du hast keine Berechtigung, diese Routine zu verwalten.",
+      workDirInvalid: "Arbeitsverzeichnis nicht erlaubt.",
+    },
+    delete: {
+      confirmTitle: "Routine löschen?",
+      confirmDescription: "Diese Aktion kann nicht rückgängig gemacht werden.",
+      confirmAction: "Löschen",
+    },
+    validation: {
+      nameRequired: "Name ist erforderlich.",
+      instructionsRequired: "Anweisungen sind erforderlich.",
+      agentRequired: "Wähle einen Agenten für diese Routine.",
+      triggerUnavailable: "Dieser Trigger ist noch nicht verfügbar.",
+      dateTimeRequired: "Wähle Datum und Uhrzeit für die einmalige Ausführung.",
+      customCronRequired: "Gib einen Cron-Ausdruck an.",
+      cronInvalid: "Cron-Ausdruck enthält ungültige Werte.",
+    },
+  },
+};
+
 Object.assign(literalResources["en-US"] as Record<string, string>, generatedLiteralResources["en-US"]);
 Object.assign(literalResources["pt-BR"] as Record<string, string>, generatedLiteralResources["pt-BR"]);
 Object.assign(literalResources["es-ES"] as Record<string, string>, generatedLiteralResources["es-ES"]);
 Object.assign(literalResources["fr-FR"] as Record<string, string>, generatedLiteralResources["fr-FR"]);
 Object.assign(literalResources["de-DE"] as Record<string, string>, generatedLiteralResources["de-DE"]);
+
+Object.assign(literalResources["en-US"] as Record<string, string>, {
+  "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
+    "Choose the model used for memory, the knowledge base, and semantic cache. None is preinstalled: download one on demand when needed.",
+  "Memória ativada sem modelo de embedding instalado":
+    "Memory enabled without an installed embedding model",
+  "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
+    "We strongly recommend choosing and downloading a model below. Without one, semantic retrieval falls back to keyword matching (degraded quality).",
+  "Resposta inesperada do catálogo": "Unexpected catalog response",
+  "Falha ao carregar catálogo": "Failed to load catalog",
+  "Baixando": "Downloading",
+  "CPU": "CPU",
+  "CPU / Apple Silicon": "CPU / Apple Silicon",
+  "Apple Silicon recomendado": "Apple Silicon recommended",
+  "GPU dedicada recomendada": "Dedicated GPU recommended",
+  "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
+    "Lightweight, balanced model. A good starting point for memory and cache in PT-BR + EN. nDCG@5 ≈ 0.91 in the internal benchmark.",
+  "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
+    "Small and instruct-tuned. +1.2 pp nDCG@5 versus the default on technical queries. Use the 'query: ' / 'passage: ' prefix for better quality.",
+  "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.":
+    "Efficient, 768 dimensions, top-tier on MTEB-multilingual (early 2026). Requires trust_remote_code=True. A good choice for a large knowledge base.",
+  "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).":
+    "1024 dimensions, multilingual SOTA. High download and memory cost; worthwhile for knowledge bases with >100k documents. Supports dense + sparse + ColBERT (this integration uses dense only).",
+  "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.":
+    "Large, instruct-tuned, and a retrieval benchmark leader. Best for maximum precision. Cost: ~2.2 GB and ~50 ms per embed on CPU.",
+  "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.":
+    "Released in late 2025, a retrieval leader with a good size/quality balance. Strong in EN; reasonable multilingual support.",
+  "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
+    "English-only, but extremely fast and light (~130 MB). Use only if your memory/knowledge content is purely EN.",
+});
+
+Object.assign(literalResources["pt-BR"] as Record<string, string>, {
+  "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
+    "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.",
+  "Memória ativada sem modelo de embedding instalado":
+    "Memória ativada sem modelo de embedding instalado",
+  "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
+    "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).",
+  "Resposta inesperada do catálogo": "Resposta inesperada do catálogo",
+  "Falha ao carregar catálogo": "Falha ao carregar catálogo",
+  "Baixando": "Baixando",
+  "CPU": "CPU",
+  "CPU / Apple Silicon": "CPU / Apple Silicon",
+  "Apple Silicon recomendado": "Apple Silicon recomendado",
+  "GPU dedicada recomendada": "GPU dedicada recomendada",
+  "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
+    "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.",
+  "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
+    "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.",
+  "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.":
+    "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.",
+  "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).":
+    "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).",
+  "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.":
+    "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.",
+  "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.":
+    "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.",
+  "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
+    "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.",
+});
+
+Object.assign(literalResources["es-ES"] as Record<string, string>, {
+  "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
+    "Elige el modelo usado para memoria, knowledge base y caché semántica. Ninguno viene preinstalado: descárgalo bajo demanda cuando lo necesites.",
+  "Memória ativada sem modelo de embedding instalado":
+    "Memoria activada sin un modelo de embeddings instalado",
+  "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
+    "Se recomienda encarecidamente elegir y descargar un modelo abajo. Sin él, la recuperación semántica cae a coincidencia por palabras clave (calidad degradada).",
+  "Resposta inesperada do catálogo": "Respuesta inesperada del catálogo",
+  "Falha ao carregar catálogo": "Error al cargar el catálogo",
+  "Baixando": "Descargando",
+  "CPU": "CPU",
+  "CPU / Apple Silicon": "CPU / Apple Silicon",
+  "Apple Silicon recomendado": "Apple Silicon recomendado",
+  "GPU dedicada recomendada": "GPU dedicada recomendada",
+  "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
+    "Modelo ligero y equilibrado. Buen punto de partida para memoria y caché en PT-BR + EN. nDCG@5 ≈ 0.91 en el benchmark interno.",
+  "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
+    "Pequeño y ajustado con instrucciones. +1.2 pp nDCG@5 frente al predeterminado en consultas técnicas. Usa el prefijo 'query: ' / 'passage: ' para mejor calidad.",
+  "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.":
+    "Eficiente, 768 dimensiones, top-tier en MTEB-multilingual (inicios de 2026). Requiere trust_remote_code=True. Buena opción para una knowledge base grande.",
+  "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).":
+    "1024 dimensiones, SOTA multilingüe. Alto coste de descarga y memoria; vale la pena para knowledge bases con >100k documentos. Soporta dense + sparse + ColBERT (esta integración usa solo dense).",
+  "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.":
+    "Grande, ajustado con instrucciones y líder en benchmarks de retrieval. Ideal para máxima precisión. Coste: ~2.2 GB y ~50 ms por embedding en CPU.",
+  "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.":
+    "Lanzado a finales de 2025, líder en retrieval con buen equilibrio tamaño/calidad. Fuerte en EN; soporte multilingüe razonable.",
+  "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
+    "Solo inglés, pero extremadamente rápido y ligero (~130 MB). Úsalo solo si tu memoria/conocimiento está puramente en EN.",
+});
+
+Object.assign(literalResources["fr-FR"] as Record<string, string>, {
+  "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
+    "Choisissez le modèle utilisé pour la mémoire, la base de connaissances et le cache sémantique. Aucun n'est préinstallé : téléchargez-en un à la demande si nécessaire.",
+  "Memória ativada sem modelo de embedding instalado":
+    "Mémoire activée sans modèle d'embedding installé",
+  "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
+    "Il est fortement recommandé de choisir et télécharger un modèle ci-dessous. Sans lui, la récupération sémantique bascule vers une correspondance par mots-clés (qualité dégradée).",
+  "Resposta inesperada do catálogo": "Réponse inattendue du catalogue",
+  "Falha ao carregar catálogo": "Échec du chargement du catalogue",
+  "Baixando": "Téléchargement de",
+  "CPU": "CPU",
+  "CPU / Apple Silicon": "CPU / Apple Silicon",
+  "Apple Silicon recomendado": "Apple Silicon recommandé",
+  "GPU dedicada recomendada": "GPU dédiée recommandée",
+  "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
+    "Modèle léger et équilibré. Bon point de départ pour la mémoire et le cache en PT-BR + EN. nDCG@5 ≈ 0.91 dans le benchmark interne.",
+  "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
+    "Petit modèle ajusté par instructions. +1,2 pp nDCG@5 par rapport au modèle par défaut sur les requêtes techniques. Utilisez le préfixe 'query: ' / 'passage: ' pour une meilleure qualité.",
+  "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.":
+    "Efficace, 768 dimensions, top-tier sur MTEB-multilingual (début 2026). Nécessite trust_remote_code=True. Bon choix pour une grande base de connaissances.",
+  "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).":
+    "1024 dimensions, SOTA multilingue. Coût élevé en téléchargement et mémoire ; pertinent pour les bases de connaissances avec >100k documents. Prend en charge dense + sparse + ColBERT (cette intégration utilise seulement dense).",
+  "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.":
+    "Grand modèle ajusté par instructions, leader sur les benchmarks de retrieval. Idéal pour une précision maximale. Coût : ~2,2 GB et ~50 ms par embedding sur CPU.",
+  "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.":
+    "Lancé fin 2025, leader en retrieval avec un bon équilibre taille/qualité. Fort en EN ; prise en charge multilingue raisonnable.",
+  "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
+    "Anglais uniquement, mais extrêmement rapide et léger (~130 MB). À utiliser seulement si votre mémoire/connaissance est exclusivement en EN.",
+});
+
+Object.assign(literalResources["de-DE"] as Record<string, string>, {
+  "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
+    "Wähle das Modell für Speicher, Knowledge Base und semantischen Cache. Keines ist vorinstalliert: lade bei Bedarf eines herunter.",
+  "Memória ativada sem modelo de embedding instalado":
+    "Speicher aktiviert, aber kein Embedding-Modell installiert",
+  "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
+    "Es wird dringend empfohlen, unten ein Modell auszuwählen und herunterzuladen. Ohne Modell fällt die semantische Suche auf Keyword-Matching zurück (geringere Qualität).",
+  "Resposta inesperada do catálogo": "Unerwartete Katalogantwort",
+  "Falha ao carregar catálogo": "Katalog konnte nicht geladen werden",
+  "Baixando": "Download von",
+  "CPU": "CPU",
+  "CPU / Apple Silicon": "CPU / Apple Silicon",
+  "Apple Silicon recomendado": "Apple Silicon empfohlen",
+  "GPU dedicada recomendada": "Dedizierte GPU empfohlen",
+  "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
+    "Leichtes, ausgewogenes Modell. Guter Einstieg für Speicher und Cache in PT-BR + EN. nDCG@5 ≈ 0,91 im internen Benchmark.",
+  "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
+    "Klein und instruction-tuned. +1,2 pp nDCG@5 gegenüber dem Standard bei technischen Abfragen. Nutze das Präfix 'query: ' / 'passage: ' für bessere Qualität.",
+  "Eficiente, 768 dim, top-tier no MTEB-multilingual (early 2026). Demanda trust_remote_code=True. Boa escolha para knowledge base grande.":
+    "Effizient, 768 Dimensionen, top-tier in MTEB-multilingual (Anfang 2026). Erfordert trust_remote_code=True. Gute Wahl für eine große Knowledge Base.",
+  "1024 dim, multilingual SOTA. Alto custo de download e memória; vale a pena para knowledge base com >100k documentos. Suporta dense + sparse + ColBERT (este integration usa só dense).":
+    "1024 Dimensionen, multilingualer SOTA. Hohe Download- und Speicherkosten; lohnt sich für Knowledge Bases mit >100k Dokumenten. Unterstützt dense + sparse + ColBERT (diese Integration nutzt nur dense).",
+  "Grande, instruct-tuned, líder em benchmarks de retrieval. Ideal para precisão máxima. Custo: ~2.2 GB e ~50 ms por embed em CPU.":
+    "Groß, instruction-tuned und führend in Retrieval-Benchmarks. Ideal für maximale Präzision. Kosten: ~2,2 GB und ~50 ms pro Embedding auf CPU.",
+  "Lançado em late 2025, líder em retrieval com bom equilíbrio tamanho/qualidade. Forte em EN; multilingual razoável.":
+    "Ende 2025 veröffentlicht, führend im Retrieval mit gutem Größen-/Qualitätsverhältnis. Stark in EN; ordentliche mehrsprachige Unterstützung.",
+  "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
+    "Nur Englisch, aber extrem schnell und leicht (~130 MB). Nur verwenden, wenn Speicher/Wissen ausschließlich EN ist.",
+});
 
 export type ResourceLanguages = keyof typeof resources;

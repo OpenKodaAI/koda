@@ -51,13 +51,26 @@ jobs:
         run: uv run mypy koda/ --ignore-missing-imports
 
   python-tests:
-    name: python-tests-${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # Cross-platform matrix. Ubuntu emits the branch-protected contexts;
+    # macOS catches darwin-specific path and isolation regressions.
+    name: ${{ matrix.check-name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            check-name: python-tests-3.11
+          - os: ubuntu-latest
+            python-version: "3.12"
+            check-name: python-tests-3.12
+          # macOS runners are scarce; only run the lower Python version
+          # there to keep CI cost predictable.
+          - os: macos-14
+            python-version: "3.11"
+            check-name: python-tests-macos-14-3.11
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6.2.0
@@ -72,12 +85,12 @@ jobs:
         run: uv sync --locked
       - name: Run tests with coverage
         run: |
-          mkdir -p artifacts/python/${{ matrix.python-version }}
+          mkdir -p artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}
           uv run pytest \
             --cov=koda \
             --cov-report=term-missing \
-            --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
-            --junitxml=artifacts/python/${{ matrix.python-version }}/pytest.xml
+            --cov-report=xml:artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/pytest.xml
         env:
           AGENT_TOKEN: "test-token"
           ALLOWED_USER_IDS: "123456789"
@@ -86,8 +99,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: python-tests-${{ matrix.python-version }}-artifacts
-          path: artifacts/python/${{ matrix.python-version }}/
+          name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -112,7 +125,7 @@ jobs:
       - name: Test web with JUnit output
         run: |
           mkdir -p artifacts/web
-          pnpm test:web -- --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml
+          pnpm test:web:ci
       - name: Build web
         run: pnpm build:web
       - name: Upload web test artifacts
@@ -188,15 +201,11 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Sync Python dependencies
         run: uv sync --locked
-      - name: Check repo-map drift
-        run: uv run python3 scripts/generate_repo_map.py --check
       - name: Check npm README drift
         run: uv run python3 scripts/sync_npm_readme.py
-      - name: Validate AI docs and open source hygiene
+      - name: Validate open source hygiene
         run: |
           uv run pytest -q \
-            tests/test_ai_docs.py \
-            tests/test_repo_map.py \
             tests/test_open_source_hygiene.py \
             tests/test_public_docs.py \
             tests/test_installation_assets.py

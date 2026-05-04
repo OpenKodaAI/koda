@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jsonErrorResponse, parseSchemaOrThrow } from "@/lib/api-utils";
+import {
+  jsonErrorResponse,
+  parseSchemaOrThrow,
+  upstreamFetch,
+} from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
@@ -34,7 +38,7 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid password-change payload.",
     );
-    const upstream = await fetch(
+    const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/password/change`,
       {
         method: "POST",
@@ -45,6 +49,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(payload),
         cache: "no-store",
       },
+      { label: "Password service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {

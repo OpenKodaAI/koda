@@ -213,6 +213,9 @@ async def test_grpc_retrieval_engine_client_probes_health_and_returns_remote_bun
             assert metadata
             assert isinstance(request.metadata, _RequestMetadata)
             assert request.envelope.normalized_query == "deploy"
+            assert request.envelope.query_embedding == [0.1, 0.2]
+            assert request.envelope.query_embedding_model == "sentence-transformers/test"
+            assert request.envelope.query_embedding_dimension == 2
             return SimpleNamespace(
                 trace_id="trace-123",
                 normalized_query="deploy",
@@ -347,7 +350,12 @@ async def test_grpc_retrieval_engine_client_probes_health_and_returns_remote_bun
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
+    monkeypatch.setattr(
+        GrpcRetrievalEngineClient,
+        "_query_embedding_payload",
+        lambda _self, _query: ([0.1, 0.2], "sentence-transformers/test", 2),
+    )
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -484,7 +492,7 @@ async def test_grpc_retrieval_engine_client_lists_graph_when_capability_is_avail
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -550,7 +558,7 @@ async def test_grpc_retrieval_engine_client_requires_bundle_assembly_capability(
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -570,6 +578,243 @@ async def test_grpc_retrieval_engine_client_requires_bundle_assembly_capability(
     assert health["bundle_contract_ready"] is False
 
     await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_grpc_retrieval_engine_client_reprobes_until_bundle_assembly_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grpc
+
+    class _FakeChannel:
+        def close(self) -> None:
+            return None
+
+    class _HealthRequest:
+        pass
+
+    class _FakeStub:
+        def __init__(self, channel: _FakeChannel) -> None:
+            self.channel = channel
+            self.calls = 0
+
+        def Health(self, request: object, *, timeout: float, metadata: object) -> SimpleNamespace:
+            assert isinstance(request, _HealthRequest)
+            assert timeout > 0
+            assert metadata
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    service="koda-retrieval-engine",
+                    ready=True,
+                    status="not_ready",
+                    details={
+                        "transport": "test",
+                        "capabilities": "typed-contract",
+                        "authoritative": "false",
+                        "production_ready": "false",
+                    },
+                )
+            return SimpleNamespace(
+                service="koda-retrieval-engine",
+                ready=True,
+                status="ready",
+                details={
+                    "transport": "test",
+                    "capabilities": "typed-contract,bundle-assembly,lexical",
+                    "authoritative": "true",
+                    "production_ready": "true",
+                    "maturity": "ga",
+                },
+            )
+
+    generated_common = ModuleType("common")
+    generated_common_v1 = ModuleType("common.v1")
+    generated_metadata_pb2 = ModuleType("common.v1.metadata_pb2")
+    generated_metadata_pb2.HealthRequest = _HealthRequest
+    generated_retrieval = ModuleType("retrieval")
+    generated_retrieval_v1 = ModuleType("retrieval.v1")
+    generated_retrieval_pb2 = ModuleType("retrieval.v1.retrieval_pb2")
+    generated_retrieval_pb2_grpc = ModuleType("retrieval.v1.retrieval_pb2_grpc")
+    generated_retrieval_pb2_grpc.RetrievalEngineServiceStub = _FakeStub
+
+    monkeypatch.setitem(sys.modules, "common", generated_common)
+    monkeypatch.setitem(sys.modules, "common.v1", generated_common_v1)
+    monkeypatch.setitem(sys.modules, "common.v1.metadata_pb2", generated_metadata_pb2)
+    monkeypatch.setitem(sys.modules, "retrieval", generated_retrieval)
+    monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
+    monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
+    monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
+
+    client = GrpcRetrievalEngineClient(
+        selection=EngineSelection(
+            backend="grpc",
+            reason="rust-default",
+            mode="rust",
+            agent_id="agent_a",
+        )
+    )
+
+    await client.start()
+
+    assert client._last_health["cutover_allowed"] is False
+    health = client.health()
+    assert health["bundle_contract_ready"] is True
+    assert health["cutover_allowed"] is True
+    assert client._stub.calls == 2  # type: ignore[union-attr]
+
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_grpc_retrieval_engine_client_blocks_dense_cutover_without_real_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import grpc
+
+    class _FakeChannel:
+        def close(self) -> None:
+            return None
+
+    class _HealthRequest:
+        pass
+
+    class _FakeStub:
+        def __init__(self, channel: _FakeChannel) -> None:
+            self.channel = channel
+
+        def Health(self, request: object, *, timeout: float, metadata: object) -> SimpleNamespace:
+            assert isinstance(request, _HealthRequest)
+            assert timeout > 0
+            assert metadata
+            return SimpleNamespace(
+                service="koda-retrieval-engine",
+                ready=True,
+                status="ready",
+                details={
+                    "transport": "test",
+                    "capabilities": "typed-contract,bundle-assembly,lexical,hybrid_dense",
+                    "authoritative": "true",
+                    "production_ready": "true",
+                    "cutover_allowed": "true",
+                    "quality_tier": "hybrid_dense",
+                },
+            )
+
+    generated_common = ModuleType("common")
+    generated_common_v1 = ModuleType("common.v1")
+    generated_metadata_pb2 = ModuleType("common.v1.metadata_pb2")
+    generated_metadata_pb2.HealthRequest = _HealthRequest
+    generated_retrieval = ModuleType("retrieval")
+    generated_retrieval_v1 = ModuleType("retrieval.v1")
+    generated_retrieval_pb2 = ModuleType("retrieval.v1.retrieval_pb2")
+    generated_retrieval_pb2_grpc = ModuleType("retrieval.v1.retrieval_pb2_grpc")
+    generated_retrieval_pb2_grpc.RetrievalEngineServiceStub = _FakeStub
+
+    monkeypatch.setitem(sys.modules, "common", generated_common)
+    monkeypatch.setitem(sys.modules, "common.v1", generated_common_v1)
+    monkeypatch.setitem(sys.modules, "common.v1.metadata_pb2", generated_metadata_pb2)
+    monkeypatch.setitem(sys.modules, "retrieval", generated_retrieval)
+    monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
+    monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
+    monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
+    monkeypatch.setattr(config, "KNOWLEDGE_RETRIEVAL_MIN_QUALITY_TIER", "hybrid_dense")
+    monkeypatch.setattr(GrpcRetrievalEngineClient, "_query_embedding_payload", lambda _self, _query: None)
+
+    client = GrpcRetrievalEngineClient(
+        selection=EngineSelection(
+            backend="grpc",
+            reason="rust-default",
+            mode="rust",
+            agent_id="agent_a",
+        )
+    )
+
+    await client.start()
+
+    health = client.health()
+    assert health["cutover_allowed"] is False
+    assert health["authoritative"] is False
+    assert health["query_embedding_ready"] is False
+
+    await client.stop()
+
+
+def test_grpc_retrieval_engine_client_rerank_stays_inside_candidate_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from koda.services import reranker
+
+    client = GrpcRetrievalEngineClient(
+        selection=EngineSelection(
+            backend="grpc",
+            reason="rust-default",
+            mode="rust",
+            agent_id="agent_a",
+        )
+    )
+    payload = {
+        "candidate_hits": [
+            {
+                "id": "weak",
+                "title": "Weak",
+                "content": "generic docs",
+                "layer": "workspace_doc",
+                "source_label": "doc:weak",
+                "similarity": 0.7,
+                "lexical_score": 0.7,
+                "dense_score": 0.0,
+                "operable": True,
+                "reasons": [],
+                "evidence_modalities": [],
+            },
+            {
+                "id": "policy",
+                "title": "Policy",
+                "content": "deploy production rollback policy",
+                "layer": "canonical_policy",
+                "source_label": "policy:deploy",
+                "similarity": 0.6,
+                "lexical_score": 0.4,
+                "dense_score": 0.8,
+                "operable": True,
+                "reasons": [],
+                "evidence_modalities": ["text"],
+            },
+        ],
+        "selected_hits": [],
+        "trace_hits": [
+            {"hit_id": "weak", "rank_after": 1, "selected": True},
+            {"hit_id": "policy", "rank_after": 2, "selected": False},
+        ],
+        "authoritative_evidence": [],
+        "supporting_evidence": [
+            {"ref_key": "old", "provenance": {"source_label": "doc:weak"}},
+            {"ref_key": "kept", "provenance": {"source_label": "policy:deploy"}},
+        ],
+        "answer_plan": {},
+        "required_verifications": [],
+        "grounding_score": 0.0,
+        "effective_engine": "rust_grpc+hybrid_dense",
+        "explanation": "remote",
+    }
+    monkeypatch.setattr(client, "_rerank_available", lambda: True)
+    monkeypatch.setattr(reranker, "rerank_sync", lambda *_args, **_kwargs: [(1, 3.0), (0, 1.0)])
+
+    client._apply_rerank_to_bundle_payload(
+        payload,
+        query="deploy policy",
+        max_results=1,
+        requires_write=True,
+    )
+
+    assert payload["selected_hits"][0]["id"] == "policy"
+    assert payload["candidate_hits"][0]["rerank_rank"] == 1
+    assert payload["authoritative_evidence"][0]["source_label"] == "policy:deploy"
+    assert [item["ref_key"] for item in payload["supporting_evidence"]] == ["kept"]
+    assert payload["effective_engine"] == "rust_grpc+rerank"
 
 
 @pytest.mark.asyncio
@@ -659,7 +904,7 @@ async def test_grpc_retrieval_engine_client_rejects_invalid_remote_bundle_contra
     monkeypatch.setitem(sys.modules, "retrieval.v1", generated_retrieval_v1)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2", generated_retrieval_pb2)
     monkeypatch.setitem(sys.modules, "retrieval.v1.retrieval_pb2_grpc", generated_retrieval_pb2_grpc)
-    monkeypatch.setattr(grpc, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRetrievalEngineClient(
         selection=EngineSelection(
@@ -741,7 +986,7 @@ async def test_grpc_memory_engine_client_probes_health(
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
 
     fake_channel = _FakeChannel()
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: fake_channel)
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: fake_channel)
     monkeypatch.setattr(config, "MEMORY_GRPC_TARGET", "127.0.0.1:50063")
 
     client = GrpcMemoryEngineClient(
@@ -930,7 +1175,7 @@ async def test_grpc_memory_engine_client_recall_sources_authoritative_rows(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1042,7 +1287,7 @@ async def test_grpc_memory_engine_client_sends_typed_cluster_and_dedupe_rows(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1365,7 +1610,7 @@ async def test_grpc_memory_engine_client_supports_projection_rpc_payloads(
     monkeypatch.setitem(sys.modules, "memory.v1", generated_memory_v1)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2", generated_memory_pb2)
     monkeypatch.setitem(sys.modules, "memory.v1.memory_pb2_grpc", generated_memory_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcMemoryEngineClient(
         selection=EngineSelection(
@@ -1463,7 +1708,7 @@ async def test_grpc_artifact_engine_client_probes_health(
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2_grpc", generated_artifact_pb2_grpc)
 
     fake_channel = _FakeChannel()
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: fake_channel)
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: fake_channel)
     monkeypatch.setattr(config, "ARTIFACT_GRPC_TARGET", "/tmp/koda/artifact.sock")
 
     client = GrpcArtifactEngineClient(
@@ -1640,7 +1885,7 @@ async def test_grpc_artifact_engine_client_ingests_artifact(
     monkeypatch.setitem(sys.modules, "artifact.v1", generated_artifact_v1)
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2", generated_artifact_pb2)
     monkeypatch.setitem(sys.modules, "artifact.v1.artifact_pb2_grpc", generated_artifact_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcArtifactEngineClient(
         selection=EngineSelection(
@@ -2133,7 +2378,7 @@ async def test_grpc_runtime_kernel_client_probes_health_and_forwards_pause(
     monkeypatch.setitem(sys.modules, "runtime.v1", generated_runtime_v1)
     monkeypatch.setitem(sys.modules, "runtime.v1.runtime_pb2", generated_runtime_pb2)
     monkeypatch.setitem(sys.modules, "runtime.v1.runtime_pb2_grpc", generated_runtime_pb2_grpc)
-    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target: _FakeChannel())
+    monkeypatch.setattr(grpc_aio, "insecure_channel", lambda _target, *_, **__: _FakeChannel())
 
     client = GrpcRuntimeKernelClient(runtime_root=tmp_path, store=_DummyStore(), mode="rust")
 

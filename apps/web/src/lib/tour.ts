@@ -1,4 +1,4 @@
-export const APP_TOUR_VERSION = 1;
+export const APP_TOUR_VERSION = 2;
 export const APP_TOUR_STORAGE_KEY = "ui:onboarding-tour";
 
 export const TOUR_CHAPTER_IDS = [
@@ -55,10 +55,10 @@ export type TourRoutePattern =
   | "/runtime"
   | "/sessions"
   | "/executions"
+  | "/executions/dlq"
   | "/memory"
   | "/costs"
-  | "/schedules"
-  | "/dlq"
+  | "/routines/schedules"
   | "/control-plane/system";
 
 export type TourRouteKey =
@@ -175,7 +175,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routeKey: "overview",
     kind: "anchored",
     anchor: "overview.stats",
-    fallbackAnchor: "overview.bot-switcher",
+    fallbackAnchor: "overview.agent-switcher",
     placement: "bottom",
     autoIncluded: true,
     copy: {
@@ -195,8 +195,8 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routePattern: "/",
     routeKey: "overview",
     kind: "anchored",
-    anchor: "overview.live-plan",
-    fallbackAnchor: "overview.runtime-control",
+    anchor: "overview.activity",
+    fallbackAnchor: "overview.history",
     placement: "top",
     autoIncluded: true,
     copy: {
@@ -212,8 +212,8 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routePattern: "/control-plane",
     routeKey: "control-plane.catalog",
     kind: "anchored",
-    anchor: "catalog.primary-actions",
-    fallbackAnchor: "catalog.create-bot",
+    anchor: "catalog.create-bot",
+    fallbackAnchor: "catalog.primary-actions",
     placement: "bottom",
     autoIncluded: true,
     copy: {
@@ -257,7 +257,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "editor.header",
     fallbackAnchor: "editor.active-step",
     placement: "bottom",
-    autoIncluded: true,
+    autoIncluded: false,
     optional: true,
     copy: {
       default: {
@@ -275,7 +275,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "editor.step-rail",
     fallbackAnchor: "editor.active-step",
     placement: "right",
-    autoIncluded: true,
+    autoIncluded: false,
     optional: true,
     copy: {
       default: {
@@ -293,7 +293,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "editor.save",
     fallbackAnchor: "editor.next-step",
     placement: "left",
-    autoIncluded: true,
+    autoIncluded: false,
     optional: true,
     copy: {
       default: {
@@ -309,7 +309,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     routeKey: "runtime",
     kind: "anchored",
     anchor: "runtime.header",
-    fallbackAnchor: "runtime.toolbar",
+    fallbackAnchor: "runtime.metrics",
     placement: "bottom",
     autoIncluded: true,
     copy: {
@@ -336,7 +336,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "runtime.metrics",
     fallbackAnchor: "runtime.empty-live",
     placement: "right",
-    autoIncluded: true,
+    autoIncluded: false,
     copy: {
       default: {
         titleKey: "tour.steps.runtimeLiveList.title",
@@ -357,7 +357,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "sessions.rail-header",
     fallbackAnchor: "sessions.conversation-rail",
     placement: "right",
-    autoIncluded: true,
+    autoIncluded: false,
     copy: {
       default: {
         titleKey: "tour.steps.sessionsRail.title",
@@ -378,7 +378,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "sessions.thread",
     fallbackAnchor: "sessions.composer",
     placement: "left",
-    autoIncluded: true,
+    autoIncluded: false,
     copy: {
       default: {
         titleKey: "tour.steps.sessionsThread.title",
@@ -399,7 +399,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "executions.search",
     fallbackAnchor: "executions.status-filters",
     placement: "bottom",
-    autoIncluded: true,
+    autoIncluded: false,
     copy: {
       default: {
         titleKey: "tour.steps.executionsFilters.title",
@@ -420,7 +420,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
     anchor: "executions.table",
     fallbackAnchor: "executions.metrics",
     placement: "top",
-    autoIncluded: true,
+    autoIncluded: false,
     copy: {
       default: {
         titleKey: "tour.steps.executionsTable.title",
@@ -473,7 +473,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.schedules.primary",
     chapterId: "schedules",
-    routePattern: "/schedules",
+    routePattern: "/routines/schedules",
     routeKey: "schedules",
     kind: "anchored",
     anchor: "schedules.primary",
@@ -490,7 +490,7 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   {
     id: "tour.dlq.primary",
     chapterId: "dlq",
-    routePattern: "/dlq",
+    routePattern: "/executions/dlq",
     routeKey: "dlq",
     kind: "anchored",
     anchor: "dlq.primary",
@@ -523,9 +523,9 @@ export const TOUR_STEPS: TourStepDefinition[] = [
   },
   {
     id: "tour.complete",
-    chapterId: "executions",
-    routePattern: "/executions",
-    routeKey: "executions",
+    chapterId: "runtime",
+    routePattern: "/runtime",
+    routeKey: "runtime",
     kind: "modal",
     placement: "center",
     autoIncluded: true,
@@ -543,7 +543,7 @@ export const AUTO_TOUR_STEP_IDS = TOUR_STEPS.filter((step) => step.autoIncluded)
   (step) => step.id,
 );
 
-export const MANUAL_TOUR_STEP_IDS = TOUR_STEPS.map((step) => step.id);
+export const MANUAL_TOUR_STEP_IDS = AUTO_TOUR_STEP_IDS;
 
 export function isTourChapterId(value: string): value is TourChapterId {
   return (TOUR_CHAPTER_IDS as readonly string[]).includes(value);
@@ -655,6 +655,10 @@ export function getTourChapterForPathname(pathname: string): TourChapterId | nul
   if (normalizedPathname.startsWith("/sessions")) {
     return "sessions";
   }
+  // DLQ lives under /executions/dlq — check it before the generic /executions match.
+  if (normalizedPathname.startsWith("/executions/dlq")) {
+    return "dlq";
+  }
   if (normalizedPathname.startsWith("/executions")) {
     return "executions";
   }
@@ -664,11 +668,8 @@ export function getTourChapterForPathname(pathname: string): TourChapterId | nul
   if (normalizedPathname.startsWith("/costs")) {
     return "costs";
   }
-  if (normalizedPathname.startsWith("/schedules")) {
+  if (normalizedPathname.startsWith("/routines")) {
     return "schedules";
-  }
-  if (normalizedPathname.startsWith("/dlq")) {
-    return "dlq";
   }
   if (normalizedPathname === "/") {
     return "overview";

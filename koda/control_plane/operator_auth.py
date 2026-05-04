@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -25,7 +24,7 @@ from .bootstrap_file import (
     read_bootstrap_file,
 )
 from .database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso
-from .password_policy import PasswordPolicyError, validate_password
+from .password_policy import validate_password
 from .settings import (
     ALLOW_LOOPBACK_BOOTSTRAP,
     CONTROL_PLANE_API_TOKENS,
@@ -41,8 +40,7 @@ from .settings import (
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
-_PASSWORD_MIN_LENGTH = CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH
-_FAILURE_TIMING_FLOOR_SECONDS = 0.3
+_FAILURE_TIMING_FLOOR_SECONDS = 0.0
 
 
 @dataclass(slots=True)
@@ -96,25 +94,8 @@ def _random_code() -> str:
     return "-".join(chunks)
 
 
-def _random_recovery_code() -> str:
-    chunks = [
-        "".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)),
-        "".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)),
-        "".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)),
-    ]
-    return "-".join(chunks).lower()
-
-
-def _pad_failure_timing(started_at: float) -> None:
-    """Sleep until at least `_FAILURE_TIMING_FLOOR_SECONDS` have elapsed.
-
-    Neutralizes timing side-channels between "user not found", "wrong password"
-    and "recovery code invalid" code paths.
-    """
-    elapsed = time.monotonic() - started_at
-    remaining = _FAILURE_TIMING_FLOOR_SECONDS - elapsed
-    if remaining > 0:
-        time.sleep(remaining)
+def _normalize_bootstrap_code(value: Any) -> str:
+    return str(value or "").strip().upper()
 
 
 @lru_cache(maxsize=1)
@@ -167,27 +148,23 @@ class OperatorAuthService:
 
     def onboarding_payload(self) -> dict[str, Any]:
         has_owner = self.has_owner()
-        generated_code = ensure_bootstrap_file(has_owner=has_owner)
-        if generated_code:
-            emit_security("security.operator_bootstrap_file_written", path=str(bootstrap_file_path()))
+        ensure_bootstrap_file(has_owner=has_owner)
         return {
             "has_owner": has_owner,
             "bootstrap_required": not has_owner,
             "auth_mode": "local_account",
             "session_required": has_owner,
-            "recovery_available": has_owner,
-            "bootstrap_file_path": str(bootstrap_file_path()) if not has_owner else "",
-            "loopback_trust_enabled": ALLOW_LOOPBACK_BOOTSTRAP and not has_owner,
+            "recovery_available": bool(CONTROL_PLANE_API_TOKENS),
+            "loopback_trust_enabled": ALLOW_LOOPBACK_BOOTSTRAP,
+            "bootstrap_file_path": str(bootstrap_file_path()),
+            "onboarding_complete": has_owner,
         }
 
     def auth_status(self, context: OperatorAuthContext | None = None) -> dict[str, Any]:
         payload = self.onboarding_payload()
-        authenticated = context is not None
-        has_owner = bool(payload.get("has_owner"))
         payload.update(
             {
-                "authenticated": authenticated,
-                "onboarding_complete": has_owner and authenticated,
+                "authenticated": context is not None,
                 "session_subject": context.subject_type if context else None,
                 "operator": (
                     {
@@ -263,13 +240,59 @@ class OperatorAuthService:
             "label": _safe_text(label),
         }
 
+    def _insert_bootstrap_code(
+        self,
+        *,
+        code: str,
+        label: str,
+        actor: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> Any | None:
+        now = _utc_now()
+        bootstrap_id = f"boot_{uuid4().hex}"
+        normalized = _normalize_bootstrap_code(code)
+        execute(
+            """
+            INSERT INTO cp_bootstrap_codes (
+                id,
+                code_hash,
+                code_hint,
+                purpose,
+                created_at,
+                expires_at,
+                issued_by,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (
+                bootstrap_id,
+                _hash_secret(normalized),
+                normalized[-4:],
+                "owner_setup",
+                now.isoformat(),
+                (expires_at or now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)).isoformat(),
+                _safe_text(actor),
+                json_dump({"label": _safe_text(label)}),
+            ),
+        )
+        return fetch_one("SELECT * FROM cp_bootstrap_codes WHERE code_hash = ?", (_hash_secret(normalized),))
+
+    def _bootstrap_file_matches(self, code: str) -> bool:
+        file_code = read_bootstrap_file()
+        if not file_code:
+            return False
+        return compare_digest(_normalize_bootstrap_code(file_code), _normalize_bootstrap_code(code))
+
     def exchange_bootstrap_code(self, code: str) -> dict[str, Any]:
         if self.has_owner():
             raise ValueError("Owner account already exists. Sign in instead.")
-        normalized = str(code or "").strip().upper()
+        normalized = _normalize_bootstrap_code(code)
         if not normalized:
             raise ValueError("Setup code is required.")
         row = fetch_one("SELECT * FROM cp_bootstrap_codes WHERE code_hash = ?", (_hash_secret(normalized),))
+        if row is None and self._bootstrap_file_matches(normalized):
+            row = self._insert_bootstrap_code(code=normalized, label="bootstrap_file")
         if row is None or _is_expired(row.get("expires_at")) or row.get("consumed_at"):
             emit_security("security.operator_bootstrap_exchange_failed", reason="invalid_or_expired_code")
             raise ValueError("Setup code is invalid or expired.")
@@ -301,6 +324,69 @@ class OperatorAuthService:
         if not token_hash:
             return None
         return fetch_one("SELECT * FROM cp_bootstrap_codes WHERE exchange_token_hash = ?", (token_hash,))
+
+    def _validate_operator_password(self, password: str, *, username: str, email: str) -> None:
+        validate_password(
+            password,
+            min_length=CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH,
+            username=username,
+            email=email,
+        )
+
+    def _issue_recovery_codes(self, *, user_id: str, generation: str) -> list[str]:
+        count = max(1, int(CONTROL_PLANE_RECOVERY_CODES_PER_USER or 10))
+        issued_at = now_iso()
+        codes: list[str] = []
+        for _ in range(count):
+            code = _random_code()
+            codes.append(code)
+            execute(
+                """
+                INSERT INTO cp_operator_recovery_codes (
+                    id,
+                    user_id,
+                    code_hash,
+                    code_hint,
+                    created_at,
+                    consumed_at,
+                    consumed_reason,
+                    generation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"rec_{uuid4().hex}",
+                    user_id,
+                    _hash_secret(code),
+                    code[-4:],
+                    issued_at,
+                    "",
+                    "",
+                    generation,
+                ),
+            )
+        if len(codes) < count:
+            raise RuntimeError("Could not issue recovery codes.")
+        return codes
+
+    def _revoke_sessions_for_user(self, user_id: str, *, except_session_id: str | None = None) -> None:
+        if except_session_id:
+            execute(
+                """
+                UPDATE cp_operator_sessions
+                SET revoked_at = ?
+                WHERE user_id = ? AND session_id != ? AND revoked_at = ''
+                """,
+                (now_iso(), user_id, except_session_id),
+            )
+            return
+        execute(
+            """
+            UPDATE cp_operator_sessions
+            SET revoked_at = ?
+            WHERE user_id = ? AND revoked_at = ''
+            """,
+            (now_iso(), user_id),
+        )
 
     def _create_session(
         self,
@@ -356,59 +442,50 @@ class OperatorAuthService:
     def register_owner(
         self,
         *,
-        email: str,
-        password: str,
-        username: str = "",
-        display_name: str = "",
-        bootstrap_code: str = "",
         registration_token: str = "",
+        bootstrap_code: str = "",
+        username: str = "",
+        email: str = "",
+        password: str = "",
+        display_name: str = "",
         remote_ip: str | None = None,
         forwarded_for: str | None = None,
     ) -> dict[str, Any]:
-        """Create the first owner account.
-
-        Accepts any ONE of three authentication mechanisms, checked in priority:
-        - a valid `registration_token` previously obtained via `exchange_bootstrap_code`
-          (legacy flow, still supported);
-        - a `bootstrap_code` matching either the env seed or the on-disk bootstrap file;
-        - a trusted loopback request (when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the
-          request comes from 127.0.0.1/::1 without a proxy hop).
-
-        On success, generates N one-time recovery codes and returns them in plaintext
-        as part of the response. They are never retrievable again.
-        """
-        started_at = time.monotonic()
         if self.has_owner():
-            _pad_failure_timing(started_at)
             raise ValueError("Owner account already exists. Sign in instead.")
-
-        authentication_mode = self._authenticate_registration(
-            bootstrap_code=bootstrap_code,
-            registration_token=registration_token,
-            remote_ip=remote_ip,
-            forwarded_for=forwarded_for,
-        )
-        if authentication_mode is None:
-            _pad_failure_timing(started_at)
-            emit_security("security.operator_owner_register_rejected", reason="no_valid_bootstrap")
-            raise ValueError("Bootstrap code is invalid or expired.")
 
         normalized_email = _normalize_email(email)
         if "@" not in normalized_email:
             raise ValueError("A valid email is required.")
-        derived_username = username.strip() if username and username.strip() else normalized_email.split("@", 1)[0]
-        normalized_username = _normalize_username(derived_username)
+        normalized_username = _normalize_username(username or normalized_email.split("@", 1)[0])
         if not normalized_username:
             raise ValueError("Username is required.")
-        try:
-            validate_password(
-                password,
-                min_length=_PASSWORD_MIN_LENGTH,
-                username=normalized_username,
-                email=normalized_email,
-            )
-        except PasswordPolicyError as exc:
-            raise ValueError(str(exc)) from exc
+        self._validate_operator_password(password, username=normalized_username, email=normalized_email)
+
+        row = None
+        trusted_loopback = (
+            ALLOW_LOOPBACK_BOOTSTRAP
+            and not str(registration_token or "").strip()
+            and not str(bootstrap_code or "").strip()
+            and is_loopback_request(remote_ip, forwarded_for)
+        )
+        if str(registration_token or "").strip():
+            row = self._registration_row(registration_token)
+            if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
+                raise ValueError("Registration token is invalid or expired.")
+        elif str(bootstrap_code or "").strip():
+            exchange = self.exchange_bootstrap_code(bootstrap_code)
+            registration_token = str(exchange.get("registration_token") or "")
+            row = self._registration_row(registration_token)
+            if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
+                raise ValueError("Registration token is invalid or expired.")
+        elif not trusted_loopback:
+            raise ValueError("Bootstrap code is invalid or expired.")
+
+        if row is not None and bootstrap_code:
+            normalized_code = _normalize_bootstrap_code(bootstrap_code)
+            if _hash_secret(normalized_code) != str(row.get("code_hash")):
+                raise ValueError("Setup code does not match registration token.")
 
         existing = fetch_one(
             "SELECT id FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)",
@@ -418,176 +495,252 @@ class OperatorAuthService:
             raise ValueError("Username or email already exists.")
         password_hash = _password_hasher().hash(password)
         user_id = f"usr_{uuid4().hex}"
-        generation = uuid4().hex
-        try:
+        recovery_generation = uuid4().hex
+        execute(
+            """
+            INSERT INTO cp_operator_users (
+                id,
+                username,
+                email,
+                display_name,
+                password_hash,
+                role,
+                created_at,
+                updated_at,
+                last_login_at,
+                failed_login_attempts,
+                locked_until,
+                disabled,
+                totp_secret,
+                recovery_generation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                normalized_username,
+                normalized_email,
+                _safe_text(display_name or normalized_username),
+                password_hash,
+                "owner",
+                now_iso(),
+                now_iso(),
+                now_iso(),
+                0,
+                "",
+                0,
+                "",
+                recovery_generation,
+            ),
+        )
+        recovery_codes = self._issue_recovery_codes(user_id=user_id, generation=recovery_generation)
+        if row is not None:
             execute(
-                """
-                INSERT INTO cp_operator_users (
-                    id,
-                    username,
-                    email,
-                    display_name,
-                    password_hash,
-                    role,
-                    created_at,
-                    updated_at,
-                    last_login_at,
-                    failed_login_attempts,
-                    locked_until,
-                    disabled,
-                    totp_secret,
-                    recovery_generation
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user_id,
-                    normalized_username,
-                    normalized_email,
-                    _safe_text(display_name or normalized_username),
-                    password_hash,
-                    "owner",
-                    now_iso(),
-                    now_iso(),
-                    now_iso(),
-                    0,
-                    "",
-                    0,
-                    "",
-                    generation,
-                ),
+                "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ?",
+                (now_iso(), str(row["id"])),
             )
-        except Exception as exc:
-            # Two scenarios collapse into the same message so we don't leak
-            # whether the collision was on id, username, or email: a concurrent
-            # register_owner (double-submit), or stale state left by a prior
-            # half-finished attempt. Either way the operator should sign in.
-            message = str(exc).lower()
-            if "duplicate" in message or "unique" in message or "unique_violation" in message:
-                raise ValueError("Owner account already exists. Sign in instead.") from exc
-            raise
-        try:
-            plaintext_codes = self._issue_recovery_codes(user_id=user_id, generation=generation)
-        except Exception:
-            # Recovery-code insertion failed AFTER the user row was committed —
-            # roll it back so the operator can retry from a clean slate instead
-            # of being locked out by a half-provisioned account.
-            execute("DELETE FROM cp_operator_users WHERE id = ?", (user_id,))
-            raise
-        if authentication_mode == "registration_token" and registration_token:
-            row = self._registration_row(registration_token)
-            if row is not None:
-                execute(
-                    "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ?",
-                    (now_iso(), str(row["id"])),
-                )
-        if authentication_mode == "bootstrap_file":
-            consume_bootstrap_file()
+        consume_bootstrap_file()
         session_token, context = self._create_session(
             user_id=user_id,
             subject_type="operator",
             label="web_owner_registration",
-            metadata={"origin": "register_owner", "bootstrap_mode": authentication_mode},
+            metadata={
+                "origin": "register_owner",
+                "remote_ip": remote_ip,
+                "forwarded_for": forwarded_for,
+            },
         )
         emit_security(
             "security.operator_owner_registered",
             user_id=_optional_audit_user_id(user_id),
             username=normalized_username,
-            bootstrap_mode=authentication_mode,
+            remote_ip=remote_ip,
+            forwarded_for=forwarded_for,
         )
         return {
             "ok": True,
             "operator": self._row_to_operator(fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (user_id,))),
             "session_token": session_token,
-            "recovery_codes": plaintext_codes,
+            "recovery_codes": recovery_codes,
             "auth": self.auth_status(context),
         }
 
-    def _authenticate_registration(
+    def reset_password_with_recovery_code(
         self,
-        *,
-        bootstrap_code: str,
-        registration_token: str,
-        remote_ip: str | None,
-        forwarded_for: str | None,
-    ) -> str | None:
-        """Return the authentication mode used, or None if none are valid."""
-        trimmed_token = str(registration_token or "").strip()
-        if trimmed_token:
-            row = self._registration_row(trimmed_token)
-            if (
-                row is not None
-                and not row.get("exchange_consumed_at")
-                and not _is_expired(row.get("exchange_expires_at"))
-            ):
-                return "registration_token"
-        trimmed_code = str(bootstrap_code or "").strip().upper()
-        if trimmed_code:
-            file_code = read_bootstrap_file()
-            if file_code and compare_digest(trimmed_code, file_code.strip().upper()):
-                return "bootstrap_file"
-        if ALLOW_LOOPBACK_BOOTSTRAP and is_loopback_request(remote_ip, forwarded_for):
-            emit_security("security.operator_bootstrap_loopback_trust_used", remote_ip=str(remote_ip or ""))
-            return "loopback_trust"
-        return None
+        identifier: str,
+        recovery_code: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        normalized_id = identifier.strip().lower()
+        row = fetch_one(
+            "SELECT * FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)",
+            (normalized_id, normalized_id),
+        )
+        if not row:
+            # Constant-time-ish side-effect to prevent enumeration
+            _password_hasher().hash("dummy")
+            raise ValueError("Invalid identifier or recovery code.")
 
-    def _issue_recovery_codes(self, *, user_id: str, generation: str) -> list[str]:
-        """Generate N fresh recovery codes, persist their Argon2 hashes, return plaintext."""
-        import time as _time_mod
+        if row.get("locked_until") and not _is_expired(row["locked_until"]):
+            raise ValueError("Invalid identifier or recovery code.")
 
-        hasher = _password_hasher()
-        plaintext_codes: list[str] = []
-        timestamp = now_iso()
-        count = max(1, CONTROL_PLANE_RECOVERY_CODES_PER_USER)
-        rows: list[tuple[Any, ...]] = []
-        for _ in range(count):
-            code = _random_recovery_code()
-            plaintext_codes.append(code)
-            rows.append(
-                (
-                    f"rec_{uuid4().hex}",
-                    user_id,
-                    hasher.hash(code),
-                    code[-4:],
-                    timestamp,
-                    "",
-                    "",
-                    generation,
-                )
-            )
-        # Batch into a single multi-values INSERT so the async bridge makes one
-        # trip to Postgres instead of N. That avoids connection-reset races in
-        # the pool when code generation runs back-to-back on the request path.
-        values_sql = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * count)
-        flat_params: tuple[Any, ...] = tuple(value for row in rows for value in row)
-        query = f"""
-            INSERT INTO cp_operator_recovery_codes (
-                id, user_id, code_hash, code_hint, created_at,
-                consumed_at, consumed_reason, generation
-            ) VALUES {values_sql}
-        """
-        # Retry on transient asyncpg connection races. The first INSERT often
-        # loses to the concurrent audit/pool release path; subsequent attempts
-        # get a fresh connection and succeed.
-        last_error: Exception | None = None
-        for attempt in range(5):
-            try:
-                execute(query, flat_params)
-                return plaintext_codes
-            except Exception as exc:  # noqa: BLE001 — asyncpg errors are unstable across versions
-                last_error = exc
-                message = str(exc).lower()
-                if (
-                    "another operation is in progress" in message
-                    or "connection was closed" in message
-                    or "connection is closed" in message
-                    or "different loop" in message
-                ):
-                    _time_mod.sleep(0.1 * (attempt + 1))
-                    continue
-                raise
-        if last_error is not None:
-            raise last_error
-        return plaintext_codes
+        generation = str(row.get("recovery_generation") or "")
+        active_codes = fetch_all(
+            """
+            SELECT id, code_hash FROM cp_operator_recovery_codes
+            WHERE user_id = ? AND consumed_at = '' AND generation = ?
+            """,
+            (str(row["id"]), generation),
+        )
+        code_hash = _hash_secret(recovery_code.strip())
+        code_row = next(
+            (item for item in active_codes if compare_digest(str(item.get("code_hash") or ""), code_hash)),
+            None,
+        )
+        if not code_row:
+            raise ValueError("Invalid identifier or recovery code.")
+
+        self._validate_operator_password(
+            new_password,
+            username=str(row.get("username") or ""),
+            email=str(row.get("email") or ""),
+        )
+
+        password_hash = _password_hasher().hash(new_password)
+        execute(
+            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, now_iso(), str(row["id"])),
+        )
+        execute(
+            """
+            UPDATE cp_operator_recovery_codes
+            SET consumed_at = ?, consumed_reason = ?
+            WHERE id = ?
+            """,
+            (now_iso(), "password_reset", str(code_row["id"])),
+        )
+        execute(
+            """
+            UPDATE cp_operator_recovery_codes
+            SET consumed_at = ?, consumed_reason = ?
+            WHERE user_id = ? AND consumed_at = '' AND generation = ?
+            """,
+            (now_iso(), "password_reset_invalidation", str(row["id"]), generation),
+        )
+        self._revoke_sessions_for_user(str(row["id"]))
+
+        emit_security(
+            "security.operator_password_reset_recovery",
+            user_id=_optional_audit_user_id(str(row["id"])),
+            username=str(row["username"]),
+        )
+        return {"ok": True}
+
+    def change_password(
+        self,
+        context: OperatorAuthContext,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        try:
+            _password_hasher().verify(str(row["password_hash"]), current_password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            raise ValueError("Invalid current password.") from None
+
+        self._validate_operator_password(
+            new_password,
+            username=str(row.get("username") or ""),
+            email=str(row.get("email") or ""),
+        )
+
+        password_hash = _password_hasher().hash(new_password)
+        execute(
+            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, now_iso(), context.user_id),
+        )
+        self._revoke_sessions_for_user(context.user_id, except_session_id=context.session_id)
+        emit_security(
+            "security.operator_password_changed",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"ok": True}
+
+    def recovery_codes_summary(self, context: OperatorAuthContext) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT recovery_generation FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        generation = str(row.get("recovery_generation") or "") if row else ""
+        total_row = fetch_one(
+            """
+            SELECT COUNT(*) AS count FROM cp_operator_recovery_codes
+            WHERE user_id = ? AND generation = ?
+            """,
+            (context.user_id, generation),
+        )
+        remaining_row = fetch_one(
+            """
+            SELECT COUNT(*) AS count FROM cp_operator_recovery_codes
+            WHERE user_id = ? AND consumed_at = '' AND generation = ?
+            """,
+            (context.user_id, generation),
+        )
+        created_row = fetch_one(
+            """
+            SELECT created_at FROM cp_operator_recovery_codes
+            WHERE user_id = ? AND generation = ?
+            ORDER BY created_at ASC LIMIT 1
+            """,
+            (context.user_id, generation),
+        )
+        total = int(total_row.get("count") or 0) if total_row else 0
+        remaining = int(remaining_row.get("count") or 0) if remaining_row else 0
+        return {
+            "total": total,
+            "remaining": remaining,
+            "active_count": remaining,
+            "generated_at": str(created_row.get("created_at") or "") if created_row else None,
+        }
+
+    def regenerate_recovery_codes(self, context: OperatorAuthContext, current_password: str) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        try:
+            _password_hasher().verify(str(row["password_hash"]), current_password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            raise ValueError("Invalid current password.") from None
+
+        # Invalidate existing
+        current_generation = str(row.get("recovery_generation") or "")
+        execute(
+            """
+            UPDATE cp_operator_recovery_codes
+            SET consumed_at = ?, consumed_reason = ?
+            WHERE user_id = ? AND consumed_at = '' AND generation = ?
+            """,
+            (now_iso(), "regenerated", context.user_id, current_generation),
+        )
+
+        generation = uuid4().hex
+        new_codes = self._issue_recovery_codes(user_id=context.user_id, generation=generation)
+        execute(
+            "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
+            (generation, now_iso(), context.user_id),
+        )
+
+        emit_security(
+            "security.operator_recovery_codes_regenerated",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"recovery_codes": new_codes, "generated_at": now_iso()}
 
     def _set_login_failure(self, row: Any | None, *, identifier: str) -> None:
         if row is None:
@@ -609,11 +762,9 @@ class OperatorAuthService:
         )
 
     def login(self, *, identifier: str, password: str) -> dict[str, Any]:
-        started_at = time.monotonic()
         normalized = str(identifier or "").strip()
         if not normalized or not password:
-            _pad_failure_timing(started_at)
-            raise ValueError("Invalid credentials.")
+            raise ValueError("Identifier and password are required.")
         row = fetch_one(
             """
             SELECT * FROM cp_operator_users
@@ -625,19 +776,17 @@ class OperatorAuthService:
         )
         if row is None:
             self._set_login_failure(None, identifier=normalized)
-            _pad_failure_timing(started_at)
             raise ValueError("Invalid credentials.")
         if row.get("disabled"):
-            _pad_failure_timing(started_at)
+            emit_security("security.operator_login_failed", identifier=normalized, reason="disabled")
             raise ValueError("Invalid credentials.")
         if row.get("locked_until") and not _is_expired(row.get("locked_until")):
-            _pad_failure_timing(started_at)
+            emit_security("security.operator_login_failed", identifier=normalized, reason="locked")
             raise ValueError("Invalid credentials.")
         try:
             _password_hasher().verify(str(row["password_hash"]), password)
         except (VerifyMismatchError, VerificationError, InvalidHashError) as exc:
             self._set_login_failure(row, identifier=normalized)
-            _pad_failure_timing(started_at)
             raise ValueError("Invalid credentials.") from exc
         execute(
             """
@@ -661,251 +810,6 @@ class OperatorAuthService:
             ),
             "session_token": session_token,
             "auth": self.auth_status(context),
-        }
-
-    def change_password(
-        self,
-        context: OperatorAuthContext,
-        *,
-        current_password: str,
-        new_password: str,
-    ) -> dict[str, Any]:
-        """Change the authenticated user's password.
-
-        Revokes every OTHER session (keeping the current one) and leaves existing
-        recovery codes intact — the operator still has their printed sheet.
-        """
-        if not context.user_id:
-            raise ValueError("Operator session is required.")
-        started_at = time.monotonic()
-        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
-        if row is None:
-            _pad_failure_timing(started_at)
-            raise ValueError("Invalid credentials.")
-        try:
-            _password_hasher().verify(str(row["password_hash"]), current_password)
-        except (VerifyMismatchError, VerificationError, InvalidHashError) as exc:
-            _pad_failure_timing(started_at)
-            emit_security(
-                "security.operator_password_change_failed",
-                user_id=_optional_audit_user_id(context.user_id),
-            )
-            raise ValueError("Invalid credentials.") from exc
-        try:
-            validate_password(
-                new_password,
-                min_length=_PASSWORD_MIN_LENGTH,
-                username=str(row.get("username") or ""),
-                email=str(row.get("email") or ""),
-            )
-        except PasswordPolicyError as exc:
-            raise ValueError(str(exc)) from exc
-        new_hash = _password_hasher().hash(new_password)
-        execute(
-            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
-            (new_hash, now_iso(), context.user_id),
-        )
-        if context.session_id:
-            execute(
-                """
-                UPDATE cp_operator_sessions
-                SET revoked_at = ?
-                WHERE user_id = ? AND session_id != ? AND revoked_at = ''
-                """,
-                (now_iso(), context.user_id, context.session_id),
-            )
-        else:
-            execute(
-                "UPDATE cp_operator_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at = ''",
-                (now_iso(), context.user_id),
-            )
-        emit_security(
-            "security.operator_password_changed",
-            user_id=_optional_audit_user_id(context.user_id),
-        )
-        return {"ok": True}
-
-    def reset_password_with_recovery_code(
-        self,
-        *,
-        identifier: str,
-        recovery_code: str,
-        new_password: str,
-    ) -> dict[str, Any]:
-        """Reset a password using a one-time recovery code.
-
-        Revokes ALL existing sessions and invalidates ALL remaining recovery
-        codes for the user (Google/GitHub style). User must regenerate a fresh
-        set from the dashboard afterwards.
-
-        Returns the same generic success payload regardless of which lookup
-        failed, to avoid leaking user existence.
-        """
-        started_at = time.monotonic()
-        normalized_identifier = str(identifier or "").strip()
-        trimmed_code = str(recovery_code or "").strip().lower()
-        if not normalized_identifier or not trimmed_code or not new_password:
-            _pad_failure_timing(started_at)
-            raise ValueError("Invalid credentials or recovery code.")
-        row = fetch_one(
-            """
-            SELECT * FROM cp_operator_users
-            WHERE lower(username) = lower(?) OR lower(email) = lower(?)
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (normalized_identifier, normalized_identifier),
-        )
-        if row is None:
-            _pad_failure_timing(started_at)
-            emit_security(
-                "security.operator_password_reset_failed",
-                reason="identifier_not_found",
-            )
-            raise ValueError("Invalid credentials or recovery code.")
-        user_id = str(row["id"])
-        generation = str(row.get("recovery_generation") or "")
-        codes = fetch_all(
-            """
-            SELECT id, code_hash FROM cp_operator_recovery_codes
-            WHERE user_id = ? AND consumed_at = '' AND generation = ?
-            ORDER BY created_at ASC
-            """,
-            (user_id, generation),
-        )
-        hasher = _password_hasher()
-        matched_id: str | None = None
-        for entry in codes:
-            try:
-                if hasher.verify(str(entry["code_hash"]), trimmed_code):
-                    matched_id = str(entry["id"])
-                    break
-            except (VerifyMismatchError, VerificationError, InvalidHashError):
-                continue
-        if matched_id is None:
-            _pad_failure_timing(started_at)
-            emit_security(
-                "security.operator_password_reset_failed",
-                user_id=_optional_audit_user_id(user_id),
-                reason="recovery_code_invalid",
-            )
-            raise ValueError("Invalid credentials or recovery code.")
-        try:
-            validate_password(
-                new_password,
-                min_length=_PASSWORD_MIN_LENGTH,
-                username=str(row.get("username") or ""),
-                email=str(row.get("email") or ""),
-            )
-        except PasswordPolicyError as exc:
-            raise ValueError(str(exc)) from exc
-        new_hash = hasher.hash(new_password)
-        timestamp = now_iso()
-        execute(
-            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
-            (new_hash, timestamp, user_id),
-        )
-        execute(
-            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? WHERE id = ?",
-            (timestamp, "password_reset", matched_id),
-        )
-        execute(
-            """
-            UPDATE cp_operator_recovery_codes
-            SET consumed_at = ?, consumed_reason = ?
-            WHERE user_id = ? AND consumed_at = '' AND generation = ?
-            """,
-            (timestamp, "password_reset_invalidation", user_id, generation),
-        )
-        execute(
-            """
-            UPDATE cp_operator_sessions
-            SET revoked_at = ?
-            WHERE user_id = ? AND revoked_at = ''
-            """,
-            (timestamp, user_id),
-        )
-        emit_security(
-            "security.operator_password_reset",
-            user_id=_optional_audit_user_id(user_id),
-        )
-        return {"ok": True}
-
-    def regenerate_recovery_codes(
-        self,
-        context: OperatorAuthContext,
-        *,
-        current_password: str,
-    ) -> dict[str, Any]:
-        """Issue a fresh batch of recovery codes; invalidates any previous codes."""
-        if not context.user_id:
-            raise ValueError("Operator session is required.")
-        started_at = time.monotonic()
-        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
-        if row is None:
-            _pad_failure_timing(started_at)
-            raise ValueError("Invalid credentials.")
-        try:
-            _password_hasher().verify(str(row["password_hash"]), current_password)
-        except (VerifyMismatchError, VerificationError, InvalidHashError) as exc:
-            _pad_failure_timing(started_at)
-            raise ValueError("Invalid credentials.") from exc
-        timestamp = now_iso()
-        execute(
-            """
-            UPDATE cp_operator_recovery_codes
-            SET consumed_at = ?, consumed_reason = ?
-            WHERE user_id = ? AND consumed_at = ''
-            """,
-            (timestamp, "regenerated", context.user_id),
-        )
-        new_generation = uuid4().hex
-        execute(
-            "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
-            (new_generation, timestamp, context.user_id),
-        )
-        plaintext = self._issue_recovery_codes(user_id=context.user_id, generation=new_generation)
-        emit_security(
-            "security.operator_recovery_codes_regenerated",
-            user_id=_optional_audit_user_id(context.user_id),
-        )
-        return {"ok": True, "recovery_codes": plaintext, "generated_at": timestamp}
-
-    def recovery_codes_summary(self, context: OperatorAuthContext) -> dict[str, Any]:
-        """Summary without revealing the codes themselves."""
-        if not context.user_id:
-            raise ValueError("Operator session is required.")
-        row = fetch_one(
-            """
-            SELECT recovery_generation FROM cp_operator_users WHERE id = ?
-            """,
-            (context.user_id,),
-        )
-        generation = str(row.get("recovery_generation") or "") if row else ""
-        total_row = fetch_one(
-            "SELECT COUNT(*) AS count FROM cp_operator_recovery_codes WHERE user_id = ? AND generation = ?",
-            (context.user_id, generation),
-        )
-        remaining_row = fetch_one(
-            """
-            SELECT COUNT(*) AS count FROM cp_operator_recovery_codes
-            WHERE user_id = ? AND consumed_at = '' AND generation = ?
-            """,
-            (context.user_id, generation),
-        )
-        created_row = fetch_one(
-            """
-            SELECT created_at FROM cp_operator_recovery_codes
-            WHERE user_id = ? AND generation = ?
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (context.user_id, generation),
-        )
-        return {
-            "total": int((total_row or {}).get("count") or 0),
-            "remaining": int((remaining_row or {}).get("count") or 0),
-            "generated_at": str((created_row or {}).get("created_at") or "") or None,
         }
 
     def logout(self, bearer_token: str) -> dict[str, Any]:
@@ -944,14 +848,14 @@ class OperatorAuthService:
         if any(compare_digest(provided, configured) for configured in CONTROL_PLANE_API_TOKENS):
             owner = self._owner_row()
             if owner is not None:
-                return self._context_from_user_row(owner, auth_kind="cli_bootstrap", subject_type="cli_bootstrap")
+                return self._context_from_user_row(owner, auth_kind="break_glass", subject_type="break_glass")
             return OperatorAuthContext(
-                auth_kind="cli_bootstrap",
-                subject_type="cli_bootstrap",
+                auth_kind="break_glass",
+                subject_type="break_glass",
                 user_id=None,
                 username=None,
                 email=None,
-                display_name="CLI Bootstrap",
+                display_name="Break Glass",
             )
         token_hash = _hash_secret(provided)
         session_row = fetch_one(

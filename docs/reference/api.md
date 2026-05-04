@@ -61,21 +61,22 @@ The control plane now separates two different concerns for integrations:
 
 Operationally, the expected lifecycle is:
 
-1. inspect the unified connection catalog and pick the default connection key for the core integration, such as `core:jira` or `core:aws`
+1. inspect the unified connection catalog and pick the default connection key for the capability, such as `core:browser` for local/core runtime capabilities or `mcp:atlassian` for third-party SaaS/cloud integrations
 2. configure or update the connection default in the control plane
 3. run `verify` so Koda records `status`, `checked_via`, `auth_expired`, and probe metadata
 4. inspect `health` if the integration is degraded or if runtime authentication starts failing
 5. grant the integration per agent through the agent editor or agent-spec API
 
-Canonical core connection payloads are keyed by `connection_key`. Typical keys include:
+Canonical connection payloads are keyed by `connection_key`. Local/core runtime capabilities use `core:*`; third-party SaaS/cloud integrations are MCP-only and use `mcp:<server_key>`.
+
+Typical keys include:
 
 - `core:browser`
-- `core:jira`
-- `core:confluence`
-- `core:gws`
-- `core:aws`
-- `core:gh`
-- `core:glab`
+- `core:shell`
+- `core:git`
+- `mcp:atlassian`
+- `mcp:google-workspace`
+- `mcp:github`
 
 `status` is the canonical top-level state exposed by default connections. Typical values include:
 

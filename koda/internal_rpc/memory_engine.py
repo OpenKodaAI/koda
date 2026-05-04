@@ -10,6 +10,7 @@ from koda.internal_rpc.common import (
     EngineSelection,
     create_grpc_channel,
     ensure_generated_proto_path,
+    make_internal_breaker,
     normalize_internal_service_probe,
     resolve_grpc_target,
     select_engine_backend,
@@ -616,6 +617,10 @@ class GrpcMemoryEngineClient:
         self._metadata_pb2: Any | None = None
         self._memory_pb2: Any | None = None
         self._startup_error: str | None = None
+        # every async RPC call goes through this breaker so
+        # a hung memory-engine doesn't compound into worker-side
+        # deadlocks.
+        self._breaker = make_internal_breaker("memory_engine")
         self._last_health: dict[str, object] = {
             "service": "memory",
             "mode": self.selection.mode,
@@ -667,7 +672,8 @@ class GrpcMemoryEngineClient:
     async def _probe_health(self) -> None:
         if self._stub is None or self._metadata_pb2 is None:
             return
-        response = await self._stub.Health(
+        response = await self._breaker.run(
+            self._stub.Health,
             self._metadata_pb2.HealthRequest(),
             timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
             metadata=self._rpc_metadata(),
@@ -729,7 +735,8 @@ class GrpcMemoryEngineClient:
         if self._stub is None or self._memory_pb2 is None:
             raise RuntimeError("grpc_memory_engine_unavailable")
         recall_context_type = self._memory_pb2.RecallContext
-        response = await self._stub.Recall(
+        response = await self._breaker.run(
+            self._stub.Recall,
             self._build_request(
                 self._memory_pb2.RecallRequest,
                 agent_id=self.selection.agent_id or "",
@@ -771,7 +778,8 @@ class GrpcMemoryEngineClient:
         if self._stub is None or self._memory_pb2 is None:
             raise RuntimeError("grpc_memory_engine_unavailable")
         row_type = self._memory_pb2.MemoryRecordRow
-        response = await self._stub.Cluster(
+        response = await self._breaker.run(
+            self._stub.Cluster,
             self._build_request(
                 self._memory_pb2.ClusterRequest,
                 agent_id=self.selection.agent_id or "",
@@ -787,7 +795,8 @@ class GrpcMemoryEngineClient:
         if self._stub is None or self._memory_pb2 is None:
             raise RuntimeError("grpc_memory_engine_unavailable")
         row_type = self._memory_pb2.MemoryRecordRow
-        response = await self._stub.Deduplicate(
+        response = await self._breaker.run(
+            self._stub.Deduplicate,
             self._build_request(
                 self._memory_pb2.DeduplicateRequest,
                 agent_id=self.selection.agent_id or "",
@@ -809,7 +818,8 @@ class GrpcMemoryEngineClient:
         all_rows = _dict_list(payload.get("all_rows"))
         cluster_rows = _dict_list(payload.get("cluster_rows"))
         filters = payload.get("filters")
-        response = await self._stub.ListCurationItems(
+        response = await self._breaker.run(
+            self._stub.ListCurationItems,
             self._build_request(
                 self._memory_pb2.ListCurationItemsRequest,
                 agent_id=self.selection.agent_id or "",
@@ -874,7 +884,8 @@ class GrpcMemoryEngineClient:
         recent_recall = _dict_list(payload.get("recent_recall"))
         maintenance_rows = _dict_list(payload.get("maintenance_rows"))
         filters = payload.get("filters")
-        response = await self._stub.GetMemoryMap(
+        response = await self._breaker.run(
+            self._stub.GetMemoryMap,
             self._build_request(
                 self._memory_pb2.GetMemoryMapRequest,
                 agent_id=self.selection.agent_id or "",
@@ -994,7 +1005,8 @@ class GrpcMemoryEngineClient:
         cluster_rows = _dict_list(payload.get("cluster_rows"))
         related_rows = _dict_list(payload.get("related_rows"))
         recent_audit_rows = _dict_list(payload.get("recent_audits"))
-        response = await self._stub.GetCurationDetail(
+        response = await self._breaker.run(
+            self._stub.GetCurationDetail,
             self._build_request(
                 self._memory_pb2.GetCurationDetailRequest,
                 agent_id=self.selection.agent_id or "",
@@ -1083,7 +1095,8 @@ class GrpcMemoryEngineClient:
             request_kwargs["cluster_rows"] = [
                 row_type(**_row_message_kwargs(item)) for item in _dict_list(cluster_rows)
             ]
-        response = await self._stub.ApplyCurationAction(
+        response = await self._breaker.run(
+            self._stub.ApplyCurationAction,
             self._build_request(
                 self._memory_pb2.ApplyCurationActionRequest,
                 **request_kwargs,

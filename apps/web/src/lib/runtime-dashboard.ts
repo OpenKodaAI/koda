@@ -691,7 +691,7 @@ export async function getOperationalCostInsights(filters: {
     total_queries: filteredEntries.filter((entry) => Boolean(entry.execution.query_text)).length,
     total_executions: filteredEntries.length,
     top_model: null,
-    top_bot: null,
+    top_agent: null,
     top_task_type: null,
   };
 
@@ -702,16 +702,16 @@ export async function getOperationalCostInsights(filters: {
 
   for (const entry of filteredEntries) {
     const bucket = toIsoDay(entry.execution.created_at) || "unknown";
-    const existingPoint = timeSeriesMap.get(bucket) ?? {
+    const existingPoint: CostTimePoint = timeSeriesMap.get(bucket) ?? {
       bucket,
       label: bucket,
       total_cost_usd: 0,
-      by_bot: {},
+      by_agent: {},
       by_model: {},
     };
     existingPoint.total_cost_usd += entry.execution.cost_usd;
-    existingPoint.by_bot[entry.execution.bot_id] =
-      (existingPoint.by_bot[entry.execution.bot_id] ?? 0) + entry.execution.cost_usd;
+    existingPoint.by_agent[entry.execution.bot_id] =
+      (existingPoint.by_agent[entry.execution.bot_id] ?? 0) + entry.execution.cost_usd;
     if (entry.execution.model) {
       existingPoint.by_model[entry.execution.model] =
         (existingPoint.by_model[entry.execution.model] ?? 0) + entry.execution.cost_usd;
@@ -737,7 +737,7 @@ export async function getOperationalCostInsights(filters: {
 
   const totalCost = overview.total_cost_usd || 1;
   const byAgent = Array.from(agentCostMap.entries()).map(([agentId, cost]) => ({
-    bot_id: agentId,
+    agent_id: agentId,
     cost_usd: cost,
     share_pct: (cost / totalCost) * 100,
     resolved_conversations: 0,
@@ -762,7 +762,7 @@ export async function getOperationalCostInsights(filters: {
     count: entry.count,
   }));
 
-  overview.top_bot = byAgent.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.bot_id ?? null;
+  overview.top_agent = byAgent.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.agent_id ?? null;
   overview.top_model = byModel.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.model ?? null;
   overview.top_task_type =
     byTaskType.sort((left, right) => right.cost_usd - left.cost_usd)[0]?.task_type ?? null;
@@ -775,10 +775,14 @@ export async function getOperationalCostInsights(filters: {
         bucket: peakBucket.bucket,
         label: peakBucket.label,
         cost_usd: peakBucket.total_cost_usd,
-        top_bot:
-          Object.entries(peakBucket.by_bot).sort((left, right) => right[1] - left[1])[0]?.[0] ?? null,
+        top_agent:
+          (Object.entries(peakBucket.by_agent) as Array<[string, number]>).sort(
+            (left, right) => right[1] - left[1],
+          )[0]?.[0] ?? null,
         top_model:
-          Object.entries(peakBucket.by_model).sort((left, right) => right[1] - left[1])[0]?.[0] ?? null,
+          (Object.entries(peakBucket.by_model) as Array<[string, number]>).sort(
+            (left, right) => right[1] - left[1],
+          )[0]?.[0] ?? null,
         top_task_type: overview.top_task_type,
       }
     : null;
@@ -797,7 +801,7 @@ export async function getOperationalCostInsights(filters: {
                 ? "queued"
                 : "running";
       const current: CostConversationRow = acc.get(sessionId) ?? {
-        bot_id: entry.execution.bot_id,
+        agent_id: entry.execution.bot_id,
         session_id: sessionId,
         name: entry.execution.query_text?.slice(0, 72) || sessionId,
         status: normalizedStatus,
@@ -839,13 +843,13 @@ export async function getOperationalCostInsights(filters: {
     comparison,
     peak_bucket: peak,
     time_series: Array.from(timeSeriesMap.values()).sort((left, right) => left.bucket.localeCompare(right.bucket)),
-    by_bot: byAgent,
+    by_agent: byAgent,
     by_model: byModel,
     by_task_type: byTaskType,
     resolved_conversations: conversationRows
       .filter((row) => row.resolved)
       .map((row) => ({
-        bot_id: row.bot_id,
+        agent_id: row.agent_id,
         session_id: row.session_id,
         name: row.name,
         cost_usd: row.cost_usd,
@@ -861,8 +865,8 @@ export async function getOperationalCostInsights(filters: {
     ),
     available_task_types: byTaskType.map((entry) => ({ value: entry.task_type, label: entry.label })),
     applied_filters: {
-      bot_id: selectedBotIds.length === 1 ? selectedBotIds[0] : "all",
-      bot_ids: selectedBotIds,
+      agent_id: selectedBotIds.length === 1 ? selectedBotIds[0] : "all",
+      agent_ids: selectedBotIds,
       period: filters.period || "runtime",
       from: null,
       to: null,

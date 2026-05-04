@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+EffortKind = Literal["enum", "tokens"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,19 +84,22 @@ def resolve_api_key_extra_model_ids(provider_id: str) -> list[str]:
 
 _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
     "claude": {
-        "claude-opus-4-6": "Claude Opus 4.6",
+        "claude-opus-4-7": "Claude Opus 4.7",
         "claude-sonnet-4-6": "Claude Sonnet 4.6",
         "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+        "claude-opus-4-6": "Claude Opus 4.6 (legacy)",
+        "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5 (snapshot)",
+        "claude-opus-4-5-20251101": "Claude Opus 4.5 (snapshot)",
+        "claude-opus-4-1-20250805": "Claude Opus 4.1 (snapshot)",
     },
     "codex": {
+        "gpt-5.5": "GPT-5.5",
         "gpt-5.4": "GPT-5.4",
         "gpt-5.4-mini": "GPT-5.4 Mini",
+        "gpt-5.4-nano": "GPT-5.4 Nano",
         "gpt-5.3-codex": "GPT-5.3 Codex",
         "gpt-5.3-codex-spark": "GPT-5.3 Codex Spark",
-        "gpt-5.2-codex": "GPT-5.2 Codex",
         "gpt-5.2": "GPT-5.2",
-        "gpt-5.1-codex-max": "GPT-5.1 Codex Max",
-        "gpt-5.1-codex-mini": "GPT-5.1 Codex Mini",
     },
     "gemini": {
         "gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite",
@@ -120,36 +125,52 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
         "mistral-small-latest": "Mistral Small",
         "codestral-latest": "Codestral",
         "pixtral-large-latest": "Pixtral Large",
+        "pixtral-12b-2409": "Pixtral 12B",
         "magistral-medium-latest": "Magistral Medium",
         "magistral-small-latest": "Magistral Small",
         "ministral-8b-latest": "Ministral 8B",
         "ministral-3b-latest": "Ministral 3B",
+        "mistral-saba-latest": "Mistral Saba",
     },
     "qwen": {
+        "qwen3-max": "Qwen3 Max",
+        "qwen3-plus": "Qwen3 Plus",
+        "qwen3-flash": "Qwen3 Flash",
+        "qwen3-vl-max": "Qwen3-VL Max",
+        "qwen3-vl-plus": "Qwen3-VL Plus",
+        "qwen3-vl-flash": "Qwen3-VL Flash",
+        "qwen3-coder-plus": "Qwen3 Coder Plus",
+        "qwen3-coder-flash": "Qwen3 Coder Flash",
+        "qwen3-omni-30b-a3b": "Qwen3 Omni 30B (multimodal)",
         "qwen-max": "Qwen Max",
         "qwen-plus": "Qwen Plus",
         "qwen-turbo": "Qwen Turbo",
         "qwen-long": "Qwen Long (1M tokens)",
-        "qwen3-coder-plus": "Qwen3 Coder Plus",
-        "qwen3-coder-flash": "Qwen3 Coder Flash",
         "qwen2.5-72b-instruct": "Qwen 2.5 72B Instruct",
         "qwen2.5-coder-32b-instruct": "Qwen 2.5 Coder 32B",
         "qwen-vl-max": "Qwen-VL Max",
         "qwen-vl-plus": "Qwen-VL Plus",
         "qwq-32b": "QwQ 32B",
+        "qvq-72b-preview": "QvQ 72B (vision reasoning, preview)",
     },
     "kimi": {
-        "kimi-k2-0905-preview": "Kimi K2 (preview)",
+        "kimi-k2.6": "Kimi K2.6",
+        "kimi-k2.5": "Kimi K2.5",
+        "kimi-k2-0905-preview": "Kimi K2 (preview 0905)",
         "kimi-k2-0711-preview": "Kimi K2 (snapshot 0711)",
         "kimi-latest": "Kimi Latest",
+        "kimi-thinking-preview": "Kimi Thinking (preview)",
         "moonshot-v1-128k": "Moonshot v1 128K",
         "moonshot-v1-32k": "Moonshot v1 32K",
         "moonshot-v1-8k": "Moonshot v1 8K",
         "moonshot-v1-auto": "Moonshot v1 Auto",
-        "kimi-thinking-preview": "Kimi Thinking (preview)",
-        "kimi-vision-2024-12-09": "Kimi Vision",
     },
     "groq": {
+        "openai/gpt-oss-120b": "GPT-OSS 120B",
+        "openai/gpt-oss-20b": "GPT-OSS 20B",
+        "openai/gpt-oss-safeguard-20b": "GPT-OSS Safeguard 20B",
+        "moonshotai/kimi-k2-instruct": "Kimi K2 (Instruct)",
+        "qwen/qwen3-32b": "Qwen3 32B",
         "llama-3.3-70b-versatile": "Llama 3.3 70B Versatile",
         "llama-3.1-8b-instant": "Llama 3.1 8B Instant",
         "llama-3.2-1b-preview": "Llama 3.2 1B (preview)",
@@ -163,10 +184,16 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
         "deepseek-r1-distill-llama-70b": "DeepSeek R1 Distill (Llama 70B)",
     },
     "deepseek": {
-        "deepseek-chat": "DeepSeek V3 (chat)",
-        "deepseek-reasoner": "DeepSeek R1 (reasoner)",
+        "deepseek-v4-pro": "DeepSeek V4 Pro",
+        "deepseek-v4-flash": "DeepSeek V4 Flash",
+        "deepseek-chat": "DeepSeek Chat (alias)",
+        "deepseek-reasoner": "DeepSeek Reasoner (alias)",
     },
     "xai": {
+        "grok-4.20-multi-agent": "Grok 4.20 Multi-Agent",
+        "grok-4.3": "Grok 4.3",
+        "grok-4.1-fast": "Grok 4.1 Fast (2M context)",
+        "grok-4-fast": "Grok 4 Fast",
         "grok-4-0709": "Grok 4",
         "grok-3": "Grok 3",
         "grok-3-mini": "Grok 3 Mini",
@@ -183,13 +210,49 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
 #          ai.google.dev/gemini-api/docs/pricing  (verified 2026-04)
 _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
     # ── Anthropic ────────────────────────────────────────────────────
-    ("claude", "claude-opus-4-6"): {
-        "description": "Modelo de raciocinio mais avancado com pensamento estendido.",
+    ("claude", "claude-opus-4-7"): {
+        "description": "Modelo de raciocinio agentic mais capaz com adaptive thinking.",
         "context_window": 1_000_000,
         "input_cost_per_1m": 5.00,
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
+    },
+    ("claude", "claude-opus-4-6"): {
+        "description": "Geracao anterior de Opus, mantida para compatibilidade.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 5.00,
+        "output_cost_per_1m": 25.00,
+        "speed_tier": 2,
+        "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
+    },
+    ("claude", "claude-opus-4-5-20251101"): {
+        "description": "Snapshot Opus 4.5 (1101).",
+        "context_window": 200_000,
+        "input_cost_per_1m": 5.00,
+        "output_cost_per_1m": 25.00,
+        "speed_tier": 2,
+        "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
+    },
+    ("claude", "claude-sonnet-4-5-20250929"): {
+        "description": "Snapshot Sonnet 4.5 (0929).",
+        "context_window": 200_000,
+        "input_cost_per_1m": 3.00,
+        "output_cost_per_1m": 15.00,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-6"): {
         "description": "Equilibrio entre velocidade e inteligencia para tarefas complexas.",
@@ -198,6 +261,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-haiku-4-5-20251001"): {
         "description": "Modelo rapido e economico para tarefas de alta vazao.",
@@ -215,6 +281,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-opus-4-1-20250805"): {
         "description": "Claude Opus 4.1 snapshot.",
@@ -223,6 +292,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 25.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-5"): {
         "description": "Claude Sonnet 4.5 com raciocinio forte.",
@@ -231,6 +303,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-sonnet-4-20250514"): {
         "description": "Claude Sonnet 4 snapshot.",
@@ -239,6 +314,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-7-sonnet-latest"): {
         "description": "Claude 3.7 Sonnet com raciocinio estendido.",
@@ -247,6 +325,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-7-sonnet-20250219"): {
         "description": "Claude 3.7 Sonnet snapshot.",
@@ -255,6 +336,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 4,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high", "xhigh", "max"),
+        "effort_default": "medium",
     },
     ("claude", "claude-3-5-haiku-latest"): {
         "description": "Claude 3.5 Haiku rapido e eficiente.",
@@ -265,13 +349,27 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "intelligence_tier": 3,
     },
     # ── OpenAI ───────────────────────────────────────────────────────
+    ("codex", "gpt-5.5"): {
+        "description": "Frontier OpenAI lancado em abril/2026 com 1M de contexto.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 3.00,
+        "output_cost_per_1m": 18.00,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
+    },
     ("codex", "gpt-5.4"): {
-        "description": "Modelo de ultima geracao com raciocinio avancado e contexto massivo.",
+        "description": "Geracao anterior de frontier, mantida para compatibilidade.",
         "context_window": 1_050_000,
         "input_cost_per_1m": 2.50,
         "output_cost_per_1m": 15.00,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-mini"): {
         "description": "Versao compacta e rapida do GPT-5.4.",
@@ -280,6 +378,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.50,
         "speed_tier": 5,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-nano"): {
         "description": "Versao ultrarapida para tarefas simples e alta vazao.",
@@ -288,6 +389,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 1.25,
         "speed_tier": 5,
         "intelligence_tier": 2,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.4-pro"): {
         "description": "Versao premium do GPT-5.4 com raciocinio estendido.",
@@ -296,6 +400,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5.3-codex"): {
         "description": "Especializado em codigo e raciocinio tecnico.",
@@ -304,6 +411,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.3-codex-spark"): {
         "description": "Versao agil do GPT-5.3 Codex para iteracao rapida.",
@@ -312,6 +422,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2-codex"): {
         "description": "Codex para tarefas de engenharia de software.",
@@ -320,6 +433,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2"): {
         "description": "Modelo GPT-5.2 de proposito geral.",
@@ -328,6 +444,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex-max"): {
         "description": "Codex 5.1 Max para projetos complexos e longos.",
@@ -336,6 +455,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 15.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex-mini"): {
         "description": "Codex 5.1 Mini para tarefas de codigo rapidas.",
@@ -344,6 +466,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.50,
         "speed_tier": 4,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5"): {
         "description": "Modelo GPT de quinta geracao com capacidades avancadas.",
@@ -352,6 +477,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-mini"): {
         "description": "Versao compacta e eficiente do GPT-5.",
@@ -360,6 +488,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 2.00,
         "speed_tier": 5,
         "intelligence_tier": 3,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-nano"): {
         "description": "Modelo ultrarapido para tarefas simples de alta vazao.",
@@ -368,6 +499,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.40,
         "speed_tier": 5,
         "intelligence_tier": 2,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5-pro"): {
         "description": "GPT-5 Pro com raciocinio estendido e precisao maxima.",
@@ -376,6 +510,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5-codex"): {
         "description": "GPT-5 Codex para engenharia de software.",
@@ -384,6 +521,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.2-pro"): {
         "description": "GPT-5.2 Pro com raciocinio avancado.",
@@ -392,6 +532,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 30.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-5.1"): {
         "description": "Modelo GPT-5.1 de proposito geral.",
@@ -400,6 +543,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 10.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-5.1-codex"): {
         "description": "Codex 5.1 para engenharia de software.",
@@ -408,6 +554,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 14.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("minimal", "low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "gpt-4.1"): {
         "description": "GPT-4.1 com janela de contexto larga.",
@@ -440,6 +589,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.40,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3"): {
         "description": "Modelo de raciocinio avancado da OpenAI.",
@@ -448,6 +600,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3-mini"): {
         "description": "Versao compacta do o3 com bom custo-beneficio.",
@@ -456,6 +611,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 4.40,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("codex", "o3-pro"): {
         "description": "o3 Pro com raciocinio profundo e alta fidelidade.",
@@ -464,6 +622,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 80.00,
         "speed_tier": 1,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "high",
     },
     ("codex", "gpt-4o"): {
         "description": "GPT-4o multimodal rapido.",
@@ -579,6 +740,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 5.00,
         "speed_tier": 3,
         "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("perplexity", "sonar-reasoning-pro"): {
         "description": "Sonar Reasoning Pro para tarefas analiticas complexas.",
@@ -587,6 +751,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
     ("perplexity", "sonar-deep-research"): {
         "description": "Sonar Deep Research executa multiplas buscas e produz relatorios densos.",
@@ -595,8 +762,11 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 8.00,
         "speed_tier": 1,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "high",
     },
-    # ── Mistral La Plateforme (Q1 2026) ──────────────────────────────
+    # ── Mistral La Plateforme (Q1 2026, plus pixtral-12b/saba added Q2 2026) ─
     ("mistral", "mistral-large-latest"): {
         "description": "Mistral Large — equilibrio entre raciocinio e custo.",
         "context_window": 131_000,
@@ -668,6 +838,22 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.04,
         "speed_tier": 5,
         "intelligence_tier": 2,
+    },
+    ("mistral", "pixtral-12b-2409"): {
+        "description": "Pixtral 12B — modelo pequeno multimodal com visao.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.15,
+        "output_cost_per_1m": 0.15,
+        "speed_tier": 4,
+        "intelligence_tier": 3,
+    },
+    ("mistral", "mistral-saba-latest"): {
+        "description": "Mistral Saba — modelo otimizado para idiomas regionais (arabe, indico).",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.20,
+        "output_cost_per_1m": 0.60,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
     },
     # ── Qwen via DashScope International (Q1 2026, USD) ──────────────
     ("qwen", "qwen-max"): {
@@ -758,9 +944,91 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "speed_tier": 3,
         "intelligence_tier": 5,
     },
+    ("qwen", "qwen3-max"): {
+        "description": "Qwen3 Max — flagship Qwen3, raciocinio e geracao avancados.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 1.60,
+        "output_cost_per_1m": 6.40,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("qwen", "qwen3-plus"): {
+        "description": "Qwen3 Plus — generalista de uso diario com excelente custo-beneficio.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.40,
+        "output_cost_per_1m": 1.20,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+    },
+    ("qwen", "qwen3-flash"): {
+        "description": "Qwen3 Flash — barato e rapido para automacao em larga escala.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.05,
+        "output_cost_per_1m": 0.20,
+        "speed_tier": 5,
+        "intelligence_tier": 3,
+    },
+    ("qwen", "qwen3-vl-max"): {
+        "description": "Qwen3-VL Max — flagship multimodal com visao + raciocinio.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 1.60,
+        "output_cost_per_1m": 6.40,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("qwen", "qwen3-vl-plus"): {
+        "description": "Qwen3-VL Plus — multimodal generalista.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.40,
+        "output_cost_per_1m": 1.20,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+    },
+    ("qwen", "qwen3-vl-flash"): {
+        "description": "Qwen3-VL Flash — multimodal rapido (snapshot 2026-01-22).",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.10,
+        "output_cost_per_1m": 0.30,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("qwen", "qwen3-omni-30b-a3b"): {
+        "description": "Qwen3 Omni — entrada de audio/video/imagem/texto, saida de texto e voz.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.40,
+        "output_cost_per_1m": 1.20,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+    },
+    ("qwen", "qvq-72b-preview"): {
+        "description": "QvQ 72B — raciocinio explicito sobre imagens (preview).",
+        "context_window": 131_000,
+        "input_cost_per_1m": 1.20,
+        "output_cost_per_1m": 4.80,
+        "speed_tier": 2,
+        "intelligence_tier": 5,
+    },
     # ── Kimi / Moonshot (Q1 2026) ────────────────────────────────────
+    ("kimi", "kimi-k2.6"): {
+        "description": "Kimi K2.6 — multimodal de proxima geracao para coding agentic e UI/UX.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 0.74,
+        "output_cost_per_1m": 3.49,
+        "cached_input_cost_per_1m": 0.18,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("kimi", "kimi-k2.5"): {
+        "description": "Kimi K2.5 — multimodal nativo com swarm de agentes self-directed.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 0.60,
+        "output_cost_per_1m": 2.50,
+        "cached_input_cost_per_1m": 0.15,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
     ("kimi", "kimi-k2-0905-preview"): {
-        "description": "Kimi K2 (preview 0905) — flagship com janela grande.",
+        "description": "Kimi K2 (preview 0905) — geracao anterior, flagship com janela grande.",
         "context_window": 256_000,
         "input_cost_per_1m": 0.60,
         "output_cost_per_1m": 2.50,
@@ -922,27 +1190,131 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "output_cost_per_1m": 0.99,
         "speed_tier": 5,
         "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
     },
-    # ── DeepSeek (Q1 2026, com prompt caching) ───────────────────────
+    ("groq", "openai/gpt-oss-120b"): {
+        "description": "GPT-OSS 120B — flagship open-weight da OpenAI hospedado no Groq.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.15,
+        "output_cost_per_1m": 0.75,
+        "speed_tier": 5,
+        "intelligence_tier": 5,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
+    },
+    ("groq", "openai/gpt-oss-20b"): {
+        "description": "GPT-OSS 20B — versao menor open-weight da OpenAI.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.10,
+        "output_cost_per_1m": 0.50,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+        "effort_kind": "enum",
+        "effort_enum_values": ("low", "medium", "high"),
+        "effort_default": "medium",
+    },
+    ("groq", "openai/gpt-oss-safeguard-20b"): {
+        "description": "GPT-OSS Safeguard 20B — substitui llama-guard para policy-following e moderacao.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.10,
+        "output_cost_per_1m": 0.50,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("groq", "moonshotai/kimi-k2-instruct"): {
+        "description": "Kimi K2 Instruct hospedado no Groq.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 1.00,
+        "output_cost_per_1m": 3.00,
+        "speed_tier": 5,
+        "intelligence_tier": 5,
+    },
+    ("groq", "qwen/qwen3-32b"): {
+        "description": "Qwen3 32B via Groq — substitui o mistral-saba-24b deprecado.",
+        "context_window": 131_000,
+        "input_cost_per_1m": 0.79,
+        "output_cost_per_1m": 0.79,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    # ── DeepSeek (Q2 2026 — V4 primary, V3 chat/reasoner sao aliases) ─
+    ("deepseek", "deepseek-v4-pro"): {
+        "description": "DeepSeek V4 Pro — flagship com modos thinking/non-thinking, contexto 1M.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 0.55,
+        "output_cost_per_1m": 2.19,
+        "cached_input_cost_per_1m": 0.14,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 2_000,
+    },
+    ("deepseek", "deepseek-v4-flash"): {
+        "description": "DeepSeek V4 Flash — barato e rapido, mesmos modos thinking/non-thinking.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 0.27,
+        "output_cost_per_1m": 1.10,
+        "cached_input_cost_per_1m": 0.07,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 1_000,
+    },
     ("deepseek", "deepseek-chat"): {
-        "description": "DeepSeek V3 chat — generalista com cache automatico.",
+        "description": "DeepSeek Chat — alias de compatibilidade (deprecado em 2026/07/24, mapeia para V4 Flash).",
         "context_window": 64_000,
         "input_cost_per_1m": 0.27,
         "output_cost_per_1m": 1.10,
         "cached_input_cost_per_1m": 0.07,
         "speed_tier": 4,
-        "intelligence_tier": 5,
+        "intelligence_tier": 4,
     },
     ("deepseek", "deepseek-reasoner"): {
-        "description": "DeepSeek R1 reasoner — cadeia de raciocinio.",
+        "description": "DeepSeek Reasoner — alias deprecado em 2026/07/24 (mapeia para V4 Pro thinking).",
         "context_window": 64_000,
         "input_cost_per_1m": 0.55,
         "output_cost_per_1m": 2.19,
         "cached_input_cost_per_1m": 0.14,
         "speed_tier": 2,
         "intelligence_tier": 5,
+        "effort_kind": "tokens",
+        "effort_token_min": 0,
+        "effort_token_max": 8_000,
+        "effort_default": 2_000,
     },
-    # ── xAI Grok (Q1 2026) ───────────────────────────────────────────
+    # ── xAI Grok (Q1 2026, plus 4.3/4.1-fast/4-fast added Q2 2026) ───
+    ("xai", "grok-4.3"): {
+        "description": "Grok 4.3 — modelo recomendado pela xAI, mais inteligente e rapido da geracao.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 3.00,
+        "output_cost_per_1m": 15.00,
+        "cached_input_cost_per_1m": 0.75,
+        "speed_tier": 4,
+        "intelligence_tier": 5,
+    },
+    ("xai", "grok-4.1-fast"): {
+        "description": "Grok 4.1 Fast — janela de 2M tokens com preco baixissimo.",
+        "context_window": 2_000_000,
+        "input_cost_per_1m": 0.20,
+        "output_cost_per_1m": 0.50,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("xai", "grok-4-fast"): {
+        "description": "Grok 4 Fast — variante de alta velocidade do Grok 4.",
+        "context_window": 256_000,
+        "input_cost_per_1m": 0.30,
+        "output_cost_per_1m": 0.60,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
     ("xai", "grok-4-0709"): {
         "description": "Grok 4 — flagship com raciocinio avancado.",
         "context_window": 256_000,
@@ -1007,25 +1379,6 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
     ProviderModelDefinition(
         "codex", "gpt-image-1.5", "GPT Image 1.5", "image", "Modelo oficial da OpenAI para imagem."
     ),
-    ProviderModelDefinition(
-        "codex",
-        "sora-2",
-        "Sora 2 (visual guiado por imagem)",
-        "image",
-        "Modelo Sora exposto para fluxos visuais guiados por texto ou imagem de referencia. "
-        "A saida oficial do modelo e video.",
-        status="preview",
-    ),
-    ProviderModelDefinition(
-        "codex",
-        "sora-2-pro",
-        "Sora 2 Pro (visual guiado por imagem)",
-        "image",
-        "Variante premium do Sora para fluxos visuais guiados por imagem. A saida oficial do modelo e video.",
-        status="preview",
-    ),
-    ProviderModelDefinition("codex", "sora-2", "Sora 2", "video", "Modelo de video da OpenAI."),
-    ProviderModelDefinition("codex", "sora-2-pro", "Sora 2 Pro", "video", "Versao premium do Sora 2."),
     ProviderModelDefinition(
         "codex", "gpt-audio-1.5", "GPT Audio 1.5", "audio", "Modelo de audio multimodal da OpenAI."
     ),
@@ -1259,8 +1612,109 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
         "transcription",
         "Transcricao local gratuita executada pela API do agent com whisper.cpp.",
     ),
-    ProviderModelDefinition("sora", "sora-2", "Sora 2", "video", "Geracao de video da OpenAI."),
-    ProviderModelDefinition("sora", "sora-2-pro", "Sora 2 Pro", "video", "Versao premium do Sora 2."),
+    # ── Mistral non-general (Q2 2026) ────────────────────────────────
+    ProviderModelDefinition(
+        "mistral",
+        "mistral-ocr-latest",
+        "Mistral OCR",
+        "transcription",
+        "Extracao de texto de documentos (PDF/imagens) via Mistral OCR — $2/1k paginas.",
+    ),
+    # ── Qwen non-general (Q1 2026) ───────────────────────────────────
+    ProviderModelDefinition(
+        "qwen",
+        "qwen3-tts-flash",
+        "Qwen3 TTS Flash",
+        "audio",
+        "Sintese de fala da familia Qwen3 com voice cloning e voice design (10 idiomas).",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "qwen-tts",
+        "Qwen TTS",
+        "audio",
+        "Sintese de fala Qwen com vozes nativas (geracao anterior).",
+        status="legacy",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "cosyvoice-v2",
+        "CosyVoice v2",
+        "audio",
+        "TTS multilingue baseado em CosyVoice integrado ao DashScope.",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "qwen-image-plus",
+        "Qwen Image Plus",
+        "image",
+        "Modelo text-to-image com renderizacao avancada de texto (chines/ingles).",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "wan2.2-t2v-plus",
+        "Wan 2.2 Text-to-Video",
+        "video",
+        "Geracao de video a partir de texto (alta qualidade).",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "wan2.2-i2v-plus",
+        "Wan 2.2 Image-to-Video",
+        "video",
+        "Animacao de imagens (image-to-video) com Wan 2.2.",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "paraformer-v2",
+        "Paraformer v2",
+        "transcription",
+        "ASR multilingue otimizado para portugues, ingles, mandarim e outras linguas.",
+    ),
+    ProviderModelDefinition(
+        "qwen",
+        "sensevoice-v1",
+        "SenseVoice v1",
+        "transcription",
+        "Reconhecimento de fala multilingue com deteccao de emocao.",
+    ),
+    # ── Groq non-general (Q2 2026) ───────────────────────────────────
+    ProviderModelDefinition(
+        "groq",
+        "whisper-large-v3",
+        "Whisper Large v3",
+        "transcription",
+        "Transcricao de audio com qualidade de referencia, hospedado no Groq.",
+    ),
+    ProviderModelDefinition(
+        "groq",
+        "whisper-large-v3-turbo",
+        "Whisper Large v3 Turbo",
+        "transcription",
+        "Versao acelerada do Whisper Large v3 (substitui distil-whisper-large-v3-en).",
+    ),
+    # ── xAI Grok non-general (Q2 2026) ───────────────────────────────
+    ProviderModelDefinition(
+        "xai",
+        "grok-image-1",
+        "Grok Image",
+        "image",
+        "Geracao de imagem da xAI — $0.02/imagem.",
+    ),
+    ProviderModelDefinition(
+        "xai",
+        "grok-image-pro",
+        "Grok Image Pro",
+        "image",
+        "Geracao de imagem premium da xAI — $0.07/imagem (qualidade superior).",
+    ),
+    ProviderModelDefinition(
+        "xai",
+        "grok-realtime",
+        "Grok Realtime Voice",
+        "audio",
+        "API de voz em tempo real (Voice Agent) — $0.05/minuto.",
+    ),
 )
 
 
@@ -1276,6 +1730,144 @@ def _general_model_title(provider_id: str, model_id: str) -> str:
 def resolve_known_general_model_ids(provider_id: str) -> list[str]:
     normalized_provider = provider_id.strip().lower()
     return list(_DYNAMIC_GENERAL_MODEL_LABELS.get(normalized_provider, {}).keys())
+
+
+_EFFORT_CAPABILITY_OVERRIDES: dict[tuple[str, str], dict[str, Any] | None] = {
+    # OpenAI/Codex current reasoning controls.
+    ("codex", "gpt-5.5"): {"kind": "enum", "values": ("none", "low", "medium", "high", "xhigh"), "default": "medium"},
+    ("codex", "gpt-5.4"): {"kind": "enum", "values": ("none", "low", "medium", "high", "xhigh"), "default": "medium"},
+    ("codex", "gpt-5.4-mini"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+    ("codex", "gpt-5.4-nano"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+    ("codex", "gpt-5.4-pro"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "high",
+    },
+    ("codex", "gpt-5.1"): {"kind": "enum", "values": ("none", "low", "medium", "high"), "default": "none"},
+    ("codex", "gpt-5.1-codex"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5.1-codex-max"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5.1-codex-mini"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5-pro"): {"kind": "enum", "values": ("high",), "default": "high"},
+    # Claude Code CLI model-specific effort support.
+    ("claude", "claude-opus-4-7"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "xhigh", "max"),
+        "default": "xhigh",
+    },
+    ("claude", "claude-opus-4-6"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "max"),
+        "default": "high",
+    },
+    ("claude", "claude-sonnet-4-6"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "max"),
+        "default": "high",
+    },
+    ("claude", "claude-opus-4-5-20251101"): None,
+    ("claude", "claude-sonnet-4-5-20250929"): None,
+    ("claude", "claude-opus-4-1"): None,
+    ("claude", "claude-opus-4-1-20250805"): None,
+    ("claude", "claude-sonnet-4-5"): None,
+    ("claude", "claude-sonnet-4-20250514"): None,
+    ("claude", "claude-3-7-sonnet-latest"): None,
+    ("claude", "claude-3-7-sonnet-20250219"): None,
+    # Perplexity reasoning effort.
+    ("perplexity", "sonar-reasoning"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    ("perplexity", "sonar-reasoning-pro"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    ("perplexity", "sonar-deep-research"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    # DeepSeek thinking mode uses enum effort plus an explicit thinking toggle.
+    ("deepseek", "deepseek-v4-pro"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    ("deepseek", "deepseek-v4-flash"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    ("deepseek", "deepseek-reasoner"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    # Groq reasoning support is model-specific.
+    ("groq", "deepseek-r1-distill-llama-70b"): None,
+    ("groq", "openai/gpt-oss-120b"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high"),
+        "default": "medium",
+    },
+    ("groq", "openai/gpt-oss-20b"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high"),
+        "default": "medium",
+    },
+    ("groq", "qwen/qwen3-32b"): {"kind": "enum", "values": ("none", "default"), "default": "default"},
+    # xAI documents configurable reasoning only for the multi-agent model.
+    ("xai", "grok-4.20-multi-agent"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+}
+
+
+def get_model_effort_capability(provider_id: str, model_id: str) -> dict[str, Any] | None:
+    """Return effort capability for a model, or None if it does not support effort.
+
+    Output shape:
+      enum  -> {"kind": "enum",   "values": tuple[str, ...], "default": str | None}
+      tokens-> {"kind": "tokens", "min": int, "max": int,    "default": int | None}
+    """
+    normalized_provider = provider_id.strip().lower()
+    normalized_model = model_id.strip()
+    override_key = (normalized_provider, normalized_model)
+    if override_key in _EFFORT_CAPABILITY_OVERRIDES:
+        override = _EFFORT_CAPABILITY_OVERRIDES[override_key]
+        return dict(override) if override is not None else None
+    meta = _GENERAL_MODEL_METADATA.get((normalized_provider, normalized_model))
+    if not meta:
+        return None
+    kind = meta.get("effort_kind")
+    if kind == "enum":
+        values = tuple(meta.get("effort_enum_values", ()))
+        if not values:
+            return None
+        return {
+            "kind": "enum",
+            "values": values,
+            "default": meta.get("effort_default"),
+        }
+    if kind == "tokens":
+        return {
+            "kind": "tokens",
+            "min": int(meta.get("effort_token_min", 0)),
+            "max": int(meta.get("effort_token_max", 0)),
+            "default": meta.get("effort_default"),
+        }
+    return None
 
 
 def _prettify_ollama_model_id(model_id: str) -> str:
@@ -1451,6 +2043,17 @@ def resolve_provider_function_model_catalog(
             "intelligence_tier": meta.get("intelligence_tier", 3),
         }
 
+        effort_capability = get_model_effort_capability(normalized_provider, normalized_model)
+        if effort_capability is not None:
+            entry["effort_kind"] = effort_capability["kind"]
+            if effort_capability["kind"] == "enum":
+                entry["effort_enum_values"] = list(effort_capability["values"])
+            else:
+                entry["effort_token_min"] = effort_capability["min"]
+                entry["effort_token_max"] = effort_capability["max"]
+            if effort_capability.get("default") is not None:
+                entry["effort_default"] = effort_capability["default"]
+
         # Pass Ollama-specific fields for the frontend tooltip
         if normalized_provider == "ollama":
             cat = ollama_lookup.get(normalized_model, {})
@@ -1508,10 +2111,22 @@ def build_function_model_catalog(
         category = str(payload.get("category") or "general")
         command_present = bool(payload.get("command_present", False))
         enabled = bool(payload.get("enabled", False))
-        functional_models = resolve_provider_function_model_catalog(
-            provider_id,
-            available_models=[str(item) for item in payload.get("available_models") or []],
-        )
+        functional_models: list[dict[str, Any]] = []
+        for item in payload.get("functional_models") or []:
+            if not isinstance(item, dict):
+                continue
+            functional_model = dict(item)
+            if (
+                functional_model.get("provider_id")
+                and functional_model.get("model_id")
+                and functional_model.get("function_id")
+            ):
+                functional_models.append(functional_model)
+        if not functional_models:
+            functional_models = resolve_provider_function_model_catalog(
+                provider_id,
+                available_models=[str(item) for item in payload.get("available_models") or []],
+            )
         for model in functional_models:
             function_id = str(model["function_id"])
             by_function.setdefault(function_id, []).append(

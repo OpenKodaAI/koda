@@ -224,9 +224,6 @@ def test_inter_agent_prompt_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_prompt.INTER_AGENT_ENABLED", True)
     monkeypatch.setattr("koda.services.tool_prompt.BROWSER_FEATURES_ENABLED", False)
     monkeypatch.setattr("koda.services.tool_prompt.POSTGRES_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.GWS_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.JIRA_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.CONFLUENCE_ENABLED", False)
 
     from koda.services.tool_prompt import build_agent_tools_prompt
 
@@ -243,9 +240,6 @@ def test_inter_agent_prompt_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_prompt.INTER_AGENT_ENABLED", False)
     monkeypatch.setattr("koda.services.tool_prompt.BROWSER_FEATURES_ENABLED", False)
     monkeypatch.setattr("koda.services.tool_prompt.POSTGRES_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.GWS_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.JIRA_ENABLED", False)
-    monkeypatch.setattr("koda.services.tool_prompt.CONFLUENCE_ENABLED", False)
 
     from koda.services.tool_prompt import build_agent_tools_prompt
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tarfile
 from pathlib import Path
 
 from release_metadata import REPOSITORY_URL, load_project_version
@@ -91,14 +92,51 @@ def sync_npm_readme(*, write: bool) -> bool:
     return drift
 
 
+def package_tarball_readme_matches(tarball_path: Path) -> bool:
+    expected = build_package_readme()
+    if not tarball_path.exists():
+        raise RuntimeError(f"{tarball_path} does not exist")
+
+    with tarfile.open(tarball_path, "r:gz") as tarball:
+        member = tarball.extractfile("package/README.md")
+        if member is None:
+            raise RuntimeError(f"{tarball_path} does not contain package/README.md")
+        actual = member.read().decode("utf-8")
+    return actual == expected
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Rewrite the package README in place.")
+    parser.add_argument(
+        "--package-tarball",
+        type=Path,
+        default=None,
+        help="Validate package/README.md inside an npm .tgz against the generated README.",
+    )
     return parser
 
 
 def main() -> int:
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.write and args.package_tarball is not None:
+        parser.error("--write cannot be combined with --package-tarball")
+
+    if args.package_tarball is not None:
+        try:
+            matches = package_tarball_readme_matches(args.package_tarball)
+        except (RuntimeError, tarfile.TarError, UnicodeDecodeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if matches:
+            return 0
+        print(
+            f"npm package README drift detected inside {args.package_tarball}.",
+            file=sys.stderr,
+        )
+        return 1
+
     drift = sync_npm_readme(write=args.write)
     if drift and not args.write:
         print(

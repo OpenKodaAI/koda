@@ -44,10 +44,7 @@ async def test_setup_page_renders_token_free_ui() -> None:
 
 
 def test_control_plane_authorization_fails_closed_without_token() -> None:
-    with (
-        patch.object(control_plane_api, "CONTROL_PLANE_AUTH_MODE", "token"),
-        patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []),
-    ):
+    with patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []):
         response = control_plane_api._authorize_request(_Request())
 
     assert response is not None
@@ -160,28 +157,28 @@ def test_doctor_script_reports_expected_checks() -> None:
         )
 
     assert payload["ok"] is True
-    assert payload["setup_url"].endswith("/control-plane")
+    assert payload["setup_url"].endswith("/setup")
     assert payload["legacy_setup_url"].endswith("/setup")
 
 
 @pytest.mark.asyncio
 async def test_connection_default_handlers_proxy_to_manager_methods() -> None:
     manager = MagicMock()
-    manager.list_connection_catalog.return_value = {"items": [{"connection_key": "core:jira"}]}
-    manager.list_connection_defaults.return_value = {"items": [{"connection_key": "core:jira"}]}
-    manager.get_connection_default.return_value = {"connection_key": "core:jira", "status": "not_configured"}
-    manager.put_connection_default.return_value = {"connection_key": "core:jira", "status": "configured"}
+    manager.list_connection_catalog.return_value = {"items": [{"connection_key": "core:browser"}]}
+    manager.list_connection_defaults.return_value = {"items": [{"connection_key": "core:browser"}]}
+    manager.get_connection_default.return_value = {"connection_key": "core:browser", "status": "not_configured"}
+    manager.put_connection_default.return_value = {"connection_key": "core:browser", "status": "configured"}
     manager.verify_connection_default.return_value = {
-        "connection": {"connection_key": "core:jira", "status": "verified"},
+        "connection": {"connection_key": "core:browser", "status": "verified"},
         "verification": {"verified": True},
     }
     manager.delete_connection_default.return_value = {
-        "connection": {"connection_key": "core:jira", "status": "not_configured"}
+        "connection": {"connection_key": "core:browser", "status": "not_configured"}
     }
     manager.set_integration_system_enabled.return_value = {
-        "integration_id": "jira",
+        "integration_id": "browser",
         "enabled": True,
-        "connection": {"connection_key": "core:jira", "status": "not_configured"},
+        "connection": {"connection_key": "core:browser", "status": "not_configured"},
     }
 
     with patch("koda.control_plane.api._manager", return_value=manager):
@@ -190,43 +187,43 @@ async def test_connection_default_handlers_proxy_to_manager_methods() -> None:
         defaults_response = await control_plane_api.list_connection_defaults_route(_Request())
 
         get_request = _Request()
-        get_request.match_info = {"connection_key": "core:jira"}
+        get_request.match_info = {"connection_key": "core:browser"}
         get_response = await control_plane_api.get_connection_default_route(get_request)
 
-        put_request = _Request(payload={"fields": [{"key": "JIRA_URL", "value": "https://example.atlassian.net"}]})
-        put_request.match_info = {"connection_key": "core:jira"}
+        put_request = _Request(payload={"fields": []})
+        put_request.match_info = {"connection_key": "core:browser"}
         put_response = await control_plane_api.put_connection_default_route(put_request)
 
         verify_request = _Request()
-        verify_request.match_info = {"connection_key": "core:jira"}
+        verify_request.match_info = {"connection_key": "core:browser"}
         verify_response = await control_plane_api.verify_connection_default_route(verify_request)
 
         disconnect_request = _Request()
-        disconnect_request.match_info = {"connection_key": "core:jira"}
+        disconnect_request.match_info = {"connection_key": "core:browser"}
         disconnect_response = await control_plane_api.delete_connection_default_route(disconnect_request)
 
         system_request = _Request(payload={"enabled": True})
-        system_request.match_info = {"integration_id": "jira"}
+        system_request.match_info = {"integration_id": "browser"}
         system_response = await control_plane_api.set_integration_system_enabled(system_request)
 
     manager.list_connection_catalog.assert_called_once_with()
     manager.list_connection_defaults.assert_called_once_with()
-    manager.get_connection_default.assert_called_once_with("core:jira")
+    manager.get_connection_default.assert_called_once_with("core:browser")
     manager.put_connection_default.assert_called_once_with(
-        "core:jira",
-        {"fields": [{"key": "JIRA_URL", "value": "https://example.atlassian.net"}]},
+        "core:browser",
+        {"fields": []},
     )
-    manager.verify_connection_default.assert_called_once_with("core:jira")
-    manager.delete_connection_default.assert_called_once_with("core:jira")
-    manager.set_integration_system_enabled.assert_called_once_with("jira", True)
+    manager.verify_connection_default.assert_called_once_with("core:browser")
+    manager.delete_connection_default.assert_called_once_with("core:browser")
+    manager.set_integration_system_enabled.assert_called_once_with("browser", True)
 
-    assert json.loads(catalog_response.text) == {"items": [{"connection_key": "core:jira"}]}
-    assert json.loads(defaults_response.text) == {"items": [{"connection_key": "core:jira"}]}
-    assert json.loads(get_response.text) == {"connection_key": "core:jira", "status": "not_configured"}
-    assert json.loads(put_response.text) == {"connection_key": "core:jira", "status": "configured"}
+    assert json.loads(catalog_response.text) == {"items": [{"connection_key": "core:browser"}]}
+    assert json.loads(defaults_response.text) == {"items": [{"connection_key": "core:browser"}]}
+    assert json.loads(get_response.text) == {"connection_key": "core:browser", "status": "not_configured"}
+    assert json.loads(put_response.text) == {"connection_key": "core:browser", "status": "configured"}
     assert json.loads(verify_response.text)["verification"] == {"verified": True}
     assert json.loads(disconnect_response.text) == {
-        "connection": {"connection_key": "core:jira", "status": "not_configured"}
+        "connection": {"connection_key": "core:browser", "status": "not_configured"}
     }
     assert json.loads(system_response.text)["enabled"] is True
 
@@ -234,27 +231,27 @@ async def test_connection_default_handlers_proxy_to_manager_methods() -> None:
 @pytest.mark.asyncio
 async def test_agent_connection_handlers_proxy_to_manager_methods() -> None:
     manager = MagicMock()
-    manager.list_agent_connections.return_value = {"items": [{"connection_key": "core:jira"}]}
+    manager.list_agent_connections.return_value = {"items": [{"connection_key": "mcp:atlassian"}]}
     manager.get_agent_connection.return_value = {
-        "connection_key": "core:jira",
+        "connection_key": "mcp:atlassian",
         "status": "configured",
         "source_origin": "agent_binding",
     }
     manager.put_agent_connection.return_value = {
-        "connection_key": "core:jira",
+        "connection_key": "mcp:atlassian",
         "status": "configured",
         "source_origin": "agent_binding",
     }
     manager.verify_agent_connection.return_value = {
-        "connection": {"connection_key": "core:jira", "status": "verified"},
+        "connection": {"connection_key": "mcp:atlassian", "status": "verified"},
         "verification": {"verified": True},
     }
     manager.delete_agent_connection.return_value = {
-        "connection": {"connection_key": "core:jira", "status": "not_configured"}
+        "connection": {"connection_key": "mcp:atlassian", "status": "not_configured"}
     }
     manager.import_agent_connection_default.return_value = {
         "connection": {
-            "connection_key": "core:jira",
+            "connection_key": "mcp:atlassian",
             "status": "configured",
             "source_origin": "imported_default",
         }
@@ -266,37 +263,37 @@ async def test_agent_connection_handlers_proxy_to_manager_methods() -> None:
         list_response = await control_plane_api.list_agent_connections_route(list_request)
 
         get_request = _Request()
-        get_request.match_info = {"agent_id": "ATLAS", "connection_key": "core:jira"}
+        get_request.match_info = {"agent_id": "ATLAS", "connection_key": "mcp:atlassian"}
         get_response = await control_plane_api.get_agent_connection_route(get_request)
 
         put_request = _Request(payload={"auth_method": "api_token", "fields": []})
-        put_request.match_info = {"agent_id": "ATLAS", "connection_key": "core:jira"}
+        put_request.match_info = {"agent_id": "ATLAS", "connection_key": "mcp:atlassian"}
         put_response = await control_plane_api.put_agent_connection_route(put_request)
 
         verify_request = _Request()
-        verify_request.match_info = {"agent_id": "ATLAS", "connection_key": "core:jira"}
+        verify_request.match_info = {"agent_id": "ATLAS", "connection_key": "mcp:atlassian"}
         verify_response = await control_plane_api.verify_agent_connection_route(verify_request)
 
         delete_request = _Request()
-        delete_request.match_info = {"agent_id": "ATLAS", "connection_key": "core:jira"}
+        delete_request.match_info = {"agent_id": "ATLAS", "connection_key": "mcp:atlassian"}
         delete_response = await control_plane_api.delete_agent_connection_route(delete_request)
 
         import_request = _Request()
-        import_request.match_info = {"agent_id": "ATLAS", "connection_key": "core:jira"}
+        import_request.match_info = {"agent_id": "ATLAS", "connection_key": "mcp:atlassian"}
         import_response = await control_plane_api.import_agent_connection_default_route(import_request)
 
     manager.list_agent_connections.assert_called_once_with("ATLAS")
-    manager.get_agent_connection.assert_called_once_with("ATLAS", "core:jira")
+    manager.get_agent_connection.assert_called_once_with("ATLAS", "mcp:atlassian")
     manager.put_agent_connection.assert_called_once_with(
         "ATLAS",
-        "core:jira",
+        "mcp:atlassian",
         {"auth_method": "api_token", "fields": []},
     )
-    manager.verify_agent_connection.assert_called_once_with("ATLAS", "core:jira")
-    manager.delete_agent_connection.assert_called_once_with("ATLAS", "core:jira")
-    manager.import_agent_connection_default.assert_called_once_with("ATLAS", "core:jira")
+    manager.verify_agent_connection.assert_called_once_with("ATLAS", "mcp:atlassian")
+    manager.delete_agent_connection.assert_called_once_with("ATLAS", "mcp:atlassian")
+    manager.import_agent_connection_default.assert_called_once_with("ATLAS", "mcp:atlassian")
 
-    assert json.loads(list_response.text) == {"items": [{"connection_key": "core:jira"}]}
+    assert json.loads(list_response.text) == {"items": [{"connection_key": "mcp:atlassian"}]}
     assert json.loads(get_response.text)["source_origin"] == "agent_binding"
     assert json.loads(put_response.text)["status"] == "configured"
     assert json.loads(verify_response.text)["verification"] == {"verified": True}

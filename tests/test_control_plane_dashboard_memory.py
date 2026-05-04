@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -389,6 +390,61 @@ def test_apply_memory_curation_action_deactivate_uses_engine_batch_plan():
         payload = apply_memory_curation_action("AGENT_A", {"action": "deactivate", "memory_ids": [101, 102]})
 
     assert payload["updated_count"] == 2
+
+
+def test_apply_memory_curation_action_clears_cache_and_cancels_jobs():
+    class _FakeMemoryEngineClient:
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+        async def apply_curation_action(
+            self,
+            *,
+            subject_id: str,
+            action: str,
+            payload: dict[str, object],
+        ) -> dict[str, object]:
+            return {
+                "applied": True,
+                "updated_count": 1,
+                "memory_ids": [101],
+                "operations": [
+                    {
+                        "op": "set_status",
+                        "memory_id": 101,
+                        "memory_status": "stale",
+                        "is_active": False,
+                    }
+                ],
+            }
+
+        def health(self) -> dict[str, object]:
+            return {
+                "ready": True,
+                "authoritative": True,
+                "production_ready": True,
+                "cutover_allowed": True,
+                "details": {"capabilities": "curation_action"},
+            }
+
+    with (
+        patch("koda.control_plane.dashboard_memory.require_primary_state_backend", return_value=object()),
+        patch(
+            "koda.control_plane.dashboard_memory.build_memory_engine_client",
+            return_value=_FakeMemoryEngineClient(),
+        ),
+        patch("koda.memory.napkin.batch_get_entries", return_value={101: SimpleNamespace(user_id=42)}),
+        patch("koda.memory.recall.clear_recall_cache") as mock_clear_cache,
+        patch("koda.memory.embedding_queue.cancel_embedding_job") as mock_cancel_job,
+    ):
+        payload = apply_memory_curation_action("AGENT_A", {"action": "expire", "memory_ids": [101]})
+
+    assert payload["updated_count"] == 1
+    mock_clear_cache.assert_called_once_with(42)
+    mock_cancel_job.assert_called_once_with(101, agent_id="agent_a")
 
 
 def test_apply_memory_curation_action_set_status_uses_engine_status_plan():

@@ -2,9 +2,7 @@ import { z } from "zod";
 import { registerBodySchema } from "@/lib/contracts/proxy-body-schemas";
 import { hexColor, safeContent, safeText } from "@/lib/contracts/sanitizers";
 
-/* ------------------------------------------------------------------ */
 /*  Schemas                                                            */
-/* ------------------------------------------------------------------ */
 
 export const workspaceBodySchema = z.object({
   name: safeText(240),
@@ -27,9 +25,7 @@ export const workspaceSpecBodySchema = z.object({
     .optional(),
 }).passthrough();
 
-/* ------------------------------------------------------------------ */
 /*  Registration                                                       */
-/* ------------------------------------------------------------------ */
 
 // POST /workspaces
 registerBodySchema({

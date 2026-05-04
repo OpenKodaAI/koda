@@ -3,15 +3,36 @@
 import argparse
 import asyncio
 import contextlib
+import faulthandler
 import os
 import signal
+import sys
 from collections.abc import Callable, Coroutine
 from typing import Any, cast
 
 from koda.logging_config import get_logger, setup_logging
 
+# Dump tracebacks for ALL threads on SIGUSR1 — used to debug startup
+# deadlocks where the asyncio event loop is blocked on a sync call.
+faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True, chain=False)
+
+
+_SUBCOMMANDS = {"migrate"}
+
 
 def main() -> None:
+    # Operator subcommands (e.g. ``python -m koda migrate``) are dispatched
+    # before argparse so the existing runtime flow with --agent-id keeps the
+    # same surface. Adding a known token at sys.argv[1] hands control to the
+    # matching module under ``koda.cli`` and exits with its return code.
+    if len(sys.argv) > 1 and sys.argv[1] in _SUBCOMMANDS:
+        subcommand = sys.argv[1]
+        forwarded = sys.argv[2:]
+        if subcommand == "migrate":
+            from koda.cli import migrate as migrate_cli
+
+            raise SystemExit(migrate_cli.run(forwarded))
+
     parser = argparse.ArgumentParser(description="Koda")
     parser.add_argument("--agent-id", type=str, default=None, help="Agent ID (AGENT_A, AGENT_B, AGENT_C)")
     args = parser.parse_args()
@@ -29,6 +50,16 @@ def main() -> None:
 
     ctx_agent_id.set(agent_id)
 
+    # initialize OpenTelemetry tracing as early as possible
+    # so spans created during bootstrap (e.g. supervisor handshake,
+    # provider auth probes) are exported. ``init_tracing`` is a no-op
+    # when ``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset, so single-host
+    # deployments without an OTel collector pay zero overhead.
+    from koda.observability import init_tracing
+
+    service_name = f"koda-worker:{agent_id}" if agent_id else "koda-worker"
+    init_tracing(service_name)
+
     # ALL koda imports go here, AFTER AGENT_ID is set in env
     from telegram.ext import (
         Application,
@@ -37,6 +68,7 @@ def main() -> None:
         CommandHandler,
         ExtBot,
         MessageHandler,
+        TypeHandler,
         filters,
     )
 
@@ -44,12 +76,13 @@ def main() -> None:
         AGENT_NAME,
         AGENT_TOKEN,
         ALLOWED_USER_IDS,
+        BOT_GATEWAY_ENABLED,
         BROWSER_FEATURES_ENABLED,
         IMAGE_TEMP_DIR,
         POSTGRES_ENABLED,
         STATE_BACKEND,
+        TELEGRAM_DROP_PENDING_UPDATES,
     )
-    from koda.handlers.atlassian import cmd_confluence, cmd_jboard, cmd_jira, cmd_jissue, cmd_jsprint
     from koda.handlers.automation import cmd_cron, cmd_curl, cmd_fetch, cmd_http, cmd_search
     from koda.handlers.browser import cmd_browse, cmd_click, cmd_js, cmd_screenshot, cmd_type
     from koda.handlers.callbacks import (
@@ -122,9 +155,8 @@ def main() -> None:
         cmd_templates,
         cmd_voice,
     )
-    from koda.handlers.devops import cmd_docker, cmd_gh, cmd_glab
+    from koda.handlers.devops import cmd_docker
     from koda.handlers.fileops import cmd_cat, cmd_edit, cmd_mkdir, cmd_rm, cmd_write
-    from koda.handlers.google_workspace import cmd_gcal, cmd_gdrive, cmd_gmail, cmd_gsheets, cmd_gws
     from koda.handlers.messages import (
         handle_audio,
         handle_document,
@@ -199,6 +231,27 @@ def main() -> None:
 
     app.add_error_handler(error_handler)
 
+    # Persist the polling offset BEFORE any other handler runs (group=-1).
+    # This is observability + groundwork for the bot-pool gateway —
+    # Telegram's server-side offset remains the actual source of truth, but
+    # the DB row gives operators a "last update_id seen by agent X" record
+    # that survives crashes and is queryable from monitoring.
+    async def _record_offset_handler(update: TelegramUpdate, _: Any) -> None:
+        update_id = getattr(update, "update_id", None)
+        if not isinstance(update_id, int) or update_id <= 0:
+            return
+        scope = (os.environ.get("AGENT_ID") or "").strip().upper()
+        if not scope:
+            return
+        try:
+            from koda.state.telegram_offsets import record_offset
+
+            await asyncio.to_thread(record_offset, scope, update_id)
+        except Exception:
+            log.exception("telegram_offset_record_handler_failed", agent_id=scope)
+
+    app.add_handler(TypeHandler(TelegramUpdate, _record_offset_handler), group=-1)
+
     # Commands
     app.add_handler(CommandHandler("start", _as_handler(cmd_start)))
     app.add_handler(CommandHandler("help", _as_handler(cmd_help)))
@@ -237,7 +290,7 @@ def main() -> None:
 
     # Skill commands
     app.add_handler(CommandHandler("skill", _as_handler(cmd_skill)))
-    app.add_handler(CommandHandler("skills", _as_handler(cmd_templates)))
+    app.add_handler(CommandHandler("skills", _as_handler(cmd_skill)))
 
     # Bookmark commands
     app.add_handler(CommandHandler("bookmarks", _as_handler(cmd_bookmarks)))
@@ -263,24 +316,8 @@ def main() -> None:
     app.add_handler(CommandHandler("forget", _as_handler(cmd_forget)))
     app.add_handler(CommandHandler("digest", _as_handler(cmd_digest)))
 
-    # DevOps commands
-    app.add_handler(CommandHandler("gh", _as_handler(cmd_gh)))
-    app.add_handler(CommandHandler("glab", _as_handler(cmd_glab)))
+    # Local runtime commands
     app.add_handler(CommandHandler("docker", _as_handler(cmd_docker)))
-
-    # Google Workspace commands
-    app.add_handler(CommandHandler("gws", _as_handler(cmd_gws)))
-    app.add_handler(CommandHandler("gmail", _as_handler(cmd_gmail)))
-    app.add_handler(CommandHandler("gcal", _as_handler(cmd_gcal)))
-    app.add_handler(CommandHandler("gdrive", _as_handler(cmd_gdrive)))
-    app.add_handler(CommandHandler("gsheets", _as_handler(cmd_gsheets)))
-
-    # Atlassian commands
-    app.add_handler(CommandHandler("jira", _as_handler(cmd_jira)))
-    app.add_handler(CommandHandler("jissue", _as_handler(cmd_jissue)))
-    app.add_handler(CommandHandler("jboard", _as_handler(cmd_jboard)))
-    app.add_handler(CommandHandler("jsprint", _as_handler(cmd_jsprint)))
-    app.add_handler(CommandHandler("confluence", _as_handler(cmd_confluence)))
 
     # Package manager commands
     app.add_handler(CommandHandler("pip", _as_handler(cmd_pip)))
@@ -362,6 +399,12 @@ def main() -> None:
         from koda.services.scheduled_jobs import stop_scheduler_dispatcher
 
         await stop_scheduler_dispatcher()
+        try:
+            from koda.memory.extraction_supervisor import get_memory_extraction_supervisor
+
+            await get_memory_extraction_supervisor().drain(timeout=2.0)
+        except Exception:
+            log.exception("memory_extraction_supervisor_drain_error")
         try:
             from koda.services.health import set_runtime_startup_state
 
@@ -445,7 +488,7 @@ def main() -> None:
         from koda.services.health import set_runtime_startup_state
         from koda.services.lifecycle_supervisor import get_background_loop_supervisor
 
-        expected_background_loops = {"temp_cleanup", "approval_cleanup", "db_maintenance"}
+        expected_background_loops = {"temp_cleanup", "approval_cleanup", "db_maintenance", "task_lease_janitor"}
         if MEMORY_ENABLED and MEMORY_MAINTENANCE_ENABLED:
             expected_background_loops.add("memory_maintenance")
         if MEMORY_ENABLED and MEMORY_EMBEDDING_REPAIR_ENABLED:
@@ -479,13 +522,47 @@ def main() -> None:
         noncritical_startup_issues: list[str] = []
 
         try:
-            from koda.services.queue_manager import recover_pending_tasks
+            from koda.services.queue_manager import (
+                _stale_task_lease_janitor,
+                recover_pending_tasks,
+            )
             from koda.services.runtime import get_runtime_controller
+            from koda.state.history_store import reap_expired_task_leases
 
             await get_runtime_controller().start(app)
+
+            # Crash-safe orchestration: any task left in running/retrying
+            # by a previous process can only be ours to recover (this PID
+            # is fresh, so its lease cannot be active). The sweep clears
+            # those rows BEFORE recover_pending_tasks runs, so the
+            # recovery path only ever sees rows that genuinely belong in
+            # the queue rather than rows that completed on the wire and
+            # never had their terminal write acknowledged.
+            try:
+                startup_reaped = await asyncio.to_thread(reap_expired_task_leases)
+                if startup_reaped:
+                    log.info(
+                        "task_lease_startup_sweep",
+                        reaped=len(startup_reaped),
+                        requeued=sum(1 for r in startup_reaped if r.get("outcome") == "requeued"),
+                        failed=sum(1 for r in startup_reaped if r.get("outcome") == "failed"),
+                    )
+            except Exception:
+                log.exception("task_lease_startup_sweep_error")
+
             recovery_summary = await recover_pending_tasks(app)
             if any(recovery_summary.values()):
                 log.info("queue_recovery_completed", **recovery_summary)
+
+            # Steady-state janitor: continuous sweep of expired leases
+            # while the process is up. Critical so a deploy/migration that
+            # breaks the loop is caught fast (ACTIVE_TASKS metric will pile
+            # up otherwise).
+            await loop_supervisor.start_loop(
+                "task_lease_janitor",
+                _stale_task_lease_janitor,
+                critical=True,
+            )
         except Exception:
             critical_startup_issues.append("runtime_start_error")
             log.exception("runtime_start_error")
@@ -561,6 +638,7 @@ def main() -> None:
             noncritical_startup_issues.append("memory_init_error")
             log.exception("memory_init_error")
 
+        log.info("post_init_checkpoint_before_knowledge")
         # Initialize sourced knowledge retrieval
         try:
             if KNOWLEDGE_ENABLED:
@@ -583,6 +661,7 @@ def main() -> None:
             noncritical_startup_issues.append("knowledge_init_error")
             log.exception("knowledge_init_error")
 
+        log.info("post_init_checkpoint_before_cache")
         # Initialize cache and script library systems
         try:
             if CACHE_ENABLED:
@@ -626,14 +705,17 @@ def main() -> None:
             except Exception as _mcp_exc:
                 noncritical_startup_issues.append(f"MCP bootstrap: {_mcp_exc}")
 
-        try:
-            from koda.services.llm_runner import warm_provider_capabilities
-
-            await warm_provider_capabilities()
-            log.info("provider_capabilities_initialized")
-        except Exception:
-            noncritical_startup_issues.append("provider_capability_init_error")
-            log.exception("provider_capability_init_error")
+        log.info("post_init_checkpoint_before_warm_providers")
+        # Provider capability warm-up is a pure latency optimisation: each
+        # probe calls ``provider_env._sanitize_env`` which makes a sync gRPC
+        # request to the Rust security sidecar. Sync gRPC blocks the asyncio
+        # event loop, and even moving the warm to ``asyncio.create_task``
+        # doesn't help — every asyncio task shares the same loop, so any one
+        # that performs a blocking sync call freezes the whole bot until it
+        # returns. The capability cache fills lazily on the first real turn,
+        # so we simply skip warm-up at startup and let the bot reach
+        # ``run_polling`` without serializing N provider auth probes.
+        log.info("post_init_checkpoint_after_warm_providers")
 
         # Start periodic temp file cleanup
         from koda.utils.images import start_temp_cleanup_loop
@@ -660,35 +742,45 @@ def main() -> None:
 
         await loop_supervisor.start_loop("db_maintenance", _db_maintenance_loop)
 
-        # Start database pool if enabled
+        log.info("post_init_checkpoint_before_db_start")
+        # Start database pool if enabled. Bound it so a slow asyncpg pool
+        # initialisation (one of the configured environments points at an
+        # unreachable host, ``_build_ssl_context`` stalls on a missing cert,
+        # the security-guard sync RPC blocks the loop, etc.) cannot prevent
+        # the bot from reaching ``run_polling``.
         if POSTGRES_ENABLED:
             from koda.services.db_manager import db_manager
 
             try:
-                await db_manager.start()
+                await asyncio.wait_for(db_manager.start(), timeout=10.0)
+                log.info("db_manager_started")
+            except TimeoutError:
+                noncritical_startup_issues.append("db_manager_start_timeout")
+                log.warning("db_manager_start_timeout")
             except Exception:
-                critical_startup_issues.append("db_manager_start_error")
-                set_runtime_startup_state(
-                    "failed",
-                    details={"critical_issues": list(critical_startup_issues)},
-                    expected_background_loops=expected_background_loops,
-                )
-                raise
+                noncritical_startup_issues.append("db_manager_start_error")
+                log.exception("db_manager_start_error")
+        log.info("post_init_checkpoint_after_db_start")
 
-        # Start browser if enabled
+        # Start browser if enabled. Bound the start so a missing /broken
+        # Playwright install (e.g. ``PLAYWRIGHT_BROWSERS_PATH`` pointing at a
+        # path that does not exist on the host) cannot block the bot from
+        # reaching ``run_polling``. Browser features become a noncritical
+        # warning if start exceeds the budget; tools that need a browser
+        # will surface a friendlier error at use time.
+        log.info("post_init_checkpoint_before_browser")
         if BROWSER_FEATURES_ENABLED:
             from koda.services.browser_manager import browser_manager
 
             try:
-                await browser_manager.start()
+                await asyncio.wait_for(browser_manager.start(), timeout=10.0)
+            except TimeoutError:
+                noncritical_startup_issues.append("browser_manager_start_timeout")
+                log.warning("browser_manager_start_timeout")
             except Exception:
-                critical_startup_issues.append("browser_manager_start_error")
-                set_runtime_startup_state(
-                    "failed",
-                    details={"critical_issues": list(critical_startup_issues)},
-                    expected_background_loops=expected_background_loops,
-                )
-                raise
+                noncritical_startup_issues.append("browser_manager_start_error")
+                log.exception("browser_manager_start_error")
+        log.info("post_init_checkpoint_after_browser")
 
         # Initialize circuit breaker metrics and emit startup event
         try:
@@ -720,8 +812,24 @@ def main() -> None:
 
     app.post_init = _post_init
 
-    log.info("agent_starting", agent_id=os.environ.get("AGENT_ID", "default"), agent_name=AGENT_NAME)
-    app.run_polling(drop_pending_updates=True)
+    log.info(
+        "agent_starting",
+        agent_id=os.environ.get("AGENT_ID", "default"),
+        agent_name=AGENT_NAME,
+        drop_pending_updates=TELEGRAM_DROP_PENDING_UPDATES,
+        bot_gateway_enabled=BOT_GATEWAY_ENABLED,
+    )
+    if BOT_GATEWAY_ENABLED:
+        # Bot-gateway path: consume the per-agent stream from
+        # koda-bot-gateway. The gateway owns Telegram polling for every
+        # bot centrally; the worker just dispatches received Updates
+        # through PTB and acknowledges after handlers complete (at-
+        # least-once delivery semantics).
+        from koda.runtime.bot_gateway_runner import run_bot_gateway_consumer
+
+        asyncio.run(run_bot_gateway_consumer(app))
+    else:
+        app.run_polling(drop_pending_updates=TELEGRAM_DROP_PENDING_UPDATES)
 
 
 if __name__ == "__main__":

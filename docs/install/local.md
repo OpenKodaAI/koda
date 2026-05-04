@@ -1,21 +1,27 @@
 # Local Install
 
+Use this path when you want Koda running on your machine with the same core topology used by the VPS deployment.
+
 ## Prerequisites
 
-- Docker
-- Docker Compose
-- Node.js with npm if you want the packaged CLI path
-- a local clone of this repository only when contributing from source
+- Docker and Docker Compose
+- Node.js with npm for the packaged CLI path
+- A repository clone only if you are contributing from source
 
 ## Quickstart
 
 ```bash
-npm install -g koda
+npm install -g @openkodaai/koda
 koda install
 ```
 
-If you are working from the repository itself, the source wrapper installs the same npm CLI and
-then stages the product bundle into a separate `.koda-release/` directory:
+Without a global install:
+
+```bash
+npx @openkodaai/koda@latest install
+```
+
+From a source clone on apt-based Linux hosts:
 
 ```bash
 git clone <your-fork-or-repo-url> ./koda
@@ -23,97 +29,78 @@ cd ./koda
 ./scripts/install.sh
 ```
 
-The installer will:
-
-1. verify Docker and the Koda npm CLI prerequisites
-2. stage the release bundle in its own product directory
-3. create a minimal `.env` if one does not exist
-4. start the quickstart stack with the release compose file
-5. run the doctor checks
-6. print the dashboard setup URL plus a short-lived setup code
+The installer verifies prerequisites, stages the product bundle, creates `.env` if needed, starts Docker Compose, runs doctor checks, and prints the setup URL plus a short-lived setup code.
 
 ## What Starts
 
-The local quickstart brings up:
+```text
+web :3000
+app :8090
+postgres
+seaweedfs + seaweedfs-init
+security + memory + artifact + retrieval + runtime-kernel
+```
 
-- `app`
-- `web`
-- `postgres`
-- `seaweedfs`
-- `seaweedfs-init`
+Optional overlays:
 
-This is the same platform topology used by the default VPS path.
-
-## Ports And Volumes
-
-Default local ports:
-
-- `3000` for the Koda dashboard UI
-- `8090` for the control plane API, health surface, and `/setup` compatibility bridge
-- `5432` for Postgres inside the compose network
-- `8333` for bundled S3-compatible storage inside the compose network
-
-Persistent volumes are managed by Docker Compose and are intended to survive container restarts.
+| Need | Enable |
+|---|---|
+| Telegram fan-in for many agents | `docker compose --profile bot-gateway up -d` |
+| Workspace quotas | `docker compose --profile policy-engine up -d` |
+| Multi-supervisor cluster | `docker compose -f docker-compose.yml -f docker-compose-cluster.yml up -d` |
+| Prometheus/Grafana/Tempo | `docker compose -f docker-compose.yml -f docker-compose-observability.yml up -d` |
 
 ## First Boot
 
-When the installer finishes, open the dashboard:
+Open:
 
-- `http://127.0.0.1:3000/setup`
+```text
+http://127.0.0.1:3000/setup
+```
 
-The flow is deliberately minimal — two screens, no provider or GitHub or Telegram required
-up-front. Everything else is configured from the dashboard after first login.
+Then:
 
-### 1. Create the owner account (`/setup`)
+1. Paste the setup code printed by the installer.
+2. Create the owner account.
+3. Save the ten one-time recovery codes.
+4. Sign in to the dashboard.
 
-Fill in:
+The setup code is stored inside the app container at `${STATE_ROOT_DIR}/control_plane/bootstrap.txt`, mode `0600`, and is deleted after the owner is registered. If it expires, run:
 
-- email
-- password (minimum 12 characters, 3 of 4 classes: upper / lower / digit / symbol)
-- confirm password
+```bash
+koda auth issue-code
+```
 
-The `username` is derived from the email local-part and can be renamed later.
+## Configure From The Dashboard
 
-By default, `ALLOW_LOOPBACK_BOOTSTRAP=true` in development, which means no setup code is
-required when the request originates from `127.0.0.1` with no proxy hop. If loopback trust is
-disabled, the page shows an additional **setup code** field; read the value from
-`${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (the file is created on first boot with mode
-`0600` and is echoed to the control-plane log once). The file is deleted automatically after
-the owner is registered.
+After login, use the dashboard to:
 
-### 2. Save your recovery codes
+- connect providers
+- create agents
+- attach integrations and secrets
+- publish runtime configuration
+- inspect health, activity, costs, executions, sessions, memory, and routines
 
-After registration, the dashboard shows **ten** one-time recovery codes. Copy, download, or
-print them — they are never shown again. Tick the confirmation checkbox and continue to the
-dashboard.
+The quickstart path does not require per-agent env configuration. Product configuration lives in the control-plane UI and API after the platform boots.
 
-Recovery codes let you reset the password without SMTP:
+`CONTROL_PLANE_API_TOKEN` is a break-glass and CLI credential. Browser auth uses owner login and HTTP-only sessions.
 
-- visit `/forgot-password`
-- enter your email + any unused recovery code + a new password
-- all existing sessions are revoked, and **every remaining recovery code is invalidated** (you
-  must regenerate a new batch from Settings › Security)
+## Demo Data For Screenshots
 
-### 3. Optional configuration in the dashboard
+```bash
+docker compose exec app python scripts/seed_demo_data.py --apply
+python3 scripts/capture_docs_screenshots.py \
+  --base-url http://127.0.0.1:3000 \
+  --out docs/assets/screenshots
+```
 
-A `SetupChecklistCard` on the dashboard home points to three opt-in steps:
+Clear only demo data:
 
-- connect an AI provider
-- create your first agent
-- connect Telegram (or any other channel)
-
-Each item opens a Drawer with its dedicated wizard. None of them block normal operation, and
-the card dismisses itself once all three are complete.
-
-`CONTROL_PLANE_API_TOKEN` stays blank by default and is only used as a break-glass CLI
-credential. It is no longer part of the default setup flow.
-
-The quickstart path does not require per-agent env configuration, provider credentials in
-`.env`, or manual Telegram runtime wiring before first boot.
+```bash
+docker compose exec app python scripts/seed_demo_data.py --clear
+```
 
 ## Doctor
-
-Run the built-in diagnostic command at any time:
 
 ```bash
 python3 scripts/doctor.py \
@@ -122,22 +109,40 @@ python3 scripts/doctor.py \
   --dashboard-url http://127.0.0.1:3000
 ```
 
-The doctor validates bootstrap configuration, storage connectivity, secrets, dashboard reachability, and control-plane reachability.
+The doctor validates bootstrap files, secrets, storage, control-plane reachability, and dashboard reachability.
 
 ## Manual Startup
-
-If you prefer to bootstrap without the installer:
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
-python3 scripts/doctor.py --env-file .env --base-url http://127.0.0.1:8090 --dashboard-url http://127.0.0.1:3000
+python3 scripts/doctor.py \
+  --env-file .env \
+  --base-url http://127.0.0.1:8090 \
+  --dashboard-url http://127.0.0.1:3000
 ```
 
 ## Troubleshooting
 
-- If the dashboard is not reachable, verify that `docker compose ps` shows `web` healthy.
-- If `http://127.0.0.1:3000/control-plane` is not reachable, verify that `docker compose ps` shows `web` healthy.
-- If `http://127.0.0.1:8090/health` is not reachable, verify that `docker compose ps` shows `app` healthy.
-- If object storage checks fail, verify that `seaweedfs` and `seaweedfs-init` both completed successfully.
-- If bootstrap still fails, rerun the doctor command and inspect the reported failing check name.
+- Dashboard unavailable: check `docker compose ps web`.
+- API unavailable: check `docker compose ps app`.
+- Degraded `/health`: inspect worker and sidecar status in the JSON payload.
+- Object storage errors: check `seaweedfs` and `seaweedfs-init`.
+- Browser login loops: verify `WEB_OPERATOR_SESSION_SECRET` is stable in `.env`.
+- Runtime worker spawn failures: rebuild `runtime-kernel`; it must contain the Python runtime and shared Koda volumes.
+
+## Local-Native PID Files
+
+The Docker-free development path writes PID files to `~/.koda-local/var/run/<service>.pid`.
+
+```text
+PID file + live process  -> service is running
+PID file + dead process  -> remove stale file before restart
+```
+
+Use the restart helper to clear stale PID files and data-directory locks:
+
+```bash
+~/.koda-local/scripts/dev-down.sh
+scripts/dev/dev-restart.sh
+```

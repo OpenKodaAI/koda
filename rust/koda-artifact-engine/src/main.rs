@@ -8,6 +8,7 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client as S3Client;
 use koda_observability::{health_details, init_tracing};
+use koda_postgres::{KodaPgPool, KodaPgPoolConfig, PostgresWorkload};
 use koda_proto::artifact::v1::artifact_engine_service_server::{
     ArtifactEngineService, ArtifactEngineServiceServer,
 };
@@ -23,7 +24,8 @@ use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
-use tokio_postgres::NoTls;
+use tokio::sync::OnceCell;
+use tokio_postgres::Client as PgClient;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -31,6 +33,8 @@ use tonic::{Request, Response, Status};
 const SERVICE_NAME: &str = "koda-artifact-engine";
 const OBJECT_STORAGE_UPLOAD_OUTCOME: &str = "persisted_object_storage";
 const OBJECT_STORAGE_STORAGE_BACKING: &str = "object_storage_postgres";
+
+static ARTIFACT_POSTGRES_POOL: OnceCell<KodaPgPool> = OnceCell::const_new();
 
 #[derive(Clone, Default)]
 struct ArtifactServer;
@@ -379,30 +383,51 @@ async fn load_object_store_payload(
     Ok(payload.into_bytes().to_vec())
 }
 
-async fn artifact_postgres_client() -> Result<tokio_postgres::Client, Status> {
-    let dsn = artifact_postgres_dsn();
-    if dsn.is_empty() {
-        return Err(Status::failed_precondition(
-            "knowledge postgres dsn is not configured",
-        ));
-    }
-    let (client, connection) = tokio_postgres::connect(&dsn, NoTls)
-        .await
-        .map_err(|error| {
-            Status::unavailable(format!("failed to connect to artifact postgres: {error}"))
-        })?;
-    tokio::spawn(async move {
-        let _ = connection.await;
-    });
-    Ok(client)
+async fn connect_artifact_postgres_pool() -> Result<KodaPgPool, Status> {
+    KodaPgPool::connect(KodaPgPoolConfig::from_env(
+        SERVICE_NAME,
+        "KODA_ARTIFACT_POSTGRES_POOL_MAX_SIZE",
+    ))
+    .await
 }
 
-async fn ensure_artifact_tables(client: &tokio_postgres::Client) -> Result<String, Status> {
+async fn artifact_postgres_pool() -> Result<&'static KodaPgPool, Status> {
+    ARTIFACT_POSTGRES_POOL
+        .get_or_try_init(connect_artifact_postgres_pool)
+        .await
+}
+
+async fn artifact_postgres_connection(
+    workload: PostgresWorkload,
+    operation: &'static str,
+) -> Result<koda_postgres::KodaPgConnection<'static>, Status> {
+    artifact_postgres_pool()
+        .await?
+        .connection(workload, operation)
+        .await
+}
+
+fn artifact_pg_error(operation: &'static str, error: tokio_postgres::Error) -> Status {
+    if let Some(pool) = ARTIFACT_POSTGRES_POOL.get() {
+        pool.status_from_pg_error(operation, error)
+    } else {
+        Status::internal(format!("{operation}: postgres query failed: {error}"))
+    }
+}
+
+async fn artifact_postgres_ready() -> bool {
+    match artifact_postgres_connection(PostgresWorkload::Health, "artifact health").await {
+        Ok(client) => client.query_one("SELECT 1", &[]).await.is_ok(),
+        Err(_) => false,
+    }
+}
+
+async fn ensure_artifact_tables(client: &PgClient) -> Result<String, Status> {
     let schema = artifact_postgres_schema();
     client
         .batch_execute(&format!(r#"CREATE SCHEMA IF NOT EXISTS "{schema}";"#))
         .await
-        .map_err(|error| Status::internal(format!("failed to ensure artifact schema: {error}")))?;
+        .map_err(|error| artifact_pg_error("ensure artifact schema", error))?;
     client
         .batch_execute(&format!(
             r#"
@@ -439,7 +464,7 @@ async fn ensure_artifact_tables(client: &tokio_postgres::Client) -> Result<Strin
             "#
         ))
         .await
-        .map_err(|error| Status::internal(format!("failed to ensure artifact tables: {error}")))?;
+        .map_err(|error| artifact_pg_error("ensure artifact tables", error))?;
     Ok(schema)
 }
 
@@ -447,7 +472,8 @@ async fn load_record_by_artifact_id(
     agent_id: &str,
     artifact_id: &str,
 ) -> Result<StoredArtifact, Status> {
-    let client = artifact_postgres_client().await?;
+    let client =
+        artifact_postgres_connection(PostgresWorkload::Read, "load artifact record").await?;
     let schema = ensure_artifact_tables(&client).await?;
     let row = client
         .query_opt(
@@ -475,7 +501,7 @@ async fn load_record_by_artifact_id(
             &[&agent_id, &artifact_id],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to load artifact record: {error}")))?;
+        .map_err(|error| artifact_pg_error("load artifact record", error))?;
     let Some(row) = row else {
         return Err(Status::not_found(format!(
             "artifact not found: {artifact_id}"
@@ -520,7 +546,7 @@ async fn load_record_by_artifact_id(
 async fn persist_uploaded_record(
     request: PersistUploadedRecordRequest<'_>,
 ) -> Result<ArtifactRecord> {
-    let client = artifact_postgres_client()
+    let client = artifact_postgres_connection(PostgresWorkload::Write, "persist artifact record")
         .await
         .map_err(anyhow::Error::msg)?;
     let schema = ensure_artifact_tables(&client)
@@ -641,18 +667,17 @@ async fn persist_uploaded_record(
         )
         .await;
     if let Err(error) = persist_result {
+        let status = artifact_pg_error("persist artifact record", error);
         if !record.object_store_key.is_empty() {
             let _ = delete_object_store_payload(&config, &record.object_store_key).await;
         }
-        return Err(anyhow::anyhow!(
-            "failed to persist artifact record: {error}"
-        ));
+        return Err(anyhow::anyhow!(status.message().to_string()));
     }
     Ok(record)
 }
 
 async fn count_indexed_artifacts() -> Result<i64, Status> {
-    let client = artifact_postgres_client().await?;
+    let client = artifact_postgres_connection(PostgresWorkload::Read, "count artifacts").await?;
     let schema = ensure_artifact_tables(&client).await?;
     let row = client
         .query_one(
@@ -660,7 +685,7 @@ async fn count_indexed_artifacts() -> Result<i64, Status> {
             &[],
         )
         .await
-        .map_err(|error| Status::internal(format!("failed to count artifact rows: {error}")))?;
+        .map_err(|error| artifact_pg_error("count artifact rows", error))?;
     Ok(row.get::<_, i64>("count"))
 }
 
@@ -864,7 +889,9 @@ impl ArtifactEngineService for ArtifactServer {
         .to_string();
         stored.record.evidence_json = evidence_json.clone();
         stored.record.updated_at_ms = now_ms();
-        let client = artifact_postgres_client().await?;
+        let client =
+            artifact_postgres_connection(PostgresWorkload::Write, "update artifact evidence")
+                .await?;
         let schema = ensure_artifact_tables(&client).await?;
         client
             .execute(
@@ -885,9 +912,7 @@ impl ArtifactEngineService for ArtifactServer {
                 ],
             )
             .await
-            .map_err(|error| {
-                Status::internal(format!("failed to persist artifact evidence: {error}"))
-            })?;
+            .map_err(|error| artifact_pg_error("persist artifact evidence", error))?;
         Ok(Response::new(GenerateEvidenceResponse { evidence_json }))
     }
 
@@ -913,7 +938,7 @@ impl ArtifactEngineService for ArtifactServer {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
-        let postgres_ready = !artifact_postgres_dsn().is_empty();
+        let postgres_ready = artifact_postgres_ready().await;
         let object_store_config = artifact_object_store_config();
         let object_store_ready = if let Some(config) = object_store_config.as_ref() {
             artifact_object_store_ready(config).await.is_ok()
@@ -951,6 +976,24 @@ impl ArtifactEngineService for ArtifactServer {
                 "required_unconfigured".to_string()
             },
         );
+        details.insert(
+            "postgres".to_string(),
+            if postgres_ready {
+                "ready".to_string()
+            } else if artifact_postgres_dsn().is_empty() {
+                "required_unconfigured".to_string()
+            } else {
+                "unreachable".to_string()
+            },
+        );
+        if let Ok(pool) = artifact_postgres_pool().await {
+            let snapshot = pool.snapshot();
+            details.insert(
+                "postgres_pool_size".to_string(),
+                snapshot.pool_max_size.to_string(),
+            );
+            details.extend(pool.health_details());
+        }
         details.insert(
             "metadata_mode".to_string(),
             "canonical_descriptor".to_string(),
@@ -1030,6 +1073,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio::sync::{oneshot, Mutex};
+    use tokio_postgres::NoTls;
     use tokio_stream::wrappers::TcpListenerStream;
 
     type ObjectMap = Arc<StdMutex<HashMap<String, Vec<u8>>>>;

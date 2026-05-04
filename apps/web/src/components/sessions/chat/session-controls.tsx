@@ -5,6 +5,7 @@ import { Pause, Play, Square } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/query/keys";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 
 type Action = "cancel" | "pause" | "resume";
 
@@ -47,6 +48,7 @@ export function SessionControls({
   active = false,
   paused = false,
 }: SessionControlsProps) {
+  const { tl } = useAppI18n();
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,14 +80,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("pause")}
           disabled={disabled || pending !== null}
-          title="Pause execution"
+          title={tl("Pause execution")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
             "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Pause strokeWidth={1.75} className="icon-xs" />
-          Pause
+          {tl("Pause")}
         </button>
       ) : null}
       {paused ? (
@@ -93,14 +95,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("resume")}
           disabled={disabled || pending !== null}
-          title="Resume execution"
+          title={tl("Resume execution")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
             "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Play strokeWidth={1.75} className="icon-xs" />
-          Resume
+          {tl("Resume")}
         </button>
       ) : null}
       {active ? (
@@ -108,14 +110,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("cancel")}
           disabled={disabled || pending !== null}
-          title="Stop execution"
+          title={tl("Stop execution")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-danger-border)] bg-transparent px-2 text-[0.75rem] text-[var(--tone-danger-text)]",
             "transition-colors hover:bg-[var(--tone-danger-bg)] disabled:opacity-50",
           )}
         >
           <Square strokeWidth={1.75} className="icon-xs" />
-          Stop
+          {tl("Stop")}
         </button>
       ) : null}
       {error ? (

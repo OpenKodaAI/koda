@@ -69,6 +69,8 @@ SECURITY_SCAN_MANIFEST_ALLOWLIST = {
     "pyproject.toml",
     "rust/Cargo.lock",
     "rust/Cargo.toml",
+    "rust/koda-command-guard/Cargo.lock",
+    "rust/koda-command-guard/pyproject.toml",
     "uv.lock",
 }
 

@@ -20,7 +20,7 @@ import json
 import mimetypes
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
 
 import aiohttp
@@ -56,9 +56,7 @@ def clear_openai_compatible_capability_cache() -> None:
     _CAPABILITY_CACHE.clear()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Capability probing
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def get_openai_compatible_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode) -> ProviderCapabilities:
@@ -93,7 +91,7 @@ async def get_openai_compatible_capabilities(profile: ProviderHttpProfile, turn_
 
 async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode) -> ProviderCapabilities:
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         return ProviderCapabilities(
             provider=profile.provider_id,
             turn_mode=turn_mode,
@@ -204,9 +202,7 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Public runner entrypoints
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def run_openai_compatible(
@@ -226,6 +222,7 @@ async def run_openai_compatible(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     """Single-turn chat completion against an OpenAI-compatible endpoint."""
     del work_dir, session_id, permission_mode, max_turns, runtime_task_id
@@ -244,7 +241,7 @@ async def run_openai_compatible(
         return _ok_result(profile, turn_mode, capabilities, text="(dry-run)", usage={}, cost=0.0)
 
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         return _error_result(
             profile,
             turn_mode,
@@ -276,6 +273,7 @@ async def run_openai_compatible(
         image_paths=image_paths,
         max_budget=max_budget,
         stream=False,
+        effort=effort,
     )
 
     started_at = time.monotonic()
@@ -384,6 +382,7 @@ async def run_openai_compatible_streaming(
     capabilities: ProviderCapabilities | None = None,
     dry_run: bool = False,
     runtime_task_id: int | None = None,
+    effort: str | int | None = None,
 ) -> AsyncIterator[str]:
     """Stream one chat completion via SSE, yielding text deltas."""
     del work_dir, session_id, permission_mode, max_turns, runtime_task_id
@@ -415,7 +414,7 @@ async def run_openai_compatible_streaming(
         return
 
     api_key, env = _resolve_credentials(profile)
-    if not api_key:
+    if not api_key and profile.auth_mode == "api_key":
         if metadata_collector is not None:
             metadata_collector["error"] = True
             metadata_collector["error_kind"] = "provider_auth"
@@ -443,6 +442,7 @@ async def run_openai_compatible_streaming(
         image_paths=image_paths,
         max_budget=max_budget,
         stream=True,
+        effort=effort,
     )
 
     chat_url = _join_with_base(base_url, profile.chat_path)
@@ -543,6 +543,25 @@ async def run_openai_compatible_streaming(
         yield footer
 
     elapsed = time.monotonic() - started_at
+
+    # Empty-stream guard: server returned 200 but produced zero tokens. This
+    # happens with malformed SSE bodies (no ``data:`` lines), early EOF on
+    # chunked-encoded responses, or when llama-server crashes mid-request
+    # without flushing. The runner used to silently report success with empty
+    # output, which let the caller treat the response as a valid empty turn.
+    # Flag it as ``transient`` (retryable) since it's almost always a server
+    # state problem rather than a contract violation.
+    if not received_first_chunk:
+        _record_metrics(profile.provider_id, model, elapsed, streaming=True, success=False)
+        if metadata_collector is not None:
+            metadata_collector["error"] = True
+            metadata_collector["error_kind"] = "transient"
+            metadata_collector["retryable"] = True
+            metadata_collector["error_message"] = (
+                f"{profile.provider_id} stream produced no tokens (empty body or early EOF)."
+            )
+        return
+
     _record_metrics(profile.provider_id, model, elapsed, streaming=True, success=True)
 
     if metadata_collector is not None:
@@ -554,9 +573,7 @@ async def run_openai_compatible_streaming(
             metadata_collector.setdefault("metadata", {})["citations"] = citations_collected
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _resolve_credentials(profile: ProviderHttpProfile) -> tuple[str, dict[str, str]]:
@@ -601,6 +618,7 @@ def _build_chat_payload(
     image_paths: list[str] | None,
     max_budget: float,
     stream: bool,
+    effort: str | int | None = None,
 ) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     if system_prompt and system_prompt.strip():
@@ -619,6 +637,25 @@ def _build_chat_payload(
         payload["stream_options"] = {"include_usage": True}
     for key, value in profile.extra_payload:
         payload[key] = value
+    if effort is not None:
+        from koda.provider_models import get_model_effort_capability
+
+        cap = get_model_effort_capability(profile.provider_id, model)
+        if cap is not None:
+            if cap["kind"] == "enum" and isinstance(effort, str) and effort in cap["values"]:
+                if profile.provider_id == "xai":
+                    payload["reasoning"] = {"effort": effort}
+                else:
+                    payload["reasoning_effort"] = effort
+                if profile.provider_id == "deepseek":
+                    payload["thinking"] = {"type": "enabled"}
+            elif cap["kind"] == "tokens":
+                try:
+                    budget = int(effort)
+                except (TypeError, ValueError):
+                    budget = None
+                if budget is not None and cap["min"] <= budget <= cap["max"]:
+                    payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
     del max_budget  # cost is enforced via budget service, not at the request layer
     return payload
 
@@ -895,3 +932,209 @@ def _record_metrics(provider_id: str, model: str, elapsed: float, *, streaming: 
         DEPENDENCY_REQUESTS.labels(agent_id=_agent_id_label, dependency=f"{provider_id}_api", status=status_label).inc()
     except Exception:
         pass
+
+
+# Profile registry for cloud OpenAI-compatible providers.
+#
+# Each builder reads its env-var override (and timeout config) on first lookup
+# rather than at import time. Adding a new OpenAI-compatible provider means
+# adding one builder + one registry entry — no new module file required.
+
+
+def _build_deepseek_profile() -> ProviderHttpProfile:
+    from koda.config import DEEPSEEK_FIRST_CHUNK_TIMEOUT, DEEPSEEK_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="deepseek",
+        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or "https://api.deepseek.com",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(DEEPSEEK_TIMEOUT),
+    )
+
+
+def _build_groq_profile() -> ProviderHttpProfile:
+    from koda.config import GROQ_FIRST_CHUNK_TIMEOUT, GROQ_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="groq",
+        base_url=os.environ.get("GROQ_API_BASE_URL") or "https://api.groq.com/openai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(GROQ_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(GROQ_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "llama-3.2-11b-vision-preview",
+                "llama-3.2-90b-vision-preview",
+            }
+        ),
+    )
+
+
+def _build_kimi_profile() -> ProviderHttpProfile:
+    from koda.config import KIMI_FIRST_CHUNK_TIMEOUT, KIMI_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="kimi",
+        base_url=os.environ.get("KIMI_API_BASE_URL") or "https://api.moonshot.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(KIMI_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(KIMI_TIMEOUT),
+        # Kimi K2 family is natively multimodal; the kimi-vision-* and
+        # moonshot-v1-vision-* SKUs are kept for operators pinned to those
+        # snapshots.
+        vision_models=frozenset(
+            {
+                "kimi-k2.6",
+                "kimi-k2.5",
+                "kimi-latest",
+                "kimi-latest-vision",
+                "kimi-vision-2024-12-09",
+                "moonshot-v1-vision-preview",
+            }
+        ),
+    )
+
+
+def _build_mistral_profile() -> ProviderHttpProfile:
+    from koda.config import MISTRAL_FIRST_CHUNK_TIMEOUT, MISTRAL_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="mistral",
+        base_url=os.environ.get("MISTRAL_API_BASE_URL") or "https://api.mistral.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(MISTRAL_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(MISTRAL_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "pixtral-large-latest",
+                "pixtral-large-2411",
+                "pixtral-12b-2409",
+                "pixtral-12b",
+                "pixtral-12b-latest",
+            }
+        ),
+    )
+
+
+def _build_perplexity_profile() -> ProviderHttpProfile:
+    from koda.config import PERPLEXITY_FIRST_CHUNK_TIMEOUT, PERPLEXITY_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="perplexity",
+        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or "https://api.perplexity.ai",
+        chat_path="/chat/completions",
+        models_path=None,
+        capability_probe="health_only",
+        health_path="/",
+        first_chunk_timeout_seconds=float(PERPLEXITY_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(PERPLEXITY_TIMEOUT),
+    )
+
+
+def _build_qwen_profile() -> ProviderHttpProfile:
+    from koda.config import QWEN_FIRST_CHUNK_TIMEOUT, QWEN_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="qwen",
+        base_url=os.environ.get("QWEN_API_BASE_URL") or "https://dashscope-intl.aliyuncs.com",
+        chat_path="/compatible-mode/v1/chat/completions",
+        models_path="/compatible-mode/v1/models",
+        first_chunk_timeout_seconds=float(QWEN_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(QWEN_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "qwen3-vl-max",
+                "qwen3-vl-plus",
+                "qwen3-vl-flash",
+                "qwen-vl-max",
+                "qwen-vl-max-latest",
+                "qwen-vl-plus",
+                "qwen-vl-plus-latest",
+                "qwen2-vl-72b-instruct",
+                "qwen2.5-vl-72b-instruct",
+                "qvq-72b-preview",
+            }
+        ),
+    )
+
+
+def _build_xai_profile() -> ProviderHttpProfile:
+    from koda.config import XAI_FIRST_CHUNK_TIMEOUT, XAI_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="xai",
+        base_url=os.environ.get("XAI_API_BASE_URL") or "https://api.x.ai",
+        chat_path="/v1/chat/completions",
+        models_path="/v1/models",
+        first_chunk_timeout_seconds=float(XAI_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(XAI_TIMEOUT),
+        # Grok 4.x is multimodal end-to-end; older `*-vision` SKUs stay
+        # listed for operators still pinned to legacy snapshots.
+        vision_models=frozenset(
+            {
+                "grok-4.3",
+                "grok-4.20-multi-agent",
+                "grok-4.1-fast",
+                "grok-4-fast",
+                "grok-4-0709",
+                "grok-4-vision-0709",
+                "grok-2-vision-1212",
+                "grok-vision-beta",
+            }
+        ),
+    )
+
+
+_PROFILE_BUILDERS: dict[str, Callable[[], ProviderHttpProfile]] = {
+    "deepseek": _build_deepseek_profile,
+    "groq": _build_groq_profile,
+    "kimi": _build_kimi_profile,
+    "mistral": _build_mistral_profile,
+    "perplexity": _build_perplexity_profile,
+    "qwen": _build_qwen_profile,
+    "xai": _build_xai_profile,
+}
+
+OPENAI_COMPATIBLE_PROVIDERS: frozenset[str] = frozenset(_PROFILE_BUILDERS)
+"""Provider IDs handled by the cloud OpenAI-compatible registry."""
+
+_PROFILE_CACHE: dict[str, ProviderHttpProfile] = {}
+
+
+def get_provider_profile(provider_id: str) -> ProviderHttpProfile:
+    """Return the cached :class:`ProviderHttpProfile` for an OpenAI-compatible provider."""
+    cached = _PROFILE_CACHE.get(provider_id)
+    if cached is not None:
+        return cached
+    builder = _PROFILE_BUILDERS.get(provider_id)
+    if builder is None:
+        raise KeyError(f"No OpenAI-compatible profile registered for provider {provider_id!r}")
+    profile = builder()
+    _PROFILE_CACHE[provider_id] = profile
+    return profile
+
+
+def reset_provider_profile_cache() -> None:
+    """Test hook — drop cached profiles so env-var overrides can be re-read."""
+    _PROFILE_CACHE.clear()
+
+
+async def get_capabilities_for_provider(provider_id: str, turn_mode: TurnMode) -> ProviderCapabilities:
+    """Probe runtime capabilities for a registered OpenAI-compatible provider."""
+    return await get_openai_compatible_capabilities(get_provider_profile(provider_id), turn_mode)
+
+
+async def run_for_provider(provider_id: str, **kwargs: Any) -> dict[str, Any]:
+    """Run one non-streaming turn against a registered OpenAI-compatible provider."""
+    return await run_openai_compatible(profile=get_provider_profile(provider_id), **kwargs)
+
+
+async def run_streaming_for_provider(provider_id: str, **kwargs: Any) -> AsyncIterator[str]:
+    """Run a streaming turn against a registered OpenAI-compatible provider."""
+    async for chunk in run_openai_compatible_streaming(profile=get_provider_profile(provider_id), **kwargs):
+        yield chunk

@@ -370,7 +370,7 @@ export function AnimatedColorPicker({
                     ref={panelRef}
                     role="dialog"
                     aria-label={tl("Painel de cor")}
-                    className="app-floating-panel app-overlay-fade-in z-[90] overflow-hidden rounded-[0.8rem] p-3"
+                    className="app-floating-panel app-floating-anim z-[90] overflow-hidden rounded-[0.8rem] p-3"
                     style={{
                       position: "fixed",
                       top: panelPosition?.top ?? 0,
