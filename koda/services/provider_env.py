@@ -227,7 +227,8 @@ def build_tool_subprocess_env(
     env_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Return a tool-safe environment with only explicit overrides added back."""
-    env = _sanitize_env(base_env, env_overrides=env_overrides, safe_env_keys=_SAFE_TOOL_ENV_KEYS)
-    if not dict(env_overrides or {}).get("HOME"):
+    overrides = {str(key): str(value) for key, value in dict(env_overrides or {}).items()}
+    env = _sanitize_env(base_env, env_overrides=overrides, safe_env_keys=_SAFE_TOOL_ENV_KEYS)
+    if "HOME" not in overrides:
         env.pop("HOME", None)
     return env

@@ -1,7 +1,8 @@
 import type { HTMLAttributes, ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ToastProvider } from "@/hooks/use-toast";
 
 vi.mock("framer-motion", () => {
   const createMotion =
@@ -35,6 +36,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/hooks/use-runtime-task", () => ({
   useRuntimeTask: vi.fn(),
 }));
@@ -50,6 +55,8 @@ vi.mock("@/components/runtime/runtime-browser-panel", () => ({
 describe("RuntimeTaskRoom", () => {
   it("renders a single stage with tabs and opens details in a secondary panel", async () => {
     const { useRuntimeTask } = await import("@/hooks/use-runtime-task");
+    const refresh = vi.fn(async () => undefined);
+    const mutate = vi.fn(async () => ({}));
     vi.mocked(useRuntimeTask).mockReturnValue({
       bundle: {
         agentId: "ATLAS",
@@ -127,8 +134,8 @@ describe("RuntimeTaskRoom", () => {
       refreshing: false,
       error: null,
       connected: true,
-      refresh: vi.fn(),
-      mutate: vi.fn(),
+      refresh,
+      mutate,
       fetchResource: vi.fn(),
     });
 
@@ -136,7 +143,9 @@ describe("RuntimeTaskRoom", () => {
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <RuntimeTaskRoom agentId="ATLAS" taskId={42} />
+        <ToastProvider>
+          <RuntimeTaskRoom agentId="ATLAS" taskId={42} />
+        </ToastProvider>
       </I18nProvider>,
     );
 
@@ -144,12 +153,130 @@ describe("RuntimeTaskRoom", () => {
     expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Browser|Navegador/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Atividade" })).toBeInTheDocument();
-    expect(screen.getByText("terminal mock")).toBeInTheDocument();
+    expect(await screen.findByText("terminal mock")).toBeInTheDocument();
+    const stage = screen.getByTestId("runtime-stage-shell");
+    expect(within(stage).queryByText("Ao vivo")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expandir superfície" }));
+    expect(stage).toHaveClass("runtime-stage-shell--fullscreen");
+    fireEvent.click(screen.getByRole("button", { name: "Recolher superfície" }));
+    expect(stage).not.toHaveClass("runtime-stage-shell--fullscreen");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações do runtime" }));
+    const menu = await screen.findByRole("menu", { name: "Mais ações do runtime" });
+    expect(within(menu).getByRole("menuitem", { name: "Atualizar" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Retentar" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Recuperar" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Fixar" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Cancelar execução" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Solicitar cleanup" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Forçar cleanup" })).toBeInTheDocument();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Atualizar" }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações do runtime" }));
+    const destructiveMenu = await screen.findByRole("menu", { name: "Mais ações do runtime" });
+    fireEvent.click(within(destructiveMenu).getByRole("menuitem", { name: "Cancelar execução" }));
+    await waitFor(() => expect(mutate).toHaveBeenCalled());
+    expect(mutate.mock.calls.at(-1)?.[0]).toBe("cancel");
+    confirmSpy.mockRestore();
 
     fireEvent.click(screen.getByRole("button", { name: "Detalhes" }));
 
+    expect(screen.getByRole("dialog", { name: "Detalhes" })).toHaveStyle({
+      position: "fixed",
+    });
     expect(screen.getByRole("tab", { name: "Arquivos" })).toBeInTheDocument();
     expect(screen.getByText("/tmp/runtime-42")).toBeInTheDocument();
     expect(screen.getByText(/Git status|Status do Git/i)).toBeInTheDocument();
+    const statusLine = screen.getByText("M src/app.tsx");
+    expect(statusLine.closest("pre")).toHaveClass("runtime-git-syntax");
+    expect(statusLine).toHaveClass("syn-git-status-modified");
+    expect(screen.getByText("+ novo fluxo")).toHaveClass("syn-diff-add");
+  });
+
+  it("keeps the mock terminal on the lightweight preview path", async () => {
+    const { useRuntimeTask } = await import("@/hooks/use-runtime-task");
+    const mutate = vi.fn();
+    vi.mocked(useRuntimeTask).mockReturnValue({
+      bundle: {
+        agentId: "ATLAS",
+        fetchedAt: "2026-03-19T00:00:00.000Z",
+        availability: {
+          health: "available",
+          database: "available",
+          runtime: "available",
+          browser: "available",
+          attach: "available",
+          errors: [],
+        },
+        task: {
+          id: 42,
+          status: "running",
+          query_text: "Mock runtime",
+          current_phase: "running",
+        },
+        environment: {
+          id: 7,
+          task_id: 42,
+          status: "active",
+          current_phase: "running",
+        },
+        warnings: [],
+        guardrails: [],
+        events: [],
+        artifacts: [],
+        checkpoints: [],
+        terminals: [
+          {
+            id: 1,
+            task_id: 42,
+            label: "Runtime",
+            interactive: true,
+            preview: "$ hello",
+          },
+        ],
+        browser: { status: "running" },
+        browserSessions: [],
+        workspaceTree: [],
+        workspaceStatus: {},
+        workspaceDiff: {},
+        services: [],
+        resources: [],
+        loopCycles: [],
+        sessions: {
+          attach_sessions: [],
+          browser_sessions: [],
+          terminals: [],
+        },
+        errors: [],
+      },
+      loading: false,
+      refreshing: false,
+      error: null,
+      connected: true,
+      refresh: vi.fn(),
+      mutate,
+      fetchResource: vi.fn(),
+    });
+
+    const { RuntimeTaskRoom } = await import("@/components/runtime/runtime-task-room");
+
+    render(
+      <I18nProvider initialLanguage="pt-BR">
+        <ToastProvider>
+          <RuntimeTaskRoom agentId="ATLAS" taskId={42} mock />
+        </ToastProvider>
+      </I18nProvider>,
+    );
+
+    expect(vi.mocked(useRuntimeTask)).toHaveBeenLastCalledWith("ATLAS", 42, { mock: true });
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+
+    expect(screen.getByText(/Terminal mock/i)).toBeInTheDocument();
+    expect(screen.getByText("$ hello")).toBeInTheDocument();
+    expect(screen.queryByText("terminal mock")).not.toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
   });
 });

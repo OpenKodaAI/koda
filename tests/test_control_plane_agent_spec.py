@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from koda.control_plane.agent_spec import (
+    build_agent_spec_from_snapshot,
     compose_agent_prompt,
     normalize_effort_overrides,
     normalize_model_policy,
@@ -11,6 +12,42 @@ from koda.control_plane.agent_spec import (
     resolve_scope_documents,
     validate_agent_spec,
 )
+
+
+def test_build_agent_spec_from_snapshot_includes_agent_skills() -> None:
+    spec = build_agent_spec_from_snapshot(
+        {
+            "agent": {"id": "ATLAS"},
+            "sections": {
+                "prompting": {
+                    "skill_policy": {"enabled": True, "max_skills": 2},
+                    "custom_skills": [
+                        {
+                            "id": "review",
+                            "name": "Review",
+                            "content": "# Review",
+                            "enabled": False,
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    assert spec["skill_policy"] == {"enabled": True, "max_skills": 2}
+    assert spec["custom_skills"] == [
+        {
+            "id": "review",
+            "name": "Review",
+            "content": "# Review",
+            "enabled": False,
+            "instruction": "",
+            "category": "general",
+            "aliases": [],
+            "tags": [],
+            "output_format_enforcement": "",
+        }
+    ]
 
 
 def test_normalize_effort_overrides_accepts_enum_and_tokens() -> None:
@@ -130,25 +167,35 @@ def test_resource_access_policy_normalizes_integration_grants() -> None:
         {
             "allowed_global_secret_keys": ["OPENAI_API_KEY"],
             "integration_grants": {
-                "GWS": {
+                "mcp:atlassian": {
                     "enabled": True,
-                    "allow_actions": ["gmail.list", "drive.*"],
-                    "secret_keys": ["gws_credentials_file"],
-                    "allowed_domains": ["googleapis.com"],
-                    "allow_private_network": False,
+                    "allow_actions": ["search_issues", "get_issue"],
+                    "secret_keys": ["atlassian_api_token"],
                 }
             },
         }
     )
 
     assert policy["allowed_global_secret_keys"] == ["OPENAI_API_KEY"]
-    assert policy["integration_grants"]["gws"] == {
+    assert policy["integration_grants"]["mcp:atlassian"] == {
         "enabled": True,
-        "allow_actions": ["gmail.list", "drive.*"],
-        "secret_keys": ["GWS_CREDENTIALS_FILE"],
-        "allowed_domains": ["googleapis.com"],
-        "allow_private_network": False,
+        "allow_actions": ["search_issues", "get_issue"],
+        "secret_keys": ["ATLASSIAN_API_TOKEN"],
     }
+
+
+def test_resource_access_policy_drops_removed_legacy_external_grants() -> None:
+    policy = normalize_resource_access_policy(
+        {
+            "integration_grants": {
+                "gws": {"allow_actions": ["gmail.list"]},
+                "jira": {"allow_actions": ["issues.search"]},
+                "aws": {"allow_actions": ["s3.list"]},
+            }
+        }
+    )
+
+    assert "integration_grants" not in policy
 
 
 def test_resource_access_policy_drops_legacy_native_database_grants() -> None:

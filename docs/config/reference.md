@@ -37,7 +37,26 @@ Koda keeps infrastructure bootstrap and product configuration separate on purpos
 
 - `KNOWLEDGE_V2_POSTGRES_DSN`
 - `KNOWLEDGE_V2_POSTGRES_SCHEMA`
+- `KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE`
+- `KNOWLEDGE_V2_POSTGRES_POOL_MIN_IDLE`
+- `KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS`
+- `KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS`
+- `KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS`
+- `KNOWLEDGE_V2_POSTGRES_MAX_LIFETIME_SECONDS`
+- `KODA_RETRIEVAL_POSTGRES_POOL_MAX_SIZE`
+- `KODA_MEMORY_POSTGRES_POOL_MAX_SIZE`
+- `KODA_ARTIFACT_POSTGRES_POOL_MAX_SIZE`
+- `KODA_BOT_GATEWAY_POSTGRES_POOL_MAX_SIZE`
 - any platform-level Postgres connectivity overrides you intentionally manage outside the default quickstart
+
+### Retrieval Quality Gates
+
+- `KNOWLEDGE_RETRIEVAL_MIN_QUALITY_TIER`
+- `KNOWLEDGE_RETRIEVAL_DENSE_WINDOW`
+- `KNOWLEDGE_RETRIEVAL_RERANK_TOP_K`
+- `KNOWLEDGE_RETRIEVAL_VECTOR_COVERAGE_MIN`
+
+`lexical_graph` is the default production tier. `hybrid_dense` requires pgvector-backed embeddings with enough vector coverage and a real local query embedding model. `hybrid_reranked` additionally requires the Python reranker path to be enabled; the Rust sidecar never advertises reranked quality by itself.
 
 ### Object Storage
 

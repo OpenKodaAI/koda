@@ -23,7 +23,10 @@ const ASSET_LABEL_RESOLVERS: Record<
         successMessage: "Modelo Kokoro pronto.",
       };
     }
-    const details = (job.details as Record<string, unknown> | null | undefined) ?? {};
+    const details = {
+      ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
+      ...(job as ProviderDownloadJob & Record<string, unknown>),
+    };
     const voiceName = String(details.voice_name ?? job.asset_id);
     return {
       toastTitle: `Baixando voz Kokoro · ${voiceName}`,
@@ -31,7 +34,10 @@ const ASSET_LABEL_RESOLVERS: Record<
     };
   },
   whispercpp: (job) => {
-    const details = (job.details as Record<string, unknown> | null | undefined) ?? {};
+    const details = {
+      ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
+      ...(job as ProviderDownloadJob & Record<string, unknown>),
+    };
     const label = String(details.label ?? `Whisper ${job.asset_id}`);
     return {
       toastTitle: `Baixando ${label}`,
@@ -39,8 +45,11 @@ const ASSET_LABEL_RESOLVERS: Record<
     };
   },
   embedding: (job) => {
-    const details = (job.details as Record<string, unknown> | null | undefined) ?? {};
-    const label = String(details.label ?? `Embedding ${job.asset_id}`);
+    const details = {
+      ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
+      ...(job as ProviderDownloadJob & Record<string, unknown>),
+    };
+    const label = String(details.title ?? details.label ?? `Embedding ${job.asset_id}`);
     return {
       toastTitle: `Baixando ${label}`,
       successMessage: `${label} pronto.`,

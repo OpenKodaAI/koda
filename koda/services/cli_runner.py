@@ -1,4 +1,4 @@
-"""Generic CLI runner for gh/glab/docker with security checks."""
+"""Generic local CLI runner with security checks."""
 
 import asyncio
 import re
@@ -181,7 +181,7 @@ async def run_cli_command(
     """Run a CLI command with safety checks.
 
     Args:
-        binary: CLI binary name (gh, glab, docker, gws).
+        binary: local CLI binary name.
         args: Arguments string.
         work_dir: Working directory.
         is_blocked: Optional callable; preferred over ``blocked_pattern``.

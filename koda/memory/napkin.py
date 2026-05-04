@@ -13,6 +13,7 @@ from koda.memory.types import (
     DEFAULT_EMBEDDING_STATUS,
     DEFAULT_MEMORY_STATUS,
     DEFAULT_ORIGIN_KIND,
+    LEXICAL_READY_EMBEDDING_STATUS,
     Memory,
     MemoryStatus,
     MemoryType,
@@ -30,6 +31,14 @@ from koda.state.primary import (
 
 def _current_agent_scope(agent_id: str | None = None) -> str:
     return normalize_agent_scope(agent_id, fallback=AGENT_ID)
+
+
+def _append_valid_window(sql: list[str], params: list[object]) -> None:
+    now_iso = datetime.now().isoformat()
+    sql.append("AND (expires_at IS NULL OR expires_at = '' OR expires_at >= ?)")
+    params.append(now_iso)
+    sql.append("AND (valid_until IS NULL OR valid_until = '' OR valid_until >= ?)")
+    params.append(now_iso)
 
 
 def _primary_enabled() -> bool:
@@ -398,12 +407,14 @@ def get_stats(user_id: int, *, agent_id: str | None = None) -> dict:
 
 
 def get_expired_active(now_iso: str, *, agent_id: str | None = None) -> list[tuple[int, str]]:
-    """Return (id, vector_ref_id) of active memories with expires_at < now."""
+    """Return (id, vector_ref_id) of active memories outside their validity window."""
     scope = _current_agent_scope(agent_id)
     rows = _fetch_rows(
         "SELECT id, vector_ref_id FROM napkin_log WHERE is_active = 1 "
-        "AND agent_id = ? AND expires_at IS NOT NULL AND expires_at < ?",
-        (scope, now_iso),
+        "AND agent_id = ? "
+        "AND ((expires_at IS NOT NULL AND expires_at != '' AND expires_at < ?) "
+        "OR (valid_until IS NOT NULL AND valid_until != '' AND valid_until < ?))",
+        (scope, now_iso, now_iso),
     )
     return [
         (
@@ -474,7 +485,7 @@ def update_embedding_state(
     if embedding_status is not None:
         fields.append("embedding_status = ?")
         params.append(embedding_status)
-        if embedding_status == "ready":
+        if embedding_status in {"ready", LEXICAL_READY_EMBEDDING_STATUS}:
             fields.append("embedding_retry_at = NULL")
     if attempts is not None:
         fields.append("embedding_attempts = ?")
@@ -509,6 +520,17 @@ def get_pending_embeddings(agent_id: str | None, limit: int = 32) -> list[Memory
     return [_row_to_memory(r) for r in rows]
 
 
+def migrate_lexical_embedding_status(*, agent_id: str | None = None) -> int:
+    """Mark lexical-only records honestly instead of presenting them as vector-ready."""
+    scope = _current_agent_scope(agent_id)
+    return _write(
+        "UPDATE napkin_log SET embedding_status = ? "
+        "WHERE agent_id = ? AND COALESCE(embedding_status, '') = 'ready' "
+        "AND COALESCE(vector_ref_id, '') = ''",
+        (LEXICAL_READY_EMBEDDING_STATUS, scope),
+    )
+
+
 def search_entries_lexical(
     *,
     user_id: int,
@@ -537,6 +559,7 @@ def search_entries_lexical(
         params.extend(t.value for t in memory_types)
     sql.append("AND agent_id = ?")
     params.append(scope)
+    _append_valid_window(sql, params)
     if project_key:
         sql.append("AND COALESCE(project_key, '') IN (?, '')")
         params.append(project_key)
@@ -604,6 +627,7 @@ def get_exact_linked_memories(
     params: list[object] = [user_id, DEFAULT_MEMORY_STATUS, MemoryStatus.ACTIVE.value]
     sql.append("AND agent_id = ?")
     params.append(scope)
+    _append_valid_window(sql, params)
     if project_key:
         sql.append("AND COALESCE(project_key, '') IN (?, '')")
         params.append(project_key)
@@ -630,19 +654,25 @@ def get_exact_linked_memories(
     return [_row_to_memory(r) for r in rows]
 
 
-def get_last_maintenance() -> str | None:
+def get_last_maintenance(*, agent_id: str | None = None) -> str | None:
     """Return executed_at of the last maintenance, or None."""
-    row = _fetch_row("SELECT executed_at FROM memory_maintenance_log ORDER BY id DESC LIMIT 1", ())
+    scope = _current_agent_scope(agent_id)
+    row = _fetch_row(
+        "SELECT executed_at FROM memory_maintenance_log WHERE COALESCE(agent_id, ?) = ? ORDER BY id DESC LIMIT 1",
+        ("default", scope),
+    )
     if row is None:
         return None
     return str(row["executed_at"] if isinstance(row, dict) else row[0])
 
 
-def log_maintenance(operation: str, affected: int, details: str) -> None:
+def log_maintenance(operation: str, affected: int, details: str, *, agent_id: str | None = None) -> None:
     """Insert a record into memory_maintenance_log."""
+    scope = _current_agent_scope(agent_id)
     _insert(
-        "INSERT INTO memory_maintenance_log (operation, memories_affected, details, executed_at) VALUES (?, ?, ?, ?)",
-        (operation, affected, details, datetime.now().isoformat()),
+        "INSERT INTO memory_maintenance_log "
+        "(agent_id, operation, memories_affected, details, executed_at) VALUES (?, ?, ?, ?, ?)",
+        (scope, operation, affected, details, datetime.now().isoformat()),
     )
 
 
@@ -733,8 +763,19 @@ def get_recent_memories(
         f"SELECT {_SELECT_COLS} FROM napkin_log "
         "WHERE user_id = ? AND is_active = 1 AND agent_id = ? AND created_at >= ? "
         "AND COALESCE(memory_status, ?) = ? "
+        "AND (expires_at IS NULL OR expires_at = '' OR expires_at >= ?) "
+        "AND (valid_until IS NULL OR valid_until = '' OR valid_until >= ?) "
         "ORDER BY created_at DESC LIMIT ?",
-        (user_id, scope, since_iso, DEFAULT_MEMORY_STATUS, MemoryStatus.ACTIVE.value, limit),
+        (
+            user_id,
+            scope,
+            since_iso,
+            DEFAULT_MEMORY_STATUS,
+            MemoryStatus.ACTIVE.value,
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+            limit,
+        ),
     )
     return [_row_to_memory(r) for r in rows]
 
@@ -756,8 +797,19 @@ def get_memories_by_types(
         f"WHERE user_id = ? AND is_active = 1 AND agent_id = ? "
         f"AND memory_type IN ({placeholders}) "
         "AND COALESCE(memory_status, ?) = ? "
+        "AND (expires_at IS NULL OR expires_at = '' OR expires_at >= ?) "
+        "AND (valid_until IS NULL OR valid_until = '' OR valid_until >= ?) "
         "ORDER BY importance DESC, created_at DESC LIMIT ?",
-        [user_id, scope, *types, DEFAULT_MEMORY_STATUS, MemoryStatus.ACTIVE.value, limit],
+        [
+            user_id,
+            scope,
+            *types,
+            DEFAULT_MEMORY_STATUS,
+            MemoryStatus.ACTIVE.value,
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+            limit,
+        ],
     )
     return [_row_to_memory(r) for r in rows]
 
@@ -798,8 +850,20 @@ def get_recent_high_importance(
         f"AND memory_type IN ({placeholders}) "
         "AND importance >= ? AND created_at >= ? "
         "AND COALESCE(memory_status, ?) = ? "
+        "AND (expires_at IS NULL OR expires_at = '' OR expires_at >= ?) "
+        "AND (valid_until IS NULL OR valid_until = '' OR valid_until >= ?) "
         "ORDER BY importance DESC, created_at DESC LIMIT 5",
-        [user_id, scope, *types, min_importance, cutoff, DEFAULT_MEMORY_STATUS, MemoryStatus.ACTIVE.value],
+        [
+            user_id,
+            scope,
+            *types,
+            min_importance,
+            cutoff,
+            DEFAULT_MEMORY_STATUS,
+            MemoryStatus.ACTIVE.value,
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+        ],
     )
     return [_row_to_memory(r) for r in rows]
 
@@ -877,6 +941,7 @@ def get_episode_bundle_candidates(
     scope = _current_agent_scope(agent_id)
     sql.append("AND agent_id = ?")
     params.append(scope)
+    _append_valid_window(sql, params)
     if project_key:
         sql.append("AND COALESCE(project_key, '') IN (?, '')")
         params.append(project_key)

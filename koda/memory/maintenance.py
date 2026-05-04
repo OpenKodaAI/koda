@@ -14,6 +14,7 @@ from koda.memory.napkin import (
     get_expired_active,
     get_stale_memories,
     log_maintenance,
+    migrate_lexical_embedding_status,
 )
 from koda.memory.store import MemoryStore
 from koda.memory.types import DEFAULT_TTL_DAYS, MemoryType
@@ -65,7 +66,7 @@ def cleanup_expired(store: MemoryStore) -> int:
     entry_ids = [row[0] for row in expired]
     vector_ref_ids = [row[1] for row in expired if row[1]]
     count = store.batch_deactivate(entry_ids, vector_ref_ids)
-    log_maintenance("cleanup_expired", count, f"Deactivated {count} expired memories")
+    log_maintenance("cleanup_expired", count, f"Deactivated {count} expired memories", agent_id=agent_id)
     log.info("maintenance_cleanup_expired", count=count)
     return count
 
@@ -84,7 +85,12 @@ def decay_importance(store: MemoryStore, half_life_days: float = 180.0, min_impo
             updates.append((new_imp, memory.id))
     if updates:
         batch_update_importance(updates)
-    log_maintenance("decay_importance", len(updates), f"Decayed importance of {len(updates)} stale memories")
+    log_maintenance(
+        "decay_importance",
+        len(updates),
+        f"Decayed importance of {len(updates)} stale memories",
+        agent_id=_store_agent_scope(store),
+    )
     log.info("maintenance_decay_importance", updated=len(updates), total_stale=len(stale))
     return len(updates)
 
@@ -131,8 +137,22 @@ def extend_existing_ttls(store: MemoryStore) -> int:
     except Exception:
         log.exception("extend_existing_ttls_failed")
     if updated:
-        log_maintenance("extend_ttls", updated, f"Extended TTLs for {updated} memories")
+        log_maintenance("extend_ttls", updated, f"Extended TTLs for {updated} memories", agent_id=agent_id)
         log.info("maintenance_extend_ttls", updated=updated)
+    return updated
+
+
+def normalize_lexical_embedding_status(store: MemoryStore) -> int:
+    agent_id = _store_agent_scope(store)
+    updated = migrate_lexical_embedding_status(agent_id=agent_id)
+    if updated:
+        log_maintenance(
+            "normalize_lexical_embedding_status",
+            updated,
+            f"Marked {updated} lexical-only memories as lexical_ready",
+            agent_id=agent_id,
+        )
+        log.info("maintenance_normalize_lexical_embedding_status", updated=updated, agent_id=agent_id)
     return updated
 
 
@@ -175,7 +195,7 @@ def cleanup_orphans(store: MemoryStore) -> int:
                 reason="local_vector_helper_rebuildable",
             )
         if cleaned:
-            log_maintenance("cleanup_orphans", cleaned, f"Cleaned {cleaned} orphan entries")
+            log_maintenance("cleanup_orphans", cleaned, f"Cleaned {cleaned} orphan entries", agent_id=agent_id)
     except Exception:
         log.exception("cleanup_orphans_failed")
     return cleaned
@@ -184,6 +204,7 @@ def cleanup_orphans(store: MemoryStore) -> int:
 async def run_maintenance(store: MemoryStore) -> dict:
     loop = asyncio.get_running_loop()
     repaired = await store.repair_pending_embeddings(limit=64)
+    lexical_normalized = await loop.run_in_executor(None, partial(normalize_lexical_embedding_status, store))
     expired = await loop.run_in_executor(None, partial(cleanup_expired, store))
     decayed, extended = await asyncio.gather(
         loop.run_in_executor(None, partial(decay_importance, store)),
@@ -196,6 +217,7 @@ async def run_maintenance(store: MemoryStore) -> dict:
         "ttls_extended": extended,
         "orphans_cleaned": orphans,
         "embeddings_repaired": repaired,
+        "lexical_status_normalized": lexical_normalized,
     }
     log.info("maintenance_complete", **summary)
     return summary

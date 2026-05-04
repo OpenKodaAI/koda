@@ -154,6 +154,22 @@ function ToastItem({ toast }: { toast: Toast }) {
           ) : null}
           {hasProgress ? <ToastProgressBar toast={toast} /> : null}
         </div>
+        {toast.action ? (
+          <button
+            type="button"
+            onClick={toast.action.onClick}
+            disabled={toast.action.disabled}
+            aria-label={toast.action.ariaLabel ?? toast.action.label}
+            className={cn(
+              "ml-2 inline-flex h-6 shrink-0 items-center justify-center rounded-full px-2.5",
+              "border border-current/20 text-[0.6875rem] font-medium leading-none opacity-85",
+              "transition-[opacity,background-color,border-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10",
+              "disabled:pointer-events-none disabled:opacity-45",
+            )}
+          >
+            {toast.action.label}
+          </button>
+        ) : null}
         {isDismissible ? (
           <button
             type="button"

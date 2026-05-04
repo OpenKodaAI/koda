@@ -966,6 +966,11 @@ async def test_backend_start_uses_pool_and_reports_health(monkeypatch: pytest.Mo
 
     assert health["pool_active"] is True
     assert health["check_ok"] is True
+    assert health["pool_max_size"] >= health["pool_min_size"]
+    assert health["acquire_timeout_ms"] > 0
+    assert health["query_timeout_ms"] > 0
+    assert health["pool_wait_timeout_total"] == 0
+    assert health["direct_connections_in_flight"] == 0
 
     await backend.close()
     assert fake_pool.closed is True
@@ -995,6 +1000,32 @@ async def test_backend_health_does_not_bootstrap_unstarted_backend():
     assert health["error"] == "not_bootstrapped"
     assert health["ingest_queue"]["ready"] is False
     assert health["ingest_queue"]["reason"] == "backend_not_bootstrapped"
+
+
+@pytest.mark.asyncio
+async def test_postgres_backend_limits_direct_connection_fallback() -> None:
+    backend = KnowledgeV2PostgresBackend(
+        agent_id="AGENT_A",
+        dsn="postgres://test",
+        schema="knowledge_v2_test",
+        pool_max_size=1,
+        acquire_timeout_ms=1,
+    )
+    backend._ready = True
+    backend._ensure_pool = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    await backend._direct_connection_gate.acquire()
+    backend._direct_connections_in_flight = 1
+    try:
+        with pytest.raises(RuntimeError, match="direct postgres connection lane saturated"):
+            async with backend._connection():
+                raise AssertionError("connection should not be yielded")
+    finally:
+        backend._direct_connections_in_flight = 0
+        backend._direct_connection_gate.release()
+
+    assert backend._direct_wait_timeout_total == 1
+    assert backend._last_postgres_error == "direct postgres connection lane saturated"
 
 
 @pytest.mark.asyncio

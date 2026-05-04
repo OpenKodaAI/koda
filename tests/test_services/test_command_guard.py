@@ -66,8 +66,5 @@ def test_dispatcher_module_uses_guard_constants() -> None:
     from koda.services import tool_dispatcher
 
     assert tool_dispatcher._BLOCKED_SHELL is not None
-    assert tool_dispatcher._BLOCKED_GWS is not None
-    assert tool_dispatcher._BLOCKED_JIRA is not None
-    assert tool_dispatcher._BLOCKED_CONFLUENCE is not None
     assert tool_dispatcher._BLOCKED_SHELL.is_blocked("rm -rf /")
     assert not tool_dispatcher._BLOCKED_SHELL.is_blocked("git status")

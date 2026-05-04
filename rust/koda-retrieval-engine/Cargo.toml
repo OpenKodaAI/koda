@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 koda-observability = { path = "../koda-observability" }
+koda-postgres = { path = "../koda-postgres" }
 koda-proto = { path = "../koda-proto" }
 prost-types.workspace = true
 serde = { version = "1", features = ["derive"] }

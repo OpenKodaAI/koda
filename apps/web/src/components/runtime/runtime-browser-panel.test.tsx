@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ToastProvider } from "@/hooks/use-toast";
 
 class MockWebSocket {
   static OPEN = 1;
@@ -32,18 +33,20 @@ describe("RuntimeBrowserPanel", () => {
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <RuntimeBrowserPanel
-          agentId="ATLAS"
-          taskId={7}
-          browser={{
-            status: "running",
-            transport: "local_headful",
-            display_id: 91,
-            novnc_port: null,
-          }}
-          mutate={mutate}
-          fetchResource={fetchResource}
-        />
+        <ToastProvider>
+          <RuntimeBrowserPanel
+            agentId="ATLAS"
+            taskId={7}
+            browser={{
+              status: "running",
+              transport: "local_headful",
+              display_id: 91,
+              novnc_port: null,
+            }}
+            mutate={mutate}
+            fetchResource={fetchResource}
+          />
+        </ToastProvider>
       </I18nProvider>
     );
 

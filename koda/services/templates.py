@@ -2,8 +2,6 @@
 
 import json
 import os
-import re
-import unicodedata
 from pathlib import Path
 
 from koda.config import AGENT_ID, SCRIPT_DIR
@@ -35,14 +33,6 @@ if _templates_override:
         TEMPLATES_PATH = SCRIPT_DIR / TEMPLATES_PATH
 else:
     TEMPLATES_PATH = (SCRIPT_DIR / f"templates_{_bid}.json") if _bid else (SCRIPT_DIR / "templates.json")
-
-_skills_override = os.environ.get("SKILLS_DIR")
-if _skills_override:
-    SKILLS_DIR = Path(_skills_override)
-    if not SKILLS_DIR.is_absolute():
-        SKILLS_DIR = SCRIPT_DIR / SKILLS_DIR
-else:
-    SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 # Built-in templates
 _BUILTIN_TEMPLATES: dict[str, str] = {
@@ -86,73 +76,13 @@ _BUILTIN_TEMPLATES: dict[str, str] = {
 }
 
 
-def _load_skills() -> dict[str, str]:
-    """Load skill templates from .md files in the skills directory."""
-    inline_skills = _load_inline_mapping("SKILLS_JSON")
-    if inline_skills:
-        return inline_skills
-    skills: dict[str, str] = {}
-    if not SKILLS_DIR.is_dir():
-        return skills
-    for md_file in sorted(SKILLS_DIR.glob("*.md")):
-        name = md_file.stem
-        try:
-            content = md_file.read_text(encoding="utf-8").strip()
-            if content:
-                skills[name] = content
-        except OSError:
-            log.warning("skill_load_failed", name=name, path=str(md_file))
-    return skills
-
-
-_SKILL_TEMPLATES: dict[str, str] = _load_skills()
-_CURATED_TEMPLATE_NAMES = frozenset({*_BUILTIN_TEMPLATES.keys(), *_SKILL_TEMPLATES.keys()})
-
-_WHEN_TO_USE_RE = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
-_WORD_RE = re.compile(r"[a-z0-9_+-]+", re.IGNORECASE)
-_MATCH_SYNONYMS: dict[str, str] = {
-    "seguranca": "security",
-    "seguro": "security",
-    "arquitetura": "architecture",
-    "arquitetural": "architecture",
-    "revisao": "review",
-    "codigo": "code",
-    "teste": "test",
-    "testes": "test",
-    "banco": "database",
-}
-
-
-def _normalize_skill_match_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", str(text or ""))
-    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").lower()
-    tokens = [token for token in _WORD_RE.findall(ascii_text) if token]
-    mapped = [_MATCH_SYNONYMS.get(token, token) for token in tokens]
-    return " ".join(mapped)
+_SKILL_TEMPLATES: dict[str, str] = {}
+_CURATED_TEMPLATE_NAMES = frozenset(_BUILTIN_TEMPLATES.keys())
 
 
 def build_skills_awareness_prompt() -> str:
-    """Build a compact <expert_skills> section listing available skills and when to use them."""
-    if not _SKILL_TEMPLATES:
-        return ""
-
-    lines: list[str] = []
-    for name in sorted(_SKILL_TEMPLATES):
-        match = _WHEN_TO_USE_RE.search(_SKILL_TEMPLATES[name])
-        desc = match.group(1).strip().split(". ")[0] + "." if match else ""
-        if desc:
-            lines.append(f"- **{name}**: {desc}")
-
-    if not lines:
-        return ""
-
-    return (
-        "<expert_skills>\n"
-        "You have access to expert skill templates — specialized methodologies for specific domains.\n"
-        "When a user's request clearly matches a skill, proactively apply its methodology or suggest "
-        "the skill to the user. The user can also invoke directly with `/skill <name> [question]`.\n\n"
-        "Available skills:\n" + "\n".join(lines) + "\n</expert_skills>"
-    )
+    """Return no global skills prompt; runtime skills are agent-scoped."""
+    return ""
 
 
 _SKILLS_AWARENESS_PROMPT: str = build_skills_awareness_prompt()
@@ -224,8 +154,8 @@ def _is_curated_name(name: str) -> bool:
 
 
 def get_all_templates() -> dict[str, str]:
-    """Get all templates (skills + built-in + user)."""
-    result = dict(_SKILL_TEMPLATES)
+    """Get all templates (built-in + user)."""
+    result: dict[str, str] = {}
     result.update(_BUILTIN_TEMPLATES)
     result.update(_display_user_templates(_load_templates()))
     return result
@@ -238,8 +168,6 @@ def get_template(name: str) -> str | None:
         return None
     if normalized in _BUILTIN_TEMPLATES:
         return _BUILTIN_TEMPLATES[normalized]
-    if normalized in _SKILL_TEMPLATES:
-        return _SKILL_TEMPLATES[normalized]
     user = _load_templates()
     for candidate in _template_key_candidates(normalized):
         if candidate in user:
@@ -248,9 +176,8 @@ def get_template(name: str) -> str | None:
 
 
 def get_skill_template(name: str) -> str | None:
-    """Get a curated runtime skill by name."""
-    normalized = _normalize_template_name(name)
-    return _SKILL_TEMPLATES.get(normalized) if normalized else None
+    """Compatibility shim: runtime skills are resolved from the current agent spec."""
+    return None
 
 
 def add_template(name: str, content: str) -> None:
@@ -259,7 +186,7 @@ def add_template(name: str, content: str) -> None:
     if not normalized:
         raise ValueError("template name is required")
     if _is_curated_name(normalized):
-        raise ValueError(f"'{normalized}' is reserved for curated skills or built-in templates")
+        raise ValueError(f"'{normalized}' is reserved for built-in templates")
     storage_key = _user_template_storage_key(normalized)
     if not storage_key:
         raise ValueError("template name is required")
@@ -288,4 +215,4 @@ def list_template_names() -> tuple[list[str], list[str], list[str]]:
     """Return (skill_names, builtin_names, user_names)."""
     user = _load_templates()
     displayed_user = sorted(_display_user_templates(user).keys())
-    return sorted(_SKILL_TEMPLATES.keys()), sorted(_BUILTIN_TEMPLATES.keys()), displayed_user
+    return [], sorted(_BUILTIN_TEMPLATES.keys()), displayed_user

@@ -419,7 +419,9 @@ class TestCanonicalConnections:
 
         payload = mgr.list_connection_catalog()
 
-        assert any(item["connection_key"] == "core:gws" for item in payload["items"])
+        legacy_core_keys = {"core:gws", "core:jira", "core:confluence", "core:gh", "core:glab", "core:aws"}
+        assert not any(item["connection_key"] in legacy_core_keys for item in payload["items"])
+        assert any(item["connection_key"] == "core:browser" for item in payload["items"])
         assert any(item["connection_key"] == "mcp:linear" for item in payload["items"])
 
     def test_generic_mcp_connection_round_trip(self, mcp_manager):

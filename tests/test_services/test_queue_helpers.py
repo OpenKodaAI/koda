@@ -8,17 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.error import TimedOut
 
-from koda.config import DEFAULT_SYSTEM_PROMPT, IMAGE_TEMP_DIR, JIRA_ENABLED, VOICE_ACTIVE_PROMPT
+from koda.config import DEFAULT_SYSTEM_PROMPT, IMAGE_TEMP_DIR, VOICE_ACTIVE_PROMPT
 from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.knowledge.types import KnowledgeLayer
-from koda.services.artifact_ingestion import (
-    ArtifactDossier,
-    ArtifactKind,
-    ArtifactRef,
-    ArtifactStatus,
-    ExtractedArtifact,
-)
-from koda.services.jira_issue_context import IssueContextDossier
 from koda.services.provider_runtime import ProviderCapabilities
 from koda.services.queue_manager import (
     BudgetExceeded,
@@ -297,82 +289,6 @@ class TestRuntimeTerminalCutover:
         assert mock_save_session.call_args.kwargs["provider_session_id"] is None
 
     @pytest.mark.asyncio
-    async def test_prepare_query_context_builds_issue_dossier_and_blocks_writes_on_gaps(self):
-        context = MagicMock()
-        context.user_data = {
-            "provider": "claude",
-            "work_dir": "/tmp",
-            "total_cost": 0.0,
-            "auto_model": False,
-            "manual_models_by_provider": {
-                "claude": "claude-sonnet-4-6",
-                "codex": "gpt-5.4-mini",
-            },
-            "provider_sessions": {},
-        }
-        item = QueueItem(chat_id=111, query_text="Analise o ticket SIM-410 e responda no Jira")
-        image_path = "/tmp/jira_dossier_img.png"
-        dossier = IssueContextDossier(
-            issue={"key": "SIM-410", "fields": {"summary": "Checkout failure"}},
-            comments=[],
-            remote_links=[],
-            dossier=ArtifactDossier(
-                subject_id="SIM-410",
-                subject_label="Jira issue SIM-410",
-                summary="SIM-410 dossier",
-                artifacts=[
-                    ExtractedArtifact(
-                        ref=ArtifactRef(
-                            artifact_id="img-1",
-                            kind=ArtifactKind.IMAGE,
-                            label="screen.png",
-                            source_type="jira_attachment",
-                        ),
-                        status=ArtifactStatus.COMPLETE,
-                        summary="Image summary",
-                        visual_paths=[image_path],
-                    ),
-                    ExtractedArtifact(
-                        ref=ArtifactRef(
-                            artifact_id="pdf-1",
-                            kind=ArtifactKind.PDF,
-                            label="spec.pdf",
-                            source_type="jira_attachment",
-                            critical_for_action=True,
-                        ),
-                        status=ArtifactStatus.UNRESOLVED,
-                        summary="PDF could not be parsed",
-                        critical_for_action=True,
-                    ),
-                ],
-            ),
-        )
-        jira_service = MagicMock()
-        jira_service.build_issue_dossier = AsyncMock(return_value=dossier)
-
-        with (
-            patch("koda.memory.config.MEMORY_ENABLED", False),
-            patch("koda.knowledge.config.KNOWLEDGE_ENABLED", False),
-            patch("koda.services.cache_config.CACHE_ENABLED", False),
-            patch("koda.services.cache_config.SCRIPT_LIBRARY_ENABLED", False),
-            patch("koda.services.queue_manager.JIRA_ENABLED", True),
-            patch("koda.services.queue_manager.JIRA_DEEP_CONTEXT_ENABLED", True),
-            patch("koda.services.queue_manager.get_provider_session_mapping", return_value=None),
-            patch("koda.services.queue_manager.save_session"),
-            patch("koda.services.queue_manager.resolve_provider_model", return_value="claude-sonnet-4-6"),
-            patch("koda.services.atlassian_client.get_jira_service", return_value=jira_service),
-        ):
-            query_context = await _prepare_query_context(context, item, user_id=111)
-
-        jira_service.build_issue_dossier.assert_awaited_once()
-        assert query_context.permission_mode == "plan"
-        assert query_context.effective_policy.approval_mode == "read_only"
-        assert "artifact dossier incomplete; writes blocked" in query_context.warnings
-        assert "<artifact_context>" in query_context.system_prompt
-        assert "SIM-410 dossier" in query_context.system_prompt
-        assert query_context.visual_paths == [image_path]
-
-    @pytest.mark.asyncio
     async def test_prepare_query_context_blocks_prompt_budget_overflow(self):
         context = MagicMock()
         context.user_data = {
@@ -458,15 +374,10 @@ class TestSystemPromptAutonomousWork:
         assert "Break the task into logical phases" in DEFAULT_SYSTEM_PROMPT
         assert "Run existing tests" in DEFAULT_SYSTEM_PROMPT
 
-    def test_atlassian_prompt_is_provider_neutral(self):
+    def test_default_prompt_has_no_native_atlassian_tooling(self):
         assert "visual analysis by Claude" not in DEFAULT_SYSTEM_PROMPT
-        if JIRA_ENABLED:
-            assert "visual analysis by the coding runtime" in DEFAULT_SYSTEM_PROMPT
-            assert "comment_get" in DEFAULT_SYSTEM_PROMPT
-            assert "comment_edit" in DEFAULT_SYSTEM_PROMPT
-            assert "comment_delete" in DEFAULT_SYSTEM_PROMPT
-            assert "comment_reply" in DEFAULT_SYSTEM_PROMPT
-            assert "safe linked top-level comments" in DEFAULT_SYSTEM_PROMPT
+        assert "`jira`" not in DEFAULT_SYSTEM_PROMPT
+        assert "`confluence`" not in DEFAULT_SYSTEM_PROMPT
 
 
 class TestParseQueueItem:

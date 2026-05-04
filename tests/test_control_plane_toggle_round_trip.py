@@ -301,8 +301,8 @@ def test_integration_toggle_round_trips(monkeypatch):
     got = manager_mod.ControlPlaneManager.get_general_system_settings(manager)
     integrations = got["values"]["resources"]["integrations"]
     assert integrations["browser_enabled"] is True
-    assert integrations["gh_enabled"] is True
-    assert integrations["jira_enabled"] is True
+    assert integrations.get("gh_enabled") is not True
+    assert integrations.get("jira_enabled") is not True
 
 
 def test_scheduler_toggle_round_trips(monkeypatch):

@@ -128,6 +128,8 @@ describe("control-plane-editor helpers", () => {
     expect(payload.memory_extraction_schema).toEqual({
       template: "{query} {response} {max_items}",
     });
+    expect(payload.skill_policy).toEqual({ enabled: true });
+    expect(payload.custom_skills).toEqual([{ id: "s1", name: "test-skill" }]);
   });
 
   it("omits execution policy when the editor leaves it unset", () => {

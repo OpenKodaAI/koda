@@ -23,7 +23,7 @@ export function CommandBarModal() {
   const [open, setOpen] = useState(false);
 
   const primaryAgentId = agents[0]?.id ?? null;
-  const skills = useSkillsCatalog(open);
+  const skills = useSkillsCatalog(primaryAgentId, open);
   const tools = useToolsCatalog(primaryAgentId, open);
   const pendingApprovals = usePendingApprovalsCatalog(primaryAgentId, open);
 

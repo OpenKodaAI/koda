@@ -7,6 +7,10 @@ import { useRuntimeQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { parseResponseError, readJsonResponse } from "@/lib/http-client";
+import {
+  buildMockRuntimeOverviews,
+  getMockRuntimeAgentIds,
+} from "@/lib/runtime-mocks";
 import type { RuntimeEvent, RuntimeOverview } from "@/lib/runtime-types";
 
 interface UseRuntimeOverviewResult {
@@ -19,11 +23,19 @@ interface UseRuntimeOverviewResult {
   lastUpdated: number | null;
 }
 
-export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOverviewResult {
+export function useRuntimeOverview(
+  selectedBotIds?: string[],
+  options?: { mock?: boolean },
+): UseRuntimeOverviewResult {
   const { language } = useAppI18n();
   const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
-  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
+  const mock = Boolean(options?.mock);
+  const [mockTick, setMockTick] = useState(0);
+  const availableBotIds = useMemo(
+    () => (mock ? getMockRuntimeAgentIds(agents) : agents.map((agent) => agent.id)),
+    [agents, mock],
+  );
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
@@ -104,7 +116,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
 
   const overviewQuery = useRuntimeQuery<Record<string, RuntimeOverview>>({
     queryKey: overviewQueryKey,
-    enabled: visibleBotIds.length > 0,
+    enabled: !mock && visibleBotIds.length > 0,
     refetchInterval: () => {
       const currentConnected = connectedRef.current;
       const currentBotIds = visibleAgentIdsRef.current;
@@ -118,8 +130,8 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   });
 
   const overviews = useMemo(
-    () => overviewQuery.data ?? {},
-    [overviewQuery.data],
+    () => (mock ? buildMockRuntimeOverviews(agents, mockTick) : overviewQuery.data ?? {}),
+    [agents, mock, mockTick, overviewQuery.data],
   );
 
   const streamBotIds = useMemo(
@@ -132,6 +144,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
   const streamKey = streamBotIds.join(",");
 
   useEffect(() => {
+    if (mock) return;
     if (!didInitialFetchRef.current) {
       didInitialFetchRef.current = true;
       return;
@@ -139,7 +152,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
 
     if (visibleBotIds.length === 0) return;
     void queryClient.invalidateQueries({ queryKey: overviewQueryKey });
-  }, [language, queryClient, overviewQueryKey, visibleBotIds.length, visibleAgentKey]);
+  }, [language, mock, queryClient, overviewQueryKey, visibleBotIds.length, visibleAgentKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -147,7 +160,7 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
     const sources: EventSource[] = [];
     const activeStreamBotIds = streamKey ? streamKey.split(",") : [];
 
-    if (activeStreamBotIds.length === 0) {
+    if (mock || activeStreamBotIds.length === 0) {
       return () => undefined;
     }
 
@@ -214,17 +227,30 @@ export function useRuntimeOverview(selectedBotIds?: string[]): UseRuntimeOvervie
         sseDebounceRef.current = null;
       }
     };
-  }, [queryClient, streamKey]);
+  }, [mock, queryClient, streamKey]);
+
+  useEffect(() => {
+    if (!mock) return undefined;
+    const timer = window.setInterval(() => setMockTick((current) => current + 1), 2_000);
+    return () => window.clearInterval(timer);
+  }, [mock]);
 
   return {
     overviews,
     loading:
-      overviewQuery.isLoading ||
-      visibleBotIds.some((agentId) => !overviews[agentId]),
+      !mock &&
+      (overviewQuery.isLoading ||
+        visibleBotIds.some((agentId) => !overviews[agentId])),
     refreshing: overviewQuery.isFetching && !overviewQuery.isLoading,
-    connected,
+    connected: mock
+      ? Object.fromEntries(visibleBotIds.map((agentId) => [agentId, true]))
+      : connected,
     error: overviewQuery.error?.message ?? null,
     refreshAgent: async (agentId) => {
+      if (mock) {
+        setMockTick((current) => current + 1);
+        return;
+      }
       const payload = await fetchAgentOverview(agentId);
       queryClient.setQueryData(
         overviewQueryKey,

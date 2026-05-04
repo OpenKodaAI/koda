@@ -36,7 +36,14 @@ from koda.memory.napkin import (
 from koda.memory.napkin import batch_deactivate as napkin_batch_deactivate
 from koda.memory.napkin import batch_update_access as napkin_batch_update_access
 from koda.memory.quality import record_dedup_decision, record_memory_quality_counter
-from koda.memory.types import Memory, MemoryLayer, MemoryStatus, MemoryType, RecallResult
+from koda.memory.types import (
+    LEXICAL_READY_EMBEDDING_STATUS,
+    Memory,
+    MemoryLayer,
+    MemoryStatus,
+    MemoryType,
+    RecallResult,
+)
 from koda.state.agent_scope import normalize_agent_scope
 
 log = get_logger(__name__)
@@ -179,12 +186,12 @@ class MemoryStore:
         update_embedding_state(
             memory.id,
             vector_ref_id="",
-            embedding_status="ready",
+            embedding_status=LEXICAL_READY_EMBEDDING_STATUS,
             attempts=0,
             last_error="",
         )
         memory.vector_ref_id = ""
-        memory.embedding_status = "ready"
+        memory.embedding_status = LEXICAL_READY_EMBEDDING_STATUS
         memory.embedding_attempts = 0
         memory.embedding_last_error = ""
         mark_embedding_job_completed(memory.id, agent_id=self._agent_id)
@@ -203,7 +210,7 @@ class MemoryStore:
         update_embedding_state(
             memory.id or job.memory_id,
             vector_ref_id="",
-            embedding_status="ready",
+            embedding_status=LEXICAL_READY_EMBEDDING_STATUS,
             attempts=0,
             last_error="",
         )

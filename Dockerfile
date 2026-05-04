@@ -5,8 +5,7 @@ FROM node:22-slim AS node-base
 RUN npm install -g \
     @anthropic-ai/claude-code \
     @openai/codex \
-    @google/gemini-cli \
-    @googleworkspace/cli
+    @google/gemini-cli
 
 FROM python:3.12-slim
 
@@ -23,10 +22,9 @@ COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node-base /usr/local/bin/claude /usr/local/bin/claude
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     && ln -sf /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
-    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini \
-    && ln -sf /usr/local/lib/node_modules/@googleworkspace/cli/run.js /usr/local/bin/gws
+    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini
 
-# Install system dependencies and CLI tools
+# Install system dependencies and local runtime tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -42,35 +40,6 @@ RUN if [ "$INSTALL_BROWSER_DEPS" = "true" ]; then \
         xvfb openbox x11vnc websockify && \
       rm -rf /var/lib/apt/lists/*; \
     fi
-
-# Install GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install GitLab CLI when a matching Debian package exists for the target architecture.
-RUN arch="$(dpkg --print-architecture)" \
-    && glab_url="https://gitlab.com/gitlab-org/cli/-/releases/permalink/latest/downloads/glab_${arch}.deb" \
-    && if curl -fsSL "${glab_url}" -o /tmp/glab.deb; then \
-        dpkg -i /tmp/glab.deb; \
-        rm /tmp/glab.deb; \
-    else \
-        echo "Skipping GitLab CLI install for unsupported architecture: ${arch}"; \
-    fi
-
-# Install AWS CLI v2
-RUN arch="$(dpkg --print-architecture)" \
-    && case "${arch}" in \
-        amd64) aws_arch="x86_64" ;; \
-        arm64) aws_arch="aarch64" ;; \
-        *) echo "Unsupported architecture for AWS CLI: ${arch}" >&2; exit 1 ;; \
-    esac \
-    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o /tmp/awscliv2.zip \
-    && unzip -q /tmp/awscliv2.zip -d /tmp/aws \
-    && /tmp/aws/aws/install && rm -rf /tmp/awscliv2.zip /tmp/aws
 
 # Create non-root user
 RUN useradd -m -s /bin/bash botuser

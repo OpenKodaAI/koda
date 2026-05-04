@@ -19,9 +19,12 @@ from koda.knowledge.config import (
     KNOWLEDGE_EMBEDDING_MODEL,
     KNOWLEDGE_V2_INGEST_MAX_POISONED_JOBS,
     KNOWLEDGE_V2_INGEST_MAX_QUEUE_DEPTH,
+    KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS,
     KNOWLEDGE_V2_POSTGRES_DSN,
+    KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS,
     KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE,
     KNOWLEDGE_V2_POSTGRES_POOL_MIN_SIZE,
+    KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS,
     KNOWLEDGE_V2_POSTGRES_RETRY_BASE_SECONDS,
     KNOWLEDGE_V2_POSTGRES_SCHEMA,
     KNOWLEDGE_V2_POSTGRES_START_RETRIES,
@@ -73,6 +76,10 @@ _RELATION_WEIGHTS: dict[str, float] = {
     "mentions": 0.35,
     "contradicts": 0.0,
 }
+
+
+class _PostgresAcquireTimeout(RuntimeError):
+    """Raised when the asyncpg pool or guarded direct lane cannot provide a connection."""
 
 
 def _json_dumps(value: Any) -> str:
@@ -142,6 +149,8 @@ class KnowledgeV2PostgresBackend:
         embedding_dimension: int = 1024,
         pool_min_size: int = KNOWLEDGE_V2_POSTGRES_POOL_MIN_SIZE,
         pool_max_size: int = KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE,
+        acquire_timeout_ms: int = KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS,
+        query_timeout_ms: int = KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS,
         start_retries: int = KNOWLEDGE_V2_POSTGRES_START_RETRIES,
         retry_base_seconds: float = KNOWLEDGE_V2_POSTGRES_RETRY_BASE_SECONDS,
     ) -> None:
@@ -151,6 +160,8 @@ class KnowledgeV2PostgresBackend:
         self._embedding_dimension = max(1, int(embedding_dimension))
         self._pool_min_size = max(1, int(pool_min_size))
         self._pool_max_size = max(self._pool_min_size, int(pool_max_size))
+        self._acquire_timeout_seconds = max(0.05, int(acquire_timeout_ms) / 1000)
+        self._query_timeout_seconds = max(0.1, int(query_timeout_ms) / 1000)
         self._start_retries = max(0, int(start_retries))
         self._retry_base_seconds = max(0.05, float(retry_base_seconds))
         self._ready = False
@@ -158,6 +169,12 @@ class KnowledgeV2PostgresBackend:
         self._ensure_lock = asyncio.Lock()
         self._pool: Any | None = None
         self._asyncpg: Any | None = None
+        self._direct_connection_gate = asyncio.Semaphore(self._pool_max_size)
+        self._direct_connections_in_flight = 0
+        self._pool_wait_timeout_total = 0
+        self._direct_wait_timeout_total = 0
+        self._query_timeout_total = 0
+        self._last_postgres_error = ""
 
     @property
     def enabled(self) -> bool:
@@ -219,9 +236,27 @@ class KnowledgeV2PostgresBackend:
             "pool_active": pool_active,
             "pool_min_size": self._pool_min_size,
             "pool_max_size": self._pool_max_size,
+            "pool_size": self._pool_size(),
+            "pool_idle": self._pool_idle_size(),
+            "pool_in_use": max(0, self._pool_size() - self._pool_idle_size()),
+            "acquire_timeout_ms": int(self._acquire_timeout_seconds * 1000),
+            "query_timeout_ms": int(self._query_timeout_seconds * 1000),
+            "idle_timeout_seconds": KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS,
+            "pool_wait_timeout_total": self._pool_wait_timeout_total,
+            "direct_wait_timeout_total": self._direct_wait_timeout_total,
+            "query_timeout_total": self._query_timeout_total,
+            "direct_connections_in_flight": self._direct_connections_in_flight,
+            "postgres_pool_max_size": self._pool_max_size,
+            "postgres_pool_idle": self._pool_idle_size(),
+            "postgres_pool_in_use": max(0, self._pool_size() - self._pool_idle_size()),
+            "postgres_acquire_timeout_ms": int(self._acquire_timeout_seconds * 1000),
+            "postgres_query_timeout_ms": int(self._query_timeout_seconds * 1000),
+            "postgres_wait_timeout_total": self._pool_wait_timeout_total,
+            "postgres_query_timeout_total": self._query_timeout_total,
+            "postgres_last_error": error or self._last_postgres_error,
             "probe_mode": probe_mode,
             "check_ok": check_ok,
-            "error": error,
+            "error": error or self._last_postgres_error,
             "cache": {},
             "ingest_queue": ingest_queue,
         }
@@ -229,9 +264,18 @@ class KnowledgeV2PostgresBackend:
     async def _probe_connectivity(self) -> tuple[bool, str, str]:
         try:
             async with self._probe_connection() as (conn, probe_mode):
-                await conn.fetchval("SELECT 1")
+                async with asyncio.timeout(self._query_timeout_seconds):
+                    await conn.fetchval("SELECT 1")
             return True, "", probe_mode
+        except TimeoutError:
+            self._query_timeout_total += 1
+            self._last_postgres_error = "postgres health query timed out"
+            return False, self._last_postgres_error, "unavailable"
+        except _PostgresAcquireTimeout as exc:
+            self._last_postgres_error = str(exc)
+            return False, str(exc), "unavailable"
         except Exception as exc:
+            self._last_postgres_error = str(exc)
             return False, str(exc), "unavailable"
 
     async def ensure_ready(self) -> bool:
@@ -248,8 +292,7 @@ class KnowledgeV2PostgresBackend:
             if self._ready:
                 return True
             try:
-                asyncpg = await self._load_asyncpg()
-                conn = await asyncpg.connect(self._dsn)
+                conn = await self._open_direct_connection()
                 try:
                     await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
                     await conn.execute(
@@ -297,7 +340,7 @@ class KnowledgeV2PostgresBackend:
                                 USING hnsw (embedding_vector vector_cosine_ops)"""
                         )
                 finally:
-                    await conn.close()
+                    await self._close_direct_connection(conn)
             except Exception:
                 log.exception("knowledge_v2_postgres_init_failed")
                 return False
@@ -328,20 +371,22 @@ class KnowledgeV2PostgresBackend:
             self._dsn,
             min_size=self._pool_min_size,
             max_size=self._pool_max_size,
+            timeout=self._acquire_timeout_seconds,
+            command_timeout=self._query_timeout_seconds,
+            max_inactive_connection_lifetime=max(1, KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS),
         )
 
     @asynccontextmanager
     async def _probe_connection(self) -> AsyncIterator[tuple[Any, str]]:
         if self._pool is not None and self._pool_loop_matches_current():
-            async with self._pool.acquire() as conn:
+            async with self._pooled_connection() as conn:
                 yield conn, "pool"
             return
-        asyncpg = await self._load_asyncpg()
-        conn = await asyncpg.connect(self._dsn)
+        conn = await self._open_direct_connection()
         try:
             yield conn, "direct"
         finally:
-            await conn.close()
+            await self._close_direct_connection(conn)
 
     def _pool_loop_matches_current(self) -> bool:
         """Return True when the cached pool is usable from the current loop.
@@ -368,19 +413,104 @@ class KnowledgeV2PostgresBackend:
             raise RuntimeError("knowledge_v2_postgres_backend_unavailable")
         await self._ensure_pool()
         if self._pool is not None and self._pool_loop_matches_current():
-            async with self._pool.acquire() as conn:
+            async with self._pooled_connection() as conn:
                 yield conn
             return
         # No pool for the current loop — fall back to a throwaway direct
         # connection rather than poisoning the cached pool. This happens
         # when a caller on a second event loop in the same process needs
         # DB access (worker main loop while bridge loop owns the pool).
-        asyncpg = await self._load_asyncpg()
-        conn = await asyncpg.connect(self._dsn)
+        conn = await self._open_direct_connection()
         try:
             yield conn
         finally:
+            await self._close_direct_connection(conn)
+
+    @asynccontextmanager
+    async def _pooled_connection(self) -> AsyncIterator[Any]:
+        context = self._pool_acquire_context()
+        try:
+            conn = await context.__aenter__()
+        except TimeoutError:
+            self._pool_wait_timeout_total += 1
+            self._last_postgres_error = "postgres pool acquire timed out"
+            raise _PostgresAcquireTimeout(self._last_postgres_error) from None
+        except Exception as exc:
+            self._last_postgres_error = str(exc)
+            raise
+        try:
+            yield conn
+        except BaseException as exc:
+            handled = await context.__aexit__(type(exc), exc, exc.__traceback__)
+            if not handled:
+                raise
+        else:
+            await context.__aexit__(None, None, None)
+
+    def _pool_acquire_context(self) -> Any:
+        """Acquire asyncpg pools with timeout while keeping lightweight test fakes usable."""
+        if self._pool is None:
+            raise RuntimeError("knowledge_v2_postgres_pool_unavailable")
+        try:
+            return self._pool.acquire(timeout=self._acquire_timeout_seconds)
+        except TypeError:
+            return self._pool.acquire()
+
+    async def _open_direct_connection(self) -> Any:
+        try:
+            await asyncio.wait_for(
+                self._direct_connection_gate.acquire(),
+                timeout=self._acquire_timeout_seconds,
+            )
+        except TimeoutError:
+            self._direct_wait_timeout_total += 1
+            self._last_postgres_error = "direct postgres connection lane saturated"
+            raise _PostgresAcquireTimeout(self._last_postgres_error) from None
+        self._direct_connections_in_flight += 1
+        try:
+            asyncpg = await self._load_asyncpg()
+            try:
+                return await asyncpg.connect(
+                    self._dsn,
+                    timeout=self._acquire_timeout_seconds,
+                    command_timeout=self._query_timeout_seconds,
+                )
+            except TypeError:
+                return await asyncpg.connect(self._dsn)
+        except Exception as exc:
+            self._last_postgres_error = str(exc)
+            self._direct_connections_in_flight = max(0, self._direct_connections_in_flight - 1)
+            self._direct_connection_gate.release()
+            raise
+
+    async def _close_direct_connection(self, conn: Any) -> None:
+        try:
             await conn.close()
+        finally:
+            self._direct_connections_in_flight = max(0, self._direct_connections_in_flight - 1)
+            self._direct_connection_gate.release()
+
+    def _pool_size(self) -> int:
+        if self._pool is None:
+            return 0
+        getter = getattr(self._pool, "get_size", None)
+        if callable(getter):
+            with suppress(Exception):
+                return max(0, int(getter()))
+        holders = getattr(self._pool, "_holders", None)
+        if holders is not None:
+            with suppress(Exception):
+                return max(0, len(holders))
+        return 0
+
+    def _pool_idle_size(self) -> int:
+        if self._pool is None:
+            return 0
+        getter = getattr(self._pool, "get_idle_size", None)
+        if callable(getter):
+            with suppress(Exception):
+                return max(0, int(getter()))
+        return 0
 
     def _invalidate_query_caches(self) -> None:
         return None
@@ -1405,11 +1535,15 @@ class KnowledgeV2PostgresBackend:
                            (user_id, agent_id, conflict_key, memory_status, created_at DESC)""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."memory_maintenance_log" (
                             id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT DEFAULT 'default',
                             operation TEXT NOT NULL,
                             memories_affected INTEGER DEFAULT 0,
                             details TEXT,
                             executed_at TEXT NOT NULL
                         )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_memory_maintenance_log_agent
+                           ON "{schema}"."memory_maintenance_log"
+                           (agent_id, executed_at DESC)""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."memory_recall_audit" (
                             id BIGSERIAL PRIMARY KEY,
                             agent_id TEXT,
@@ -2541,6 +2675,23 @@ class KnowledgeV2PostgresBackend:
                            ON "{schema}"."tasks"
                            (agent_id, lease_expires_at)
                            WHERE status IN ('running', 'retrying')""",
+                ),
+            ),
+            _Migration(
+                "026_memory_truthful_status_and_agent_maintenance",
+                (
+                    f"""ALTER TABLE "{schema}"."memory_maintenance_log"
+                           ADD COLUMN IF NOT EXISTS agent_id TEXT DEFAULT 'default'""",
+                    f"""UPDATE "{schema}"."memory_maintenance_log"
+                           SET agent_id = 'default'
+                           WHERE agent_id IS NULL OR agent_id = ''""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_memory_maintenance_log_agent
+                           ON "{schema}"."memory_maintenance_log"
+                           (agent_id, executed_at DESC)""",
+                    f"""UPDATE "{schema}"."napkin_log"
+                           SET embedding_status = 'lexical_ready'
+                           WHERE COALESCE(embedding_status, '') = 'ready'
+                             AND COALESCE(vector_ref_id, '') = ''""",
                 ),
             ),
         )

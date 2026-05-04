@@ -60,9 +60,10 @@ def test_runtime_snapshot_exports_only_compiled_prompt_contract(monkeypatch):
     assert snapshot.persisted_to_disk is False
     assert snapshot.env["KOKORO_VOICES_PATH"] == "/tmp/kokoro-managed.bin"
     assert snapshot.env["AGENT_COMPILED_PROMPT_TEXT"] == expected_prompt
-    assert '"gws"' in snapshot.env["AGENT_RESOURCE_ACCESS_POLICY_JSON"]
+    assert "AGENT_RESOURCE_ACCESS_POLICY_JSON" not in snapshot.env
     assert "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON" in snapshot.env
     assert '"claude"' in snapshot.env["AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON"]
+    assert "SKILLS_JSON" not in snapshot.env
 
 
 def test_legacy_agent_discovery_uses_env_only(monkeypatch):
@@ -174,7 +175,7 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
             },
             "resource_access_policy": {
                 "integration_grants": {
-                    "gws": {"allow_actions": ["gmail.list"]},
+                    "mcp:atlassian": {"allow_actions": ["search_issues"]},
                 }
             },
             "memory_policy": {},
@@ -187,7 +188,7 @@ def test_runtime_prompt_preview_respects_execution_policy_allowlist():
     compiled_prompt = str(payload.get("compiled_prompt") or "")
     assert "`job_create`" in compiled_prompt
     assert "## Integration Grants" in compiled_prompt
-    assert "`gws`" in compiled_prompt
+    assert "`mcp:atlassian`" in compiled_prompt
 
 
 def test_runtime_access_ignores_legacy_runtime_token_secret():

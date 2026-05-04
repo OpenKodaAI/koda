@@ -19,6 +19,7 @@ import {
 
 export interface ComposerMentionMenuContentProps {
   query: string;
+  agentId?: string | null;
   activeIndex: number;
   onItemsChange: (items: MentionCandidate[]) => void;
   onActiveIndex: (index: number) => void;
@@ -61,6 +62,7 @@ function candidateToItem(candidate: MentionCandidate): SuggestionItem {
 
 export function ComposerMentionMenuContent({
   query,
+  agentId,
   activeIndex,
   onItemsChange,
   onActiveIndex,
@@ -69,7 +71,7 @@ export function ComposerMentionMenuContent({
   idPrefix,
 }: ComposerMentionMenuContentProps) {
   const { t } = useAppI18n();
-  const { skills, mcps } = useMentionSuggestions(query);
+  const { skills, mcps } = useMentionSuggestions(query, agentId);
 
   const flat = useMemo(() => [...skills, ...mcps], [mcps, skills]);
 

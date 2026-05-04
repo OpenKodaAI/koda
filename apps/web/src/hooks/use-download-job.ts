@@ -71,6 +71,19 @@ async function fetchJob(
   return (await res.json()) as ProviderDownloadJob;
 }
 
+function jobText(job: ProviderDownloadJob, ...keys: string[]): string {
+  const topLevel = job as ProviderDownloadJob & Record<string, unknown>;
+  const details =
+    job.details && typeof job.details === "object"
+      ? (job.details as Record<string, unknown>)
+      : {};
+  for (const key of keys) {
+    const value = details[key] ?? topLevel[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
 /**
  * Orchestrates a single download lifecycle: kicks off the job via POST,
  * shows a sticky toast, polls progress, and morphs the toast into a
@@ -98,6 +111,92 @@ export function useDownloadJob() {
       delete intervalsRef.current[toastId];
     }
   }, []);
+
+  const cancelDownload = useCallback(
+    async (providerId: ProviderId, jobId: string, toastId: string) => {
+      updateToast(toastId, {
+        type: "loading",
+        message: "Cancelando download…",
+        persistent: true,
+        action: {
+          label: "Cancelando",
+          ariaLabel: "Cancelando download",
+          onClick: () => undefined,
+          disabled: true,
+        },
+      });
+
+      try {
+        const res = await fetch(
+          `/api/control-plane/providers/${providerId}/downloads/${encodeURIComponent(jobId)}/cancel`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+          },
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `cancel request failed (${res.status})`);
+        }
+        const job = (await res.json()) as ProviderDownloadJob;
+        stopPoll(toastId);
+        activeKeysRef.current.delete(toastId);
+
+        if (job.status === "completed") {
+          updateToast(toastId, {
+            type: "success",
+            message: "Download concluído antes do cancelamento.",
+            persistent: false,
+            durationMs: 4000,
+            progress: undefined,
+            action: undefined,
+          });
+          return;
+        }
+
+        updateToast(toastId, {
+          type: job.status === "error" ? "error" : "info",
+          message:
+            job.status === "error"
+              ? jobText(job, "last_error") || "Falha no download"
+              : "Download cancelado.",
+          persistent: false,
+          durationMs: job.status === "error" ? 8000 : 4000,
+          progress: undefined,
+          action: undefined,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error && err.message.trim()
+            ? err.message
+            : "Falha ao cancelar o download";
+        updateToast(toastId, {
+          type: "error",
+          message,
+          persistent: true,
+          action: {
+            label: "Cancelar",
+            ariaLabel: "Cancelar download",
+            onClick: () => {
+              void cancelDownload(providerId, jobId, toastId);
+            },
+          },
+        });
+      }
+    },
+    [stopPoll, updateToast],
+  );
+
+  const cancelAction = useCallback(
+    (providerId: ProviderId, jobId: string, toastId: string) => ({
+      label: "Cancelar",
+      ariaLabel: "Cancelar download",
+      onClick: () => {
+        void cancelDownload(providerId, jobId, toastId);
+      },
+    }),
+    [cancelDownload],
+  );
 
   const beginPolling = useCallback(
     (
@@ -135,6 +234,7 @@ export function useDownloadJob() {
                 downloaded: job.downloaded_bytes,
                 total: job.total_bytes,
               },
+              action: cancelAction(providerId, jobId, toastId),
             });
             // Keep polling while the job is in flight.
             reschedule(nextPollDelayMs);
@@ -150,24 +250,34 @@ export function useDownloadJob() {
               persistent: false,
               durationMs: 4000,
               progress: undefined,
+              action: undefined,
             });
             if (onComplete) await onComplete(job);
             return;
           }
 
-          // status: error | cancelled
           stopPoll(toastId);
           activeKeysRef.current.delete(toastId);
-          const lastError =
-            (job.details && typeof job.details === "object"
-              ? String((job.details as Record<string, unknown>).last_error ?? "")
-              : "") || "Falha no download";
+          if (job.status === "cancelled") {
+            updateToast(toastId, {
+              type: "info",
+              message: jobText(job, "message") || "Download cancelado.",
+              persistent: false,
+              durationMs: 4000,
+              progress: undefined,
+              action: undefined,
+            });
+            return;
+          }
+
+          const lastError = jobText(job, "last_error") || "Falha no download";
           updateToast(toastId, {
             type: "error",
             message: lastError,
             persistent: false,
             durationMs: 8000,
             progress: undefined,
+            action: undefined,
           });
         } catch {
           // Network / 5xx blip. Don't drop the sticky toast — back off.
@@ -192,7 +302,7 @@ export function useDownloadJob() {
       // Initial tick scheduled normally so we don't double-fire on attach.
       reschedule(POLL_INTERVAL_MS);
     },
-    [stopPoll, updateToast],
+    [cancelAction, stopPoll, updateToast],
   );
 
   const start = useCallback(
@@ -229,6 +339,7 @@ export function useDownloadJob() {
           persistent: false,
           durationMs: 8000,
           progress: undefined,
+          action: undefined,
         });
         return;
       }
@@ -242,14 +353,18 @@ export function useDownloadJob() {
           persistent: false,
           durationMs: 4000,
           progress: undefined,
+          action: undefined,
         });
         if (params.onComplete) await params.onComplete(job);
         return;
       }
 
+      updateToast(toastId, {
+        action: cancelAction(params.providerId, job.id, toastId),
+      });
       beginPolling(params.providerId, job.id, toastId, params.successMessage, params.onComplete);
     },
-    [beginPolling, showToast, updateToast],
+    [beginPolling, cancelAction, showToast, updateToast],
   );
 
   const attach = useCallback(
@@ -261,11 +376,12 @@ export function useDownloadJob() {
         title: params.toastTitle,
         persistent: true,
         progress: { downloaded: 0, total: 0 },
+        action: cancelAction(params.providerId, params.jobId, toastId),
       });
       activeKeysRef.current.add(toastId);
       beginPolling(params.providerId, params.jobId, toastId, params.successMessage);
     },
-    [beginPolling, showToast],
+    [beginPolling, cancelAction, showToast],
   );
 
   const isActive = useCallback(

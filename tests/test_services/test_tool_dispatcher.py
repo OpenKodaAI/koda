@@ -1,11 +1,12 @@
 """Tests for tool_dispatcher: parsing, execution, security."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from koda.agent_contract import resolve_action_envelope, resolve_integration_action
+from koda.agent_contract import resolve_action_envelope
 from koda.services import tool_dispatcher as tool_dispatcher_module
 from koda.services.tool_dispatcher import (
     AgentToolCall,
@@ -226,51 +227,46 @@ class TestBrowserScope:
 # Feature flags
 
 
-class TestFeatureFlags:
+class TestLegacyExternalTools:
+    @pytest.mark.parametrize("tool_name", ["gws", "jira", "confluence", "gh", "glab", "aws"])
     @pytest.mark.asyncio
-    async def test_gws_disabled(self):
+    async def test_removed_external_tools_return_unknown(self, tool_name: str):
         ctx = _make_ctx()
-        call = AgentToolCall(tool="gws", params={"args": "gmail users.messages.list"}, raw_match="")
-        with (
-            patch("koda.services.tool_dispatcher.GWS_ENABLED", False),
-            patch(
-                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-                {"integration_grants": {"gws": {"allow_actions": ["*"]}}},
-            ),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "not enabled" in result.output
+        call = AgentToolCall(tool=tool_name, params={"args": "list"}, raw_match="")
 
-    @pytest.mark.asyncio
-    async def test_jira_disabled(self):
-        ctx = _make_ctx()
-        call = AgentToolCall(tool="jira", params={"args": "issues search --jql test"}, raw_match="")
-        with (
-            patch("koda.services.tool_dispatcher.JIRA_ENABLED", False),
-            patch(
-                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-                {"integration_grants": {"jira": {"allow_actions": ["*"]}}},
-            ),
-        ):
-            result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "not enabled" in result.output
+        result = await execute_tool(call, ctx)
 
+        assert not result.success
+        assert "Unknown tool" in result.output
+        assert tool_name not in tool_dispatcher_module._TOOL_HANDLERS
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh repo list",
+            "aws s3 ls",
+            "gcloud projects list",
+            "npx -y @googleworkspace/cli gmail users.messages.list",
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_confluence_disabled(self):
+    async def test_shell_execute_allows_informal_external_cli_commands(self, command: str):
         ctx = _make_ctx()
-        call = AgentToolCall(tool="confluence", params={"args": "pages search --cql test"}, raw_match="")
+        call = AgentToolCall(tool="shell_execute", params={"command": command}, raw_match="")
+
         with (
-            patch("koda.services.tool_dispatcher.CONFLUENCE_ENABLED", False),
+            patch("koda.services.tool_dispatcher.SHELL_ENABLED", True),
             patch(
-                "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-                {"integration_grants": {"confluence": {"allow_actions": ["*"]}}},
-            ),
+                "koda.services.shell_runner.run_shell_command",
+                new_callable=AsyncMock,
+                return_value="Exit 0:\nok",
+            ) as runner,
         ):
             result = await execute_tool(call, ctx)
-        assert not result.success
-        assert "not enabled" in result.output
+
+        assert result.success
+        assert result.output == "Exit 0:\nok"
+        runner.assert_awaited_once_with(command, ctx.work_dir, timeout=30)
 
 
 # Security
@@ -783,80 +779,9 @@ class TestFormatResults:
 class TestIsWriteTool:
     """Test the _is_write_tool classifier used by the agent loop."""
 
-    def test_jira_search_is_read(self):
-        assert _is_write_tool("jira", {"args": "issues search --jql 'project=PROJ'"}) is False
-
-    def test_jira_get_is_read(self):
-        assert _is_write_tool("jira", {"args": "issues get --key PROJ-1"}) is False
-
-    def test_jira_comment_get_is_read(self):
-        assert _is_write_tool("jira", {"args": "issues comment_get --key PROJ-1 --comment-id 100"}) is False
-
-    def test_jira_transitions_is_read(self):
-        assert _is_write_tool("jira", {"args": "issues transitions --key PROJ-1"}) is False
-
-    def test_jira_transition_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues transition --key PROJ-1 --transition-id 31"}) is True
-
-    def test_jira_create_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues create --project PROJ --summary 'Test'"}) is True
-
-    def test_jira_update_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues update --key PROJ-1 --summary 'New'"}) is True
-
-    def test_jira_delete_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues delete --key PROJ-1"}) is True
-
-    def test_jira_comment_reply_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues comment_reply --key PROJ-1 --comment-id 100 --body hi"}) is True
-
-    def test_jira_comment_edit_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues comment_edit --key PROJ-1 --comment-id 100 --body hi"}) is True
-
-    def test_jira_comment_delete_is_write(self):
-        assert _is_write_tool("jira", {"args": "issues comment_delete --key PROJ-1 --comment-id 100"}) is True
-
-    def test_confluence_search_is_read(self):
-        assert _is_write_tool("confluence", {"args": "pages search --cql 'space=DEV'"}) is False
-
-    def test_confluence_get_is_read(self):
-        assert _is_write_tool("confluence", {"args": "pages get --id 123"}) is False
-
-    def test_confluence_create_is_write(self):
-        assert _is_write_tool("confluence", {"args": "pages create --space DEV --title 'New'"}) is True
-
-    def test_confluence_update_is_write(self):
-        assert _is_write_tool("confluence", {"args": "pages update --id 123 --title 'Updated'"}) is True
-
-    def test_gws_list_is_read(self):
-        assert _is_write_tool("gws", {"args": "gmail users.messages.list"}) is False
-
-    def test_gws_get_is_read(self):
-        assert _is_write_tool("gws", {"args": "gmail users.messages.get --id abc"}) is False
-
-    def test_gws_action_resolution_for_list(self):
-        resolution = resolve_integration_action("gws", {"args": "gmail users.messages.list"})
-        assert resolution.action_id == "gmail.list"
-        assert resolution.resource_method == "users.messages.list"
-        assert resolution.access_level == "read"
-
-    def test_gws_send_is_write(self):
-        assert _is_write_tool("gws", {"args": "gmail users.messages.send"}) is True
-
-    def test_gws_create_event_is_write(self):
-        assert _is_write_tool("gws", {"args": "gcal events.insert"}) is True
-
-    def test_gws_drive_delete_is_destructive(self):
-        resolution = resolve_integration_action("gws", {"args": "drive files.delete"})
-        assert resolution.action_id == "drive.delete"
-        assert resolution.resource_method == "files.delete"
-        assert resolution.access_level == "destructive"
-
-    def test_gws_admin_insert_is_admin(self):
-        resolution = resolve_integration_action("gws", {"args": "admin directory.users.insert"})
-        assert resolution.action_id == "admin.insert"
-        assert resolution.resource_method == "directory.users.insert"
-        assert resolution.access_level == "admin"
+    @pytest.mark.parametrize("tool_name", ["gws", "jira", "confluence", "gh", "glab", "aws"])
+    def test_removed_legacy_tools_are_not_write_classified(self, tool_name: str):
+        assert _is_write_tool(tool_name, {"args": "list"}) is False
 
     def test_web_search_is_read(self):
         assert _is_write_tool("web_search", {}) is False
@@ -1261,193 +1186,6 @@ async def test_execute_tool_blocks_disallowed_tool_by_policy():
 
 @pytest.mark.asyncio
 @pytest.mark.real_policy_gate
-async def test_execute_tool_blocks_integration_action_outside_grant():
-    ctx = _make_ctx()
-    call = AgentToolCall(
-        tool="gws",
-        params={"args": "gmail users.messages.send"},
-        raw_match="",
-    )
-
-    with (
-        patch(
-            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-            {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.list"],
-                    }
-                }
-            },
-        ),
-        patch(
-            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "id": "allow-gws",
-                        "decision": "allow",
-                        "selectors": {"tool_id": ["gws"]},
-                    }
-                ],
-            },
-        ),
-    ):
-        result = await execute_tool(call, ctx)
-
-    assert result.success is False
-    assert result.metadata["policy_blocked"] is True
-    assert result.metadata["integration_id"] == "gws"
-    assert result.metadata["action_id"] == "gmail.send"
-    assert result.metadata["resource_method"] == "users.messages.send"
-    assert "outside the granted scope" in result.output.lower()
-
-
-@pytest.mark.asyncio
-@pytest.mark.real_policy_gate
-async def test_execute_tool_allows_gws_list_under_grant():
-    ctx = _make_ctx()
-    call = AgentToolCall(
-        tool="gws",
-        params={"args": "gmail users.messages.list"},
-        raw_match="",
-    )
-
-    mock_cli_result = MagicMock(
-        text='Exit 0:\n{"messages": []}',
-        binary="gws",
-        args=["gmail", "users.messages.list"],
-        exit_code=0,
-        timed_out=False,
-        truncated=False,
-    )
-
-    with (
-        patch("koda.services.tool_dispatcher.GWS_ENABLED", True),
-        patch(
-            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-            {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.list"],
-                    }
-                }
-            },
-        ),
-        patch(
-            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "id": "allow-gws",
-                        "decision": "allow",
-                        "selectors": {"tool_id": ["gws"]},
-                    }
-                ],
-            },
-        ),
-        patch(
-            "koda.services.cli_runner.run_cli_command_detailed", new_callable=AsyncMock, return_value=mock_cli_result
-        ),
-    ):
-        result = await execute_tool(call, ctx)
-
-    assert result.success is True
-    assert result.metadata["integration_id"] == "gws"
-    assert result.metadata["action_id"] == "gmail.list"
-    assert result.metadata["resource_method"] == "users.messages.list"
-
-
-@pytest.mark.asyncio
-@pytest.mark.real_policy_gate
-async def test_execute_tool_blocks_gws_drive_delete_outside_grant():
-    ctx = _make_ctx()
-    call = AgentToolCall(
-        tool="gws",
-        params={"args": "drive files.delete"},
-        raw_match="",
-    )
-
-    with (
-        patch(
-            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-            {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.list"],
-                    }
-                }
-            },
-        ),
-        patch(
-            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "id": "allow-gws",
-                        "decision": "allow",
-                        "selectors": {"tool_id": ["gws"]},
-                    }
-                ],
-            },
-        ),
-    ):
-        result = await execute_tool(call, ctx)
-
-    assert result.success is False
-    assert result.metadata["policy_blocked"] is True
-    assert result.metadata["action_id"] == "drive.delete"
-    assert result.metadata["resource_method"] == "files.delete"
-
-
-@pytest.mark.asyncio
-@pytest.mark.real_policy_gate
-async def test_execute_tool_blocks_gws_admin_outside_grant():
-    ctx = _make_ctx()
-    call = AgentToolCall(
-        tool="gws",
-        params={"args": "admin directory.users.insert"},
-        raw_match="",
-    )
-
-    with (
-        patch(
-            "koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY",
-            {
-                "integration_grants": {
-                    "gws": {
-                        "allow_actions": ["gmail.list"],
-                    }
-                }
-            },
-        ),
-        patch(
-            "koda.services.execution_policy.AGENT_EXECUTION_POLICY",
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "id": "allow-gws",
-                        "decision": "allow",
-                        "selectors": {"tool_id": ["gws"]},
-                    }
-                ],
-            },
-        ),
-    ):
-        result = await execute_tool(call, ctx)
-
-    assert result.success is False
-    assert result.metadata["policy_blocked"] is True
-    assert result.metadata["action_id"] == "admin.insert"
-    assert result.metadata["resource_method"] == "directory.users.insert"
-
-
-@pytest.mark.asyncio
-@pytest.mark.real_policy_gate
 async def test_execute_tool_blocks_private_network_without_explicit_grant():
     ctx = _make_ctx()
     call = AgentToolCall(
@@ -1642,32 +1380,45 @@ async def test_execute_tool_blocks_mcp_tool_via_central_gate_without_queue_manag
 class TestRequestSkill:
     """Tests for the request_skill agent tool handler."""
 
-    def _make_skill(self, skill_id="tdd", name="TDD", aliases=("test-driven",), content="# TDD Skill"):
-        from koda.skills._registry import SkillDefinition
+    def _make_skill(
+        self,
+        skill_id="tdd",
+        name="TDD",
+        aliases=("test-driven",),
+        content="# TDD Skill",
+        enabled=True,
+        triggers=None,
+    ):
+        return {
+            "id": skill_id,
+            "name": name,
+            "aliases": list(aliases),
+            "content": content,
+            "enabled": enabled,
+            "triggers": list(triggers or []),
+        }
 
-        return SkillDefinition(
-            id=skill_id,
-            name=name,
-            aliases=aliases,
-            full_content=content,
+    def _set_agent_skills(self, monkeypatch, skills, skill_policy=None):
+        monkeypatch.setenv(
+            "AGENT_SPEC_JSON",
+            json.dumps(
+                {
+                    "custom_skills": skills,
+                    "skill_policy": skill_policy or {},
+                }
+            ),
         )
 
     @pytest.mark.asyncio
-    async def test_request_skill_by_name(self):
+    async def test_request_skill_by_name(self, monkeypatch):
         """Exact skill ID match returns skill content."""
         skill = self._make_skill()
-        mock_registry = MagicMock()
-        mock_registry.resolve_alias.return_value = None
-        mock_registry.get.side_effect = lambda sid: skill if sid == "tdd" else None
-        mock_registry.get_all.return_value = {"tdd": skill}
+        self._set_agent_skills(monkeypatch, [skill])
 
         ctx = _make_ctx()
         call = AgentToolCall(tool="request_skill", params={"query": "tdd"}, raw_match="")
 
-        with (
-            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
-            patch("koda.skills._telemetry.emit_skill_invocation"),
-        ):
+        with patch("koda.skills._telemetry.emit_skill_invocation"):
             from koda.services.tool_dispatcher import _handle_request_skill
 
             result = await _handle_request_skill(call.params, ctx)
@@ -1676,20 +1427,15 @@ class TestRequestSkill:
         assert "# TDD Skill" in result.output
 
     @pytest.mark.asyncio
-    async def test_request_skill_by_alias(self):
+    async def test_request_skill_by_alias(self, monkeypatch):
         """Alias match resolves to the correct skill."""
         skill = self._make_skill()
-        mock_registry = MagicMock()
-        mock_registry.resolve_alias.side_effect = lambda q: "tdd" if "test-driven" in q else None
-        mock_registry.get.side_effect = lambda sid: skill if sid == "tdd" else None
+        self._set_agent_skills(monkeypatch, [skill])
 
         ctx = _make_ctx()
         call = AgentToolCall(tool="request_skill", params={"query": "test-driven"}, raw_match="")
 
-        with (
-            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
-            patch("koda.skills._telemetry.emit_skill_invocation"),
-        ):
+        with patch("koda.skills._telemetry.emit_skill_invocation"):
             from koda.services.tool_dispatcher import _handle_request_skill
 
             result = await _handle_request_skill(call.params, ctx)
@@ -1698,34 +1444,31 @@ class TestRequestSkill:
         assert "# TDD Skill" in result.output
 
     @pytest.mark.asyncio
-    async def test_request_skill_by_query(self):
-        """Semantic fallback returns a matching skill."""
-        skill = self._make_skill()
-        mock_registry = MagicMock()
-        mock_registry.resolve_alias.return_value = None
-        mock_registry.get.return_value = None
+    async def test_request_skill_by_display_name(self, monkeypatch):
+        """Display name resolves without requiring a global catalog or semantic fallback."""
+        skill = self._make_skill(skill_id="deploy-review", name="Deploy Review", aliases=())
+        self._set_agent_skills(monkeypatch, [skill])
 
-        from koda.skills._selector import SkillMatch
+        ctx = _make_ctx()
 
-        mock_match = SkillMatch(
-            skill=skill,
-            semantic_score=0.8,
-            trigger_matched=False,
-            alias_matched=False,
-            composite_score=0.8,
-            selection_reason="semantic",
-        )
-        mock_selector = MagicMock()
-        mock_selector.select.return_value = [mock_match]
+        with patch("koda.skills._telemetry.emit_skill_invocation"):
+            from koda.services.tool_dispatcher import _handle_request_skill
+
+            result = await _handle_request_skill({"query": "Deploy Review"}, ctx)
+
+        assert result.success is True
+        assert "# TDD Skill" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_by_query(self, monkeypatch):
+        """Selector fallback returns a matching agent skill."""
+        skill = self._make_skill(triggers=(r"\btests?\b",))
+        self._set_agent_skills(monkeypatch, [skill])
 
         ctx = _make_ctx()
         call = AgentToolCall(tool="request_skill", params={"query": "how to write tests"}, raw_match="")
 
-        with (
-            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
-            patch("koda.skills._selector.get_shared_selector", return_value=mock_selector),
-            patch("koda.skills._telemetry.emit_skill_invocation"),
-        ):
+        with patch("koda.skills._telemetry.emit_skill_invocation"):
             from koda.services.tool_dispatcher import _handle_request_skill
 
             result = await _handle_request_skill(call.params, ctx)
@@ -1734,29 +1477,71 @@ class TestRequestSkill:
         assert "# TDD Skill" in result.output
 
     @pytest.mark.asyncio
-    async def test_request_skill_not_found(self):
-        """Unmatched query returns helpful error with available skills."""
-        mock_registry = MagicMock()
-        mock_registry.resolve_alias.return_value = None
-        mock_registry.get.return_value = None
-        mock_registry.get_all.return_value = {
-            "tdd": self._make_skill(),
-            "security": self._make_skill(skill_id="security"),
-        }
+    async def test_request_skill_does_not_use_global_fallback(self, monkeypatch):
+        """No configured skills means request_skill fails even for former curated names."""
+        self._set_agent_skills(monkeypatch, [])
 
-        mock_selector = MagicMock()
-        mock_selector.select.return_value = []
+        ctx = _make_ctx()
+
+        from koda.services.tool_dispatcher import _handle_request_skill
+
+        result = await _handle_request_skill({"query": "security"}, ctx)
+
+        assert result.success is False
+        assert "No expert skills configured for this agent" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_ignores_disabled_skill(self, monkeypatch):
+        """Disabled custom skills are not available to request_skill."""
+        self._set_agent_skills(monkeypatch, [self._make_skill(enabled=False)])
+
+        ctx = _make_ctx()
+
+        from koda.services.tool_dispatcher import _handle_request_skill
+
+        result = await _handle_request_skill({"query": "tdd"}, ctx)
+
+        assert result.success is False
+        assert "No expert skills configured for this agent" in result.output
+
+    @pytest.mark.asyncio
+    async def test_request_skill_respects_skill_policy(self, monkeypatch):
+        """Policy filtering limits request_skill to the current agent's allowed skills."""
+        self._set_agent_skills(
+            monkeypatch,
+            [
+                self._make_skill(),
+                self._make_skill(skill_id="security", name="Security", content="# Security"),
+            ],
+            {"enabled_skills": ["security"]},
+        )
+
+        ctx = _make_ctx()
+
+        from koda.services.tool_dispatcher import _handle_request_skill
+
+        result = await _handle_request_skill({"query": "tdd"}, ctx)
+
+        assert result.success is False
+        assert result.output.endswith("Skills configured for this agent: security")
+
+    @pytest.mark.asyncio
+    async def test_request_skill_not_found(self, monkeypatch):
+        """Unmatched query returns helpful error with available skills."""
+        self._set_agent_skills(
+            monkeypatch,
+            [
+                self._make_skill(),
+                self._make_skill(skill_id="security", name="Security", content="# Security"),
+            ],
+        )
 
         ctx = _make_ctx()
         call = AgentToolCall(tool="request_skill", params={"query": "nonexistent_xyz"}, raw_match="")
 
-        with (
-            patch("koda.skills._registry.get_shared_registry", return_value=mock_registry),
-            patch("koda.skills._selector.get_shared_selector", return_value=mock_selector),
-        ):
-            from koda.services.tool_dispatcher import _handle_request_skill
+        from koda.services.tool_dispatcher import _handle_request_skill
 
-            result = await _handle_request_skill(call.params, ctx)
+        result = await _handle_request_skill(call.params, ctx)
 
         assert result.success is False
         assert "No matching skill found" in result.output

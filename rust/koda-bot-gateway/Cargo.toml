@@ -19,6 +19,7 @@ async-stream.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 koda-observability = { path = "../koda-observability" }
+koda-postgres = { path = "../koda-postgres" }
 koda-proto = { path = "../koda-proto" }
 prost = "0.13"
 reqwest.workspace = true

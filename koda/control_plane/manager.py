@@ -8,14 +8,10 @@ import hashlib
 import json
 import os
 import re
-import subprocess
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -124,6 +120,7 @@ from .agent_spec import (
     normalize_effort_overrides,
     normalize_knowledge_policy,
     normalize_memory_policy,
+    normalize_resource_access_policy,
     parse_json_env_value,
     render_markdown_documents_from_agent_spec,
     resolve_agent_documents,
@@ -228,6 +225,11 @@ _ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
 _ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
 _ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
 _ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
+_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "whispercpp", "embedding"})
+
+
+class _ProviderDownloadCancelled(RuntimeError):
+    """Internal signal used to stop provider downloads cooperatively."""
 
 
 class GeneralPayloadValidationError(ValueError):
@@ -453,6 +455,10 @@ _KNOWLEDGE_POLICY_ENV_KEYS: tuple[str, ...] = (
     "KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED",
     "KNOWLEDGE_EVALUATION_SAMPLING_RATE",
     "KNOWLEDGE_CITATION_POLICY",
+    "KNOWLEDGE_RETRIEVAL_MIN_QUALITY_TIER",
+    "KNOWLEDGE_RETRIEVAL_DENSE_WINDOW",
+    "KNOWLEDGE_RETRIEVAL_RERANK_TOP_K",
+    "KNOWLEDGE_RETRIEVAL_VECTOR_COVERAGE_MIN",
 )
 _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     "general": {
@@ -534,15 +540,9 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "integrations": {
         "browser_enabled": ("BROWSER_ENABLED", "bool"),
-        "gws_enabled": ("GWS_ENABLED", "bool"),
-        "jira_enabled": ("JIRA_ENABLED", "bool"),
-        "confluence_enabled": ("CONFLUENCE_ENABLED", "bool"),
-        "aws_enabled": ("AWS_ENABLED", "bool"),
         "whisper_enabled": ("WHISPER_ENABLED", "bool"),
         "tts_enabled": ("TTS_ENABLED", "bool"),
         "link_analysis_enabled": ("LINK_ANALYSIS_ENABLED", "bool"),
-        "gh_enabled": ("GH_ENABLED", "bool"),
-        "glab_enabled": ("GLAB_ENABLED", "bool"),
         "docker_enabled": ("DOCKER_ENABLED", "bool"),
     },
     "memory": {
@@ -692,8 +692,6 @@ _SHARED_ENV_BLOCKED_KEYS: frozenset[str] = frozenset(
         "MEMORY_PROFILE_TOML",
         "MODEL_PRICING_USD",
         "RUNTIME_LOCAL_UI_TOKEN",
-        "SKILLS_JSON",
-        "SKILLS_DIR",
         "TEMPLATES_JSON",
         "TEMPLATES_PATH",
         "VOICE_ACTIVE_PROMPT_TEXT",
@@ -910,177 +908,7 @@ _GENERAL_KNOWLEDGE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "allowed_workspace_roots",
     "storage_mode",
 )
-_GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {
-    "jira": {
-        "title": "Jira",
-        "description": "Credenciais globais para busca, deep context e operacoes governadas no Jira.",
-        "fields": (
-            {
-                "key": "JIRA_URL",
-                "label": "Instance URL",
-                "input_type": "url",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "JIRA_USERNAME",
-                "label": "Username or email",
-                "input_type": "email",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "JIRA_API_TOKEN",
-                "label": "API token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": True,
-            },
-        ),
-    },
-    "confluence": {
-        "title": "Confluence",
-        "description": "Global credentials for governed reading of Confluence pages and spaces.",
-        "fields": (
-            {
-                "key": "CONFLUENCE_URL",
-                "label": "Instance URL",
-                "input_type": "url",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "CONFLUENCE_USERNAME",
-                "label": "Username or email",
-                "input_type": "email",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "CONFLUENCE_API_TOKEN",
-                "label": "API token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": True,
-            },
-        ),
-    },
-    "gws": {
-        "title": "Google Workspace",
-        "description": "Service credential used for approved Google Workspace operations.",
-        "fields": (
-            {
-                "key": "GWS_CREDENTIALS_FILE",
-                "label": "Arquivo de credenciais",
-                "input_type": "path",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "GWS_SERVICE_ACCOUNT_KEY",
-                "label": "JSON da service account",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "aws": {
-        "title": "AWS",
-        "description": "Perfis e regiao padrao usados pelo sistema quando integracoes AWS estiverem habilitadas.",
-        "fields": (
-            {
-                "key": "AWS_DEFAULT_REGION",
-                "label": "Default region",
-                "input_type": "text",
-                "storage": "env",
-                "required": True,
-            },
-            {
-                "key": "AWS_PROFILE_DEV",
-                "label": "Perfil dev",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_PROFILE_PROD",
-                "label": "Perfil prod",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ROLE_ARN",
-                "label": "Role ARN",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ROLE_SESSION_NAME",
-                "label": "Role session name",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_EXTERNAL_ID",
-                "label": "External ID",
-                "input_type": "text",
-                "storage": "env",
-                "required": False,
-            },
-            {
-                "key": "AWS_ACCESS_KEY_ID",
-                "label": "Access key ID",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-            {
-                "key": "AWS_SECRET_ACCESS_KEY",
-                "label": "Secret access key",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-            {
-                "key": "AWS_SESSION_TOKEN",
-                "label": "Session token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "gh": {
-        "title": "GitHub CLI",
-        "description": "Token opcional para uso governado do GitHub CLI quando a sessao local nao for usada.",
-        "fields": (
-            {
-                "key": "GH_TOKEN",
-                "label": "GitHub token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-    "glab": {
-        "title": "GitLab CLI",
-        "description": "Token opcional para uso governado do GitLab CLI quando a sessao local nao for usada.",
-        "fields": (
-            {
-                "key": "GITLAB_TOKEN",
-                "label": "GitLab token",
-                "input_type": "password",
-                "storage": "secret",
-                "required": False,
-            },
-        ),
-    },
-}
+_GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES: dict[str, dict[str, Any]] = {}
 _CORE_CONNECTION_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
     {
         str(field.get("key") or "").strip().upper()
@@ -1107,26 +935,6 @@ class RuntimeSnapshot:
     @property
     def env(self) -> dict[str, str]:
         return self.process_env
-
-
-class _VerificationTimeout(RuntimeError):
-    """Raised when an integration verification probe exceeds its time budget."""
-
-
-def _run_with_timeout(func: Any, timeout_seconds: int = 10) -> Any:
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError as exc:
-            future.cancel()
-            raise _VerificationTimeout(f"Verification timed out after {timeout_seconds}s") from exc
-
-
-def _mint_google_service_account_token(credentials_path: str) -> dict[str, Any]:
-    from koda.services.provider_auth import _mint_google_service_account_token as mint_service_account_token
-
-    return cast(dict[str, Any], mint_service_account_token(credentials_path))
 
 
 def _normalize_agent_id(agent_id: str) -> str:
@@ -1546,6 +1354,7 @@ class ControlPlaneManager:
         self._provider_login_processes: dict[str, Any] = {}
         self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
         self._provider_download_threads: dict[str, threading.Thread] = {}
+        self._provider_download_cancel_events: dict[str, threading.Event] = {}
 
     def _auto_seed_enabled(self) -> bool:
         """Skip auto-seeding for tests that instantiate via ``object.__new__``."""
@@ -2679,9 +2488,6 @@ class ControlPlaneManager:
             "browser": self._bool_from_env(env, "BROWSER_FEATURES_ENABLED")
             or self._bool_from_env(env, "BROWSER_ENABLED")
             or self._bool_from_env(env, "RUNTIME_BROWSER_LIVE_ENABLED"),
-            "jira": self._bool_from_env(env, "JIRA_ENABLED"),
-            "confluence": self._bool_from_env(env, "CONFLUENCE_ENABLED"),
-            "gws": self._bool_from_env(env, "GWS_ENABLED"),
         }
 
     def _provider_catalog_from_env(self, env: dict[str, str]) -> dict[str, Any]:
@@ -4359,26 +4165,7 @@ class ControlPlaneManager:
         config = self._agent_core_connection_config(agent_id, normalized)
         if normalized == "browser":
             return "none"
-        if normalized == "gws":
-            if self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"):
-                return "service_account_key"
-            return "service_account"
-        if normalized in {"jira", "confluence"}:
-            return "api_token"
-        if normalized in {"gh", "glab"}:
-            if persisted in supported_modes:
-                return persisted
-            return "local_session"
-        if normalized == "aws":
-            if persisted in supported_modes:
-                return persisted
-            if _nonempty_text(config.get("AWS_ROLE_ARN")):
-                return "assume_role"
-            if self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID") and self.get_secret_asset(
-                agent_id, "AWS_SECRET_ACCESS_KEY"
-            ):
-                return "access_key"
-            return "local_session"
+        _ = config
         if persisted in supported_modes:
             return persisted
         return definition.auth_modes[0] if definition.auth_modes else "none"
@@ -4393,37 +4180,7 @@ class ControlPlaneManager:
             return bool(row and int(row.get("configured") or 0))
         config = self._agent_core_connection_config(agent_id, normalized)
         auth_method = self._resolve_agent_core_auth_method(agent_id, normalized)
-        if normalized == "gws":
-            if auth_method == "service_account_key":
-                return bool(self.get_secret_asset(agent_id, "GWS_SERVICE_ACCOUNT_KEY"))
-            return bool(_nonempty_text(config.get("GWS_CREDENTIALS_FILE")))
-        if normalized in {"jira", "confluence"}:
-            required_secret = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
-            required_env = (
-                ("JIRA_URL", "JIRA_USERNAME") if normalized == "jira" else ("CONFLUENCE_URL", "CONFLUENCE_USERNAME")
-            )
-            return bool(self.get_secret_asset(agent_id, required_secret)) and all(
-                _nonempty_text(config.get(key)) for key in required_env
-            )
-        if normalized in {"gh", "glab"}:
-            if auth_method == "local_session":
-                return bool(row)
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            return bool(self.get_secret_asset(agent_id, secret_key))
-        if normalized == "aws":
-            if not _nonempty_text(config.get("AWS_DEFAULT_REGION")):
-                return False
-            if auth_method == "local_session":
-                return bool(row)
-            if auth_method == "assume_role":
-                return (
-                    bool(_nonempty_text(config.get("AWS_ROLE_ARN")))
-                    and bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID"))
-                    and bool(self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY"))
-                )
-            return bool(self.get_secret_asset(agent_id, "AWS_ACCESS_KEY_ID")) and bool(
-                self.get_secret_asset(agent_id, "AWS_SECRET_ACCESS_KEY")
-            )
+        _ = (config, auth_method)
         return bool(row)
 
     def _resolve_integration_auth_mode(
@@ -4454,40 +4211,7 @@ class ControlPlaneManager:
         config = self._system_default_connection_config(normalized)
         if normalized == "browser":
             return "none"
-        if normalized == "gws":
-            if self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"):
-                return "service_account_key"
-            return "service_account"
-        if normalized in {"jira", "confluence"}:
-            return "api_token"
-        if normalized == "aws":
-            if self._stored_global_secret_value("AWS_ACCESS_KEY_ID") and self._stored_global_secret_value(
-                "AWS_SECRET_ACCESS_KEY"
-            ):
-                return "access_key"
-            if _nonempty_text(config.get("AWS_ROLE_ARN")):
-                return "assume_role"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "assume_role" in supported_modes:
-                return "assume_role"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
-        if normalized == "gh":
-            if self._stored_global_secret_value("GH_TOKEN"):
-                return "token"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "token" in supported_modes:
-                return "token"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
-        if normalized == "glab":
-            if self._stored_global_secret_value("GITLAB_TOKEN"):
-                return "token"
-            if persisted_auth_mode in supported_modes:
-                return persisted_auth_mode
-            if "token" in supported_modes:
-                return "token"
-            return definition.auth_modes[0] if definition.auth_modes else "none"
+        _ = config
         if persisted_auth_mode in supported_modes:
             return persisted_auth_mode
         return definition.auth_modes[0] if definition.auth_modes else "none"
@@ -4581,14 +4305,6 @@ class ControlPlaneManager:
         fields = {
             str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
         }
-        if normalized in {"gh", "glab"}:
-            if row is not None:
-                return bool(int(row["configured"] or 0))
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            return bool(self._stored_global_secret_value(secret_key))
-        if normalized == "gws":
-            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
-            return bool(credentials_file or self._stored_global_secret_value("GWS_SERVICE_ACCOUNT_KEY"))
         template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized)
         if template is None:
             if normalized == "browser":
@@ -4707,10 +4423,6 @@ class ControlPlaneManager:
                 "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
             }
 
-        from koda.services.core_connection_broker import get_core_connection_broker
-
-        broker = get_core_connection_broker()
-
         if normalized == "browser":
             return {
                 "verified": self._agent_core_connection_configured(normalized_agent, normalized),
@@ -4720,192 +4432,6 @@ class ControlPlaneManager:
                 "auth_expired": False,
                 "details": {"auth_method": "none"},
             }
-
-        if normalized == "aws":
-            region = _nonempty_text(
-                self._agent_core_connection_config(normalized_agent, normalized).get("AWS_DEFAULT_REGION")
-            )
-            if not region:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "AWS missing default region.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            try:
-                import boto3  # type: ignore
-            except ImportError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "boto3 not installed.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            try:
-                resolved, session_kwargs = broker.build_boto3_session_kwargs(agent_id=normalized_agent)
-                session = boto3.Session(**session_kwargs)
-                identity = session.client("sts").get_caller_identity()
-                return {
-                    "verified": True,
-                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
-                    "last_error": "",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {
-                        "auth_method": resolved.auth_method,
-                        "region": region,
-                        "account": str(identity.get("Account") or ""),
-                        "arn": str(identity.get("Arn") or ""),
-                        "user_id": str(identity.get("UserId") or ""),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-
-        if normalized in {"gh", "glab"}:
-            cli = "gh" if normalized == "gh" else "glab"
-            checked_via = f"{cli}_api_user"
-            try:
-                from koda.services.provider_env import build_tool_subprocess_env
-
-                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
-                    proc_env = build_tool_subprocess_env(env_overrides=env)
-                    result = subprocess.run(
-                        [cli, "api", "user"],
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        env=proc_env,
-                    )
-            except FileNotFoundError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": f"{cli} CLI not found.",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            if result.returncode != 0:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": (
-                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
-                    ),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {"auth_method": resolved.auth_method},
-                }
-            try:
-                payload = _safe_json_object(json.loads(result.stdout or "{}"))
-            except json.JSONDecodeError:
-                payload = {}
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
-                "last_error": "",
-                "checked_via": checked_via,
-                "auth_expired": False,
-                "details": {"auth_method": resolved.auth_method, **payload},
-            }
-
-        if normalized == "gws":
-            try:
-                with broker.materialize_cli_environment(normalized, agent_id=normalized_agent) as (resolved, env):
-                    credentials_file = _nonempty_text(
-                        env.get("GWS_CREDENTIALS_FILE") or env.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    )
-                    token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"auth_method": self._resolve_agent_core_auth_method(normalized_agent, normalized)},
-                }
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(token_info.get("client_email")),
-                "last_error": "",
-                "checked_via": "service_account_token",
-                "auth_expired": False,
-                "details": {
-                    "auth_method": resolved.auth_method,
-                    "client_email": _nonempty_text(token_info.get("client_email")),
-                    "project_id": _nonempty_text(token_info.get("project_id")),
-                    "token_uri": _nonempty_text(token_info.get("token_uri")),
-                },
-            }
-
-        if normalized in {"jira", "confluence"}:
-            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
-            try:
-                kwargs = broker.atlassian_client_kwargs(normalized, agent_id=normalized_agent)
-                if normalized == "jira":
-                    from atlassian import Jira  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Jira(**kwargs, api_version="3")
-                        return client.myself()
-                else:
-                    from atlassian import Confluence  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Confluence(**kwargs)
-                        return client.get_all_spaces(limit=1)
-
-                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
-                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(payload.get("displayName"))
-                    or _nonempty_text(payload.get("emailAddress")),
-                    "last_error": "",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": payload,
-                }
-            except _VerificationTimeout as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
 
         return {
             "verified": self._agent_core_connection_configured(normalized_agent, normalized),
@@ -4963,261 +4489,6 @@ class ControlPlaneManager:
 
     def _verify_integration_configuration(self, integration_id: str) -> dict[str, Any]:
         normalized = integration_id.strip().lower()
-        fields = {
-            str(item.get("key") or ""): _safe_json_object(item) for item in self._integration_fields_payload(normalized)
-        }
-
-        if normalized == "aws":
-            region = _nonempty_text(fields.get("AWS_DEFAULT_REGION", {}).get("value"))
-            if not region:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "AWS missing default region.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": "unknown", "region": region},
-                }
-            try:
-                import boto3  # type: ignore
-            except ImportError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "boto3 not installed.",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": "unknown", "region": region},
-                }
-
-            access_key_id = self._global_secret_value("AWS_ACCESS_KEY_ID")
-            secret_access_key = self._global_secret_value("AWS_SECRET_ACCESS_KEY")
-            session_token = self._global_secret_value("AWS_SESSION_TOKEN")
-            profile_name = _nonempty_text(fields.get("AWS_PROFILE_PROD", {}).get("value")) or _nonempty_text(
-                fields.get("AWS_PROFILE_DEV", {}).get("value")
-            )
-            auth_mode = self._resolve_integration_auth_mode(normalized)
-            session_kwargs: dict[str, Any] = {"region_name": region}
-            if auth_mode == "access_key" and access_key_id and secret_access_key:
-                session_kwargs["aws_access_key_id"] = access_key_id
-                session_kwargs["aws_secret_access_key"] = secret_access_key
-                if session_token:
-                    session_kwargs["aws_session_token"] = session_token
-            elif profile_name:
-                session_kwargs["profile_name"] = profile_name
-            try:
-                session = boto3.Session(**session_kwargs)
-                identity = session.client("sts").get_caller_identity()
-                return {
-                    "verified": True,
-                    "account_label": str(identity.get("Arn") or identity.get("Account") or ""),
-                    "last_error": "",
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {
-                        "auth_mode": auth_mode,
-                        "region": region,
-                        "account": str(identity.get("Account") or ""),
-                        "arn": str(identity.get("Arn") or ""),
-                        "user_id": str(identity.get("UserId") or ""),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "sts_get_caller_identity",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode, "region": region},
-                }
-
-        if normalized in {"gh", "glab"}:
-            cli = "gh" if normalized == "gh" else "glab"
-            secret_key = "GH_TOKEN" if normalized == "gh" else "GITLAB_TOKEN"
-            auth_mode = self._resolve_integration_auth_mode(normalized)
-            command_env = dict(os.environ)
-            token_value = self._global_secret_value(secret_key)
-            if auth_mode == "token":
-                if not token_value:
-                    return {
-                        "verified": False,
-                        "account_label": "",
-                        "last_error": f"{cli} token missing.",
-                        "checked_via": f"{cli}_api_user",
-                        "auth_expired": False,
-                        "details": {"auth_mode": auth_mode},
-                    }
-                command_env[secret_key] = token_value
-            try:
-                result = subprocess.run(
-                    [cli, "api", "user"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=command_env,
-                )
-            except FileNotFoundError:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": f"{cli} CLI not found.",
-                    "checked_via": f"{cli}_api_user",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode},
-                }
-            if result.returncode != 0:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": (
-                        _nonempty_text(result.stderr) or _nonempty_text(result.stdout) or f"{cli} auth failed."
-                    ),
-                    "checked_via": f"{cli}_api_user",
-                    "auth_expired": False,
-                    "details": {"auth_mode": auth_mode},
-                }
-            try:
-                payload = _safe_json_object(json.loads(result.stdout or "{}"))
-            except json.JSONDecodeError:
-                payload = {}
-            return {
-                "verified": True,
-                "account_label": _nonempty_text(payload.get("login")) or _nonempty_text(payload.get("username")),
-                "last_error": "",
-                "checked_via": f"{cli}_api_user",
-                "auth_expired": False,
-                "details": {"auth_mode": auth_mode, **payload},
-            }
-
-        if normalized == "gws":
-            credentials_file = _nonempty_text(fields.get("GWS_CREDENTIALS_FILE", {}).get("value"))
-            service_account_key = self._global_secret_value("GWS_SERVICE_ACCOUNT_KEY")
-            if not credentials_file and not service_account_key:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": "GWS credentials missing.",
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"credentials_source": "missing"},
-                }
-            credentials_source = "file" if credentials_file else "secret"
-            temp_path = ""
-            try:
-                if not credentials_file:
-                    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
-                        handle.write(service_account_key)
-                        temp_path = handle.name
-                    credentials_file = temp_path
-                token_info = _safe_json_object(_mint_google_service_account_token(credentials_file))
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(token_info.get("client_email")),
-                    "last_error": "",
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {
-                        "credentials_source": credentials_source,
-                        "client_email": _nonempty_text(token_info.get("client_email")),
-                        "project_id": _nonempty_text(token_info.get("project_id")),
-                        "token_uri": _nonempty_text(token_info.get("token_uri")),
-                    },
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": "service_account_token",
-                    "auth_expired": False,
-                    "details": {"credentials_source": credentials_source},
-                }
-            finally:
-                if temp_path:
-                    with contextlib.suppress(OSError):
-                        os.unlink(temp_path)
-
-        if normalized in {"jira", "confluence"}:
-            template = _GENERAL_INTEGRATION_CREDENTIAL_TEMPLATES.get(normalized, {})
-            for field in template.get("fields", ()):
-                key = str(field["key"])
-                if str(field.get("storage") or "env") == "secret":
-                    if not self._global_secret_value(key):
-                        return {
-                            "verified": False,
-                            "account_label": "",
-                            "last_error": f"{normalized} credentials missing.",
-                            "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
-                            "auth_expired": False,
-                            "details": {},
-                        }
-                    continue
-                if not _nonempty_text(fields.get(key, {}).get("value")):
-                    return {
-                        "verified": False,
-                        "account_label": "",
-                        "last_error": f"{normalized} credentials missing.",
-                        "checked_via": "jira_myself" if normalized == "jira" else "confluence_read_probe",
-                        "auth_expired": False,
-                        "details": {},
-                    }
-            url_key = "JIRA_URL" if normalized == "jira" else "CONFLUENCE_URL"
-            user_key = "JIRA_USERNAME" if normalized == "jira" else "CONFLUENCE_USERNAME"
-            token_key = "JIRA_API_TOKEN" if normalized == "jira" else "CONFLUENCE_API_TOKEN"
-            checked_via = "jira_myself" if normalized == "jira" else "confluence_read_probe"
-            try:
-                if normalized == "jira":
-                    from atlassian import Jira  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Jira(
-                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
-                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
-                            password=self._global_secret_value(token_key),
-                        )
-                        return client.myself()
-                else:
-                    from atlassian import Confluence  # type: ignore
-
-                    def _probe() -> Any:
-                        client = Confluence(
-                            url=_nonempty_text(fields.get(url_key, {}).get("value")),
-                            username=_nonempty_text(fields.get(user_key, {}).get("value")),
-                            password=self._global_secret_value(token_key),
-                        )
-                        return client.get_all_spaces(limit=1)
-
-                probe_result = _run_with_timeout(_probe, timeout_seconds=10)
-                payload = _safe_json_object(probe_result if isinstance(probe_result, dict) else {})
-                return {
-                    "verified": True,
-                    "account_label": _nonempty_text(payload.get("displayName"))
-                    or _nonempty_text(payload.get("emailAddress")),
-                    "last_error": "",
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": payload,
-                }
-            except _VerificationTimeout as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-            except Exception as exc:
-                return {
-                    "verified": False,
-                    "account_label": "",
-                    "last_error": str(exc),
-                    "checked_via": checked_via,
-                    "auth_expired": False,
-                    "details": {},
-                }
-
         return {
             "verified": self._integration_configured(normalized),
             "account_label": "",
@@ -5885,9 +5156,39 @@ class ControlPlaneManager:
             "created_at": _trimmed_text(row["created_at"]),
             "updated_at": _trimmed_text(row["updated_at"]),
             "completed_at": _trimmed_text(row["completed_at"]),
+            "details": details,
         }
         payload.update(details)
         return payload
+
+    def _provider_download_cancel_events_ref(self) -> dict[str, threading.Event]:
+        events = getattr(self, "_provider_download_cancel_events", None)
+        if events is None:
+            events = {}
+            self._provider_download_cancel_events = events
+        return events
+
+    def _provider_download_cancel_requested(self, job_id: str) -> bool:
+        event = self._provider_download_cancel_events_ref().get(job_id)
+        return bool(event and event.is_set())
+
+    def _raise_if_provider_download_cancelled(self, job_id: str) -> None:
+        if self._provider_download_cancel_requested(job_id):
+            raise _ProviderDownloadCancelled("download cancelled")
+
+    def _register_provider_download_thread(self, job_id: str, thread: threading.Thread) -> None:
+        threads = getattr(self, "_provider_download_threads", None)
+        if threads is None:
+            threads = {}
+            self._provider_download_threads = threads
+        threads[job_id] = thread
+        self._provider_download_cancel_events_ref()[job_id] = threading.Event()
+
+    def _clear_provider_download_tracking(self, job_id: str) -> None:
+        threads = getattr(self, "_provider_download_threads", None)
+        if threads is not None:
+            threads.pop(job_id, None)
+        self._provider_download_cancel_events_ref().pop(job_id, None)
 
     def _persist_provider_download_job(
         self,
@@ -5967,15 +5268,9 @@ class ControlPlaneManager:
             "language_id": str(metadata["language_id"]),
             "language_label": str(metadata["language_label"]),
         }
-        self._persist_provider_download_job(
-            job_id,
-            provider_id="kokoro",
-            asset_id=voice_id,
-            status="running",
-            details={**base_details, "message": "Baixando voz do catalogo oficial do Kokoro."},
-        )
 
         def _on_progress(downloaded_bytes: int, total_bytes: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -5987,8 +5282,17 @@ class ControlPlaneManager:
             )
 
         try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id=voice_id,
+                status="running",
+                details={**base_details, "message": "Baixando voz do catalogo oficial do Kokoro."},
+            )
             result = ensure_kokoro_voice_downloaded(voice_id, progress_callback=_on_progress)
             downloaded_bytes = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -6002,6 +5306,14 @@ class ControlPlaneManager:
                     "message": "Voz baixada com sucesso.",
                 },
             )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id=voice_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
         except Exception as exc:
             self._persist_provider_download_job(
                 job_id,
@@ -6011,7 +5323,7 @@ class ControlPlaneManager:
                 details={**base_details, "last_error": str(exc)},
             )
         finally:
-            self._provider_download_threads.pop(job_id, None)
+            self._clear_provider_download_tracking(job_id)
 
     def get_kokoro_voice_catalog(self, language: str = "") -> dict[str, Any]:
         sections = self._system_settings_sections()
@@ -6096,7 +5408,7 @@ class ControlPlaneManager:
             name=f"kokoro-download-{normalized_voice}",
             daemon=True,
         )
-        self._provider_download_threads[job_id] = thread
+        self._register_provider_download_thread(job_id, thread)
         thread.start()
         row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
         if row is None:
@@ -6121,15 +5433,9 @@ class ControlPlaneManager:
             "asset": "model",
             "filename": kokoro_model_path().name,
         }
-        self._persist_provider_download_job(
-            job_id,
-            provider_id="kokoro",
-            asset_id="model",
-            status="running",
-            details={**base_details, "message": "Baixando modelo base do Kokoro."},
-        )
 
         def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -6141,8 +5447,17 @@ class ControlPlaneManager:
             )
 
         try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="running",
+                details={**base_details, "message": "Baixando modelo base do Kokoro."},
+            )
             ensure_kokoro_model(progress_callback=_on_progress)
             bytes_on_disk = int(kokoro_model_path().stat().st_size)
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="kokoro",
@@ -6156,6 +5471,14 @@ class ControlPlaneManager:
                     "message": "Modelo Kokoro pronto.",
                 },
             )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="kokoro",
+                asset_id="model",
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
         except Exception as exc:  # noqa: BLE001 - persist any failure as job error
             self._persist_provider_download_job(
                 job_id,
@@ -6165,7 +5488,7 @@ class ControlPlaneManager:
                 details={**base_details, "last_error": str(exc)},
             )
         finally:
-            self._provider_download_threads.pop(job_id, None)
+            self._clear_provider_download_tracking(job_id)
 
     def start_kokoro_model_download(self) -> dict[str, Any]:
         active = self._active_provider_download_job("kokoro", "model")
@@ -6212,7 +5535,7 @@ class ControlPlaneManager:
             name="kokoro-model-download",
             daemon=True,
         )
-        self._provider_download_threads[job_id] = thread
+        self._register_provider_download_thread(job_id, thread)
         thread.start()
         row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
         if row is None:
@@ -6247,7 +5570,15 @@ class ControlPlaneManager:
         for entry in _safe_json_list(payload.get("items")):
             item = _safe_json_object(entry)
             model_id = str(item.get("id") or "")
-            item["active_job"] = self._active_provider_download_job("embedding", model_id)
+            try:
+                item["active_job"] = self._active_provider_download_job("embedding", model_id)
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning(
+                    "embedding_catalog_active_job_probe_failed",
+                    model_id=model_id,
+                    error=str(exc),
+                )
+                item["active_job"] = None
             items.append(item)
         return {**payload, "items": items}
 
@@ -6261,6 +5592,7 @@ class ControlPlaneManager:
                 status="error",
                 details={"last_error": f"unknown embedding model: {model_id}"},
             )
+            self._clear_provider_download_tracking(job_id)
             return
 
         base_details = {
@@ -6270,6 +5602,17 @@ class ControlPlaneManager:
             "expected_size_mb": definition.size_mb,
         }
         expected_total = int(definition.size_mb) * 1024 * 1024
+        if self._provider_download_cancel_requested(job_id):
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="cancelled",
+                total_bytes=expected_total,
+                details={**base_details, "message": "Download cancelado."},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
         self._persist_provider_download_job(
             job_id,
             provider_id="embedding",
@@ -6316,6 +5659,18 @@ class ControlPlaneManager:
         last_persist = 0.0
         while worker.is_alive():
             downloaded = _embedding_model_disk_bytes(definition.id)
+            if self._provider_download_cancel_requested(job_id):
+                self._persist_provider_download_job(
+                    job_id,
+                    provider_id="embedding",
+                    asset_id=definition.id,
+                    status="cancelled",
+                    downloaded_bytes=downloaded,
+                    total_bytes=expected_total,
+                    details={**base_details, "message": "Download cancelado."},
+                )
+                self._clear_provider_download_tracking(job_id)
+                return
             now = time.monotonic()
             if now - last_persist >= 0.75:
                 self._persist_provider_download_job(
@@ -6331,6 +5686,19 @@ class ControlPlaneManager:
             time.sleep(0.5)
         worker.join()
 
+        if self._provider_download_cancel_requested(job_id):
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="embedding",
+                asset_id=definition.id,
+                status="cancelled",
+                downloaded_bytes=_embedding_model_disk_bytes(definition.id),
+                total_bytes=expected_total,
+                details={**base_details, "message": "Download cancelado."},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+
         if download_error:
             self._persist_provider_download_job(
                 job_id,
@@ -6339,7 +5707,7 @@ class ControlPlaneManager:
                 status="error",
                 details={**base_details, "last_error": str(download_error.get("exc"))},
             )
-            self._provider_download_threads.pop(job_id, None)
+            self._clear_provider_download_tracking(job_id)
             return
 
         final_bytes = _embedding_model_disk_bytes(definition.id)
@@ -6362,7 +5730,7 @@ class ControlPlaneManager:
         bare_name = definition.repo_id.split("/", 1)[-1]
         if bare_name != definition.repo_id:
             reset_embedding_load_cache(bare_name)
-        self._provider_download_threads.pop(job_id, None)
+        self._clear_provider_download_tracking(job_id)
 
     def start_embedding_model_download(self, model_id: str) -> dict[str, Any]:
         normalized = _nonempty_text(model_id)
@@ -6415,7 +5783,7 @@ class ControlPlaneManager:
             name=f"embedding-download-{definition.id}",
             daemon=True,
         )
-        self._provider_download_threads[job_id] = thread
+        self._register_provider_download_thread(job_id, thread)
         thread.start()
         row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
         if row is None:
@@ -6543,15 +5911,9 @@ class ControlPlaneManager:
             "filename": str(descriptor["filename"]),
             "label": str(descriptor["label"]),
         }
-        self._persist_provider_download_job(
-            job_id,
-            provider_id="whispercpp",
-            asset_id=variant_id,
-            status="running",
-            details={**base_details, "message": "Baixando modelo Whisper."},
-        )
 
         def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="whispercpp",
@@ -6563,8 +5925,17 @@ class ControlPlaneManager:
             )
 
         try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="running",
+                details={**base_details, "message": "Baixando modelo Whisper."},
+            )
             result = ensure_whisper_model_downloaded(variant_id, progress_callback=_on_progress)
             bytes_on_disk = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
             self._persist_provider_download_job(
                 job_id,
                 provider_id="whispercpp",
@@ -6578,6 +5949,14 @@ class ControlPlaneManager:
                     "message": "Modelo Whisper pronto.",
                 },
             )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="whispercpp",
+                asset_id=variant_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
         except Exception as exc:  # noqa: BLE001 - persist any failure as job error
             self._persist_provider_download_job(
                 job_id,
@@ -6587,7 +5966,7 @@ class ControlPlaneManager:
                 details={**base_details, "last_error": str(exc)},
             )
         finally:
-            self._provider_download_threads.pop(job_id, None)
+            self._clear_provider_download_tracking(job_id)
 
     def start_whisper_model_download(self, variant_id: str = WHISPER_DEFAULT_VARIANT) -> dict[str, Any]:
         normalized = _nonempty_text(variant_id)
@@ -6641,7 +6020,7 @@ class ControlPlaneManager:
             name=f"whisper-download-{normalized}",
             daemon=True,
         )
-        self._provider_download_threads[job_id] = thread
+        self._register_provider_download_thread(job_id, thread)
         thread.start()
         row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
         if row is None:
@@ -6700,7 +6079,7 @@ class ControlPlaneManager:
 
     def get_provider_download_job(self, provider_id: str, job_id: str) -> dict[str, Any]:
         normalized = provider_id.strip().lower()
-        if normalized not in {"kokoro", "whispercpp"}:
+        if normalized not in _PROVIDER_DOWNLOAD_PROVIDER_IDS:
             raise ValueError(f"unsupported provider download: {provider_id}")
         self._cleanup_provider_download_jobs()
         row = fetch_one(
@@ -6710,6 +6089,49 @@ class ControlPlaneManager:
         if row is None:
             raise KeyError(job_id)
         return self._provider_download_job_payload(row)
+
+    def cancel_provider_download_job(self, provider_id: str, job_id: str) -> dict[str, Any]:
+        normalized = provider_id.strip().lower()
+        if normalized not in _PROVIDER_DOWNLOAD_PROVIDER_IDS:
+            raise ValueError(f"unsupported provider download: {provider_id}")
+        self._cleanup_provider_download_jobs()
+        row = fetch_one(
+            "SELECT * FROM cp_provider_download_jobs WHERE id = ? AND provider_id = ?",
+            (job_id, normalized),
+        )
+        if row is None:
+            raise KeyError(job_id)
+
+        status = str(row["status"] or "pending")
+        if status not in {"pending", "running"}:
+            return self._provider_download_job_payload(row)
+
+        event = self._provider_download_cancel_events_ref().get(job_id)
+        if event is not None:
+            event.set()
+
+        details = _safe_json_object(json_load(row["details_json"], {}))
+        self._persist_provider_download_job(
+            job_id,
+            provider_id=normalized,
+            asset_id=str(row["asset_id"]),
+            status="cancelled",
+            downloaded_bytes=int(row["downloaded_bytes"] or 0),
+            total_bytes=int(row["total_bytes"] or 0),
+            details={**details, "message": "Download cancelado."},
+        )
+
+        thread = getattr(self, "_provider_download_threads", {}).get(job_id)
+        if thread is None or not thread.is_alive():
+            self._clear_provider_download_tracking(job_id)
+
+        refreshed = fetch_one(
+            "SELECT * FROM cp_provider_download_jobs WHERE id = ? AND provider_id = ?",
+            (job_id, normalized),
+        )
+        if refreshed is None:
+            raise KeyError(job_id)
+        return self._provider_download_job_payload(refreshed)
 
     def get_provider_connection(self, provider_id: str) -> dict[str, Any]:
         return self._serialize_provider_connection(provider_id.strip().lower())
@@ -7276,6 +6698,7 @@ class ControlPlaneManager:
                     "memory_policy",
                     "knowledge_policy",
                     "resource_access_policy",
+                    "skill_policy",
                 )
                 if _safe_json_object(normalized_spec.get(key))
             ],
@@ -7304,9 +6727,12 @@ class ControlPlaneManager:
             "voice_policy",
             "image_analysis_policy",
             "memory_extraction_schema",
+            "skill_policy",
         ):
             if key in payload:
                 updated_spec[key] = _safe_json_object(payload.get(key))
+        if "custom_skills" in payload:
+            updated_spec["custom_skills"] = _safe_json_list(payload.get("custom_skills"))
 
         if "documents" in payload:
             updated_spec["documents"] = {
@@ -7360,6 +6786,17 @@ class ControlPlaneManager:
                 prompting_payload["image_analysis_policy"] = _safe_json_object(updated_spec["image_analysis_policy"])
             else:
                 prompting_payload.pop("image_analysis_policy", None)
+        if "skill_policy" in payload:
+            if _safe_json_object(updated_spec.get("skill_policy")):
+                prompting_payload["skill_policy"] = _safe_json_object(updated_spec["skill_policy"])
+            else:
+                prompting_payload.pop("skill_policy", None)
+        if "custom_skills" in payload:
+            custom_skills = _safe_json_list(updated_spec.get("custom_skills"))
+            if custom_skills:
+                prompting_payload["custom_skills"] = custom_skills
+            else:
+                prompting_payload.pop("custom_skills", None)
 
         if "model_policy" in payload:
             self._apply_model_policy_to_section(providers_payload, _safe_json_object(updated_spec.get("model_policy")))
@@ -10689,11 +10126,19 @@ class ControlPlaneManager:
         }
         for env_key in _CORE_CONNECTION_RUNTIME_ENV_KEYS:
             runtime_env.pop(env_key, None)
-        connection_refs = [
-            _safe_json_object(item)
-            for item in _safe_json_list(snapshot.get("connection_refs"))
-            if isinstance(item, dict)
-        ]
+        connection_refs: list[dict[str, Any]] = []
+        for item in _safe_json_list(snapshot.get("connection_refs")):
+            if not isinstance(item, dict):
+                continue
+            ref = _safe_json_object(item)
+            kind = str(ref.get("kind") or "").strip().lower()
+            connection_key = str(ref.get("connection_key") or "").strip().lower()
+            integration_key = str(ref.get("integration_key") or "").strip().lower()
+            if kind == "core" or connection_key.startswith("core:"):
+                core_id = integration_key or connection_key.split(":", 1)[1]
+                if core_id not in CORE_INTEGRATION_CATALOG:
+                    continue
+            connection_refs.append(ref)
         runtime_snapshot = dict(snapshot)
         runtime_snapshot["env"] = runtime_env
         runtime_snapshot["process_env"] = runtime_env
@@ -10718,9 +10163,6 @@ class ControlPlaneManager:
             if not content:
                 continue
             inline_documents[kind] = content
-
-        skills = [asset for asset in _safe_json_list(snapshot.get("skills")) if str(asset.get("content") or "").strip()]
-        skills_payload = {str(asset["name"]): str(asset["content"]).strip() for asset in skills}
 
         templates = {str(asset["name"]): str(asset["content"]) for asset in _safe_json_list(snapshot.get("templates"))}
 
@@ -10771,7 +10213,9 @@ class ControlPlaneManager:
             env["KOKORO_VOICES_PATH"] = str(kokoro_managed_voices_storage_path())
         except Exception:
             log.warning("control_plane_kokoro_assets_unavailable", agent_id=normalized, exc_info=True)
-        resource_access_policy = _safe_json_object(agent_spec.get("resource_access_policy"))
+        resource_access_policy = normalize_resource_access_policy(
+            _safe_json_object(agent_spec.get("resource_access_policy"))
+        )
         if resource_access_policy and "AGENT_RESOURCE_ACCESS_POLICY_JSON" not in env:
             env["AGENT_RESOURCE_ACCESS_POLICY_JSON"] = json_dump(resource_access_policy)
         if _safe_json_object(agent_spec.get("tool_policy")) and "AGENT_TOOL_POLICY_JSON" not in env:
@@ -10904,8 +10348,6 @@ class ControlPlaneManager:
         if composed_prompt:
             env["AGENT_COMPILED_PROMPT_TEXT"] = composed_prompt
         if inline_mode:
-            if skills_payload:
-                env["SKILLS_JSON"] = json.dumps(skills_payload, ensure_ascii=False)
             if templates:
                 env["TEMPLATES_JSON"] = json.dumps(templates, ensure_ascii=False)
             if inline_documents.get("voice_prompt_md"):
@@ -11089,9 +10531,6 @@ class ControlPlaneManager:
 
             if target_agent_ids:
                 self._import_legacy_templates(target_agent_ids)
-
-            if existing_agent_ids or target_agent_ids:
-                self._import_legacy_skills()
 
             for agent_id in target_agent_ids:
                 publish = self.publish_agent(agent_id)
@@ -11473,13 +10912,7 @@ class ControlPlaneManager:
         ):
             return "tools"
         if (
-            key.startswith("JIRA_")
-            or key.startswith("CONFLUENCE_")
-            or key.startswith("AWS_")
-            or key.startswith("POSTGRES_")
-            or key.startswith("GWS_")
-            or key.startswith("GH_")
-            or key.startswith("GLAB_")
+            key.startswith("POSTGRES_")
             or key.startswith("DOCKER_")
             or key.startswith("WHISPER_")
             or key.startswith("TTS_")
@@ -11522,28 +10955,6 @@ class ControlPlaneManager:
             data = json.loads(path.read_text(encoding="utf-8"))
             for name, content in data.items():
                 self.upsert_template_asset(agent_id, {"name": name, "content": content})
-
-    def _import_legacy_skills(self) -> None:
-        skills_dir = ROOT_DIR / "koda" / "skills"
-        if not skills_dir.exists():
-            return
-        seed_agent = "DEFAULT"
-        if not fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (seed_agent,)):
-            # Do not create an actual agent for skill seeding; use the first agent as scope carrier.
-            row = fetch_one("SELECT id FROM cp_agent_definitions ORDER BY id ASC LIMIT 1")
-            if row is not None:
-                seed_agent = str(row["id"])
-            else:
-                return
-        for path in skills_dir.glob("*.md"):
-            self.upsert_skill_asset(
-                seed_agent,
-                {
-                    "scope": "global",
-                    "name": path.stem,
-                    "content": path.read_text(encoding="utf-8"),
-                },
-            )
 
     # ------------------------------------------------------------------ #
     #  MCP Server Catalog                                                  #

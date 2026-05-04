@@ -774,6 +774,33 @@ async def _runtime_task_workspace_file(request: web.Request) -> web.Response:
     return web.json_response(payload or {"error": "environment not found"})
 
 
+async def _runtime_task_workspace_search(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    query = request.query.get("q", "")
+    max_results_raw = request.query.get("max_results", "100")
+    try:
+        max_results = max(1, min(int(max_results_raw), 250))
+    except ValueError:
+        return web.json_response({"error": "max_results must be an integer"}, status=400)
+    try:
+        payload = get_runtime_controller().search_workspace(
+            task_id,
+            query=query,
+            case_sensitive=str(request.query.get("case_sensitive", "false")).lower() == "true",
+            whole_word=str(request.query.get("whole_word", "false")).lower() == "true",
+            regex=str(request.query.get("regex", "false")).lower() == "true",
+            max_results=max_results,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    if payload is None:
+        return web.json_response({"error": "environment not found"}, status=404)
+    return web.json_response(payload)
+
+
 async def _runtime_task_workspace_status(request: web.Request) -> web.Response:
     auth = _authorize_runtime_access(request)
     if auth:
@@ -789,6 +816,122 @@ async def _runtime_task_workspace_diff(request: web.Request) -> web.Response:
     task_id = int(request.match_info["task_id"])
     relative_path = request.query.get("path")
     return web.json_response(get_runtime_controller().get_workspace_diff(task_id, relative_path=relative_path))
+
+
+def _workspace_mutation_blocked_response(task_id: int) -> web.Response | None:
+    allowed, phase = _is_mutation_allowed(task_id)
+    if allowed:
+        return None
+    return web.json_response({"error": f"mutations blocked during {phase}"}, status=409)
+
+
+def _workspace_mutation_error_response(exc: Exception) -> web.Response:
+    if isinstance(exc, ValueError):
+        return web.json_response({"error": str(exc)}, status=400)
+    if isinstance(exc, FileNotFoundError):
+        return web.json_response({"error": str(exc) or "path not found"}, status=404)
+    if isinstance(exc, FileExistsError):
+        return web.json_response({"error": str(exc) or "path already exists"}, status=409)
+    if isinstance(exc, IsADirectoryError):
+        return web.json_response({"error": str(exc) or "path is a directory"}, status=409)
+    raise exc
+
+
+async def _runtime_task_workspace_write(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    blocked = _workspace_mutation_blocked_response(task_id)
+    if blocked:
+        return blocked
+    payload = await _json_payload(request)
+    relative_path = str(payload.get("path") or "")
+    content = payload.get("content")
+    if not isinstance(content, str):
+        return web.json_response({"error": "content must be a string"}, status=400)
+    try:
+        result = get_runtime_controller().write_workspace_file(
+            task_id,
+            relative_path=relative_path,
+            content=content,
+        )
+    except (FileNotFoundError, FileExistsError, IsADirectoryError, ValueError) as exc:
+        return _workspace_mutation_error_response(exc)
+    if result is None:
+        return web.json_response({"error": "environment not found"}, status=404)
+    return web.json_response(result)
+
+
+async def _runtime_task_workspace_create(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    blocked = _workspace_mutation_blocked_response(task_id)
+    if blocked:
+        return blocked
+    payload = await _json_payload(request)
+    relative_path = str(payload.get("path") or "")
+    kind = str(payload.get("kind") or "file")
+    content = payload.get("content")
+    if content is not None and not isinstance(content, str):
+        return web.json_response({"error": "content must be a string"}, status=400)
+    try:
+        result = get_runtime_controller().create_workspace_entry(
+            task_id,
+            relative_path=relative_path,
+            kind=kind,
+            content=content or "",
+        )
+    except (FileNotFoundError, FileExistsError, IsADirectoryError, ValueError) as exc:
+        return _workspace_mutation_error_response(exc)
+    if result is None:
+        return web.json_response({"error": "environment not found"}, status=404)
+    return web.json_response(result)
+
+
+async def _runtime_task_workspace_delete(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    blocked = _workspace_mutation_blocked_response(task_id)
+    if blocked:
+        return blocked
+    payload = await _json_payload(request)
+    relative_path = str(payload.get("path") or "")
+    try:
+        result = get_runtime_controller().delete_workspace_entry(task_id, relative_path=relative_path)
+    except (FileNotFoundError, FileExistsError, IsADirectoryError, ValueError) as exc:
+        return _workspace_mutation_error_response(exc)
+    if result is None:
+        return web.json_response({"error": "environment not found"}, status=404)
+    return web.json_response(result)
+
+
+async def _runtime_task_workspace_rename(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    blocked = _workspace_mutation_blocked_response(task_id)
+    if blocked:
+        return blocked
+    payload = await _json_payload(request)
+    from_path = str(payload.get("from_path") or "")
+    to_path = str(payload.get("to_path") or "")
+    try:
+        result = get_runtime_controller().rename_workspace_entry(
+            task_id,
+            from_path=from_path,
+            to_path=to_path,
+        )
+    except (FileNotFoundError, FileExistsError, IsADirectoryError, ValueError) as exc:
+        return _workspace_mutation_error_response(exc)
+    if result is None:
+        return web.json_response({"error": "environment not found"}, status=404)
+    return web.json_response(result)
 
 
 async def _runtime_task_services(request: web.Request) -> web.Response:
@@ -1345,8 +1488,13 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/browser/screenshot", _runtime_task_browser_screenshot)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/workspace/tree", _runtime_task_workspace_tree)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/workspace/file", _runtime_task_workspace_file)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/workspace/search", _runtime_task_workspace_search)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/workspace/status", _runtime_task_workspace_status)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/workspace/diff", _runtime_task_workspace_diff)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/workspace/write", _runtime_task_workspace_write)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/workspace/create", _runtime_task_workspace_create)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/workspace/delete", _runtime_task_workspace_delete)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/workspace/rename", _runtime_task_workspace_rename)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/services", _runtime_task_services)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/resources", _runtime_task_resources)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/loop", _runtime_task_loop)

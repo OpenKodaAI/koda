@@ -160,6 +160,8 @@ const AGENT_SPEC_FIELDS = new Set<string>([
   "voicePolicyJson",
   "imageAnalysisPolicyJson",
   "memoryExtractionSchemaJson",
+  "skillPolicyJson",
+  "customSkillsJson",
 ]);
 
 const COLLECTION_TO_DIRTY: Record<string, string> = {
@@ -743,6 +745,8 @@ export function AgentEditorProvider({
           voicePolicyJson: state.voicePolicyJson,
           imageAnalysisPolicyJson: state.imageAnalysisPolicyJson,
           memoryExtractionSchemaJson: state.memoryExtractionSchemaJson,
+          skillPolicyJson: state.skillPolicyJson,
+          customSkillsJson: state.customSkillsJson,
           executionPolicyJson: state.executionPolicyDirty
             ? state.executionPolicyJson
             : undefined,

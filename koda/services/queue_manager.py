@@ -39,9 +39,6 @@ from koda.config import (
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_WORK_DIR,
     IMAGE_TEMP_DIR,
-    JIRA_DEEP_CONTEXT_ENABLED,
-    JIRA_DEEP_CONTEXT_MAX_ISSUES,
-    JIRA_ENABLED,
     MAX_AGENT_TOOL_ITERATIONS,
     MAX_BROWSER_TASKS_GLOBAL,
     MAX_CONCURRENT_TASKS_GLOBAL,
@@ -2014,7 +2011,6 @@ async def _prepare_query_context(
     cache_task = None
     script_task = None
     artifact_task = None
-    jira_dossier_tasks: list[asyncio.Task] = []
     knowledge_waits_for_artifacts = item.artifact_bundle is not None
     knowledge_enabled = False
     base_policy = default_execution_policy(task_kind, environment=environment)
@@ -2152,22 +2148,6 @@ async def _prepare_query_context(
             artifact_task = asyncio.create_task(extract_bundle(item.artifact_bundle))
     except Exception:
         log.exception("artifact_bundle_setup_error")
-
-    try:
-        if JIRA_ENABLED and JIRA_DEEP_CONTEXT_ENABLED:
-            from koda.services.atlassian_client import get_jira_service
-            from koda.services.jira_issue_context import extract_issue_keys
-
-            issue_keys = extract_issue_keys(item.query_text)[:JIRA_DEEP_CONTEXT_MAX_ISSUES]
-            if issue_keys:
-                knowledge_waits_for_artifacts = True
-                jira_service = get_jira_service()
-                jira_dossier_tasks = [
-                    asyncio.create_task(jira_service.build_issue_dossier(issue_key, query=item.query_text))
-                    for issue_key in issue_keys
-                ]
-    except Exception:
-        log.exception("jira_dossier_setup_error")
 
     # Override session_id for continuations
     if item.is_continuation and item.continuation_session_id:
@@ -2371,43 +2351,6 @@ async def _prepare_query_context(
             log.exception("artifact_bundle_error")
             _query_warnings.append("artifact extraction unavailable")
 
-    if jira_dossier_tasks:
-        try:
-            jira_results = await asyncio.wait_for(
-                asyncio.gather(*jira_dossier_tasks), timeout=ARTIFACT_EXTRACTION_TIMEOUT
-            )
-            jira_context_blocks: list[str] = []
-            for result in jira_results:
-                artifact_dossiers.append(result.dossier)
-                jira_context_blocks.append(result.dossier.to_prompt_context(item.query_text))
-                for path in result.dossier.visual_paths:
-                    if path not in visual_paths:
-                        visual_paths.append(path)
-                for artifact in result.dossier.artifacts:
-                    if artifact.ref.path and artifact.ref.path not in temp_paths:
-                        temp_paths.append(artifact.ref.path)
-                    for path in artifact.visual_paths:
-                        if path not in temp_paths:
-                            temp_paths.append(path)
-            if jira_context_blocks:
-                _append_prompt_segment(
-                    prompt_segments,
-                    segment_id="jira_artifact_context",
-                    text="\n\n".join(jira_context_blocks),
-                    category="supporting_knowledge",
-                    priority=72,
-                    compression_strategy="head_and_tail",
-                    drop_policy="drop",
-                )
-        except TimeoutError:
-            log.warning("jira_dossier_timeout")
-            for task in jira_dossier_tasks:
-                await _cancel_pending_task(task)
-            _query_warnings.append("jira dossier timeout")
-        except Exception:
-            log.exception("jira_dossier_error")
-            _query_warnings.append("jira dossier unavailable")
-
     # Inject cache hint or relevant scripts into system prompt
     if _cache_hit and hasattr(_cache_hit, "match_type") and _cache_hit.match_type == "fuzzy_suggest":
         hint = _cache_hit.response[:3000]
@@ -2475,83 +2418,71 @@ async def _prepare_query_context(
             compose_skill_prompt,
             resolve_skill_graph,
         )
-        from koda.skills._registry import get_shared_registry
-        from koda.skills._selector import get_shared_selector
+        from koda.skills._index import SkillEmbeddingIndex
+        from koda.skills._registry import build_skill_registry_from_custom_skills
+        from koda.skills._runtime import (
+            get_runtime_agent_spec,
+            get_runtime_custom_skills,
+            get_runtime_skill_policy,
+        )
+        from koda.skills._selector import SkillSelector
         from koda.skills._telemetry import emit_skill_selection
 
-        registry = get_shared_registry()
-        registry.reload_if_stale()
+        agent_spec = get_runtime_agent_spec()
+        _agent_custom_skills = get_runtime_custom_skills(agent_spec)
+        _agent_skill_policy = get_runtime_skill_policy(agent_spec) or None
 
-        _agent_custom_skills: list[dict[str, Any]] = []
-        _agent_skill_policy: dict[str, Any] | None = None
-        try:
-            from koda.control_plane import get_control_plane_manager
+        registry = build_skill_registry_from_custom_skills(_agent_custom_skills, _agent_skill_policy)
+        agent_skills = registry.get_all()
+        if agent_skills:
+            skill_index = SkillEmbeddingIndex()
+            skill_index.rebuild(agent_skills)
+            selector = SkillSelector(registry, skill_index)
+            skill_matches = selector.select(
+                item.query_text,
+                max_skills=_agent_skill_policy.get("max_skills", 6) if _agent_skill_policy else 6,
+                agent_skill_policy=_agent_skill_policy,
+            )
 
-            cpm = get_control_plane_manager()
-            if cpm is not None:
-                agent_spec: dict[str, Any] = getattr(cpm, "get_cached_agent_spec", lambda: {})()
-                _agent_custom_skills = agent_spec.get("custom_skills", [])
-                _agent_skill_policy = agent_spec.get("skill_policy") or None
-        except Exception:  # noqa: BLE001
-            pass
+            if skill_matches:
+                resolved = resolve_skill_graph(skill_matches, registry)
+                _resolved_skill_matches = resolved
+                skill_prompt = compose_skill_prompt(resolved, token_budget=1600, progressive=True)
 
-        if _agent_custom_skills:
-            merged_skills = registry.merge_agent_skills(_agent_custom_skills)
-        else:
-            merged_skills = registry.get_all()
+                if skill_prompt:
+                    best_score = max(m.composite_score for m in resolved)
+                    effective_priority = max(15, 30 - int(best_score * 15))
 
-        from koda.skills._index import get_shared_index
-
-        skill_index = get_shared_index()
-        skill_index.rebuild(merged_skills)
-
-        selector = get_shared_selector()
-
-        skill_matches = selector.select(
-            item.query_text,
-            max_skills=_agent_skill_policy.get("max_skills", 6) if _agent_skill_policy else 6,
-            agent_skill_policy=_agent_skill_policy,
-        )
-
-        if skill_matches:
-            resolved = resolve_skill_graph(skill_matches, registry)
-            _resolved_skill_matches = resolved
-            skill_prompt = compose_skill_prompt(resolved, token_budget=1600, progressive=True)
-
-            if skill_prompt:
-                best_score = max(m.composite_score for m in resolved)
-                effective_priority = max(15, 30 - int(best_score * 15))
-
-                _append_prompt_segment(
-                    prompt_segments,
-                    segment_id="active_skills",
-                    text=skill_prompt,
-                    category="skills",
-                    priority=effective_priority,
-                    compression_strategy="head_and_tail",
-                    drop_policy="drop",
-                )
-
-                output_req = compose_output_requirements(resolved)
-                if output_req:
                     _append_prompt_segment(
                         prompt_segments,
-                        segment_id="skill_output_requirements",
-                        text=output_req,
+                        segment_id="active_skills",
+                        text=skill_prompt,
                         category="skills",
-                        priority=10,
-                        compression_strategy="truncate_tail",
+                        priority=effective_priority,
+                        compression_strategy="head_and_tail",
                         drop_policy="drop",
                     )
 
-            emit_skill_selection(
-                user_id=getattr(item, "user_id", None),
-                task_id=getattr(item, "task_id", None),
-                query_text=item.query_text,
-                matches=skill_matches,
-                resolved=resolved,
-                included_in_prompt=bool(skill_prompt),
-            )
+                    output_req = compose_output_requirements(resolved)
+                    if output_req:
+                        _append_prompt_segment(
+                            prompt_segments,
+                            segment_id="skill_output_requirements",
+                            text=output_req,
+                            category="skills",
+                            priority=10,
+                            compression_strategy="truncate_tail",
+                            drop_policy="drop",
+                        )
+
+                emit_skill_selection(
+                    user_id=getattr(item, "user_id", None),
+                    task_id=getattr(item, "task_id", None),
+                    query_text=item.query_text,
+                    matches=skill_matches,
+                    resolved=resolved,
+                    included_in_prompt=bool(skill_prompt),
+                )
     except Exception:
         log.exception("skills_selection_failed")
 
@@ -4525,27 +4456,30 @@ async def _post_process(
 
             if MEMORY_ENABLED:
                 from koda.memory import get_memory_manager
+                from koda.memory.extraction_supervisor import get_memory_extraction_supervisor
 
                 async def _extract_memory() -> None:
-                    try:
-                        mm = get_memory_manager()
-                        knowledge_ctx = getattr(ctx, "knowledge_query_context", None)
-                        await mm.post_query(
-                            query_text,
-                            run_result.result,
-                            user_id,
-                            run_result.session_id,
-                            source_query_id=query_id,
-                            source_task_id=task_id,
-                            source_episode_id=getattr(ctx, "execution_episode_id", None),
-                            project_key=str(getattr(knowledge_ctx, "project_key", "") or ""),
-                            environment=str(getattr(knowledge_ctx, "environment", "") or ""),
-                            team=str(getattr(knowledge_ctx, "team", "") or ""),
-                        )
-                    except Exception:
-                        log.exception("memory_extraction_error")
+                    mm = get_memory_manager()
+                    knowledge_ctx = getattr(ctx, "knowledge_query_context", None)
+                    await mm.post_query(
+                        query_text,
+                        run_result.result,
+                        user_id,
+                        run_result.session_id,
+                        source_query_id=query_id,
+                        source_task_id=task_id,
+                        source_episode_id=getattr(ctx, "execution_episode_id", None),
+                        project_key=str(getattr(knowledge_ctx, "project_key", "") or ""),
+                        environment=str(getattr(knowledge_ctx, "environment", "") or ""),
+                        team=str(getattr(knowledge_ctx, "team", "") or ""),
+                    )
 
-                asyncio.create_task(_extract_memory())
+                get_memory_extraction_supervisor().submit(
+                    _extract_memory,
+                    agent_id=AGENT_ID,
+                    user_id=user_id,
+                    task_id=task_id,
+                )
         except Exception:
             log.exception("memory_extraction_setup_error")
 

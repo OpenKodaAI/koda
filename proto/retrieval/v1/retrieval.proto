@@ -34,6 +34,8 @@ message RetrievalHit {
   repeated string graph_relation_types = 26;
   repeated string evidence_modalities = 27;
   repeated string reasons = 28;
+  double rerank_score = 29;
+  int32 rerank_rank = 30;
 }
 
 message RetrievalTraceHit {
@@ -58,6 +60,8 @@ message RetrievalTraceHit {
   string exclusion_reason = 19;
   repeated string evidence_modalities = 20;
   repeated string supporting_evidence_keys = 21;
+  double rerank_score = 22;
+  int32 rerank_rank = 23;
 }
 
 message AuthoritativeEvidence {
@@ -140,6 +144,9 @@ message RetrieveEnvelope {
   repeated string allowed_source_labels = 10;
   repeated string allowed_workspace_roots = 11;
   google.protobuf.Struct metadata = 12;
+  repeated double query_embedding = 13;
+  string query_embedding_model = 14;
+  int32 query_embedding_dimension = 15;
 }
 
 message RetrieveRequest {

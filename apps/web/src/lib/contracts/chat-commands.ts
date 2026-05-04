@@ -65,8 +65,7 @@ export type ChatCommandsCatalog = z.infer<typeof chatCommandsCatalogSchema>;
 
 /* ------------------------------------------------------------------ */
 /*  Skill-search contracts                                             */
-/*  GET /api/control-plane/skills/search?q=...                         */
-/*       -> { items: SkillSuggestion[] }                               */
+/*  Suggestions are derived from agent-spec custom_skills.              */
 /* ------------------------------------------------------------------ */
 
 export const skillSuggestionSchema = z.object({

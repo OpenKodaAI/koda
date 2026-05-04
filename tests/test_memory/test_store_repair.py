@@ -146,5 +146,11 @@ async def test_repair_single_job_succeeds(monkeypatch: pytest.MonkeyPatch) -> No
         result = store._repair_single_job(job)
 
     assert result is True
-    mock_update.assert_called_once_with(400, vector_ref_id="", embedding_status="ready", attempts=0, last_error="")
+    mock_update.assert_called_once_with(
+        400,
+        vector_ref_id="",
+        embedding_status="lexical_ready",
+        attempts=0,
+        last_error="",
+    )
     mock_complete.assert_called_once_with(400, agent_id="agent_a")

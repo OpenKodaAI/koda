@@ -83,7 +83,6 @@ def main() -> None:
         STATE_BACKEND,
         TELEGRAM_DROP_PENDING_UPDATES,
     )
-    from koda.handlers.atlassian import cmd_confluence, cmd_jboard, cmd_jira, cmd_jissue, cmd_jsprint
     from koda.handlers.automation import cmd_cron, cmd_curl, cmd_fetch, cmd_http, cmd_search
     from koda.handlers.browser import cmd_browse, cmd_click, cmd_js, cmd_screenshot, cmd_type
     from koda.handlers.callbacks import (
@@ -156,9 +155,8 @@ def main() -> None:
         cmd_templates,
         cmd_voice,
     )
-    from koda.handlers.devops import cmd_docker, cmd_gh, cmd_glab
+    from koda.handlers.devops import cmd_docker
     from koda.handlers.fileops import cmd_cat, cmd_edit, cmd_mkdir, cmd_rm, cmd_write
-    from koda.handlers.google_workspace import cmd_gcal, cmd_gdrive, cmd_gmail, cmd_gsheets, cmd_gws
     from koda.handlers.messages import (
         handle_audio,
         handle_document,
@@ -292,7 +290,7 @@ def main() -> None:
 
     # Skill commands
     app.add_handler(CommandHandler("skill", _as_handler(cmd_skill)))
-    app.add_handler(CommandHandler("skills", _as_handler(cmd_templates)))
+    app.add_handler(CommandHandler("skills", _as_handler(cmd_skill)))
 
     # Bookmark commands
     app.add_handler(CommandHandler("bookmarks", _as_handler(cmd_bookmarks)))
@@ -318,24 +316,8 @@ def main() -> None:
     app.add_handler(CommandHandler("forget", _as_handler(cmd_forget)))
     app.add_handler(CommandHandler("digest", _as_handler(cmd_digest)))
 
-    # DevOps commands
-    app.add_handler(CommandHandler("gh", _as_handler(cmd_gh)))
-    app.add_handler(CommandHandler("glab", _as_handler(cmd_glab)))
+    # Local runtime commands
     app.add_handler(CommandHandler("docker", _as_handler(cmd_docker)))
-
-    # Google Workspace commands
-    app.add_handler(CommandHandler("gws", _as_handler(cmd_gws)))
-    app.add_handler(CommandHandler("gmail", _as_handler(cmd_gmail)))
-    app.add_handler(CommandHandler("gcal", _as_handler(cmd_gcal)))
-    app.add_handler(CommandHandler("gdrive", _as_handler(cmd_gdrive)))
-    app.add_handler(CommandHandler("gsheets", _as_handler(cmd_gsheets)))
-
-    # Atlassian commands
-    app.add_handler(CommandHandler("jira", _as_handler(cmd_jira)))
-    app.add_handler(CommandHandler("jissue", _as_handler(cmd_jissue)))
-    app.add_handler(CommandHandler("jboard", _as_handler(cmd_jboard)))
-    app.add_handler(CommandHandler("jsprint", _as_handler(cmd_jsprint)))
-    app.add_handler(CommandHandler("confluence", _as_handler(cmd_confluence)))
 
     # Package manager commands
     app.add_handler(CommandHandler("pip", _as_handler(cmd_pip)))
@@ -417,6 +399,12 @@ def main() -> None:
         from koda.services.scheduled_jobs import stop_scheduler_dispatcher
 
         await stop_scheduler_dispatcher()
+        try:
+            from koda.memory.extraction_supervisor import get_memory_extraction_supervisor
+
+            await get_memory_extraction_supervisor().drain(timeout=2.0)
+        except Exception:
+            log.exception("memory_extraction_supervisor_drain_error")
         try:
             from koda.services.health import set_runtime_startup_state
 

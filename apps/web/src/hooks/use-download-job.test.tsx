@@ -159,6 +159,114 @@ describe("useDownloadJob", () => {
     expect(result.current.toast.toasts[0].persistent).toBe(false);
   });
 
+  it("cancels an active download from the toast action", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "job-5",
+          provider_id: "kokoro",
+          asset_id: "model",
+          status: "running",
+          downloaded_bytes: 0,
+          total_bytes: 1000,
+          progress_percent: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "job-5",
+          provider_id: "kokoro",
+          asset_id: "model",
+          status: "cancelled",
+          downloaded_bytes: 100,
+          total_bytes: 1000,
+          progress_percent: 10,
+          details: { message: "Download cancelado." },
+        }),
+      );
+
+    const { result } = mountHooks();
+
+    await act(async () => {
+      await result.current.download.start({
+        providerId: "kokoro",
+        assetKey: "model",
+        startEndpoint: "/api/start",
+        toastTitle: "Baixando modelo Kokoro",
+        successMessage: "Modelo Kokoro pronto.",
+      });
+    });
+
+    const action = result.current.toast.toasts[0].action;
+    expect(action?.label).toBe("Cancelar");
+
+    await act(async () => {
+      action?.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/control-plane/providers/kokoro/downloads/job-5/cancel",
+      {
+        method: "POST",
+        credentials: "same-origin",
+      },
+    );
+    expect(result.current.toast.toasts[0].type).toBe("info");
+    expect(result.current.toast.toasts[0].message).toBe("Download cancelado.");
+    expect(result.current.toast.toasts[0].persistent).toBe(false);
+    expect(result.current.toast.toasts[0].action).toBeUndefined();
+  });
+
+  it("treats a cancelled poll response as cancellation, not failure", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "job-6",
+          provider_id: "embedding",
+          asset_id: "minilm-l6-v2",
+          status: "running",
+          downloaded_bytes: 0,
+          total_bytes: 1000,
+          progress_percent: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "job-6",
+          provider_id: "embedding",
+          asset_id: "minilm-l6-v2",
+          status: "cancelled",
+          downloaded_bytes: 250,
+          total_bytes: 1000,
+          progress_percent: 25,
+          message: "Download cancelado.",
+        }),
+      );
+
+    const { result } = mountHooks();
+
+    await act(async () => {
+      await result.current.download.start({
+        providerId: "embedding",
+        assetKey: "minilm-l6-v2",
+        startEndpoint: "/api/start",
+        toastTitle: "Baixando MiniLM",
+        successMessage: "MiniLM pronto.",
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+
+    expect(result.current.toast.toasts[0].type).toBe("info");
+    expect(result.current.toast.toasts[0].message).toBe("Download cancelado.");
+    expect(result.current.toast.toasts[0].persistent).toBe(false);
+    expect(result.current.toast.toasts[0].action).toBeUndefined();
+  });
+
   it("keeps the toast persistent and surfaces a connection-loss message after repeated failures", async () => {
     fetchMock
       .mockResolvedValueOnce(

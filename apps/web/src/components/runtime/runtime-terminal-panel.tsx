@@ -7,8 +7,10 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type ITheme } from "@xterm/xterm";
-import { AlertTriangle, MonitorSmartphone, Search, TerminalSquare, X } from "lucide-react";
+import { MonitorSmartphone, Search, TerminalSquare, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useToast } from "@/hooks/use-toast";
 import { humanizeRuntimeAttachError } from "@/lib/runtime-errors";
 import type { RuntimeAttachSession, RuntimeTerminal } from "@/lib/runtime-types";
 import { buildClientWebSocketUrl } from "@/lib/runtime-ui";
@@ -148,6 +150,7 @@ export function RuntimeTerminalPanel({
   fetchResource,
 }: RuntimeTerminalPanelProps) {
   const { t } = useAppI18n();
+  const { showToast } = useToast();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -163,6 +166,11 @@ export function RuntimeTerminalPanel({
   const [writeMode, setWriteMode] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    if (!error) return;
+    showToast(error, "error", { id: `runtime-terminal:${taskId}:error` });
+  }, [error, showToast, taskId]);
 
   const terminalOptions = useMemo(
     () =>
@@ -501,7 +509,7 @@ export function RuntimeTerminalPanel({
 
   return (
     <div>
-      <div className="runtime-terminal-shell">
+      <div className="runtime-terminal-shell runtime-terminal-shell--stage">
         <div className="runtime-terminal-header">
           <div className="runtime-terminal-header__left">
             <span
@@ -516,30 +524,46 @@ export function RuntimeTerminalPanel({
           <div className="runtime-terminal-header__right">
             {terminalOptions.length > 1 &&
               terminalOptions.map((terminal) => (
-                <button
+                <Button
                   key={terminal.id}
                   type="button"
                   onClick={() => setSelectedTerminalId(terminal.id)}
-                  className={cn(
-                    "runtime-filter-pill",
-                    terminal.id === effectiveSelectedTerminalId && "is-active"
-                  )}
+                  variant="secondary"
+                  size="sm"
+                  selected={terminal.id === effectiveSelectedTerminalId}
+                  className={cn("h-7 px-2 text-[0.75rem]")}
+                  aria-pressed={terminal.id === effectiveSelectedTerminalId}
                 >
                   {getTerminalButtonLabel(terminal, terminalOptions)}
-                </button>
+                </Button>
               ))}
-            <button
+            <Button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              variant="ghost"
+              size="sm"
+              selected={searchOpen}
+              className="h-7 w-7 px-0 text-[0.75rem]"
+              aria-label={t("runtime.terminal.searchPlaceholder")}
+              aria-pressed={searchOpen}
+            >
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+            <Button
               type="button"
               onClick={() => {
                 void connectTerminal(!writeMode).catch((attachError: unknown) => {
                   void handleAttachFailure(attachError);
                 });
               }}
-              className={cn("runtime-ghost-button", writeMode && "is-active")}
+              variant="secondary"
+              size="sm"
+              selected={writeMode}
+              className="h-7 px-2 text-[0.75rem]"
             >
               <MonitorSmartphone className="h-3.5 w-3.5" />
               {writeMode ? t("runtime.terminal.control") : t("runtime.terminal.read")}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -578,6 +602,7 @@ export function RuntimeTerminalPanel({
                 setSearchQuery("");
                 terminalRef.current?.focus();
               }}
+              aria-label={t("common.close")}
             >
               <X className="h-3 w-3" />
             </button>
@@ -586,16 +611,10 @@ export function RuntimeTerminalPanel({
 
         <div
           ref={containerRef}
-          className="runtime-terminal h-[52vh] min-h-[420px] w-full"
+          className="runtime-terminal runtime-terminal--task-room w-full"
         />
       </div>
 
-      {error ? (
-        <div className="runtime-inline-alert runtime-inline-alert--danger mt-4">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      ) : null}
     </div>
   );
 }

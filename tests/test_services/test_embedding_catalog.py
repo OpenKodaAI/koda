@@ -125,6 +125,33 @@ def test_model_payload_includes_status_fields():
         assert key in payload, f"missing key {key!r}"
 
 
+def test_model_payload_survives_install_status_probe_failure(monkeypatch):
+    monkeypatch.setattr(
+        catalog_module,
+        "is_model_installed",
+        lambda _id: (_ for _ in ()).throw(OSError("cache busy")),
+    )
+
+    payload = model_payload(DEFAULT_MODEL_ID)
+
+    assert payload["installed"] is False
+    assert payload["disk_bytes"] == 0
+
+
+def test_model_payload_survives_disk_usage_probe_failure(monkeypatch):
+    monkeypatch.setattr(catalog_module, "is_model_installed", lambda _id: True)
+    monkeypatch.setattr(
+        catalog_module,
+        "model_disk_bytes",
+        lambda _id: (_ for _ in ()).throw(OSError("cache disappeared")),
+    )
+
+    payload = model_payload(DEFAULT_MODEL_ID)
+
+    assert payload["installed"] is True
+    assert payload["disk_bytes"] == 0
+
+
 def test_catalog_payload_marks_active(monkeypatch):
     # Pretend nothing is installed so we can lock down the structure shape
     # without depending on the real cache dir.

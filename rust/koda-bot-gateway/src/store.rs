@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use koda_postgres::{KodaPgPool, KodaPgPoolConfig, PostgresWorkload};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -187,20 +188,22 @@ impl Store for InMemoryStore {
 // ---------------------------------------------------------------------------
 
 pub struct PostgresStore {
-    client: Arc<Mutex<tokio_postgres::Client>>,
+    pool: KodaPgPool,
     schema: String,
 }
 
 impl PostgresStore {
     pub async fn connect(dsn: &str, schema: &str) -> anyhow::Result<Self> {
-        let (client, connection) = tokio_postgres::connect(dsn, tokio_postgres::NoTls).await?;
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::error!(error = %e, "bot_gateway_postgres_connection_lost");
-            }
-        });
+        let mut config = KodaPgPoolConfig::from_env(
+            "koda-bot-gateway",
+            "KODA_BOT_GATEWAY_POSTGRES_POOL_MAX_SIZE",
+        );
+        config.dsn = dsn.trim().to_string();
+        config.schema = schema.trim().to_string();
+        config.application_name = "koda-bot-gateway".to_string();
+        let pool = KodaPgPool::connect(config).await?;
         Ok(Self {
-            client: Arc::new(Mutex::new(client)),
+            pool,
             schema: schema.to_string(),
         })
     }
@@ -208,12 +211,34 @@ impl PostgresStore {
     fn q(&self, sql: &str) -> String {
         sql.replace("{schema}", &self.schema)
     }
+
+    async fn connection(
+        &self,
+        workload: PostgresWorkload,
+        operation: &'static str,
+    ) -> Result<koda_postgres::KodaPgConnection<'_>, StoreError> {
+        self.pool
+            .connection(workload, operation)
+            .await
+            .map_err(|status| StoreError::Postgres(status.message().to_string()))
+    }
+
+    fn pg_error(&self, operation: &'static str, error: tokio_postgres::Error) -> StoreError {
+        StoreError::Postgres(
+            self.pool
+                .status_from_pg_error(operation, error)
+                .message()
+                .to_string(),
+        )
+    }
 }
 
 #[async_trait]
 impl Store for PostgresStore {
     async fn upsert_bot(&self, agent_id: &str, bot_token: &str) -> Result<(), StoreError> {
-        let client = self.client.lock().await;
+        let client = self
+            .connection(PostgresWorkload::Write, "bot gateway upsert bot")
+            .await?;
         client
             .execute(
                 &self.q(r#"INSERT INTO "{schema}"."cp_bot_gateway_tokens"
@@ -224,19 +249,21 @@ impl Store for PostgresStore {
                 &[&agent_id, &bot_token],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway upsert bot", e))?;
         Ok(())
     }
 
     async fn delete_bot(&self, agent_id: &str) -> Result<bool, StoreError> {
-        let client = self.client.lock().await;
+        let client = self
+            .connection(PostgresWorkload::Write, "bot gateway delete bot")
+            .await?;
         let n = client
             .execute(
                 &self.q(r#"DELETE FROM "{schema}"."cp_bot_gateway_tokens" WHERE agent_id = $1"#),
                 &[&agent_id],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway delete bot", e))?;
         client
             .execute(
                 &self.q(
@@ -245,12 +272,14 @@ impl Store for PostgresStore {
                 &[&agent_id],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway delete pending updates", e))?;
         Ok(n > 0)
     }
 
     async fn list_bots(&self) -> Result<Vec<BotEntry>, StoreError> {
-        let client = self.client.lock().await;
+        let client = self
+            .connection(PostgresWorkload::Read, "bot gateway list bots")
+            .await?;
         let rows = client
             .query(
                 &self.q(
@@ -261,7 +290,7 @@ impl Store for PostgresStore {
                 &[],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway list bots", e))?;
         Ok(rows
             .into_iter()
             .map(|row| BotEntry {
@@ -278,11 +307,13 @@ impl Store for PostgresStore {
         updates: &[PendingUpdate],
         next_offset: i64,
     ) -> Result<(), StoreError> {
-        let mut client = self.client.lock().await;
+        let mut client = self
+            .connection(PostgresWorkload::Write, "bot gateway enqueue updates")
+            .await?;
         let tx = client
             .transaction()
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway begin enqueue transaction", e))?;
         for update in updates {
             tx.execute(
                 &self.q(r#"INSERT INTO "{schema}"."cp_telegram_pending_updates"
@@ -292,7 +323,7 @@ impl Store for PostgresStore {
                 &[&agent_id, &update.update_id, &update.payload.to_string()],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway insert pending update", e))?;
         }
         tx.execute(
             &self.q(
@@ -305,15 +336,17 @@ impl Store for PostgresStore {
             &[&agent_id, &next_offset],
         )
         .await
-        .map_err(|e| StoreError::Postgres(e.to_string()))?;
+        .map_err(|e| self.pg_error("bot gateway upsert offset", e))?;
         tx.commit()
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway commit enqueue transaction", e))?;
         Ok(())
     }
 
     async fn replay_pending(&self, agent_id: &str) -> Result<Vec<PendingUpdate>, StoreError> {
-        let client = self.client.lock().await;
+        let client = self
+            .connection(PostgresWorkload::Read, "bot gateway replay pending")
+            .await?;
         let rows = client
             .query(
                 &self.q(r#"SELECT update_id, payload_json::text
@@ -323,7 +356,7 @@ impl Store for PostgresStore {
                 &[&agent_id],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway replay pending", e))?;
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let update_id: i64 = row.get(0);
@@ -340,7 +373,9 @@ impl Store for PostgresStore {
     }
 
     async fn acknowledge_update(&self, agent_id: &str, update_id: i64) -> Result<bool, StoreError> {
-        let client = self.client.lock().await;
+        let client = self
+            .connection(PostgresWorkload::Write, "bot gateway acknowledge update")
+            .await?;
         let n = client
             .execute(
                 &self.q(r#"DELETE FROM "{schema}"."cp_telegram_pending_updates"
@@ -348,7 +383,7 @@ impl Store for PostgresStore {
                 &[&agent_id, &update_id],
             )
             .await
-            .map_err(|e| StoreError::Postgres(e.to_string()))?;
+            .map_err(|e| self.pg_error("bot gateway acknowledge update", e))?;
         Ok(n > 0)
     }
 

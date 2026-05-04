@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -16,6 +17,16 @@ _VALIDATION_COMMAND_RE = re.compile(
     r"\b(pytest|ruff check|ruff format --check|mypy|npm test|pnpm test|yarn test|vitest|go test|cargo test)\b",
     re.I,
 )
+
+
+def _procedural_conflict_subject(task_kind: str, outcome: str, tools: list[object], query: str) -> str:
+    tool_sequence = ",".join(str(tool).strip().lower() for tool in tools[:6] if str(tool).strip()) or "no-tools"
+    intent_terms = " ".join(re.findall(r"[a-z0-9_/-]{3,}", query.lower())[:16])
+    digest = hashlib.sha256(
+        f"{task_kind}|{outcome}|{tool_sequence}|{intent_terms}".encode(),
+        usedforsecurity=False,
+    ).hexdigest()[:12]
+    return f"{task_kind}:{outcome}:{digest}"
 
 
 @dataclass(slots=True)
@@ -109,6 +120,7 @@ def build_execution_memories(
         "environment": environment,
         "team": team,
         "owner": owner,
+        "conflict_key_version": 2,
     }
 
     return [
@@ -139,7 +151,7 @@ def build_execution_memories(
             },
             conflict_key=build_conflict_key(
                 MemoryType.PROCEDURE,
-                subject=task_kind,
+                subject=_procedural_conflict_subject(task_kind, outcome, tools, query),
                 project_key=project_key,
                 environment=environment,
                 team=team,

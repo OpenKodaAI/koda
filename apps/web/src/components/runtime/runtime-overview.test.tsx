@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ToastProvider } from "@/hooks/use-toast";
 import type { RuntimeOverview } from "@/lib/runtime-types";
 
 vi.mock("next/link", () => ({
@@ -89,18 +90,20 @@ describe("RuntimeOverviewScreen", () => {
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <AgentCatalogProvider
-          initialAgents={[
-            {
-              id: "ATLAS",
-              label: "ATLAS",
-              color: "#6E97D9",
-              colorRgb: "110, 151, 217",
-            },
-          ]}
-        >
-          <RuntimeOverviewScreen />
-        </AgentCatalogProvider>
+        <ToastProvider>
+          <AgentCatalogProvider
+            initialAgents={[
+              {
+                id: "ATLAS",
+                label: "ATLAS",
+                color: "#6E97D9",
+                colorRgb: "110, 151, 217",
+              },
+            ]}
+          >
+            <RuntimeOverviewScreen />
+          </AgentCatalogProvider>
+        </ToastProvider>
       </I18nProvider>
     );
 

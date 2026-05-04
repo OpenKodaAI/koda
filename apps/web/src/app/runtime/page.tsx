@@ -14,9 +14,10 @@ const RuntimeOverviewScreen = dynamic(
 export default async function RuntimePage({
   searchParams,
 }: {
-  searchParams: Promise<{ agent?: string | string[] }>;
+  searchParams: Promise<{ agent?: string | string[]; mock?: string | string[] }>;
 }) {
-  const { agent } = await searchParams;
+  const { agent, mock } = await searchParams;
   const initialBotIds = Array.isArray(agent) ? agent : agent ? [agent] : undefined;
-  return <RuntimeOverviewScreen initialBotIds={initialBotIds} />;
+  const mockMode = Array.isArray(mock) ? mock.includes("1") || mock.includes("true") : mock === "1" || mock === "true";
+  return <RuntimeOverviewScreen initialBotIds={initialBotIds} mock={mockMode} />;
 }

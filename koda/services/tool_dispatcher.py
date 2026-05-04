@@ -5,15 +5,13 @@ import json
 import re
 import time as _time
 from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager, nullcontext
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import cast
 
 from koda.agent_contract import (
     evaluate_integration_grant,
-    resolve_gws_action,
     resolve_integration_action,
 )
 from koda.config import (
@@ -22,16 +20,12 @@ from koda.config import (
     ALLOWED_GIT_CMDS,
     BROWSER_FEATURES_ENABLED,
     BROWSER_TOOL_TIMEOUT,
-    CONFLUENCE_ENABLED,
     FILEOPS_BLOCKED_EXTENSIONS,
     FILEOPS_ENABLED,
     FILEOPS_MAX_READ_SIZE,
     GIT_ENABLED,
     GIT_META_CHARS,
-    GWS_CREDENTIALS_FILE,
-    GWS_ENABLED,
     INTER_AGENT_ENABLED,
-    JIRA_ENABLED,
     PLUGIN_SYSTEM_ENABLED,
     SHELL_ENABLED,
     SHELL_TIMEOUT,
@@ -88,9 +82,6 @@ _ACTION_PLAN_RE = re.compile(r"<action_plan>.*?</action_plan>", re.DOTALL | re.I
 # directly. The ``noqa: E402`` here keeps the comment block above the
 # import so the rationale is co-located with the wire-up site.
 _BLOCKED_SHELL = _blocked_patterns_module.SHELL_GUARD
-_BLOCKED_GWS = _blocked_patterns_module.GWS_GUARD
-_BLOCKED_JIRA = _blocked_patterns_module.JIRA_GUARD
-_BLOCKED_CONFLUENCE = _blocked_patterns_module.CONFLUENCE_GUARD
 
 # Tools that modify state (require approval in supervised mode)
 _WRITE_TOOLS = frozenset(
@@ -240,31 +231,6 @@ def _configured_resource_access_policy() -> dict[str, object]:
     return dict(AGENT_RESOURCE_ACCESS_POLICY) if AGENT_RESOURCE_ACCESS_POLICY else {}
 
 
-def _gws_env_overrides() -> dict[str, str]:
-    if not GWS_CREDENTIALS_FILE:
-        return {}
-    return {
-        "GWS_CREDENTIALS_FILE": GWS_CREDENTIALS_FILE,
-        "GOOGLE_APPLICATION_CREDENTIALS": GWS_CREDENTIALS_FILE,
-    }
-
-
-@contextmanager
-def _gws_env_context() -> Iterator[dict[str, str]]:
-    from koda.config import AGENT_ID
-
-    current_agent = str(AGENT_ID or "").strip().upper()
-    if not current_agent:
-        with nullcontext(_gws_env_overrides()) as env:
-            yield env
-        return
-
-    from koda.services.core_connection_broker import get_core_connection_broker
-
-    with get_core_connection_broker().materialize_cli_environment("gws", agent_id=current_agent) as (_resolved, env):
-        yield env
-
-
 def is_known_tool(tool_id: str) -> bool:
     if tool_id in _TOOL_HANDLERS:
         return True
@@ -348,8 +314,6 @@ def _infer_tool_category(tool: str) -> str:
         return "fileops"
     if tool.startswith("db_"):
         return "db"
-    if tool in {"gws", "jira", "confluence"}:
-        return "cli"
     if tool.startswith("browser_"):
         return "browser"
     if tool.startswith("job_"):
@@ -461,7 +425,7 @@ def _record_runtime_integration_health(
     status: str,
     details: dict[str, object],
 ) -> None:
-    if integration_id not in {"browser", "gws", "jira", "confluence"}:
+    if integration_id != "browser":
         return
     try:
         from koda.control_plane.database import execute, json_dump, now_iso
@@ -1300,202 +1264,6 @@ async def _handle_http_request(params: dict, ctx: ToolContext) -> AgentToolResul
     return AgentToolResult(tool="http_request", success=success, output=result)
 
 
-async def _handle_gws(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not GWS_ENABLED:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Google Workspace is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Missing required param: 'args'.",
-        )
-
-    if _BLOCKED_GWS is not None and _BLOCKED_GWS.is_blocked(args):
-        _audit_blocked("gws", "blocked_gws_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output="Blocked: this GWS command is not allowed for safety reasons.",
-        )
-    resolution = resolve_gws_action(args)
-
-    from koda.services.cli_runner import run_cli_command_detailed
-    from koda.utils.approval import _execution_approved
-
-    token = _execution_approved.set(True)
-    try:
-        with _gws_env_context() as env:
-            command_result = await run_cli_command_detailed(
-                "gws",
-                args,
-                ctx.work_dir,
-                is_blocked=_blocked_patterns_module.is_blocked_gws,
-                timeout=AGENT_TOOL_TIMEOUT,
-                env=env,
-            )
-    except RuntimeError as exc:
-        return AgentToolResult(
-            tool="gws",
-            success=False,
-            output=str(exc),
-        )
-    finally:
-        _execution_approved.reset(token)
-
-    success = not command_result.text.startswith(("Exit 1:", "Blocked:", "Error:", "Timeout"))
-    return AgentToolResult(
-        tool="gws",
-        success=success,
-        output=command_result.text,
-        metadata={
-            "category": "cli",
-            "binary": command_result.binary,
-            "args": command_result.args,
-            "exit_code": command_result.exit_code,
-            "timed_out": command_result.timed_out,
-            "truncated": command_result.truncated,
-            "action_id": resolution.action_id,
-            "resource_method": resolution.resource_method,
-        },
-    )
-
-
-async def _handle_jira(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not JIRA_ENABLED:
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Jira is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Missing required param: 'args' (e.g. 'issues search --jql ...').",
-        )
-
-    if _BLOCKED_JIRA is not None and _BLOCKED_JIRA.is_blocked(args):
-        _audit_blocked("jira", "blocked_jira_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="jira",
-            success=False,
-            output="Blocked: this Jira command is not allowed for safety reasons.",
-        )
-
-    from koda.services.resilience import check_breaker, jira_breaker, record_failure, record_success
-
-    err = check_breaker(jira_breaker)
-    if err:
-        return AgentToolResult(tool="jira", success=False, output=err)
-
-    from koda.services.atlassian_client import get_jira_service, parse_atlassian_args
-    from koda.utils.approval import _execution_approved
-
-    try:
-        resource, action, parsed_params = parse_atlassian_args(args)
-    except ValueError as e:
-        return AgentToolResult(tool="jira", success=False, output=str(e))
-
-    token = _execution_approved.set(True)
-    try:
-        service = get_jira_service()
-        result = await service.execute(resource, action, parsed_params)
-    finally:
-        _execution_approved.reset(token)
-
-    success = not result.startswith("Exit 1:")
-    if success:
-        record_success(jira_breaker)
-    else:
-        record_failure(jira_breaker)
-    return AgentToolResult(
-        tool="jira",
-        success=success,
-        output=result,
-        metadata={
-            "category": "cli",
-            "binary": "jira",
-            "args": args,
-            "resource": resource,
-            "action": action,
-            "params": parsed_params,
-        },
-    )
-
-
-async def _handle_confluence(params: dict, ctx: ToolContext) -> AgentToolResult:
-    if not CONFLUENCE_ENABLED:
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Confluence is not enabled.",
-        )
-
-    args = params.get("args", "")
-    if not args:
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Missing required param: 'args' (e.g. 'pages search --cql ...').",
-        )
-
-    if _BLOCKED_CONFLUENCE is not None and _BLOCKED_CONFLUENCE.is_blocked(args):
-        _audit_blocked("confluence", "blocked_confluence_pattern", user_id=ctx.user_id)
-        return AgentToolResult(
-            tool="confluence",
-            success=False,
-            output="Blocked: this Confluence command is not allowed for safety reasons.",
-        )
-
-    from koda.services.resilience import check_breaker, confluence_breaker, record_failure, record_success
-
-    err = check_breaker(confluence_breaker)
-    if err:
-        return AgentToolResult(tool="confluence", success=False, output=err)
-
-    from koda.services.atlassian_client import get_confluence_service, parse_atlassian_args
-    from koda.utils.approval import _execution_approved
-
-    try:
-        resource, action, parsed_params = parse_atlassian_args(args)
-    except ValueError as e:
-        return AgentToolResult(tool="confluence", success=False, output=str(e))
-
-    token = _execution_approved.set(True)
-    try:
-        service = get_confluence_service()
-        result = await service.execute(resource, action, parsed_params)
-    finally:
-        _execution_approved.reset(token)
-
-    success = not result.startswith("Exit 1:")
-    if success:
-        record_success(confluence_breaker)
-    else:
-        record_failure(confluence_breaker)
-    return AgentToolResult(
-        tool="confluence",
-        success=success,
-        output=result,
-        metadata={
-            "category": "cli",
-            "binary": "confluence",
-            "args": args,
-            "resource": resource,
-            "action": action,
-            "params": parsed_params,
-        },
-    )
-
-
 async def _handle_set_workdir(params: dict, ctx: ToolContext) -> AgentToolResult:
     path = params.get("path", "")
     if not path:
@@ -2276,8 +2044,10 @@ async def _handle_snapshot_delete(params: dict, ctx: ToolContext) -> AgentToolRe
 
 async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResult:
     """Resolve a skill by name/alias/query and return its full content with instruction."""
-    from koda.skills._registry import get_shared_registry
-    from koda.skills._selector import get_shared_selector
+    from koda.skills._index import SkillEmbeddingIndex
+    from koda.skills._registry import build_skill_registry_from_custom_skills
+    from koda.skills._runtime import get_runtime_agent_spec, get_runtime_custom_skills, get_runtime_skill_policy
+    from koda.skills._selector import SkillSelector
     from koda.skills._telemetry import emit_skill_invocation
 
     query = str(params.get("query", "")).strip()
@@ -2288,7 +2058,16 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
             output="Please specify a skill name or description. Use /skill to list available skills.",
         )
 
-    registry = get_shared_registry()
+    agent_spec = get_runtime_agent_spec()
+    skill_policy = get_runtime_skill_policy(agent_spec) or None
+    registry = build_skill_registry_from_custom_skills(get_runtime_custom_skills(agent_spec), skill_policy)
+    skills = registry.get_all()
+    if not skills:
+        return AgentToolResult(
+            tool="request_skill",
+            success=False,
+            output="No expert skills configured for this agent.",
+        )
 
     # Try exact match or alias first
     skill_id = registry.resolve_alias(query.lower().replace(" ", "-"))
@@ -2308,19 +2087,21 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
     if skill is None:
         # Fall back to semantic search
         try:
-            selector = get_shared_selector()
-            matches = selector.select(query, max_skills=1)
+            skill_index = SkillEmbeddingIndex()
+            skill_index.rebuild(skills)
+            selector = SkillSelector(registry, skill_index)
+            matches = selector.select(query, max_skills=1, agent_skill_policy=skill_policy)
             if matches and matches[0].composite_score >= 0.4:
                 skill = matches[0].skill
         except Exception:
             pass
 
     if skill is None:
-        available = ", ".join(sorted(registry.get_all().keys()))
+        available = ", ".join(sorted(skills.keys()))
         return AgentToolResult(
             tool="request_skill",
             success=False,
-            output=f"No matching skill found for '{query}'. Available skills: {available}",
+            output=f"No matching skill found for '{query}'. Skills configured for this agent: {available}",
         )
 
     # Build response with instruction
@@ -3572,9 +3353,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "web_search": _handle_web_search,
     "fetch_url": _handle_fetch_url,
     "http_request": _handle_http_request,
-    "gws": _handle_gws,
-    "jira": _handle_jira,
-    "confluence": _handle_confluence,
     "agent_set_workdir": _handle_set_workdir,
     "agent_get_status": _handle_get_status,
     "browser_navigate": _handle_browser_navigate,

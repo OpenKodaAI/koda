@@ -568,8 +568,11 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
 
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in app_dockerfile
-    assert "@googleworkspace/cli" in app_dockerfile
-    assert "/usr/local/bin/gws" in app_dockerfile
+    assert "@googleworkspace/cli" not in app_dockerfile
+    assert "/usr/local/bin/gws" not in app_dockerfile
+    assert "apt-get install -y --no-install-recommends gh" not in app_dockerfile
+    assert "glab_" not in app_dockerfile
+    assert "awscli.amazonaws.com" not in app_dockerfile
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in web_dockerfile
     assert 'CMD ["node", "server.mjs"]' in web_dockerfile
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile

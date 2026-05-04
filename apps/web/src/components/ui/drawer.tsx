@@ -36,6 +36,8 @@ export function Drawer({
     side === "right"
       ? "right-0 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right-4 data-[state=closed]:slide-out-to-right-4"
       : "left-0 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left-4 data-[state=closed]:slide-out-to-left-4";
+  const sideStyle =
+    side === "right" ? { right: 0, left: "auto" } : { left: 0, right: "auto" };
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={modal}>
@@ -67,7 +69,14 @@ export function Drawer({
             "duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             className,
           )}
-          style={{ width, maxWidth: "100vw" }}
+          style={{
+            position: "fixed",
+            top: 0,
+            bottom: 0,
+            width,
+            maxWidth: "100vw",
+            ...sideStyle,
+          }}
         >
           <header className="flex items-start justify-between gap-3 border-b border-[var(--divider-hair)] px-5 py-4">
             <div className="min-w-0 flex-1">

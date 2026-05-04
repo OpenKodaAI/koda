@@ -52,7 +52,6 @@ from koda.services.shell_runner import run_shell_command
 from koda.services.templates import (
     add_template,
     delete_template,
-    get_skill_template,
     get_template,
     list_template_names,
 )
@@ -1243,15 +1242,10 @@ async def cmd_templates(update: Update, context: BotContext) -> None:
     if not auth_check(update):
         return await reject_unauthorized(update)
 
-    skills, builtin, user = list_template_names()
+    _, builtin, user = list_template_names()
     lines = []
 
-    if skills:
-        lines.append("Expert Skills:")
-        for name in skills:
-            lines.append(f"  • {name}")
-
-    lines.append("\nBuilt-in templates:")
+    lines.append("Built-in templates:")
     for name in builtin:
         lines.append(f"  • {name}")
 
@@ -1260,8 +1254,7 @@ async def cmd_templates(update: Update, context: BotContext) -> None:
         for name in user:
             lines.append(f"  • {name}")
 
-    lines.append("\nUsage: /skill <name> [your question]")
-    lines.append("       /template use <name> [your question]")
+    lines.append("\nUsage: /template use <name> [your question]")
     lines.append("       /template add <name> <prompt text>")
     lines.append("       /template del <name>")
     await update.message.reply_text("\n".join(lines))
@@ -1351,29 +1344,92 @@ async def cmd_skill(update: Update, context: BotContext) -> None:
     if not auth_check(update):
         return await reject_unauthorized(update)
 
+    from koda.skills._index import SkillEmbeddingIndex
+    from koda.skills._registry import SkillDefinition, build_skill_registry_from_custom_skills
+    from koda.skills._runtime import get_runtime_agent_spec, get_runtime_custom_skills, get_runtime_skill_policy
+    from koda.skills._selector import SkillSelector
+    from koda.skills._telemetry import emit_skill_invocation
+
     init_user_data(context.user_data, user_id=update.effective_user.id)
     args = context.args
+    agent_spec = get_runtime_agent_spec()
+    skill_policy = get_runtime_skill_policy(agent_spec) or None
+    registry = build_skill_registry_from_custom_skills(get_runtime_custom_skills(agent_spec), skill_policy)
+    skills = registry.get_all()
 
     if not args:
         # List available skills
-        skills, _, _ = list_template_names()
         if not skills:
-            await update.message.reply_text("No expert skills available.")
+            await update.message.reply_text("No expert skills configured for this agent.")
             return
         lines = ["Expert Skills:"]
-        for name in skills:
-            lines.append(f"  • {name}")
+        for skill_def in sorted(skills.values(), key=lambda item: item.id):
+            label = (
+                f"{skill_def.id} - {skill_def.name}"
+                if skill_def.name and skill_def.name != skill_def.id
+                else skill_def.id
+            )
+            lines.append(f"  • {label}")
         lines.append("\nUsage: /skill <name> [your question]")
         await update.message.reply_text("\n".join(lines))
         return
 
+    def _resolve_direct_skill(candidate: str) -> SkillDefinition | None:
+        skill_id = registry.resolve_alias(candidate.lower().replace(" ", "-")) or registry.resolve_alias(
+            candidate.lower()
+        )
+        resolved = registry.get(skill_id) if skill_id else None
+        if resolved is not None:
+            return resolved
+
+        normalized_name = candidate.lower().strip()
+        normalized_slug = normalized_name.replace(" ", "-")
+        return next(
+            (
+                skill_candidate
+                for skill_candidate in skills.values()
+                if (
+                    skill_candidate.name.lower() == normalized_name
+                    or skill_candidate.name.lower().replace(" ", "-") == normalized_slug
+                )
+            ),
+            None,
+        )
+
     name = args[0]
-    template = get_skill_template(name)
-    if not template:
+    skill: SkillDefinition | None = None
+    consumed_args = 1
+    for end in range(len(args), 0, -1):
+        candidate_name = " ".join(args[:end])
+        skill = _resolve_direct_skill(candidate_name)
+        if skill is not None:
+            name = candidate_name
+            consumed_args = end
+            break
+
+    if skill is None:
+        try:
+            skill_index = SkillEmbeddingIndex()
+            skill_index.rebuild(skills)
+            selector = SkillSelector(registry, skill_index)
+            match = selector.select_by_name_or_query(name)
+            if match and match.composite_score >= 0.4:
+                skill = match.skill
+        except Exception:
+            log.exception("skill_command_resolution_failed")
+
+    if skill is None:
         await update.message.reply_text(f"Skill '{name}' not found. Use /skill to see available skills.")
         return
 
-    user_text = " ".join(args[1:]) if len(args) > 1 else ""
+    user_text = " ".join(args[consumed_args:]) if len(args) > consumed_args else ""
+    parts: list[str] = []
+    if skill.instruction:
+        parts.append(f"<instruction>{skill.instruction}</instruction>")
+    parts.append(skill.full_content)
+    if skill.output_format_enforcement:
+        parts.append(f"\n<output_format>{skill.output_format_enforcement}</output_format>")
+    template = "\n\n".join(parts)
     query = f"{template}\n\n{user_text}" if user_text else template
 
     user_id = update.effective_user.id
@@ -1381,7 +1437,8 @@ async def cmd_skill(update: Update, context: BotContext) -> None:
         await update.message.reply_text("Rate limited. Please wait.")
         return
 
-    await update.message.reply_text(f"Using skill: {name}")
+    emit_skill_invocation(skill_id=skill.id, explicit=True, user_id=user_id)
+    await update.message.reply_text(f"Using skill: {skill.id}")
     await enqueue(user_id, update, context, query)
 
 

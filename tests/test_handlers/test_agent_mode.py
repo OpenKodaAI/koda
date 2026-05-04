@@ -196,7 +196,7 @@ class TestStreamingMetadataCollector:
                     "type": "assistant",
                     "message": {
                         "content": [
-                            {"type": "tool_use", "name": "Bash", "input": {"command": "glab mr list"}},
+                            {"type": "tool_use", "name": "Bash", "input": {"command": "git status --short"}},
                         ]
                     },
                 }

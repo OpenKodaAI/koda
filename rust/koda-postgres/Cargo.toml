@@ -1,0 +1,12 @@
+[package]
+name = "koda-postgres"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+bb8.workspace = true
+bb8-postgres.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+tonic.workspace = true
+tracing.workspace = true

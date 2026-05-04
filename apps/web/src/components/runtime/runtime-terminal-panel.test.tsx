@@ -103,15 +103,18 @@ describe("RuntimeTerminalPanel", () => {
     const fetchResource = vi.fn().mockResolvedValue({ items: [] });
 
     const { RuntimeTerminalPanel } = await import("@/components/runtime/runtime-terminal-panel");
+    const { ToastProvider } = await import("@/hooks/use-toast");
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <RuntimeTerminalPanel
-          taskId={7}
-          terminals={[]}
-          mutate={mutate}
-          fetchResource={fetchResource}
-        />
+        <ToastProvider>
+          <RuntimeTerminalPanel
+            taskId={7}
+            terminals={[]}
+            mutate={mutate}
+            fetchResource={fetchResource}
+          />
+        </ToastProvider>
       </I18nProvider>
     );
 
@@ -146,34 +149,37 @@ describe("RuntimeTerminalPanel", () => {
     const fetchResource = vi.fn().mockResolvedValue({ items: [] });
 
     const { RuntimeTerminalPanel } = await import("@/components/runtime/runtime-terminal-panel");
+    const { ToastProvider } = await import("@/hooks/use-toast");
 
     render(
       <I18nProvider initialLanguage="pt-BR">
-        <RuntimeTerminalPanel
-          taskId={7}
-          terminals={[
-            {
-              id: 5,
-              task_id: 7,
-              label: "claude stream",
-              interactive: false,
-            },
-            {
-              id: 9,
-              task_id: 7,
-              label: "operator shell",
-              interactive: true,
-            },
-            {
-              id: 11,
-              task_id: 7,
-              label: "operator shell",
-              interactive: true,
-            },
-          ]}
-          mutate={mutate}
-          fetchResource={fetchResource}
-        />
+        <ToastProvider>
+          <RuntimeTerminalPanel
+            taskId={7}
+            terminals={[
+              {
+                id: 5,
+                task_id: 7,
+                label: "claude stream",
+                interactive: false,
+              },
+              {
+                id: 9,
+                task_id: 7,
+                label: "operator shell",
+                interactive: true,
+              },
+              {
+                id: 11,
+                task_id: 7,
+                label: "operator shell",
+                interactive: true,
+              },
+            ]}
+            mutate={mutate}
+            fetchResource={fetchResource}
+          />
+        </ToastProvider>
       </I18nProvider>
     );
 

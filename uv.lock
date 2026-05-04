@@ -289,24 +289,6 @@ wheels = [
 ]
 
 [[package]]
-name = "atlassian-python-api"
-version = "3.41.21"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "deprecated" },
-    { name = "jmespath" },
-    { name = "oauthlib" },
-    { name = "requests" },
-    { name = "requests-oauthlib" },
-    { name = "six" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/46/f7/c048201e0e4ff9f3d88af2c8bed5f24d5f2a45ece9a4686c42d0c6bfbf5a/atlassian_python_api-3.41.21.tar.gz", hash = "sha256:30117504ebdcbe229c6a15f7a6b89076e7f20e5feeb425fbce2b4b0b18b0e639", size = 236609, upload-time = "2025-03-17T08:04:11.338Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/a5/2e4c6fbaf586f9f0f2b5f364c19a1d467280bc28973b94dab5175b47056c/atlassian_python_api-3.41.21-py3-none-any.whl", hash = "sha256:6397bfa08d19acf08a766d3db5dd782348e8a3efca49cbf4ada870290a7fcf07", size = 183701, upload-time = "2025-03-17T08:04:09.589Z" },
-]
-
-[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1361,7 +1343,6 @@ dependencies = [
     { name = "argon2-cffi" },
     { name = "asyncpg" },
     { name = "asyncssh" },
-    { name = "atlassian-python-api" },
     { name = "beautifulsoup4" },
     { name = "boto3" },
     { name = "croniter" },
@@ -1445,7 +1426,6 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1,<24.0" },
     { name = "asyncpg", specifier = ">=0.30.0,<1.0" },
     { name = "asyncssh", specifier = ">=2.14.0,<3.0" },
-    { name = "atlassian-python-api", specifier = ">=3.41,<4.0" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7,<2.0" },
     { name = "beautifulsoup4", specifier = ">=4.12,<5.0" },
     { name = "botbuilder-core", marker = "extra == 'channels-all'", specifier = ">=4.14,<5.0" },

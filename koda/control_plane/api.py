@@ -693,27 +693,6 @@ async def list_dashboard_agent_approvals_route(request: web.Request) -> web.Resp
     return web.json_response({"items": items})
 
 
-async def list_skills_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
-    import re
-
-    from koda.services.templates import _SKILL_TEMPLATES
-
-    when_to_use_re = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
-    items: list[dict[str, Any]] = []
-    for name, content in sorted(_SKILL_TEMPLATES.items()):
-        match = when_to_use_re.search(content)
-        description = match.group(1).strip().split(". ")[0] if match else ""
-        items.append(
-            {
-                "id": name,
-                "title": name.replace("-", " ").replace("_", " "),
-                "description": description,
-                "category": "skill",
-            }
-        )
-    return web.json_response({"items": items})
-
-
 async def list_agent_tools_catalog_route(request: web.Request) -> web.Response:  # noqa: ARG001
     try:
         from koda.utils.approval import _OPS_COMMANDS, WRITE_CLASSIFIERS
@@ -723,14 +702,9 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
     tool_descriptions = {
         "shell": "Execute shell commands in the agent workspace",
         "git": "Git operations (status, log, diff, commit, push)",
-        "gh": "GitHub CLI operations (PRs, issues, releases)",
-        "glab": "GitLab CLI operations",
         "docker": "Docker container operations",
         "pip": "Python package manager",
         "npm": "Node package manager",
-        "gws": "Google Workspace (Gmail, Calendar, Drive, Sheets)",
-        "jira": "Jira issue tracker",
-        "confluence": "Confluence wiki",
         "http_request": "HTTP request (GET/POST/etc)",
         "cron": "Scheduled jobs",
         "write": "Write a file",
@@ -1734,13 +1708,37 @@ async def get_provider_download_job(request: web.Request) -> web.Response:
     import asyncio
 
     manager = _manager()
-    payload = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: manager.get_provider_download_job(
-            request.match_info["provider_id"],
-            request.match_info["job_id"],
-        ),
-    )
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.get_provider_download_job(
+                request.match_info["provider_id"],
+                request.match_info["job_id"],
+            ),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except KeyError:
+        return web.json_response({"error": "download job not found"}, status=404)
+    return web.json_response(payload)
+
+
+async def cancel_provider_download_job(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.cancel_provider_download_job(
+                request.match_info["provider_id"],
+                request.match_info["job_id"],
+            ),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except KeyError:
+        return web.json_response({"error": "download job not found"}, status=404)
     return web.json_response(payload)
 
 
@@ -2343,10 +2341,6 @@ def setup_control_plane_routes(app: web.Application) -> None:
         post_dashboard_approval_route,
     )
     app.router.add_get(
-        "/api/control-plane/skills",
-        list_skills_catalog_route,
-    )
-    app.router.add_get(
         "/api/control-plane/dashboard/agents/{agent_id}/tools",
         list_agent_tools_catalog_route,
     )
@@ -2521,6 +2515,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/providers/{provider_id}/downloads/{job_id}",
         get_provider_download_job,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/{provider_id}/downloads/{job_id}/cancel",
+        cancel_provider_download_job,
     )
     app.router.add_get("/api/control-plane/providers/ollama/models", get_ollama_models)
     app.router.add_get("/api/control-plane/system-settings/secrets/{secret_key}", get_global_secret)

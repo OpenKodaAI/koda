@@ -33,12 +33,15 @@ function matchesQuery(haystack: string | null | undefined, query: string): boole
  * for the mention menu. Filters by `query` (substring on slug / label /
  * description) and caps each group at 8 items.
  */
-export function useMentionSuggestions(query: string): {
+export function useMentionSuggestions(
+  query: string,
+  agentId: string | null | undefined,
+): {
   skills: MentionCandidate[];
   mcps: MentionCandidate[];
   isLoading: boolean;
 } {
-  const skillEntries = useSkillsCatalog();
+  const skillEntries = useSkillsCatalog(agentId);
   const { servers, isLoading: mcpLoading } = useMcpCatalogSuggestions();
 
   const skills: MentionCandidate[] = useMemo(() => {

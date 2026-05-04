@@ -105,7 +105,7 @@ async function fetchEmbeddingCatalog(): Promise<CatalogPayload> {
   ) {
      
     console.error("embedding catalog malformed payload", { body: text.slice(0, 500) });
-    throw new Error("Resposta inesperada do catálogo");
+    throw new Error("embedding.catalog.malformed");
   }
   return parsed as CatalogPayload;
 }
@@ -233,7 +233,10 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
   );
 
   if (catalogError && !catalog) {
-    const message = catalogError.message || tl("Falha ao carregar catálogo");
+    const message =
+      catalogError.message === "embedding.catalog.malformed"
+        ? tl("Resposta inesperada do catálogo")
+        : catalogError.message || tl("Falha ao carregar catálogo");
     return (
       <div className="rounded-xl border border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] p-4 text-sm text-[color:var(--tone-warning-text)]">
         <div className="font-medium mb-1">{tl("Não foi possível carregar o catálogo")}</div>
@@ -372,7 +375,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                 </div>
               </header>
               <p className="line-clamp-2 text-[11px] leading-snug text-[var(--text-secondary)]">
-                {model.description}
+                {tl(model.description)}
               </p>
               <footer className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-tertiary)]">
                 <span className="inline-flex items-center gap-1">
@@ -385,7 +388,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                 </span>
                 <span className="inline-flex items-center gap-1">
                   <Cpu size={10} strokeWidth={1.75} />
-                  {HARDWARE_LABEL[model.hardware_hint] ?? model.hardware_hint}
+                  {tl(HARDWARE_LABEL[model.hardware_hint] ?? model.hardware_hint)}
                 </span>
                 <span>
                   {formatSize(model.size_mb)} · {model.dimension}d ·{" "}

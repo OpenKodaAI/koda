@@ -28,6 +28,7 @@ Model files live under the standard ``~/.cache/huggingface/hub`` path so
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -220,6 +221,41 @@ def _model_cache_dir(repo_id: str) -> Path:
     return _hf_cache_dir() / f"models--{safe}"
 
 
+def _safe_is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _safe_iterdir(path: Path) -> Iterable[Path]:
+    try:
+        yield from path.iterdir()
+    except OSError:
+        return
+
+
+def _safe_glob(path: Path, pattern: str) -> Iterable[Path]:
+    try:
+        yield from path.glob(pattern)
+    except OSError:
+        return
+
+
+def _safe_rglob(path: Path, pattern: str) -> Iterable[Path]:
+    try:
+        yield from path.rglob(pattern)
+    except OSError:
+        return
+
+
+def _safe_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def model_local_path(model_id: str) -> Path | None:
     definition = CATALOG.get(model_id)
     if definition is None:
@@ -239,25 +275,28 @@ def is_model_installed(model_id: str) -> bool:
         return False
     base = _model_cache_dir(definition.repo_id)
     snapshots = base / "snapshots"
-    if not snapshots.is_dir():
+    if not _safe_is_dir(snapshots):
         return False
-    blobs = base / "blobs"
-    if blobs.is_dir():
-        for entry in blobs.iterdir():
-            if entry.suffix == ".incomplete":
-                return False
-    for snapshot in snapshots.iterdir():
-        if not snapshot.is_dir():
+
+    has_weights = False
+    for snapshot in _safe_iterdir(snapshots):
+        if not _safe_is_dir(snapshot):
             continue
-        for name in (
-            "model.safetensors",
-            "pytorch_model.bin",
-            "model.onnx",
+        for pattern in (
+            "model*.safetensors",
+            "pytorch_model*.bin",
+            "*.onnx",
         ):
-            candidate = snapshot / name
-            if candidate.exists():
-                return True
-    return False
+            if any(_safe_exists(candidate) for candidate in _safe_glob(snapshot, pattern)):
+                has_weights = True
+                break
+        if has_weights:
+            break
+    if not has_weights:
+        return False
+
+    blobs = base / "blobs"
+    return not (_safe_is_dir(blobs) and any(_safe_glob(blobs, "*.incomplete")))
 
 
 def model_disk_bytes(model_id: str) -> int:
@@ -266,11 +305,15 @@ def model_disk_bytes(model_id: str) -> int:
     if definition is None:
         return 0
     base = _model_cache_dir(definition.repo_id)
-    if not base.is_dir():
+    if not _safe_is_dir(base):
         return 0
     total = 0
-    for path in base.rglob("*"):
-        if path.is_file() and not path.is_symlink():
+    for path in _safe_rglob(base, "*"):
+        try:
+            is_regular_file = path.is_file() and not path.is_symlink()
+        except OSError:
+            continue
+        if is_regular_file:
             try:
                 total += path.stat().st_size
             except OSError:
@@ -285,8 +328,18 @@ def model_payload(model_id: str) -> dict[str, Any]:
     """Serialize one catalog entry plus disk status for the UI."""
     definition = CATALOG[model_id]
     payload = asdict(definition)
-    payload["installed"] = is_model_installed(model_id)
-    payload["disk_bytes"] = model_disk_bytes(model_id)
+    try:
+        installed = is_model_installed(model_id)
+    except Exception:  # noqa: BLE001 - status probing must never break the catalog
+        installed = False
+    payload["installed"] = installed
+    if installed:
+        try:
+            payload["disk_bytes"] = model_disk_bytes(model_id)
+        except Exception:  # noqa: BLE001 - best-effort metadata only
+            payload["disk_bytes"] = 0
+    else:
+        payload["disk_bytes"] = 0
     return payload
 
 

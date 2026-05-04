@@ -169,6 +169,7 @@ _RESOURCE_ACCESS_POLICY_KEYS = frozenset(
         "local_env",
     }
 )
+_REMOVED_EXTERNAL_INTEGRATION_IDS = frozenset({"gws", "jira", "confluence", "gh", "glab", "aws"})
 _RESERVED_LOCAL_ENV_PREFIXES = (
     "RUNTIME_",
     "MEMORY_",
@@ -238,6 +239,7 @@ def normalize_custom_skills(value: Any) -> list[dict[str, Any]]:
                 "id": skill_id,
                 "name": name,
                 "content": content,
+                "enabled": _as_bool(item.get("enabled"), True),
                 "instruction": _trimmed(item.get("instruction")),
                 "category": _trimmed(item.get("category")) or "general",
                 "aliases": normalize_string_list(item.get("aliases")),
@@ -245,6 +247,27 @@ def normalize_custom_skills(value: Any) -> list[dict[str, Any]]:
                 "output_format_enforcement": _trimmed(item.get("output_format_enforcement")),
             }
         )
+    return normalized
+
+
+def normalize_skill_policy(value: Any) -> dict[str, Any]:
+    raw = _safe_json_object(value)
+    if not raw:
+        return {}
+    normalized: dict[str, Any] = {}
+    enabled = _as_bool(raw.get("enabled"))
+    if enabled is not None:
+        normalized["enabled"] = enabled
+    max_skills = _as_int(raw.get("max_skills"))
+    if max_skills is not None and max_skills > 0:
+        normalized["max_skills"] = max_skills
+    skill_budget_pct = _as_float(raw.get("skill_budget_pct"))
+    if skill_budget_pct is not None and skill_budget_pct > 0:
+        normalized["skill_budget_pct"] = skill_budget_pct
+    for key in ("enabled_skills", "disabled_skills"):
+        items = normalize_string_list(raw.get(key))
+        if items:
+            normalized[key] = items
     return normalized
 
 
@@ -909,6 +932,7 @@ def normalize_agent_spec(agent_spec: dict[str, Any]) -> dict[str, Any]:
         "voice_policy": _compact_mapping(_safe_json_object(agent_spec.get("voice_policy"))),
         "image_analysis_policy": _compact_mapping(_safe_json_object(agent_spec.get("image_analysis_policy"))),
         "memory_extraction_schema": _compact_mapping(_safe_json_object(agent_spec.get("memory_extraction_schema"))),
+        "skill_policy": normalize_skill_policy(agent_spec.get("skill_policy")),
         "custom_skills": normalize_custom_skills(agent_spec.get("custom_skills")),
         "documents": {
             kind: _normalize_markdown_block(value)
@@ -951,6 +975,8 @@ def build_agent_spec_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "execution_policy": _safe_json_object(runtime.get("execution_policy")),
             "voice_policy": _safe_json_object(prompting.get("voice_policy")),
             "image_analysis_policy": _safe_json_object(prompting.get("image_analysis_policy")),
+            "skill_policy": _safe_json_object(prompting.get("skill_policy")),
+            "custom_skills": _safe_json_list(prompting.get("custom_skills")),
             "memory_extraction_schema": _safe_json_object(memory.get("memory_extraction_schema")),
             "documents": documents,
         }
@@ -985,6 +1011,7 @@ def validate_agent_spec(
     enabled_providers: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate typed config, markdown projections, and publish safety rules."""
+    raw_resource_access_policy = _safe_json_object(_safe_json_object(agent_spec).get("resource_access_policy"))
     normalized_spec = normalize_agent_spec(agent_spec)
     errors: list[str] = []
     warnings: list[str] = []
@@ -1216,21 +1243,26 @@ def validate_agent_spec(
         if promotion_mode and promotion_mode not in PROMOTION_MODES:
             errors.append(f"knowledge_policy.promotion_mode is invalid: {promotion_mode}")
 
+    raw_grants = _safe_json_object(raw_resource_access_policy.get("integration_grants"))
+    unknown_integrations = sorted(
+        str(integration_id or "").strip().lower()
+        for integration_id in raw_grants
+        if str(integration_id or "").strip().lower()
+        and str(integration_id or "").strip().lower() not in _REMOVED_EXTERNAL_INTEGRATION_IDS
+        and str(integration_id or "").strip().lower() not in CORE_INTEGRATION_CATALOG
+        and not str(integration_id or "").strip().lower().startswith("mcp:")
+    )
+    if unknown_integrations:
+        errors.append(
+            "resource_access_policy.integration_grants contains unknown integrations: "
+            + ", ".join(unknown_integrations)
+        )
+
     if resource_access_policy:
         unexpected_keys = sorted(key for key in resource_access_policy if key not in _RESOURCE_ACCESS_POLICY_KEYS)
         if unexpected_keys:
             warnings.append(
                 "resource_access_policy contains unsupported keys that will be ignored: " + ", ".join(unexpected_keys)
-            )
-        unknown_integrations = sorted(
-            integration_id
-            for integration_id in normalize_integration_grants(resource_access_policy.get("integration_grants"))
-            if integration_id not in CORE_INTEGRATION_CATALOG
-        )
-        if unknown_integrations:
-            errors.append(
-                "resource_access_policy.integration_grants contains unknown integrations: "
-                + ", ".join(unknown_integrations)
             )
         for list_key in ("allowed_global_secret_keys", "allowed_shared_env_keys"):
             invalid_keys = [
@@ -1250,16 +1282,6 @@ def validate_agent_spec(
                 )
             if env_key.startswith(_RESERVED_LOCAL_ENV_PREFIXES):
                 errors.append(f"resource_access_policy.local_env.{env_key} uses a reserved core/provider prefix.")
-        integration_grants = normalize_integration_grants(resource_access_policy.get("integration_grants"))
-        unknown_integrations = sorted(
-            integration_id for integration_id in integration_grants if integration_id not in CORE_INTEGRATION_CATALOG
-        )
-        if unknown_integrations:
-            errors.append(
-                "resource_access_policy.integration_grants contains unknown integrations: "
-                + ", ".join(unknown_integrations)
-            )
-
     if memory_extraction_schema:
         template = _trimmed(
             memory_extraction_schema.get("template")

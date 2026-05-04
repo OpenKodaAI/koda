@@ -385,6 +385,7 @@ export function ChatComposer({
           {isMentionOpen ? (
             <ComposerMentionMenuContent
               query={triggers.mentionTrigger?.query ?? ""}
+              agentId={agentId}
               activeIndex={activeIndex}
               onActiveIndex={setActiveIndex}
               onItemsChange={handleMentionItemsChange}

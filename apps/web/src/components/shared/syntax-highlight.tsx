@@ -7,6 +7,12 @@ import { cn } from "@/lib/utils";
 
 export type SyntaxLang = "json" | "sql" | "shell" | "diff" | "python" | "typescript" | "yaml" | "html" | "css" | "plain";
 
+export interface SearchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+}
+
 /*  Extension → language detection                                     */
 
 const EXT_TO_LANG: Record<string, SyntaxLang> = {
@@ -172,7 +178,14 @@ interface Token {
     | "diff-add"
     | "diff-remove"
     | "diff-hunk"
-    | "diff-header";
+    | "diff-header"
+    | "git-status-added"
+    | "git-status-copied"
+    | "git-status-deleted"
+    | "git-status-modified"
+    | "git-status-renamed"
+    | "git-status-untracked"
+    | "git-status-conflict";
   text: string;
 }
 
@@ -329,6 +342,22 @@ function tokenizeShell(code: string): Token[] {
 
 /*  Diff tokenizer (line-based)                                        */
 
+function getGitStatusTokenType(line: string): Token["type"] | null {
+  const match = line.match(/^([ MADRCU?!]{1,2})\s+(.+)$/);
+  if (!match) return null;
+
+  const status = match[1].trim();
+  if (!status) return null;
+  if (status.includes("?")) return "git-status-untracked";
+  if (status.includes("U")) return "git-status-conflict";
+  if (status.includes("D")) return "git-status-deleted";
+  if (status.includes("A")) return "git-status-added";
+  if (status.includes("R")) return "git-status-renamed";
+  if (status.includes("C")) return "git-status-copied";
+  if (status.includes("M")) return "git-status-modified";
+  return null;
+}
+
 function tokenizeDiff(code: string): Token[] {
   const tokens: Token[] = [];
   const lines = code.split("\n");
@@ -336,8 +365,11 @@ function tokenizeDiff(code: string): Token[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (i > 0) tokens.push({ type: "plain", text: "\n" });
+    const gitStatusType = getGitStatusTokenType(line);
 
-    if (line.startsWith("diff ") || line.startsWith("index ")) {
+    if (gitStatusType) {
+      tokens.push({ type: gitStatusType, text: line });
+    } else if (line.startsWith("diff ") || line.startsWith("index ")) {
       tokens.push({ type: "diff-header", text: line });
     } else if (line.startsWith("@@")) {
       tokens.push({ type: "diff-hunk", text: line });
@@ -661,6 +693,13 @@ const TOKEN_CLASS: Record<Token["type"], string> = {
   "diff-remove": "syn-diff-remove",
   "diff-hunk": "syn-diff-hunk",
   "diff-header": "syn-diff-header",
+  "git-status-added": "syn-git-status-added",
+  "git-status-copied": "syn-git-status-copied",
+  "git-status-deleted": "syn-git-status-deleted",
+  "git-status-modified": "syn-git-status-modified",
+  "git-status-renamed": "syn-git-status-renamed",
+  "git-status-untracked": "syn-git-status-untracked",
+  "git-status-conflict": "syn-git-status-conflict",
 };
 
 function renderTokens(tokens: Token[]): ReactNode[] {
@@ -675,6 +714,95 @@ function renderTokens(tokens: Token[]): ReactNode[] {
   });
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSearchRegExp(query: string, options?: SearchOptions): RegExp | null {
+  if (!query) return null;
+  try {
+    const source = options?.regex ? query : escapeRegExp(query);
+    const wordSource = options?.wholeWord ? `\\b(?:${source})\\b` : source;
+    return new RegExp(wordSource, options?.caseSensitive ? "g" : "gi");
+  } catch {
+    return null;
+  }
+}
+
+function applySearchToNodes(
+  nodes: ReactNode[],
+  query: string | undefined,
+  options: SearchOptions | undefined,
+  currentMatchIndex: number | undefined,
+  startIndex = 0,
+): { nodes: ReactNode[]; total: number } {
+  if (!query) return { nodes, total: 0 };
+  const rx = buildSearchRegExp(query, options);
+  if (!rx) return { nodes, total: 0 };
+
+  let globalIdx = startIndex;
+  let total = 0;
+  const result: ReactNode[] = [];
+
+  const renderText = (text: string, keyPrefix: string): ReactNode[] => {
+    const rendered: ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    rx.lastIndex = 0;
+
+    while ((match = rx.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        rendered.push(text.slice(lastIndex, match.index));
+      }
+      const value = match[0];
+      if (!value) {
+        rx.lastIndex += 1;
+        continue;
+      }
+      const cls =
+        globalIdx === currentMatchIndex
+          ? "syn-search-match syn-search-match--current"
+          : "syn-search-match";
+      rendered.push(
+        <mark key={`${keyPrefix}-${globalIdx}`} className={cls}>
+          {value}
+        </mark>,
+      );
+      globalIdx++;
+      total++;
+      lastIndex = match.index + value.length;
+    }
+
+    if (lastIndex < text.length) {
+      rendered.push(text.slice(lastIndex));
+    }
+    return rendered;
+  };
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (typeof node === "string") {
+      result.push(...renderText(node, `s-${i}`));
+    } else if (node != null && typeof node === "object" && "props" in (node as React.ReactElement)) {
+      const el = node as React.ReactElement<{ children?: ReactNode; className?: string }>;
+      const text = typeof el.props.children === "string" ? el.props.children : null;
+      if (text) {
+        result.push(
+          <span key={`w-${i}`} className={el.props.className}>
+            {renderText(text, `w-${i}`)}
+          </span>,
+        );
+      } else {
+        result.push(node);
+      }
+    } else {
+      result.push(node);
+    }
+  }
+
+  return { nodes: result, total };
+}
+
 /*  Public component                                                   */
 
 interface SyntaxHighlightProps {
@@ -687,6 +815,8 @@ interface SyntaxHighlightProps {
   filePath?: string;
   /** Search query to highlight matches within tokens */
   searchQuery?: string;
+  /** Search matching options */
+  searchOptions?: SearchOptions;
   /** Index of the currently focused match (0-based) */
   currentMatchIndex?: number;
   /** Callback reporting total number of matches found */
@@ -700,6 +830,7 @@ export function SyntaxHighlight({
   lineNumbers = false,
   filePath,
   searchQuery,
+  searchOptions,
   currentMatchIndex,
   onMatchCount,
 }: SyntaxHighlightProps) {
@@ -708,68 +839,9 @@ export function SyntaxHighlight({
   const { rendered, matchCount } = useMemo(() => {
     const tokens = tokenize(children, resolvedLang);
 
-    // --- Search highlighting post-process ---
-    function applySearch(nodes: ReactNode[]): { nodes: ReactNode[]; total: number } {
-      if (!searchQuery) return { nodes, total: 0 };
-      const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const rx = new RegExp(`(${escaped})`, "gi");
-      let globalIdx = 0;
-      const result: ReactNode[] = [];
-
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        if (typeof node === "string") {
-          const parts = node.split(rx);
-          for (const part of parts) {
-            if (rx.test(part)) {
-              rx.lastIndex = 0; // reset after test
-              const cls =
-                globalIdx === currentMatchIndex
-                  ? "syn-search-match syn-search-match--current"
-                  : "syn-search-match";
-              result.push(<mark key={`s-${i}-${globalIdx}`} className={cls}>{part}</mark>);
-              globalIdx++;
-            } else {
-              if (part) result.push(part);
-            }
-          }
-        } else if (node != null && typeof node === "object" && "props" in (node as React.ReactElement)) {
-          const el = node as React.ReactElement<{ children?: ReactNode; className?: string }>;
-          const text = typeof el.props.children === "string" ? el.props.children : null;
-          if (text) {
-            const parts = text.split(rx);
-            const inner: ReactNode[] = [];
-            for (const part of parts) {
-              if (rx.test(part)) {
-                rx.lastIndex = 0;
-                const cls =
-                  globalIdx === currentMatchIndex
-                    ? "syn-search-match syn-search-match--current"
-                    : "syn-search-match";
-                inner.push(<mark key={`s-${i}-${globalIdx}`} className={cls}>{part}</mark>);
-                globalIdx++;
-              } else {
-                if (part) inner.push(part);
-              }
-            }
-            result.push(
-              <span key={`w-${i}`} className={el.props.className}>
-                {inner}
-              </span>,
-            );
-          } else {
-            result.push(node);
-          }
-        } else {
-          result.push(node);
-        }
-      }
-      return { nodes: result, total: globalIdx };
-    }
-
     if (!lineNumbers) {
       const base = renderTokens(tokens);
-      const { nodes, total } = applySearch(base);
+      const { nodes, total } = applySearchToNodes(base, searchQuery, searchOptions, currentMatchIndex);
       return { rendered: nodes, matchCount: total };
     }
 
@@ -824,7 +896,13 @@ export function SyntaxHighlight({
 
     const lineElements = lineTokens.map((lt, i) => {
       const base = renderTokens(lt);
-      const { nodes, total } = applySearch(base);
+      const { nodes, total } = applySearchToNodes(
+        base,
+        searchQuery,
+        searchOptions,
+        currentMatchIndex,
+        totalMatches,
+      );
       totalMatches += total;
       return (
         <div key={i} className="syn-line">
@@ -837,7 +915,7 @@ export function SyntaxHighlight({
     });
 
     return { rendered: lineElements, matchCount: totalMatches };
-  }, [children, resolvedLang, lineNumbers, searchQuery, currentMatchIndex]);
+  }, [children, resolvedLang, lineNumbers, searchQuery, searchOptions, currentMatchIndex]);
 
   useEffect(() => {
     onMatchCount?.(matchCount);

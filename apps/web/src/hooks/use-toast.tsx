@@ -31,6 +31,12 @@ export type Toast = {
   progress?: ToastProgress;
   /** Whether the close button is rendered. Defaults to !persistent. */
   dismissible?: boolean;
+  action?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    ariaLabel?: string;
+  };
 };
 
 export type ShowToastOptions = {
@@ -41,6 +47,7 @@ export type ShowToastOptions = {
   persistent?: boolean;
   progress?: ToastProgress;
   dismissible?: boolean;
+  action?: Toast["action"];
 };
 
 type ToastContextValue = {
@@ -124,6 +131,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         persistent,
         progress: options.progress,
         dismissible,
+        action: options.action,
       };
 
       setToasts((prev) => {

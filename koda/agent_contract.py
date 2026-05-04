@@ -147,16 +147,6 @@ class IntegrationActionResolution:
 
 
 @dataclass(frozen=True, slots=True)
-class GwsActionResolution:
-    """Canonical Google Workspace action derived from CLI args."""
-
-    service: str
-    action_id: str
-    resource_method: str
-    access_level: str
-
-
-@dataclass(frozen=True, slots=True)
 class IntegrationGrantDecision:
     """Final allow/deny decision for one integration action."""
 
@@ -388,21 +378,6 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
     ),
     CoreToolDefinition(
         "browser_pdf", "Browser PDF", "browser", "Generate page PDF.", read_only=True, feature_flag="browser"
-    ),
-    CoreToolDefinition(
-        "gws",
-        "Google Workspace",
-        "integration",
-        "Execute Google Workspace commands.",
-        feature_flag="gws",
-    ),
-    CoreToolDefinition("jira", "Jira", "integration", "Execute Jira commands.", feature_flag="jira"),
-    CoreToolDefinition(
-        "confluence",
-        "Confluence",
-        "integration",
-        "Execute Confluence commands.",
-        feature_flag="confluence",
     ),
     CoreToolDefinition("script_search", "Script search", "library", "Search saved scripts.", read_only=True),
     CoreToolDefinition("script_list", "Script list", "library", "List saved scripts.", read_only=True),
@@ -908,98 +883,6 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         runtime_constraints=("allowed_domains", "allow_private_network"),
     ),
     CoreIntegrationDefinition(
-        id="gws",
-        title="Google Workspace",
-        description="Governed Google Workspace CLI and service-account credentials.",
-        transport="cli",
-        auth_modes=("service_account", "service_account_key"),
-        risk_class="write",
-        required_env=(),
-        health_probe="credentials_file",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(
-                    key="GOOGLE_APPLICATION_CREDENTIALS",
-                    label="Service Account JSON (path or content)",
-                    required=True,
-                    input_type="textarea",
-                    help="Cole o JSON do service account ou o caminho absoluto do arquivo.",
-                ),
-            ),
-        ),
-        runtime_constraints=("allowed_domains", "allow_private_network"),
-    ),
-    CoreIntegrationDefinition(
-        id="jira",
-        title="Jira",
-        description="Governed Jira operations and deep issue context.",
-        transport="api",
-        auth_modes=("api_token",),
-        risk_class="write",
-        required_secrets=("JIRA_API_TOKEN",),
-        required_env=("JIRA_URL", "JIRA_USERNAME"),
-        health_probe="credential_presence",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(key="JIRA_URL", label="Jira site URL", input_type="text"),
-                ConnectionField(key="JIRA_USERNAME", label="Username (email)", input_type="text"),
-                ConnectionField(key="JIRA_API_TOKEN", label="API Token", input_type="password"),
-            ),
-        ),
-    ),
-    CoreIntegrationDefinition(
-        id="confluence",
-        title="Confluence",
-        description="Governed Confluence document access and mutations.",
-        transport="api",
-        auth_modes=("api_token",),
-        risk_class="write",
-        required_secrets=("CONFLUENCE_API_TOKEN",),
-        required_env=("CONFLUENCE_URL", "CONFLUENCE_USERNAME"),
-        health_probe="credential_presence",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(key="CONFLUENCE_URL", label="Confluence site URL", input_type="text"),
-                ConnectionField(key="CONFLUENCE_USERNAME", label="Username (email)", input_type="text"),
-                ConnectionField(key="CONFLUENCE_API_TOKEN", label="API Token", input_type="password"),
-            ),
-        ),
-    ),
-    CoreIntegrationDefinition(
-        id="aws",
-        title="AWS",
-        description="Governed AWS profiles, regions, and CLI-backed runtime access.",
-        transport="cli",
-        auth_modes=("assume_role", "access_key", "local_session"),
-        risk_class="write",
-        required_env=("AWS_DEFAULT_REGION",),
-        health_probe="sts_caller_identity",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="api_key",
-            fields=(
-                ConnectionField(key="AWS_ACCESS_KEY_ID", label="Access Key ID", input_type="password"),
-                ConnectionField(key="AWS_SECRET_ACCESS_KEY", label="Secret Access Key", input_type="password"),
-                ConnectionField(key="AWS_DEFAULT_REGION", label="Default region", input_type="text"),
-            ),
-            scope_fields=(
-                ConnectionField(
-                    key="AWS_SESSION_TOKEN",
-                    label="Session Token (opcional)",
-                    required=False,
-                    input_type="password",
-                ),
-            ),
-        ),
-        runtime_constraints=("allowed_db_envs",),
-    ),
-    CoreIntegrationDefinition(
         id="script_library",
         title="Script Library",
         description="Saved script search and lifecycle operations.",
@@ -1032,53 +915,6 @@ _CORE_INTEGRATION_DEFINITIONS: tuple[CoreIntegrationDefinition, ...] = (
         risk_class="write",
         health_probe="binary_exec",
         runtime_constraints=("allowed_paths",),
-    ),
-    CoreIntegrationDefinition(
-        id="gh",
-        title="GitHub CLI",
-        description="Governed GitHub CLI execution.",
-        transport="cli",
-        auth_modes=("local_session", "token"),
-        risk_class="write",
-        health_probe="gh_api_user",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="local_app",
-            local_app_name="GitHub CLI (gh)",
-            local_app_detection_hint="Execute `gh auth login` no terminal para autenticar.",
-            fields=(
-                ConnectionField(
-                    key="GITHUB_PERSONAL_ACCESS_TOKEN",
-                    label="Personal Access Token (fallback)",
-                    required=False,
-                    input_type="password",
-                    help="Optional: only use when `gh auth login` is not viable.",
-                ),
-            ),
-        ),
-    ),
-    CoreIntegrationDefinition(
-        id="glab",
-        title="GitLab CLI",
-        description="Governed GitLab CLI execution.",
-        transport="cli",
-        auth_modes=("local_session", "token"),
-        risk_class="write",
-        health_probe="glab_api_user",
-        supports_persistence=True,
-        connection_profile=ConnectionProfile(
-            strategy="local_app",
-            local_app_name="GitLab CLI (glab)",
-            local_app_detection_hint="Execute `glab auth login` no terminal para autenticar.",
-            fields=(
-                ConnectionField(
-                    key="GITLAB_PERSONAL_ACCESS_TOKEN",
-                    label="Personal Access Token (fallback)",
-                    required=False,
-                    input_type="password",
-                ),
-            ),
-        ),
     ),
     CoreIntegrationDefinition(
         id="docker",
@@ -1134,47 +970,7 @@ AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
 PROMOTION_MODES: frozenset[str] = frozenset({"review_queue"})
 ACCESS_LEVELS: frozenset[str] = frozenset({"read", "write", "admin", "destructive"})
 _READ_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-_GWS_SERVICE_ALIASES = {
-    "gmail": "gmail",
-    "gcal": "calendar",
-    "calendar": "calendar",
-    "gdrive": "drive",
-    "drive": "drive",
-    "gsheets": "sheets",
-    "sheets": "sheets",
-    "chat": "chat",
-    "admin": "admin",
-}
-_GWS_READ_ACTION_TOKENS = frozenset({"get", "list", "search", "schema", "read", "download", "export", "view"})
-_GWS_WRITE_ACTION_TOKENS = frozenset(
-    {"create", "update", "patch", "append", "send", "reply", "copy", "move", "import", "add"}
-)
-_GWS_ADMIN_ACTION_TOKENS = frozenset(
-    {"insert", "makeadmin", "permissions", "delegates", "forwardingaddresses", "sendas", "emptytrash"}
-)
-_GWS_DESTRUCTIVE_ACTION_TOKENS = frozenset({"delete", "trash", "remove", "purge"})
-_GWS_ADMIN_RESOURCE_HINTS = frozenset(
-    {"admin", "forwardingaddresses", "sendas", "makeadmin", "permissions", "delegates", "emptytrash"}
-)
-_READ_ATLASSIAN_ACTIONS = frozenset(
-    {
-        "search",
-        "get",
-        "list",
-        "comments",
-        "comment_get",
-        "view",
-        "analyze",
-        "attachments",
-        "links",
-        "issues",
-        "children",
-        "view_video",
-        "view_image",
-        "view_audio",
-        "transitions",
-    }
-)
+_MCP_READ_ACTION_TOKENS = frozenset({"get", "list", "search", "schema", "read", "download", "export", "view"})
 _DESTRUCTIVE_ACTION_TOKENS = frozenset({"delete", "clear", "purge", "remove", "disconnect"})
 _ADMIN_ACTION_TOKENS = frozenset({"switch_env", "set", "configure"})
 _SHELL_READ_ACTION_TOKENS = frozenset(
@@ -1352,87 +1148,6 @@ _NPM_ACTION_LEVELS: dict[str, str] = {
     "uninstall": "destructive",
     "unpublish": "destructive",
 }
-_GH_ACTION_LEVELS: dict[str, str] = {
-    "auth.status": "read",
-    "pr.list": "read",
-    "pr.view": "read",
-    "pr.diff": "read",
-    "pr.checks": "read",
-    "pr.status": "read",
-    "pr.checkout": "write",
-    "pr.comment": "write",
-    "pr.create": "write",
-    "pr.edit": "write",
-    "pr.ready": "write",
-    "pr.reopen": "write",
-    "pr.update-branch": "write",
-    "pr.close": "destructive",
-    "pr.merge": "destructive",
-    "issue.list": "read",
-    "issue.view": "read",
-    "issue.status": "read",
-    "issue.comment": "write",
-    "issue.create": "write",
-    "issue.edit": "write",
-    "issue.reopen": "write",
-    "issue.close": "destructive",
-    "issue.delete": "destructive",
-    "repo.list": "read",
-    "repo.view": "read",
-    "repo.clone": "write",
-    "repo.create": "write",
-    "repo.fork": "write",
-    "repo.delete": "destructive",
-    "release.list": "read",
-    "release.view": "read",
-    "release.create": "write",
-    "release.edit": "write",
-    "release.upload": "write",
-    "release.delete": "destructive",
-    "run.list": "read",
-    "run.view": "read",
-    "run.download": "read",
-    "run.watch": "read",
-    "run.rerun": "write",
-    "run.cancel": "destructive",
-    "run.delete": "destructive",
-    "workflow.list": "read",
-    "workflow.view": "read",
-    "workflow.run": "write",
-    "workflow.enable": "write",
-    "workflow.disable": "write",
-}
-_GLAB_ACTION_LEVELS: dict[str, str] = {
-    "auth.status": "read",
-    "mr.list": "read",
-    "mr.view": "read",
-    "mr.checkout": "write",
-    "mr.create": "write",
-    "mr.update": "write",
-    "mr.rebase": "write",
-    "mr.note": "write",
-    "mr.approve": "write",
-    "mr.revoke": "write",
-    "mr.close": "destructive",
-    "mr.merge": "destructive",
-    "issue.list": "read",
-    "issue.view": "read",
-    "issue.note": "write",
-    "issue.create": "write",
-    "issue.update": "write",
-    "issue.close": "destructive",
-    "issue.delete": "destructive",
-    "repo.view": "read",
-    "repo.clone": "write",
-    "repo.create": "write",
-    "repo.delete": "destructive",
-    "pipeline.list": "read",
-    "pipeline.view": "read",
-    "pipeline.run": "write",
-    "pipeline.retry": "write",
-    "pipeline.cancel": "destructive",
-    "pipeline.delete": "destructive",
-}
 _SCHEDULER_ACTION_LEVELS: dict[str, str] = {
     "job_list": "read",
     "job_get": "read",
@@ -1548,6 +1263,8 @@ def normalize_integration_grants(value: Any) -> dict[str, dict[str, Any]]:
         integration_id = str(raw_integration_id or "").strip().lower()
         if not integration_id or not isinstance(raw_payload, dict):
             continue
+        if integration_id not in CORE_INTEGRATION_CATALOG and not integration_id.startswith("mcp:"):
+            continue
         applicable = _integration_runtime_constraints(integration_id)
         grant: dict[str, Any] = {}
 
@@ -1647,90 +1364,6 @@ def _resolve_prefixed_subcommand_action(
     return f"{integration_id}.{subcommand}", access_level
 
 
-def _resolve_grouped_cli_action(
-    integration_id: str,
-    args: str | None,
-    registry: dict[str, str],
-    *,
-    default_access_level: str = "write",
-) -> tuple[str, str]:
-    tokens = [token.strip().lower() for token in _command_tokens(args) if token.strip()]
-    if not tokens:
-        return f"{integration_id}.unknown", default_access_level
-    if len(tokens) >= 2:
-        candidate = f"{tokens[0]}.{tokens[1]}"
-        if candidate in registry:
-            return f"{integration_id}.{candidate}", registry[candidate]
-    candidate = tokens[0]
-    return f"{integration_id}.{candidate}", registry.get(candidate, default_access_level)
-
-
-def canonicalize_gws_command_args(service: str, args: str | None = None) -> str:
-    """Return canonical GWS CLI args in the form '<service> <resource.method> ...'."""
-    normalized_service = _GWS_SERVICE_ALIASES.get(
-        str(service or "").strip().lower(), str(service or "").strip().lower()
-    )
-    raw_args = str(args or "").strip()
-    if not raw_args:
-        return normalized_service
-    tokens = shlex.split(raw_args)
-    if tokens and _GWS_SERVICE_ALIASES.get(tokens[0].strip().lower(), tokens[0].strip().lower()) == normalized_service:
-        return raw_args
-    return f"{normalized_service} {raw_args}"
-
-
-def _gws_is_admin_method(service: str, resource_method: str) -> bool:
-    normalized_service = str(service or "").strip().lower()
-    normalized_resource = str(resource_method or "").strip().lower()
-    if not normalized_resource:
-        return normalized_service == "admin"
-    if normalized_service == "admin":
-        return True
-    if any(hint in normalized_resource for hint in _GWS_ADMIN_RESOURCE_HINTS):
-        return True
-    tokens = [token for token in normalized_resource.split(".") if token]
-    return any(token in _GWS_ADMIN_ACTION_TOKENS for token in tokens)
-
-
-def resolve_gws_action(args: str | None) -> GwsActionResolution:
-    """Resolve one GWS command string to a canonical service.action envelope."""
-    tokens = shlex.split(str(args or ""))
-    service_token = str(tokens[0] if tokens else "generic").strip().lower()
-    service = _GWS_SERVICE_ALIASES.get(service_token, service_token or "generic")
-    resource_method = ""
-    for token in tokens[1:]:
-        if "." in token:
-            resource_method = token.strip()
-            break
-    if not resource_method and len(tokens) > 1:
-        resource_method = str(tokens[1]).strip()
-    if not resource_method and tokens and "." in tokens[0]:
-        resource_method = str(tokens[0]).strip()
-        service = _GWS_SERVICE_ALIASES.get(resource_method.split(".", 1)[0].strip().lower(), service)
-    if not resource_method:
-        resource_method = "unknown"
-    normalized_resource = resource_method.lower()
-    action_token = normalized_resource.rsplit(".", 1)[-1] if normalized_resource else "unknown"
-    if _gws_is_admin_method(service, normalized_resource):
-        service = "admin"
-        access_level = "admin"
-    elif action_token in _GWS_DESTRUCTIVE_ACTION_TOKENS:
-        access_level = "destructive"
-    elif action_token in _GWS_READ_ACTION_TOKENS:
-        access_level = "read"
-    elif action_token in _GWS_ADMIN_ACTION_TOKENS:
-        service = "admin"
-        access_level = "admin"
-    else:
-        access_level = "write"
-    return GwsActionResolution(
-        service=service,
-        action_id=f"{service}.{action_token}",
-        resource_method=resource_method,
-        access_level=access_level,
-    )
-
-
 def _serialize_connection_field(field: ConnectionField) -> dict[str, Any]:
     return {
         "key": field.key,
@@ -1800,11 +1433,6 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
             {f"shell.{action}": "read" for action in sorted(_SHELL_READ_ACTION_TOKENS)},
         ),
         "git": _action_catalog("git", {f"git.{action}": level for action, level in _GIT_ACTION_LEVELS.items()}),
-        "gh": _action_catalog("gh", {f"gh.{action}": level for action, level in _GH_ACTION_LEVELS.items()}),
-        "glab": _action_catalog(
-            "glab",
-            {f"glab.{action}": level for action, level in _GLAB_ACTION_LEVELS.items()},
-        ),
         "docker": _action_catalog(
             "docker",
             {f"docker.{action}": level for action, level in _DOCKER_ACTION_LEVELS.items()},
@@ -1828,303 +1456,6 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
                 "fileops.delete": "destructive",
             },
         ),
-        "gws": [
-            {
-                "action_id": f"{service}.{verb}",
-                "access_level": level,
-                "default_approval_mode": "guarded",
-                "auth_mode": "service_account",
-            }
-            for service in ("gmail", "calendar", "drive", "sheets", "chat")
-            for verb, level in (
-                ("list", "read"),
-                ("get", "read"),
-                ("search", "read"),
-                ("read", "read"),
-                ("download", "read"),
-                ("export", "read"),
-                ("view", "read"),
-                ("create", "write"),
-                ("update", "write"),
-                ("patch", "write"),
-                ("append", "write"),
-                ("send", "write"),
-                ("reply", "write"),
-                ("copy", "write"),
-                ("move", "write"),
-                ("import", "write"),
-                ("add", "write"),
-                ("delete", "destructive"),
-                ("trash", "destructive"),
-                ("remove", "destructive"),
-                ("purge", "destructive"),
-            )
-        ]
-        + [
-            {
-                "action_id": f"admin.{verb}",
-                "access_level": "admin",
-                "default_approval_mode": "guarded",
-                "auth_mode": "service_account",
-            }
-            for verb in sorted(_GWS_ADMIN_ACTION_TOKENS)
-        ],
-        "jira": [
-            {
-                "action_id": "issues.search",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.create",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.update",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.delete",
-                "access_level": "destructive",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.transition",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.transitions",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comment",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comment_get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comment_edit",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comment_delete",
-                "access_level": "destructive",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comment_reply",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.assign",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.comments",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.link",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.analyze",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.attachments",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.links",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.view_video",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.view_image",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "issues.view_audio",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "projects.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "projects.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "boards.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "boards.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "sprints.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "sprints.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "sprints.issues",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "users.search",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "components.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "versions.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "statuses.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "priorities.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "fields.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-        ],
-        "confluence": [
-            {
-                "action_id": "pages.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "pages.search",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "pages.children",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "pages.create",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "pages.update",
-                "access_level": "write",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "pages.delete",
-                "access_level": "destructive",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "spaces.list",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-            {
-                "action_id": "spaces.get",
-                "access_level": "read",
-                "default_approval_mode": "guarded",
-                "auth_mode": "api_token",
-            },
-        ],
     }
 
 
@@ -2322,11 +1653,7 @@ def _normalize_effect_tags(
         if server_key:
             tags.add("mcp_tool")
 
-    if (grant_decision and grant_decision.sensitive_access_used) or resolution.integration_id in {
-        "gws",
-        "jira",
-        "confluence",
-    }:
+    if grant_decision and grant_decision.sensitive_access_used:
         tags.add("credential_access")
 
     return tuple(sorted(tags))
@@ -2399,7 +1726,7 @@ def build_action_envelope(
     resource_scope = _resolve_resource_scope(resolution, payload, server_key=server_key)
     external_side_effect = bool(
         resolution.integration_id.startswith("mcp:")
-        or resolution.integration_id in {"web", "gws", "jira", "confluence"}
+        or resolution.integration_id == "web"
         or resolution.integration_id == "browser"
         or resolution.action_id in {"push", "agent_send", "agent_delegate", "agent_broadcast"}
         or "external_communication" in effect_tags
@@ -2409,7 +1736,7 @@ def build_action_envelope(
     catalogued = bool(
         tool_id in CORE_TOOL_CATALOG
         or parsed_mcp_tool is not None
-        or tool_id in {"gws", "jira", "confluence", "shell", "git", "docker", "pip", "npm", "gh", "glab"}
+        or tool_id in {"shell", "git", "docker", "pip", "npm"}
         or tool_id in {"write", "edit", "rm", "mkdir", "cat"}
     )
     return ActionEnvelope(
@@ -2473,7 +1800,7 @@ def _infer_mcp_access_level(tool_name: str) -> str:
     action_token = re.split(r"[_.-]", str(tool_name or "").strip().lower(), maxsplit=1)[0]
     if not action_token:
         return "write"
-    return _action_level_from_tokens(action_token, read_actions=_GWS_READ_ACTION_TOKENS)
+    return _action_level_from_tokens(action_token, read_actions=_MCP_READ_ACTION_TOKENS)
 
 
 def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = None) -> IntegrationActionResolution:
@@ -2573,39 +1900,6 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             domain=host,
             private_network=_is_private_host(host),
             resource_method=action_id,
-        )
-
-    if tool == "gws":
-        integration = _integration_defaults("gws")
-        gws_action = resolve_gws_action(str(payload.get("args") or ""))
-        return IntegrationActionResolution(
-            integration_id=integration.id,
-            action_id=gws_action.action_id,
-            resource_method=gws_action.resource_method,
-            access_level=gws_action.access_level,
-            transport=integration.transport,
-            risk_class=gws_action.access_level,
-            default_approval_mode=integration.default_approval_mode,
-            tool_id=tool,
-            auth_modes=integration.auth_modes,
-        )
-
-    if tool in {"jira", "confluence"}:
-        integration = _integration_defaults(tool)
-        tokens = shlex.split(str(payload.get("args") or ""))
-        resource = str(tokens[0] if tokens else "generic").strip().lower()
-        action_token = str(tokens[1] if len(tokens) > 1 else "unknown").strip().lower()
-        access_level = _action_level_from_tokens(action_token, read_actions=_READ_ATLASSIAN_ACTIONS)
-        return IntegrationActionResolution(
-            integration_id=integration.id,
-            action_id=f"{resource}.{action_token}",
-            access_level=access_level,
-            transport=integration.transport,
-            risk_class=access_level,
-            default_approval_mode=integration.default_approval_mode,
-            tool_id=tool,
-            auth_modes=integration.auth_modes,
-            resource_method=f"{resource}.{action_token}",
         )
 
     if tool.startswith("script_"):
@@ -2722,40 +2016,6 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             "npm",
             str(payload.get("args") or ""),
             _NPM_ACTION_LEVELS,
-        )
-        return IntegrationActionResolution(
-            integration_id=integration.id,
-            action_id=action_id,
-            access_level=access_level,
-            transport=integration.transport,
-            risk_class=access_level,
-            default_approval_mode=integration.default_approval_mode,
-            tool_id=tool,
-            auth_modes=integration.auth_modes,
-            resource_method=action_id,
-        )
-
-    if tool == "gh":
-        integration = _integration_defaults("gh")
-        action_id, access_level = _resolve_grouped_cli_action("gh", str(payload.get("args") or ""), _GH_ACTION_LEVELS)
-        return IntegrationActionResolution(
-            integration_id=integration.id,
-            action_id=action_id,
-            access_level=access_level,
-            transport=integration.transport,
-            risk_class=access_level,
-            default_approval_mode=integration.default_approval_mode,
-            tool_id=tool,
-            auth_modes=integration.auth_modes,
-            resource_method=action_id,
-        )
-
-    if tool == "glab":
-        integration = _integration_defaults("glab")
-        action_id, access_level = _resolve_grouped_cli_action(
-            "glab",
-            str(payload.get("args") or ""),
-            _GLAB_ACTION_LEVELS,
         )
         return IntegrationActionResolution(
             integration_id=integration.id,

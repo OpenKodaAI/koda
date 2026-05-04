@@ -130,19 +130,6 @@ class TestIsWriteOperation:
     def test_git_tag_is_write(self):
         assert is_write_operation("git", "tag v1.0") is True
 
-    # GitHub CLI
-    def test_gh_pr_list_is_read(self):
-        assert is_write_operation("gh", "pr list") is False
-
-    def test_gh_pr_create_is_write(self):
-        assert is_write_operation("gh", "pr create") is True
-
-    def test_gh_issue_list_is_read(self):
-        assert is_write_operation("gh", "issue list") is False
-
-    def test_gh_api_is_write(self):
-        assert is_write_operation("gh", "api --method POST /repos/owner/repo") is True
-
     # Docker
     def test_docker_ps_is_read(self):
         assert is_write_operation("docker", "ps") is False
@@ -156,40 +143,12 @@ class TestIsWriteOperation:
     def test_docker_run_is_write(self):
         assert is_write_operation("docker", "run hello-world") is True
 
-    # Google Workspace
-    def test_gws_list_is_read(self):
-        assert is_write_operation("gws", "gmail users.messages.list") is False
-
-    def test_gws_send_is_write(self):
-        assert is_write_operation("gws", "gmail users.messages.send") is True
-
-    def test_gmail_list_is_read(self):
-        assert is_write_operation("gmail", "users.messages.list") is False
-
-    # Atlassian
-    def test_jira_search_is_read(self):
-        assert is_write_operation("jira", "issues search") is False
-
-    def test_jira_get_is_read(self):
-        assert is_write_operation("jira", "issues get --key PROJ-1") is False
-
-    def test_jira_comment_get_is_read(self):
-        assert is_write_operation("jira", "issues comment_get --key PROJ-1 --comment-id 100") is False
-
-    def test_jira_create_is_write(self):
-        assert is_write_operation("jira", "issues create --project PROJ") is True
-
-    def test_jira_comment_reply_is_write(self):
-        assert is_write_operation("jira", "issues comment_reply --key PROJ-1 --comment-id 100 --body hi") is True
-
-    def test_jira_comment_edit_is_write(self):
-        assert is_write_operation("jira", "issues comment_edit --key PROJ-1 --comment-id 100 --body hi") is True
-
-    def test_jira_comment_delete_is_write(self):
-        assert is_write_operation("jira", "issues comment_delete --key PROJ-1 --comment-id 100") is True
-
-    def test_confluence_get_is_read(self):
-        assert is_write_operation("confluence", "pages get --id 123") is False
+    @pytest.mark.parametrize(
+        "command",
+        ["gws", "gmail", "gcal", "gdrive", "gsheets", "jira", "confluence", "gh", "glab", "aws"],
+    )
+    def test_removed_external_commands_default_to_write(self, command):
+        assert is_write_operation(command, "list") is True
 
     # Package managers
     def test_pip_list_is_read(self):
@@ -753,7 +712,7 @@ class TestAgentCmdApproval:
             telegram_bot,
             chat_id=111,
             user_id=222,
-            description="jira transition",
+            description="state transition",
             session_id="session-1",
         )
         assert isinstance(op_id, str)

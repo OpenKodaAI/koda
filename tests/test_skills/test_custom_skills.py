@@ -1,18 +1,11 @@
-"""Tests for agent-scoped custom skills: normalization, building, and merging."""
+"""Tests for agent-scoped custom skills."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from koda.control_plane.agent_spec import normalize_custom_skills
-from koda.skills._registry import SkillRegistry, _build_skill_from_dict
-
-# Path to the real skills directory shipped with the repo.
-SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "koda" / "skills"
-
-
-# normalize_custom_skills
+from koda.control_plane.agent_spec import normalize_custom_skills, normalize_skill_policy
+from koda.skills._registry import _build_skill_from_dict, build_skill_registry_from_custom_skills
 
 
 def test_normalize_valid_skill() -> None:
@@ -25,6 +18,7 @@ def test_normalize_valid_skill() -> None:
             "category": "ops",
             "aliases": ["ms"],
             "tags": ["automation"],
+            "enabled": False,
             "output_format_enforcement": "json",
         }
     ]
@@ -38,6 +32,7 @@ def test_normalize_valid_skill() -> None:
     assert skill["category"] == "ops"
     assert skill["aliases"] == ["ms"]
     assert skill["tags"] == ["automation"]
+    assert skill["enabled"] is False
     assert skill["output_format_enforcement"] == "json"
 
 
@@ -53,6 +48,7 @@ def test_normalize_minimal_skill() -> None:
     assert skill["category"] == "general"
     assert skill["aliases"] == []
     assert skill["tags"] == []
+    assert skill["enabled"] is True
 
 
 def test_normalize_filters_invalid() -> None:
@@ -83,7 +79,24 @@ def test_normalize_non_list() -> None:
     assert normalize_custom_skills(42) == []
 
 
-# _build_skill_from_dict
+def test_normalize_skill_policy() -> None:
+    result = normalize_skill_policy(
+        {
+            "enabled": False,
+            "max_skills": "3",
+            "skill_budget_pct": "0.25",
+            "enabled_skills": ["review", "", 123],
+            "disabled_skills": ["legacy"],
+        }
+    )
+
+    assert result == {
+        "enabled": False,
+        "max_skills": 3,
+        "skill_budget_pct": 0.25,
+        "enabled_skills": ["review", "123"],
+        "disabled_skills": ["legacy"],
+    }
 
 
 def test_build_from_dict_full() -> None:
@@ -144,39 +157,29 @@ def test_build_from_dict_uses_instruction_as_summary() -> None:
     assert skill.awareness_summary == "Helps with database migrations"
 
 
-# merge_agent_skills
+def test_build_registry_has_no_global_fallback() -> None:
+    registry = build_skill_registry_from_custom_skills([])
+    assert registry.get_all() == {}
 
 
-def test_merge_adds_custom_skills() -> None:
-    registry = SkillRegistry(SKILLS_DIR)
-    customs = [{"id": "brand-new", "name": "Brand New", "content": "New skill body."}]
-    merged = registry.merge_agent_skills(customs)
-    assert "brand-new" in merged
-    assert merged["brand-new"].name == "Brand New"
+def test_build_registry_filters_disabled_custom_skills() -> None:
+    registry = build_skill_registry_from_custom_skills(
+        [
+            {"id": "active", "name": "Active", "content": "body"},
+            {"id": "inactive", "name": "Inactive", "content": "body", "enabled": False},
+        ]
+    )
+
+    assert sorted(registry.get_all()) == ["active"]
 
 
-def test_merge_overrides_global() -> None:
-    registry = SkillRegistry(SKILLS_DIR)
-    globals_before = registry.get_all()
-    if not globals_before:
-        return  # Skip if no global skills exist
-    existing_id = next(iter(globals_before))
-    customs = [{"id": existing_id, "name": "Override", "content": "Overridden content."}]
-    merged = registry.merge_agent_skills(customs)
-    assert merged[existing_id].name == "Override"
-    assert merged[existing_id].full_content == "Overridden content."
+def test_build_registry_filters_by_policy() -> None:
+    registry = build_skill_registry_from_custom_skills(
+        [
+            {"id": "review", "name": "Review", "content": "body"},
+            {"id": "security", "name": "Security", "content": "body"},
+        ],
+        {"enabled_skills": ["review"]},
+    )
 
-
-def test_merge_preserves_globals() -> None:
-    registry = SkillRegistry(SKILLS_DIR)
-    globals_before = registry.get_all()
-    merged = registry.merge_agent_skills([{"id": "extra", "name": "Extra", "content": "body"}])
-    for gid in globals_before:
-        assert gid in merged
-
-
-def test_merge_empty_customs() -> None:
-    registry = SkillRegistry(SKILLS_DIR)
-    globals_before = registry.get_all()
-    merged = registry.merge_agent_skills([])
-    assert merged == globals_before
+    assert sorted(registry.get_all()) == ["review"]

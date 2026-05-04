@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_tool_subprocess_env_ignores_host_core_auth_variables(monkeypatch):
     from koda.services.provider_env import build_tool_subprocess_env
@@ -34,13 +36,12 @@ def test_agent_core_runtime_connection_does_not_fall_back_to_host_auth(monkeypat
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/host-google.json")
     monkeypatch.setenv("JIRA_API_TOKEN", "host-jira-token")
 
-    assert manager.resolve_agent_core_runtime_connection("atlas", "gh") is None
-    assert manager.resolve_agent_core_runtime_connection("atlas", "aws") is None
-    assert manager.resolve_agent_core_runtime_connection("atlas", "gws") is None
-    assert manager.resolve_agent_core_runtime_connection("atlas", "jira") is None
+    for integration_id in ("gh", "aws", "gws", "jira"):
+        with pytest.raises(KeyError):
+            manager.resolve_agent_core_runtime_connection("atlas", integration_id)
 
 
-def test_runtime_snapshot_excludes_core_connection_auth_env(monkeypatch):
+def test_runtime_snapshot_drops_removed_core_refs_without_censoring_explicit_env(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
     manager = object.__new__(manager_mod.ControlPlaneManager)
@@ -85,9 +86,9 @@ def test_runtime_snapshot_excludes_core_connection_auth_env(monkeypatch):
 
     snapshot = manager._resolve_runtime_snapshot("atlas")
 
-    assert "JIRA_URL" not in snapshot.process_env
-    assert "AWS_DEFAULT_REGION" not in snapshot.process_env
-    assert "GWS_CREDENTIALS_FILE" not in snapshot.process_env
-    assert "JIRA_API_TOKEN" not in snapshot.process_env
+    assert snapshot.process_env["JIRA_URL"] == "https://jira.example.com"
+    assert snapshot.process_env["AWS_DEFAULT_REGION"] == "us-east-1"
+    assert snapshot.process_env["GWS_CREDENTIALS_FILE"] == "/tmp/creds.json"
+    assert snapshot.process_env["JIRA_API_TOKEN"] == "decrypted:enc-jira"
     assert snapshot.process_env["RUNTIME_LOCAL_UI_TOKEN"] == "decrypted:enc-runtime"
-    assert snapshot.connection_refs == [{"connection_key": "core:jira", "kind": "core", "integration_key": "jira"}]
+    assert snapshot.connection_refs == []

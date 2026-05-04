@@ -28,8 +28,6 @@ class TestCircuitBreakers:
             "claude_cli",
             "codex_cli",
             "telegram_api",
-            "jira",
-            "confluence",
             "postgres",
             "browser",
             "http_external",
@@ -74,9 +72,9 @@ class TestRecordOutcome:
 
 class TestCircuitOpenError:
     def test_error_message(self):
-        err = CircuitOpenError("jira")
-        assert err.dependency == "jira"
-        assert "jira" in str(err)
+        err = CircuitOpenError("postgres")
+        assert err.dependency == "postgres"
+        assert "postgres" in str(err)
         assert "circuit breaker" in str(err)
 
 

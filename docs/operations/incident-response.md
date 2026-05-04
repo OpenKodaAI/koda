@@ -83,7 +83,12 @@ docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 
 **Prevention**: with `KODA_CLUSTER_MODE=cluster`, set
 `KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE=ceil(MAX_CONCURRENCY/4)` so N
-workers × pool_size doesn't exceed `max_connections`.
+workers × pool_size doesn't exceed `max_connections`. Rust sidecars can be
+tuned independently with `KODA_RETRIEVAL_POSTGRES_POOL_MAX_SIZE`,
+`KODA_MEMORY_POSTGRES_POOL_MAX_SIZE`, `KODA_ARTIFACT_POSTGRES_POOL_MAX_SIZE`,
+and `KODA_BOT_GATEWAY_POSTGRES_POOL_MAX_SIZE`; keep
+`KNOWLEDGE_V2_POSTGRES_ACQUIRE_TIMEOUT_MS` low enough to fail fast under pool
+pressure instead of accumulating unbounded waits.
 
 ## 4. Sidecar (memory / artifact / retrieval / runtime-kernel) hung
 

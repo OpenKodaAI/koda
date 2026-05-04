@@ -331,7 +331,7 @@
         "summary": "List canonical system-level connection defaults",
         "responses": {
           "200": {
-            "description": "System-level default connections keyed by connection_key. Core integrations use keys such as core:jira and core:aws."
+            "description": "System-level default connections keyed by connection_key. Local/core capabilities use keys such as core:browser; third-party SaaS/cloud integrations use mcp:<server_key>."
           }
         }
       }

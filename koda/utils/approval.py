@@ -20,7 +20,6 @@ from telegram.constants import ParseMode
 
 from koda.agent_contract import (
     ActionEnvelope,
-    canonicalize_gws_command_args,
     normalize_integration_grants,
     resolve_integration_action,
 )
@@ -342,10 +341,6 @@ def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
     return False
 
 
-def _normalize_command_prefix(tokens: list[str]) -> str:
-    return " ".join(token.strip().lower() for token in tokens if token.strip())
-
-
 def _operational_resolution_from_contract(
     command_name: str,
     *,
@@ -368,14 +363,9 @@ _OPS_COMMANDS = frozenset(
     {
         "shell",
         "git",
-        "gh",
-        "glab",
         "docker",
         "pip",
         "npm",
-        "gws",
-        "jira",
-        "confluence",
         "http_request",
         "write",
         "edit",
@@ -384,17 +374,6 @@ _OPS_COMMANDS = frozenset(
         "cat",
     }
 )
-_GWS_SHORTCUT_SERVICES = {
-    "gmail": "gmail",
-    "gcal": "calendar",
-    "gdrive": "drive",
-    "gsheets": "sheets",
-}
-_ATLASSIAN_SHORTCUT_RESOURCES = {
-    "jissue": "issues",
-    "jboard": "boards",
-    "jsprint": "sprints",
-}
 _OPS_SHELL_READ_CMDS = frozenset(
     {
         "ls",
@@ -519,91 +498,6 @@ _OPS_NPM_READ_CMDS = frozenset(
 _OPS_NPM_WRITE_CMDS = frozenset(
     {"install", "i", "add", "update", "remove", "rm", "uninstall", "publish", "pack", "link", "exec", "run", "prune"}
 )
-_OPS_GH_READ_PREFIXES = frozenset(
-    {
-        "auth status",
-        "pr list",
-        "pr view",
-        "pr diff",
-        "pr checks",
-        "pr status",
-        "issue list",
-        "issue view",
-        "issue status",
-        "repo list",
-        "repo view",
-        "release list",
-        "release view",
-        "run list",
-        "run view",
-    }
-)
-_OPS_GH_WRITE_PREFIXES = frozenset(
-    {
-        "pr create",
-        "pr edit",
-        "pr merge",
-        "pr close",
-        "pr reopen",
-        "pr comment",
-        "issue create",
-        "issue edit",
-        "issue comment",
-        "issue reply",
-        "issue close",
-        "issue reopen",
-        "repo fork",
-        "release create",
-        "release edit",
-        "release delete",
-        "run cancel",
-        "run rerun",
-    }
-)
-_OPS_GLAB_READ_PREFIXES = frozenset(
-    {
-        "auth status",
-        "mr list",
-        "mr view",
-        "mr diff",
-        "mr checks",
-        "mr status",
-        "issue list",
-        "issue view",
-        "issue status",
-        "repo list",
-        "repo view",
-        "release list",
-        "release view",
-        "pipeline list",
-        "pipeline view",
-        "run list",
-        "run view",
-    }
-)
-_OPS_GLAB_WRITE_PREFIXES = frozenset(
-    {
-        "mr create",
-        "mr edit",
-        "mr merge",
-        "mr close",
-        "mr reopen",
-        "mr comment",
-        "issue create",
-        "issue edit",
-        "issue comment",
-        "issue reply",
-        "issue close",
-        "issue reopen",
-        "release create",
-        "release edit",
-        "release delete",
-        "pipeline cancel",
-        "pipeline retry",
-        "run cancel",
-        "run rerun",
-    }
-)
 
 
 def _resolve_operational_command(
@@ -620,7 +514,7 @@ def _resolve_operational_command(
     if not args:
         return None
 
-    if command in {"shell", "git", "gh", "glab", "docker", "pip", "npm", "gws"} and GIT_META_CHARS.search(args):
+    if command in {"shell", "git", "docker", "pip", "npm"} and GIT_META_CHARS.search(args):
         return _OperationalActionResolution(
             integration_id=command,
             action_id=f"{command}.meta",
@@ -649,20 +543,9 @@ def _resolve_operational_command(
             deny_message="Blocked: this npm command is not allowed for safety reasons.",
         )
 
-    gws_guard = _blocked_pattern_for_command("gws")
-    if command == "gws" and gws_guard is not None and gws_guard.is_blocked(args):
-        return _OperationalActionResolution(
-            integration_id="gws",
-            action_id="gws.blocked",
-            access_level="write",
-            deny_reason="gws_blocked_pattern",
-            deny_message="Blocked: this GWS command is not allowed for safety reasons.",
-        )
-
     tokens = shlex.split(args)
     first = _first_token(args)
     second = str(tokens[1]).strip().lower() if len(tokens) > 1 else ""
-    prefix = _normalize_command_prefix(tokens[:2]) if tokens else ""
 
     if command == "shell":
         if first not in _OPS_SHELL_READ_CMDS:
@@ -704,32 +587,6 @@ def _resolve_operational_command(
                 ),
             )
         return _operational_resolution_from_contract("docker", raw_args=args)
-
-    if command == "gh":
-        if prefix in _OPS_GH_READ_PREFIXES:
-            return _operational_resolution_from_contract("gh", raw_args=args)
-        if prefix in _OPS_GH_WRITE_PREFIXES:
-            return _operational_resolution_from_contract("gh", raw_args=args)
-        return _OperationalActionResolution(
-            integration_id="gh",
-            action_id=_operational_resolution_from_contract("gh", raw_args=args).action_id,
-            access_level="write",
-            deny_reason="gh_subcommand_not_allowed",
-            deny_message="GitHub CLI command is not allowed by the registry.",
-        )
-
-    if command == "glab":
-        if prefix in _OPS_GLAB_READ_PREFIXES:
-            return _operational_resolution_from_contract("glab", raw_args=args)
-        if prefix in _OPS_GLAB_WRITE_PREFIXES:
-            return _operational_resolution_from_contract("glab", raw_args=args)
-        return _OperationalActionResolution(
-            integration_id="glab",
-            action_id=_operational_resolution_from_contract("glab", raw_args=args).action_id,
-            access_level="write",
-            deny_reason="glab_subcommand_not_allowed",
-            deny_message="GitLab CLI command is not allowed by the registry.",
-        )
 
     if command == "pip":
         if first in _OPS_PIP_READ_CMDS:
@@ -782,33 +639,6 @@ def _resolve_operational_command(
             path=resolved_path,
         )
 
-    if command == "gws":
-        return _operational_resolution_from_contract("gws", raw_args=args)
-
-    if command == "jira":
-        jira_guard = _blocked_pattern_for_command("jira")
-        if jira_guard is not None and jira_guard.is_blocked(args):
-            return _OperationalActionResolution(
-                integration_id="jira",
-                action_id="jira.blocked",
-                access_level="write",
-                deny_reason="jira_blocked_pattern",
-                deny_message="This Jira operation is blocked for safety.",
-            )
-        return _operational_resolution_from_contract("jira", raw_args=args)
-
-    if command == "confluence":
-        confluence_guard = _blocked_pattern_for_command("confluence")
-        if confluence_guard is not None and confluence_guard.is_blocked(args):
-            return _OperationalActionResolution(
-                integration_id="confluence",
-                action_id="confluence.blocked",
-                access_level="write",
-                deny_reason="confluence_blocked_pattern",
-                deny_message="This Confluence operation is blocked for safety.",
-            )
-        return _operational_resolution_from_contract("confluence", raw_args=args)
-
     if command == "http_request":
         tokens = args.split(maxsplit=2)
         if len(tokens) < 2:
@@ -835,20 +665,11 @@ def _resolve_operational_command(
 def _canonical_operational_request(command_name: str, raw_args: str) -> tuple[str, str]:
     normalized_command = str(command_name or "").strip().lower()
     args = str(raw_args or "")
-    if normalized_command == "gws":
-        return "gws", args
-    service = _GWS_SHORTCUT_SERVICES.get(normalized_command)
-    if service is None:
-        resource = _ATLASSIAN_SHORTCUT_RESOURCES.get(normalized_command)
-        if resource is not None:
-            prefixed = f"{resource} {args}".strip() if args.strip() else ""
-            return "jira", prefixed
-        if normalized_command == "http":
-            tokens = args.split(maxsplit=2)
-            if len(tokens) >= 2:
-                return "http_request", args
-        return normalized_command, args
-    return "gws", canonicalize_gws_command_args(service, args)
+    if normalized_command == "http":
+        tokens = args.split(maxsplit=2)
+        if len(tokens) >= 2:
+            return "http_request", args
+    return normalized_command, args
 
 
 def _blocked_pattern_for_command(command_name: str) -> Any | None:
@@ -865,9 +686,6 @@ def _blocked_pattern_for_command(command_name: str) -> Any | None:
     return {
         "pip": blocked_patterns.PIP_GUARD,
         "npm": blocked_patterns.NPM_GUARD,
-        "gws": blocked_patterns.GWS_GUARD,
-        "jira": blocked_patterns.JIRA_GUARD,
-        "confluence": blocked_patterns.CONFLUENCE_GUARD,
     }.get(normalized_command)
 
 
@@ -876,18 +694,6 @@ def _should_bypass_manual_validation(
     args_list: list[str],
 ) -> bool:
     normalized_command = str(command_name or "").strip().lower()
-    if normalized_command in {"jira", "jissue", "jboard", "jsprint"}:
-        with contextlib.suppress(Exception):
-            from koda.handlers.atlassian import JIRA_ENABLED as handler_jira_enabled
-
-            if not bool(handler_jira_enabled):
-                return True
-    if normalized_command == "confluence":
-        with contextlib.suppress(Exception):
-            from koda.handlers.atlassian import CONFLUENCE_ENABLED as handler_confluence_enabled
-
-            if not bool(handler_confluence_enabled):
-                return True
     if normalized_command == "http":
         return len(args_list) < 2
     if normalized_command != "cron":
@@ -1086,36 +892,6 @@ def _is_git_write(args: str) -> bool:
     return first not in _GIT_READ_CMDS
 
 
-_GH_READ_PREFIXES = frozenset(
-    {
-        "pr list",
-        "pr view",
-        "pr diff",
-        "pr checks",
-        "pr status",
-        "issue list",
-        "issue view",
-        "issue status",
-        "repo list",
-        "repo view",
-        "release list",
-        "release view",
-        "run list",
-        "run view",
-    }
-)
-
-
-def _is_gh_write(args: str) -> bool:
-    lower = args.lower().strip()
-    return not any(lower.startswith(p) for p in _GH_READ_PREFIXES)
-
-
-def _is_glab_write(args: str) -> bool:
-    # Same logic as gh
-    return _is_gh_write(args)
-
-
 _DOCKER_READ_CMDS = frozenset(
     {
         "ps",
@@ -1138,43 +914,6 @@ _DOCKER_READ_CMDS = frozenset(
 def _is_docker_write(args: str) -> bool:
     first = _first_token(args)
     return first not in _DOCKER_READ_CMDS
-
-
-_GWS_READ_ACTIONS = frozenset(
-    {
-        "list",
-        "get",
-        "search",
-        "schema",
-    }
-)
-
-
-def _is_gws_write(args: str) -> bool:
-    return resolve_integration_action("gws", {"args": args}).access_level != "read"
-
-
-_ATLASSIAN_READ_ACTIONS = frozenset(
-    {
-        "search",
-        "get",
-        "list",
-        "comments",
-        "comment_get",
-        "view",
-        "analyze",
-        "attachments",
-        "links",
-        "view_video",
-        "view_image",
-        "view_audio",
-        "transitions",
-    }
-)
-
-
-def _is_atlassian_write(args: str) -> bool:
-    return resolve_integration_action("jira", {"args": args}).access_level != "read"
 
 
 _PKG_READ_CMDS = frozenset(
@@ -1237,19 +976,7 @@ WRITE_CLASSIFIERS: dict[str, Callable[[str], bool]] = {
     # Classified by args
     "shell": _is_shell_write,
     "git": _is_git_write,
-    "gh": _is_gh_write,
-    "glab": _is_glab_write,
     "docker": _is_docker_write,
-    "gws": _is_gws_write,
-    "gmail": _is_gws_write,
-    "gcal": _is_gws_write,
-    "gdrive": _is_gws_write,
-    "gsheets": _is_gws_write,
-    "jira": _is_atlassian_write,
-    "jissue": _is_atlassian_write,
-    "jboard": _is_atlassian_write,
-    "jsprint": _is_atlassian_write,
-    "confluence": _is_atlassian_write,
     "pip": _is_pkg_write,
     "npm": _is_pkg_write,
     "http": _is_http_write,
@@ -1436,19 +1163,6 @@ def with_approval(
                     return await func(update, context, *args, **kwargs)
                 finally:
                     _execution_approved.set(False)
-
-            if policy_command_name == "gws":
-                gws_enabled = True
-                with contextlib.suppress(Exception):
-                    from koda.handlers.google_workspace import GWS_ENABLED as handler_gws_enabled
-
-                    gws_enabled = bool(handler_gws_enabled)
-                if not gws_enabled or not is_write_operation(policy_command_name, policy_raw_args):
-                    _execution_approved.set(True)
-                    try:
-                        return await func(update, context, *args, **kwargs)
-                    finally:
-                        _execution_approved.set(False)
 
             if policy_command_name in _OPS_COMMANDS:
                 resolution = _resolve_operational_command(
