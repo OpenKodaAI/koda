@@ -77,22 +77,15 @@ jobs:
         if: env.SNYK_TOKEN != ''
         run: pnpm install --frozen-lockfile
 
-      - name: Export pinned Python requirements for Snyk
+      - name: Export installed Python requirements for Snyk
         if: env.SNYK_TOKEN != ''
         run: |
           mkdir -p artifacts/security/snyk
-          uv export \
-            --format requirements.txt \
-            --locked \
-            --all-groups \
-            --all-extras \
-            --no-editable \
-            --no-emit-project \
-            --no-emit-workspace \
-            --no-hashes \
-            --no-header \
-            --no-annotate \
-            --output-file artifacts/security/snyk/python-requirements.txt
+          python -m pip freeze \
+            --all \
+            --exclude-editable \
+            --exclude koda \
+            > artifacts/security/snyk/python-requirements.txt
 
       - name: Set up Snyk CLI
         if: env.SNYK_TOKEN != ''
