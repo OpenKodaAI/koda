@@ -517,7 +517,9 @@ def test_snyk_policy_excludes_generated_artifacts_only() -> None:
 def test_snyk_workflow_excludes_non_source_manifests() -> None:
     workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
 
-    assert "--no-hashes" in workflow_text
+    assert "python -m pip freeze" in workflow_text
+    assert "--exclude-editable" in workflow_text
+    assert "--exclude koda" in workflow_text
     assert (
         "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release"
         in workflow_text
