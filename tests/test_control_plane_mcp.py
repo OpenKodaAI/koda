@@ -395,6 +395,31 @@ class TestMCPAgentConnections:
         env_json = json.loads(raw_row["env_values_json"])
         assert env_json["TOKEN"] == "ENC:secret123"
 
+    def test_null_env_values_are_ignored_not_stored_as_literal_secret(self, mcp_manager):
+        mgr, db = mcp_manager
+        self._seed_catalog(mgr)
+        mgr.upsert_mcp_agent_connection(
+            "agent-1",
+            "linear",
+            {
+                "env_values": {"TOKEN": None, "EMPTY": ""},
+            },
+        )
+        raw_row = db.tables["cp_mcp_agent_connections"][0]
+        assert json.loads(raw_row["env_values_json"]) == {}
+
+    def test_env_values_reject_non_string_values(self, mcp_manager):
+        mgr, _db = mcp_manager
+        self._seed_catalog(mgr)
+        with pytest.raises(ValueError, match="must be a string"):
+            mgr.upsert_mcp_agent_connection(
+                "agent-1",
+                "linear",
+                {
+                    "env_values": {"TOKEN": {"bad": "shape"}},
+                },
+            )
+
     def test_upsert_updates_existing_connection(self, mcp_manager):
         mgr, _db = mcp_manager
         self._seed_catalog(mgr)

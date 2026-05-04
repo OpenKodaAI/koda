@@ -80,9 +80,13 @@ def _functional_catalog_from_general_settings(settings: dict[str, Any]) -> dict[
     }
 
 
-def _effort_defaults_from_general_settings(settings: dict[str, Any]) -> dict[str, Any]:
+def _effort_default_from_general_settings(settings: dict[str, Any]) -> dict[str, Any]:
     values = _safe_json_object(settings.get("values"))
     models = _safe_json_object(values.get("models"))
+    effort_default = _safe_json_object(models.get("effort_default"))
+    if effort_default:
+        return effort_default
+    # Deprecated read-only compatibility with the old per-model map.
     return _safe_json_object(models.get("effort_defaults"))
 
 
@@ -130,8 +134,10 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     general_settings = _general_settings(manager)
     provider_connections = _provider_connections_from_general_settings(general_settings)
     functional_catalog = _functional_catalog_from_general_settings(general_settings)
-    effort_defaults_global = _effort_defaults_from_general_settings(general_settings)
-    effort_overrides = _safe_json_object(policy.get("effort_overrides"))
+    effort_default_global = _effort_default_from_general_settings(general_settings)
+    effort_override = _safe_json_object(policy.get("effort_override"))
+    if not effort_override:
+        effort_override = _safe_json_object(policy.get("effort_overrides"))
     provider_runtime_eligibility = _safe_json_object(snapshot.get("provider_runtime_eligibility"))
 
     default_provider = (
@@ -233,8 +239,8 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
         "tts_voice_label": voice_label,
         "tts_voice_language": voice_language,
         "selectable_function_options": selectable_function_options,
-        "effort_overrides": effort_overrides,
-        "effort_defaults_global": effort_defaults_global,
+        "effort_override": effort_override,
+        "effort_default_global": effort_default_global,
     }
 
 
@@ -254,16 +260,27 @@ def resolve_effort(
         return None
 
     slug = f"{provider_id.strip().lower()}:{model_id.strip()}"
+
+    def _selection_value(source: dict[str, Any]) -> Any:
+        source_provider = _nonempty_text(source.get("provider_id")).lower()
+        source_model = _nonempty_text(source.get("model_id"))
+        if source_provider == provider_id.strip().lower() and source_model == model_id.strip():
+            return source.get("value")
+        return None
+
     sources = []
     if settings is not None:
+        sources.append(_safe_json_object(settings.get("effort_override")))
+        sources.append(_safe_json_object(settings.get("effort_default_global")))
+        # Deprecated map keys are read only for migration compatibility.
         sources.append(_safe_json_object(settings.get("effort_overrides")))
         sources.append(_safe_json_object(settings.get("effort_defaults_global")))
     for source in sources:
         if not source:
             continue
-        if slug not in source:
+        candidate = _selection_value(source) if "value" in source else source.get(slug)
+        if candidate is None:
             continue
-        candidate = source[slug]
         if cap["kind"] == "enum":
             if isinstance(candidate, str):
                 normalized = candidate.strip().lower()

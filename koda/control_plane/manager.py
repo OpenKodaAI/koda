@@ -117,9 +117,10 @@ from .agent_spec import (
     merge_hierarchical_documents,
     normalize_agent_spec,
     normalize_autonomy_policy,
-    normalize_effort_overrides,
     normalize_knowledge_policy,
+    normalize_legacy_effort_selection,
     normalize_memory_policy,
+    normalize_model_effort_selection,
     normalize_resource_access_policy,
     parse_json_env_value,
     render_markdown_documents_from_agent_spec,
@@ -256,6 +257,49 @@ def _mcp_connection_key(server_key: Any) -> str:
     return f"mcp:{_normalize_mcp_server_key(server_key)}"
 
 
+def _validate_mcp_connection_command_override(command: Any) -> list[str]:
+    from koda.integrations.custom_mcp_registry import ValidationError, validate_stdio_command
+
+    if not isinstance(command, list):
+        raise ValueError("MCP command_override must be a list of argv strings.")
+    try:
+        return validate_stdio_command(command)
+    except ValidationError as exc:
+        raise ValueError(f"Invalid MCP command_override: {exc}") from exc
+
+
+def _validate_mcp_connection_url_override(url: Any) -> str:
+    from koda.services.mcp_client import validate_mcp_http_url
+
+    normalized = str(url or "").strip()
+    if not normalized:
+        return ""
+    try:
+        validate_mcp_http_url(normalized)
+    except Exception as exc:
+        raise ValueError(f"Invalid MCP url_override: {exc}") from exc
+    return normalized
+
+
+def _validate_mcp_connection_env_values(env_values: Any) -> dict[str, str]:
+    from koda.integrations.custom_mcp_registry import ValidationError, validate_env_name
+
+    if not isinstance(env_values, dict):
+        raise ValueError("MCP env_values must be an object.")
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in env_values.items():
+        try:
+            key = validate_env_name(str(raw_key))
+        except ValidationError as exc:
+            raise ValueError(f"Invalid MCP env key: {exc}") from exc
+        if raw_value in (None, ""):
+            continue
+        if not isinstance(raw_value, str):
+            raise ValueError(f"MCP env value for {key!r} must be a string.")
+        normalized[key] = raw_value
+    return normalized
+
+
 def _core_connection_key(integration_id: Any) -> str:
     return f"core:{str(integration_id or '').strip().lower()}"
 
@@ -383,6 +427,7 @@ def _build_runtime_prompt_preview_payload(
 _MODEL_POLICY_ENV_KEYS: tuple[str, ...] = (
     "AGENT_MODEL_POLICY_JSON",
     "MODEL_FUNCTION_DEFAULTS_JSON",
+    "MODEL_EFFORT_DEFAULT_JSON",
     "MODEL_EFFORT_DEFAULTS_JSON",
     "DEFAULT_PROVIDER",
     "PROVIDER_FALLBACK_ORDER",
@@ -474,7 +519,7 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "providers": {
         "functional_defaults": ("MODEL_FUNCTION_DEFAULTS_JSON", "json"),
-        "effort_defaults": ("MODEL_EFFORT_DEFAULTS_JSON", "json"),
+        "effort_default": ("MODEL_EFFORT_DEFAULT_JSON", "json"),
         "default_provider": ("DEFAULT_PROVIDER", "string"),
         "fallback_order": ("PROVIDER_FALLBACK_ORDER", "csv"),
         "max_budget_usd": ("MAX_BUDGET_USD", "float"),
@@ -733,7 +778,7 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "account.rate_limit_per_minute": "RATE_LIMIT_PER_MINUTE",
     "models.default_provider": "DEFAULT_PROVIDER",
     "models.functional_defaults": "MODEL_FUNCTION_DEFAULTS_JSON",
-    "models.effort_defaults": "MODEL_EFFORT_DEFAULTS_JSON",
+    "models.effort_default": "MODEL_EFFORT_DEFAULT_JSON",
     "models.max_budget_usd": "MAX_BUDGET_USD",
     "models.max_total_budget_usd": "MAX_TOTAL_BUDGET_USD",
     "models.elevenlabs_default_language": "ELEVENLABS_DEFAULT_LANGUAGE",
@@ -2164,22 +2209,33 @@ class ControlPlaneManager:
         self,
         provider_id: str,
         *,
-        project_id: str = "",
-        base_url: str = "",
+        project_id: str | None = None,
+        base_url: str | None = None,
+        detected_models: list[str] | None = None,
     ) -> None:
         sections = self._system_settings_sections()
         access_section = dict(self._access_section(sections))
         meta_map = dict(self._provider_connection_meta())
         normalized = provider_id.strip().upper()
         payload = dict(_safe_json_object(meta_map.get(normalized)))
-        if project_id.strip():
-            payload["project_id"] = project_id.strip()
-        elif "project_id" in payload:
-            payload.pop("project_id", None)
-        if base_url.strip():
-            payload["base_url"] = base_url.strip()
-        elif "base_url" in payload:
-            payload.pop("base_url", None)
+        if project_id is not None:
+            if project_id.strip():
+                payload["project_id"] = project_id.strip()
+            elif "project_id" in payload:
+                payload.pop("project_id", None)
+        if base_url is not None:
+            if base_url.strip():
+                payload["base_url"] = base_url.strip()
+            elif "base_url" in payload:
+                payload.pop("base_url", None)
+        if detected_models is not None:
+            normalized_models = list(
+                dict.fromkeys(str(model).strip() for model in detected_models if str(model).strip())
+            )
+            if normalized_models:
+                payload["detected_models"] = normalized_models
+            else:
+                payload.pop("detected_models", None)
         if payload:
             meta_map[normalized] = payload
         else:
@@ -2190,6 +2246,10 @@ class ControlPlaneManager:
             access_section.pop("provider_connection_meta", None)
         sections["access"] = access_section
         self._persist_global_sections(sections)
+
+    def _provider_detected_model_ids(self, provider_id: str) -> list[str]:
+        meta = self._provider_connection_meta().get(provider_id.strip().upper(), {})
+        return normalize_string_list(_safe_json_object(meta).get("detected_models"))
 
     def _provider_connection_env(self) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -2454,8 +2514,8 @@ class ControlPlaneManager:
                     if isinstance(value, bool):
                         env_rebuild[section_name][env_key] = _stringify_env_value(value)
                     continue
-                if env_key == "MODEL_EFFORT_DEFAULTS_JSON":
-                    normalized_effort = normalize_effort_overrides(value)
+                if env_key == "MODEL_EFFORT_DEFAULT_JSON":
+                    normalized_effort = normalize_model_effort_selection(value)
                     if normalized_effort:
                         env_rebuild[section_name][env_key] = _stringify_env_value(normalized_effort)
                     continue
@@ -2505,7 +2565,13 @@ class ControlPlaneManager:
             if not available_models:
                 ambient = os.environ.get(f"{prefix}_AVAILABLE_MODELS", "")
                 available_models = [item.strip() for item in ambient.split(",") if item.strip()]
-            available_models = list(dict.fromkeys(available_models + resolve_known_general_model_ids(provider)))
+            available_models = list(
+                dict.fromkeys(
+                    available_models
+                    + self._provider_detected_model_ids(provider)
+                    + resolve_known_general_model_ids(provider)
+                )
+            )
             default_model = _trimmed_text(
                 env.get(f"{prefix}_DEFAULT_MODEL") or os.environ.get(f"{prefix}_DEFAULT_MODEL")
             )
@@ -4569,11 +4635,7 @@ class ControlPlaneManager:
                         payload["available_models"] = list(dict.fromkeys(current + extra))
             payload["functional_models"] = resolve_provider_function_model_catalog(
                 provider_id,
-                available_models=[
-                    str(item)
-                    for item in _safe_json_object(catalog.get("providers")).get(provider_id, {}).get("available_models")
-                    or []
-                ],
+                available_models=[str(item) for item in _safe_json_object(payload).get("available_models") or []],
             )
         catalog["model_functions"] = resolve_model_function_catalog()
         catalog["functional_model_catalog"] = self._functional_model_catalog(catalog)
@@ -6467,6 +6529,9 @@ class ControlPlaneManager:
             last_error=result.last_error,
         )
         if result.verified:
+            detected_models = normalize_string_list(_safe_json_object(result.details).get("model_ids"))
+            if detected_models:
+                self._persist_provider_connection_meta(normalized, detected_models=detected_models)
             self._mark_provider_enabled(normalized, enabled=True)
         latest_row = fetch_one(
             """
@@ -8217,6 +8282,53 @@ class ControlPlaneManager:
                     }
         return defaults
 
+    def _resolve_general_effort_target(
+        self,
+        *,
+        providers_section: dict[str, Any],
+        provider_catalog: dict[str, Any],
+    ) -> tuple[str, str]:
+        functional_defaults = self._resolve_general_functional_defaults(
+            providers_section=providers_section,
+            provider_catalog=provider_catalog,
+        )
+        general_selection = _safe_json_object(functional_defaults.get("general"))
+        provider_id = (
+            _nonempty_text(general_selection.get("provider_id")).lower()
+            or _nonempty_text(providers_section.get("default_provider")).lower()
+        )
+        providers = _safe_json_object(provider_catalog.get("providers"))
+        provider_payload = _safe_json_object(providers.get(provider_id))
+        model_id = (
+            _nonempty_text(general_selection.get("model_id"))
+            or _nonempty_text(providers_section.get(f"{provider_id}_default_model"))
+            or _nonempty_text(provider_payload.get("default_model"))
+        )
+        return provider_id, model_id
+
+    def _resolve_general_effort_default(
+        self,
+        *,
+        providers_section: dict[str, Any],
+        provider_catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider_id, model_id = self._resolve_general_effort_target(
+            providers_section=providers_section,
+            provider_catalog=provider_catalog,
+        )
+        effort_default = normalize_model_effort_selection(
+            providers_section.get("effort_default"),
+            provider_id=provider_id,
+            model_id=model_id,
+        )
+        if effort_default:
+            return effort_default
+        return normalize_legacy_effort_selection(
+            providers_section.get("effort_defaults"),
+            provider_id=provider_id,
+            model_id=model_id,
+        )
+
     def _resolve_elevenlabs_api_key(self) -> str:
         api_key = self._provider_api_key_secret_value("elevenlabs")
         if api_key:
@@ -8438,7 +8550,10 @@ class ControlPlaneManager:
                 providers_section=providers_section,
                 provider_catalog=provider_catalog,
             ),
-            "effort_defaults": normalize_effort_overrides(providers_section.get("effort_defaults")),
+            "effort_default": self._resolve_general_effort_default(
+                providers_section=providers_section,
+                provider_catalog=provider_catalog,
+            ),
             # Apple Silicon Metal acceleration switch. Defaults to ``True``
             # so the Metal path stays opt-out rather than opt-in for Apple
             # users. Non-Apple hosts ignore the flag at runtime.
@@ -9108,13 +9223,6 @@ class ControlPlaneManager:
         if functional_defaults_requested:
             current_providers["functional_defaults"] = functional_defaults_requested
 
-        if "effort_defaults" in models:
-            normalized_effort_defaults = normalize_effort_overrides(models.get("effort_defaults"))
-            if normalized_effort_defaults:
-                current_providers["effort_defaults"] = normalized_effort_defaults
-            else:
-                current_providers.pop("effort_defaults", None)
-
         default_provider = _nonempty_text(current_providers.get("default_provider")).lower()
         if default_provider and default_provider not in enabled_providers:
             default_provider = enabled_providers[0] if enabled_providers else ""
@@ -9202,6 +9310,38 @@ class ControlPlaneManager:
                 continue
             deduped_fallback.append(provider)
         current_providers["fallback_order"] = deduped_fallback
+
+        effort_provider, effort_model = self._resolve_general_effort_target(
+            providers_section=current_providers,
+            provider_catalog=provider_catalog,
+        )
+        existing_effort_default = normalize_model_effort_selection(
+            current_providers.get("effort_default"),
+            provider_id=effort_provider,
+            model_id=effort_model,
+        )
+        if existing_effort_default:
+            current_providers["effort_default"] = existing_effort_default
+        else:
+            current_providers.pop("effort_default", None)
+
+        if "effort_default" in models or "effort_defaults" in models:
+            normalized_effort_default = normalize_model_effort_selection(
+                models.get("effort_default"),
+                provider_id=effort_provider,
+                model_id=effort_model,
+            )
+            if not normalized_effort_default and "effort_defaults" in models:
+                normalized_effort_default = normalize_legacy_effort_selection(
+                    models.get("effort_defaults"),
+                    provider_id=effort_provider,
+                    model_id=effort_model,
+                )
+            if normalized_effort_default:
+                current_providers["effort_default"] = normalized_effort_default
+            else:
+                current_providers.pop("effort_default", None)
+            current_providers.pop("effort_defaults", None)
 
         # Deprecated compatibility: accept legacy provider_credentials payloads
         provider_creds = _safe_json_object(payload.get("provider_credentials"))
@@ -11296,10 +11436,7 @@ class ControlPlaneManager:
         if _is_reserved_mcp_server_key(normalized_server_key):
             raise ValueError("This MCP server key is reserved because Koda already supports it natively.")
         # Verify server exists in catalog
-        catalog_row = fetch_one(
-            "SELECT server_key FROM cp_mcp_server_catalog WHERE server_key = ?",
-            (normalized_server_key,),
-        )
+        catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (normalized_server_key,))
         if catalog_row is None:
             raise KeyError(f"unknown MCP server: {normalized_server_key}")
         normalized = _normalize_agent_id(agent_id)
@@ -11314,17 +11451,18 @@ class ControlPlaneManager:
             if "transport_override" in payload
             else (existing_row.get("transport_override") if existing_row else None)
         ) or None
-        command_override_json = (
-            json_dump(payload.get("command_override"))
-            if "command_override" in payload
-            else (existing_row.get("command_override_json") if existing_row else None)
-        )
-        url_override = (
-            payload["url_override"]
-            if "url_override" in payload
-            else (existing_row.get("url_override") if existing_row else None)
-        ) or None
-        raw_env = payload.get("env_values") or {}
+        command_override_json: str | None
+        if "command_override" in payload:
+            command_override_json = json_dump(
+                _validate_mcp_connection_command_override(payload.get("command_override"))
+            )
+        else:
+            command_override_json = existing_row.get("command_override_json") if existing_row else None
+        if "url_override" in payload:
+            url_override = _validate_mcp_connection_url_override(payload.get("url_override")) or None
+        else:
+            url_override = (existing_row.get("url_override") if existing_row else None) or None
+        raw_env = _validate_mcp_connection_env_values(payload.get("env_values") or {})
         encrypted_env = json_load(str(existing_row.get("env_values_json") or "{}"), {}) if existing_row else {}
         clear_env_keys = {str(item).strip() for item in payload.get("clear_env_keys") or [] if str(item).strip()}
         for clear_key in clear_env_keys:
@@ -12105,6 +12243,8 @@ class ControlPlaneManager:
 
         normalized = _normalize_agent_id(agent_id)
         policy = self._get_mcp_capability_policy(normalized, server_key, "resource", _uri_hash(uri))
+        if policy == "auto":
+            policy = self._get_mcp_capability_policy(normalized, server_key, "resource", uri)
         if policy == "blocked":
             return {"success": False, "error": "resource_blocked", "uri": uri}
         from koda.services.mcp_manager import McpServerInstance

@@ -190,6 +190,7 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
         "deepseek-reasoner": "DeepSeek Reasoner (alias)",
     },
     "xai": {
+        "grok-4.20-multi-agent": "Grok 4.20 Multi-Agent",
         "grok-4.3": "Grok 4.3",
         "grok-4.1-fast": "Grok 4.1 Fast (2M context)",
         "grok-4-fast": "Grok 4 Fast",
@@ -1731,6 +1732,108 @@ def resolve_known_general_model_ids(provider_id: str) -> list[str]:
     return list(_DYNAMIC_GENERAL_MODEL_LABELS.get(normalized_provider, {}).keys())
 
 
+_EFFORT_CAPABILITY_OVERRIDES: dict[tuple[str, str], dict[str, Any] | None] = {
+    # OpenAI/Codex current reasoning controls.
+    ("codex", "gpt-5.5"): {"kind": "enum", "values": ("none", "low", "medium", "high", "xhigh"), "default": "medium"},
+    ("codex", "gpt-5.4"): {"kind": "enum", "values": ("none", "low", "medium", "high", "xhigh"), "default": "medium"},
+    ("codex", "gpt-5.4-mini"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+    ("codex", "gpt-5.4-nano"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+    ("codex", "gpt-5.4-pro"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high", "xhigh"),
+        "default": "high",
+    },
+    ("codex", "gpt-5.1"): {"kind": "enum", "values": ("none", "low", "medium", "high"), "default": "none"},
+    ("codex", "gpt-5.1-codex"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5.1-codex-max"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5.1-codex-mini"): {
+        "kind": "enum",
+        "values": ("none", "low", "medium", "high"),
+        "default": "none",
+    },
+    ("codex", "gpt-5-pro"): {"kind": "enum", "values": ("high",), "default": "high"},
+    # Claude Code CLI model-specific effort support.
+    ("claude", "claude-opus-4-7"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "xhigh", "max"),
+        "default": "xhigh",
+    },
+    ("claude", "claude-opus-4-6"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "max"),
+        "default": "high",
+    },
+    ("claude", "claude-sonnet-4-6"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "max"),
+        "default": "high",
+    },
+    ("claude", "claude-opus-4-5-20251101"): None,
+    ("claude", "claude-sonnet-4-5-20250929"): None,
+    ("claude", "claude-opus-4-1"): None,
+    ("claude", "claude-opus-4-1-20250805"): None,
+    ("claude", "claude-sonnet-4-5"): None,
+    ("claude", "claude-sonnet-4-20250514"): None,
+    ("claude", "claude-3-7-sonnet-latest"): None,
+    ("claude", "claude-3-7-sonnet-20250219"): None,
+    # Perplexity reasoning effort.
+    ("perplexity", "sonar-reasoning"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    ("perplexity", "sonar-reasoning-pro"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    ("perplexity", "sonar-deep-research"): {
+        "kind": "enum",
+        "values": ("minimal", "low", "medium", "high"),
+        "default": "medium",
+    },
+    # DeepSeek thinking mode uses enum effort plus an explicit thinking toggle.
+    ("deepseek", "deepseek-v4-pro"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    ("deepseek", "deepseek-v4-flash"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    ("deepseek", "deepseek-reasoner"): {"kind": "enum", "values": ("high", "max"), "default": "high"},
+    # Groq reasoning support is model-specific.
+    ("groq", "deepseek-r1-distill-llama-70b"): None,
+    ("groq", "openai/gpt-oss-120b"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high"),
+        "default": "medium",
+    },
+    ("groq", "openai/gpt-oss-20b"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high"),
+        "default": "medium",
+    },
+    ("groq", "qwen/qwen3-32b"): {"kind": "enum", "values": ("none", "default"), "default": "default"},
+    # xAI documents configurable reasoning only for the multi-agent model.
+    ("xai", "grok-4.20-multi-agent"): {
+        "kind": "enum",
+        "values": ("low", "medium", "high", "xhigh"),
+        "default": "medium",
+    },
+}
+
+
 def get_model_effort_capability(provider_id: str, model_id: str) -> dict[str, Any] | None:
     """Return effort capability for a model, or None if it does not support effort.
 
@@ -1740,6 +1843,10 @@ def get_model_effort_capability(provider_id: str, model_id: str) -> dict[str, An
     """
     normalized_provider = provider_id.strip().lower()
     normalized_model = model_id.strip()
+    override_key = (normalized_provider, normalized_model)
+    if override_key in _EFFORT_CAPABILITY_OVERRIDES:
+        override = _EFFORT_CAPABILITY_OVERRIDES[override_key]
+        return dict(override) if override is not None else None
     meta = _GENERAL_MODEL_METADATA.get((normalized_provider, normalized_model))
     if not meta:
         return None
@@ -2004,10 +2111,22 @@ def build_function_model_catalog(
         category = str(payload.get("category") or "general")
         command_present = bool(payload.get("command_present", False))
         enabled = bool(payload.get("enabled", False))
-        functional_models = resolve_provider_function_model_catalog(
-            provider_id,
-            available_models=[str(item) for item in payload.get("available_models") or []],
-        )
+        functional_models: list[dict[str, Any]] = []
+        for item in payload.get("functional_models") or []:
+            if not isinstance(item, dict):
+                continue
+            functional_model = dict(item)
+            if (
+                functional_model.get("provider_id")
+                and functional_model.get("model_id")
+                and functional_model.get("function_id")
+            ):
+                functional_models.append(functional_model)
+        if not functional_models:
+            functional_models = resolve_provider_function_model_catalog(
+                provider_id,
+                available_models=[str(item) for item in payload.get("available_models") or []],
+            )
         for model in functional_models:
             function_id = str(model["function_id"])
             by_function.setdefault(function_id, []).append(

@@ -157,9 +157,22 @@ class TestPayloadBuilder:
             image_paths=None,
             max_budget=0.0,
             stream=False,
-            effort=4000,
+            effort="max",
         )
-        assert payload["thinking"] == {"type": "enabled", "budget_tokens": 4000}
+        assert payload["reasoning_effort"] == "max"
+        assert payload["thinking"] == {"type": "enabled"}
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("xai"),
+            model="grok-4.20-multi-agent",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="xhigh",
+        )
+        assert payload["reasoning"] == {"effort": "xhigh"}
         assert "reasoning_effort" not in payload
 
     def test_effort_skipped_when_model_has_no_capability(self, mistral_profile):
@@ -199,9 +212,23 @@ class TestPayloadBuilder:
             image_paths=None,
             max_budget=0.0,
             stream=False,
-            effort=999_999,
+            effort="low",
         )
         assert "thinking" not in payload
+        assert "reasoning_effort" not in payload
+
+        payload = _build_chat_payload(
+            profile=get_provider_profile("xai"),
+            model="grok-4.20-multi-agent",
+            query="hi",
+            system_prompt=None,
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            effort="max",
+        )
+        assert "reasoning" not in payload
+        assert "reasoning_effort" not in payload
 
 
 class TestUsageAndCost:

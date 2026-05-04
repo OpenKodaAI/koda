@@ -41,7 +41,15 @@ from koda.config import (
 )
 from koda.internal_rpc.artifact_engine import build_artifact_engine_client
 from koda.internal_rpc.common import parse_boolish
-from koda.internal_rpc.runtime_kernel import build_runtime_kernel_client
+from koda.internal_rpc.runtime_kernel import (
+    RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS as _RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS,
+)
+from koda.internal_rpc.runtime_kernel import (
+    RUNTIME_KERNEL_CAPABILITY_DEFAULTS as _RUNTIME_KERNEL_CAPABILITY_DEFAULTS,
+)
+from koda.internal_rpc.runtime_kernel import (
+    build_runtime_kernel_client,
+)
 from koda.logging_config import get_logger
 from koda.services.metrics import (
     RUNTIME_ACTIVE_ENVS,
@@ -84,44 +92,11 @@ _WORKSPACE_SEARCH_IGNORED_DIRS = {
     "node_modules",
 }
 
-_RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
-    "workspace-provisioning",
-    "workspace-cleanup",
-    "environment-tracking",
-    "process-spawn",
-    "command-execution",
-    "terminal-streaming",
-    "interactive-terminal-sessions",
-    "terminal-input-write",
-    "terminal-resize",
-    "terminal-close",
-    "signal-termination",
-    "browser-session-registry",
-    "checkpoint-persistence",
-    "checkpoint-retrieval",
-    "checkpoint-restore",
-    "snapshot-collection",
-    "reconcile",
-)
-_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
-    "create_environment",
-    "start_task",
-    "execute_command",
-    "stream_terminal",
-    "open_terminal",
-    "write_terminal",
-    "resize_terminal",
-    "close_terminal",
-    "stream_terminal_session",
-    "terminate_task",
-    "cleanup_environment",
-    "start_browser_session",
-    "stop_browser_session",
-    "get_browser_session",
-    "save_checkpoint",
-    "get_checkpoint",
-    "restore_checkpoint",
-)
+_RUNTIME_KERNEL_OPERATION_ALIASES: dict[str, str] = {
+    "finalize": "finalize_task",
+    "pause": "pause_task",
+    "resume": "resume_task",
+}
 
 
 class RuntimeController:
@@ -441,8 +416,6 @@ class RuntimeController:
             authoritative_operations = [str(item).strip() for item in authoritative_ops_value if str(item).strip()]
         else:
             authoritative_operations = []
-        if rust_mode and not authoritative_operations:
-            authoritative_operations = list(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         full_authority = parse_boolish(
             raw.get("full_authority", details.get("full_authority")),
             default=authoritative and rust_mode,
@@ -451,6 +424,8 @@ class RuntimeController:
             raw.get("partial_authority", details.get("partial_authority")),
             default=False,
         )
+        if rust_mode and not authoritative_operations and (authoritative or full_authority or partial_authority):
+            authoritative_operations = list(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         cutover_state = "remote" if remote else "in_process"
         if remote and not connected:
             cutover_state = "remote_disconnected"
@@ -523,16 +498,23 @@ class RuntimeController:
         }
 
     def _runtime_kernel_operation_required(self, operation: str, runtime_kernel: Mapping[str, Any]) -> bool:
-        if bool(runtime_kernel.get("forwarding_authoritative", False)):
-            return True
         if str(runtime_kernel.get("mode") or "").strip().lower() != "rust":
             return False
         authoritative_operations = {
             str(item).strip() for item in runtime_kernel.get("authoritative_operations") or [] if str(item).strip()
         }
+        kernel_authoritative = any(
+            bool(runtime_kernel.get(flag)) for flag in ("authoritative", "full_authority", "partial_authority")
+        )
         if not authoritative_operations:
             authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
-        return operation in authoritative_operations
+            if not kernel_authoritative:
+                authoritative_operations.discard("pause_task")
+                authoritative_operations.discard("resume_task")
+        return (
+            operation in authoritative_operations
+            or _RUNTIME_KERNEL_OPERATION_ALIASES.get(operation) in authoritative_operations
+        )
 
     def _runtime_kernel_browser_authoritative(self, runtime_kernel: Mapping[str, Any] | None = None) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
@@ -543,15 +525,8 @@ class RuntimeController:
 
     def _runtime_kernel_terminal_authoritative(self, runtime_kernel: Mapping[str, Any] | None = None) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
-        if str(payload.get("mode") or "").strip().lower() != "rust":
-            return False
-        authoritative_operations = {
-            str(item).strip() for item in payload.get("authoritative_operations") or [] if str(item).strip()
-        }
-        if not authoritative_operations:
-            authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         return any(
-            operation in authoritative_operations
+            self._runtime_kernel_operation_required(operation, payload)
             for operation in (
                 "open_terminal",
                 "write_terminal",
@@ -566,15 +541,8 @@ class RuntimeController:
         runtime_kernel: Mapping[str, Any] | None = None,
     ) -> bool:
         payload = runtime_kernel or self.get_runtime_kernel_health()
-        if str(payload.get("mode") or "").strip().lower() != "rust":
-            return False
-        authoritative_operations = {
-            str(item).strip() for item in payload.get("authoritative_operations") or [] if str(item).strip()
-        }
-        if not authoritative_operations:
-            authoritative_operations = set(_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS)
         checkpoint_ops = {"save_checkpoint", "get_checkpoint", "restore_checkpoint"}
-        return any(operation in authoritative_operations for operation in checkpoint_ops)
+        return any(self._runtime_kernel_operation_required(operation, payload) for operation in checkpoint_ops)
 
     def _terminal_kernel_session_id(self, terminal: Mapping[str, Any] | None) -> str:
         if not isinstance(terminal, Mapping):

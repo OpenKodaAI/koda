@@ -187,22 +187,7 @@ def validate_payload(payload: CustomServerPayload, *, secret_key: bytes | None =
         raise ValidationError(f"unsupported transport_type: {transport!r}")
 
     if transport == "stdio":
-        if not payload.command:
-            raise ValidationError("stdio transport requires a command")
-        head = payload.command[0]
-        if not head:
-            raise ValidationError("command[0] cannot be empty")
-        if head.startswith("/") or head.startswith("./") or head.startswith("../"):
-            raise ValidationError(f"command must not be a filesystem path: {head!r}")
-        if head not in SAFE_STDIO_COMMANDS:
-            raise ValidationError(f"command {head!r} not in allowlist {sorted(SAFE_STDIO_COMMANDS)}")
-        for arg in payload.command[1:] + payload.args:
-            if not isinstance(arg, str):
-                raise ValidationError("args must be strings")
-            if "\x00" in arg:
-                raise ValidationError("args cannot contain null bytes")
-            if len(arg) > 500:
-                raise ValidationError("each arg must be ≤ 500 chars")
+        validate_stdio_command(payload.command + payload.args)
     else:  # http_sse
         if not payload.url:
             raise ValidationError("http_sse transport requires a URL")
@@ -221,12 +206,7 @@ def validate_payload(payload: CustomServerPayload, *, secret_key: bytes | None =
     total_env_size = 0
     for field_def in payload.env_schema:
         env_name = str(field_def.get("key") or "")
-        if not _ENV_NAME_RE.match(env_name):
-            raise ValidationError(f"env name {env_name!r} must match {_ENV_NAME_RE.pattern}")
-        if env_name in FORBIDDEN_ENV_NAMES:
-            raise ValidationError(f"env name {env_name!r} is forbidden")
-        if env_name.startswith("KODA_"):
-            raise ValidationError(f"env name {env_name!r} is reserved (KODA_*)")
+        validate_env_name(env_name)
         total_env_size += len(env_name) + len(str(field_def.get("label") or ""))
     if total_env_size > 4096:
         raise ValidationError("env_schema total size exceeds 4KB")
@@ -254,6 +234,51 @@ def compute_validation_signature(payload: CustomServerPayload, secret: bytes) ->
         }
     )
     return hmac.new(secret, body.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def validate_stdio_command(command: list[Any]) -> list[str]:
+    """Validate and normalize a custom stdio MCP command argv."""
+    if not command:
+        raise ValidationError("stdio transport requires a command")
+    if not isinstance(command, list):
+        raise ValidationError("stdio command must be a list")
+    normalized: list[str] = []
+    for idx, item in enumerate(command):
+        if not isinstance(item, str):
+            raise ValidationError(f"stdio command[{idx}] must be a string")
+        normalized.append(item)
+    head = normalized[0]
+    if not head:
+        raise ValidationError("command[0] cannot be empty")
+    if head.startswith("/") or head.startswith("./") or head.startswith("../"):
+        raise ValidationError(f"command must not be a filesystem path: {head!r}")
+    if head not in SAFE_STDIO_COMMANDS:
+        raise ValidationError(f"command {head!r} not in allowlist {sorted(SAFE_STDIO_COMMANDS)}")
+    for arg in normalized[1:]:
+        if "\x00" in arg:
+            raise ValidationError("args cannot contain null bytes")
+        if len(arg) > 500:
+            raise ValidationError("each arg must be ≤ 500 chars")
+    return normalized
+
+
+def validate_env_name(env_name: str) -> str:
+    """Validate one env var name accepted by custom MCP runtime config."""
+    normalized = str(env_name or "").strip()
+    if not _ENV_NAME_RE.match(normalized):
+        raise ValidationError(f"env name {normalized!r} must match {_ENV_NAME_RE.pattern}")
+    if normalized in FORBIDDEN_ENV_NAMES:
+        raise ValidationError(f"env name {normalized!r} is forbidden")
+    if normalized.startswith("KODA_"):
+        raise ValidationError(f"env name {normalized!r} is reserved (KODA_*)")
+    return normalized
+
+
+def validate_http_sse_url(url: str, *, allow_localhost: bool = True) -> str:
+    """Validate and normalize a custom HTTP/SSE MCP URL."""
+    normalized = str(url or "").strip()
+    _validate_http_url(normalized, allow_localhost=allow_localhost)
+    return normalized
 
 
 def list_custom_servers(*, agent_id: str | None = None) -> list[dict[str, Any]]:

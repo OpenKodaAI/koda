@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -71,7 +70,6 @@ const RuntimeTerminalPanel = dynamic(
 interface RuntimeTaskRoomProps {
   agentId: string;
   taskId: number;
-  mock?: boolean;
 }
 
 function toneToDot(tone: SemanticTone): StatusDotTone {
@@ -93,29 +91,6 @@ function TerminalPanelLoading() {
   return (
     <div className="flex min-h-[360px] items-center justify-center bg-[var(--terminal-background)] text-[0.8125rem] text-[var(--text-tertiary)]">
       {tl("Preparando terminal...")}
-    </div>
-  );
-}
-
-function MockTerminalSurface({ preview }: { preview: string | null | undefined }) {
-  const { t } = useAppI18n();
-  const lines = (preview || "$ koda runtime sample\n✓ waiting for live output\n").split(/\r?\n/);
-
-  return (
-    <div className="flex min-h-[clamp(340px,calc(100dvh-330px),640px)] flex-col overflow-hidden bg-[var(--terminal-background)]">
-      <div className="flex h-9 items-center justify-between border-b border-[color:var(--divider-hair)] px-3">
-        <div className="flex items-center gap-2 text-[0.75rem] text-[var(--text-secondary)]">
-          <span className="runtime-live-badge__dot" />
-          <span>{t("runtime.room.terminalMockPreview")}</span>
-        </div>
-      </div>
-      <pre className="min-h-0 flex-1 overflow-auto px-4 py-3 font-mono text-[0.8125rem] leading-6 text-[var(--terminal-foreground)]">
-        {lines.map((line, index) => (
-          <span key={`${index}-${line}`} className="block">
-            {line || " "}
-          </span>
-        ))}
-      </pre>
     </div>
   );
 }
@@ -142,19 +117,14 @@ function RuntimeGitSyntax({
   );
 }
 
-function MockRuntimeBadge({ mock }: { mock: boolean }) {
+function LiveRuntimeBadge() {
   const { t } = useAppI18n();
   return (
     <span
-      className={cn(
-        "inline-flex h-5 items-center gap-1.5 rounded-[var(--radius-chip)] px-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)]",
-        mock
-          ? "text-[var(--tone-info-text)]"
-          : "text-[var(--text-tertiary)]",
-      )}
+      className="inline-flex h-5 items-center gap-1.5 rounded-[var(--radius-chip)] px-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]"
     >
-      <StatusDot tone={mock ? "info" : "success"} pulse={!mock} />
-      {mock ? t("runtime.room.mock") : t("runtime.room.liveSample")}
+      <StatusDot tone="success" pulse />
+      {t("runtime.room.liveSample")}
     </span>
   );
 }
@@ -167,7 +137,6 @@ function RuntimeTaskHeader({
   phaseTone,
   isLivePhase,
   connected,
-  mockMode,
   branchName,
   heartbeatLabel,
   actionRail,
@@ -179,7 +148,6 @@ function RuntimeTaskHeader({
   phaseTone: StatusDotTone;
   isLivePhase: boolean;
   connected: boolean;
-  mockMode: boolean;
   branchName: string | null;
   heartbeatLabel: string;
   actionRail: ReactNode;
@@ -192,7 +160,7 @@ function RuntimeTaskHeader({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.72rem] text-[var(--text-tertiary)]">
             <Link
-              href={`/runtime?agent=${agentId}${mockMode ? "&mock=1" : ""}`}
+              href={`/runtime?agent=${agentId}`}
               className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
               aria-label={t("common.back")}
             >
@@ -217,7 +185,7 @@ function RuntimeTaskHeader({
             ) : null}
             <span className="text-[var(--text-quaternary)]">/</span>
             <span>{heartbeatLabel}</span>
-            <MockRuntimeBadge mock={mockMode} />
+            <LiveRuntimeBadge />
           </div>
 
           <h1 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
@@ -401,18 +369,13 @@ function RuntimeStatFooter({ stats }: { stats: RuntimeStageStat[] }) {
   );
 }
 
-export function RuntimeTaskRoom({ agentId, taskId, mock = false }: RuntimeTaskRoomProps) {
+export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
   const { t, tl } = useAppI18n();
   const { showToast } = useToast();
-  const searchParams = useSearchParams();
   const warningToastKeysRef = useRef<Set<string>>(new Set());
-  const mockMode =
-    mock ||
-    searchParams?.get("mock") === "1" ||
-    searchParams?.get("mock") === "true";
   const { bundle, loading, error, connected, mutate, fetchResource, refresh } =
-    useRuntimeTask(agentId, taskId, { mock: mockMode });
-  const [activeTab, setActiveTab] = useState<RoomTab>(mockMode ? "activity" : "terminal");
+    useRuntimeTask(agentId, taskId);
+  const [activeTab, setActiveTab] = useState<RoomTab>("terminal");
   const [detailTab, setDetailTab] = useState<DetailTab>("details");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -592,7 +555,6 @@ export function RuntimeTaskRoom({ agentId, taskId, mock = false }: RuntimeTaskRo
         phaseTone={phaseTone}
         isLivePhase={isLivePhase}
         connected={connected}
-        mockMode={mockMode}
         branchName={bundle.environment?.branch_name || null}
         heartbeatLabel={heartbeatAt ? formatRelativeTime(heartbeatAt) : t("runtime.room.stats.noHeartbeat")}
         actionRail={
@@ -626,16 +588,12 @@ export function RuntimeTaskRoom({ agentId, taskId, mock = false }: RuntimeTaskRo
         stats={essentialStats}
       >
           {activeTab === "terminal" ? (
-            mockMode ? (
-              <MockTerminalSurface preview={bundle.terminals.at(-1)?.preview} />
-            ) : (
-              <RuntimeTerminalPanel
-                taskId={taskId}
-                terminals={bundle.terminals}
-                mutate={mutate}
-                fetchResource={fetchResource}
-              />
-            )
+            <RuntimeTerminalPanel
+              taskId={taskId}
+              terminals={bundle.terminals}
+              mutate={mutate}
+              fetchResource={fetchResource}
+            />
           ) : null}
 
           {activeTab === "browser" ? (

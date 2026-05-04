@@ -587,6 +587,34 @@ def _workspace_controller(
     return controller, workspace_path
 
 
+def test_runtime_kernel_operation_required_uses_reported_operation_set(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller = _build_controller(
+        monkeypatch,
+        tmp_path,
+        store=_StoreStub(),
+        kernel=_KernelStub(
+            health_payload={
+                "mode": "rust",
+                "transport": "grpc-uds",
+                "connected": True,
+                "ready": True,
+                "authoritative": True,
+                "production_ready": True,
+                "authoritative_operations": ["stream_terminal"],
+            }
+        ),
+    )
+
+    runtime_kernel = controller.get_runtime_kernel_health()
+
+    assert runtime_kernel["forwarding_authoritative"] is True
+    assert controller._runtime_kernel_operation_required("stream_terminal", runtime_kernel) is True
+    assert controller._runtime_kernel_operation_required("save_checkpoint", runtime_kernel) is False
+
+
 def test_workspace_write_updates_existing_file_only(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

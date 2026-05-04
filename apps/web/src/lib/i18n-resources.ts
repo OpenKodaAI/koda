@@ -69,7 +69,9 @@ export const resources = {
         tokensUnit: "tokens",
         notSupported: "This model does not expose effort tuning.",
         sectionTitle: "Effort defaults",
-        sectionDescription: "Pick the default effort level per model. Each agent can override.",
+        sectionDescription: "Pick the effort level for the selected default model. Each agent can override.",
+        enumNone: "None",
+        enumDefault: "Default",
         enumMinimal: "Minimal",
         enumLow: "Low",
         enumMedium: "Medium",
@@ -764,7 +766,9 @@ export const resources = {
         tokensUnit: "tokens",
         notSupported: "Este modelo não expõe ajuste de effort.",
         sectionTitle: "Effort padrão",
-        sectionDescription: "Defina o effort padrão por modelo. Cada agente pode sobrescrever.",
+        sectionDescription: "Defina o effort do modelo padrão selecionado. Cada agente pode sobrescrever.",
+        enumNone: "Nenhum",
+        enumDefault: "Padrão",
         enumMinimal: "Mínimo",
         enumLow: "Baixo",
         enumMedium: "Médio",
@@ -9152,9 +9156,7 @@ mutableResources["en-US"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Runtime environment update recorded.",
   completed: "{{label}} completed.",
-  mock: "Mock",
   liveSample: "Live sample",
-  terminalMockPreview: "Terminal mock · live preview",
 };
 
 mutableResources["pt-BR"].translation.runtime.room = {
@@ -9237,9 +9239,7 @@ mutableResources["pt-BR"].translation.runtime.room = {
   phasePreview: "Etapa {{value}}.",
   environmentUpdateRecorded: "Atualização do ambiente registrada pelo runtime.",
   completed: "{{label}} concluído.",
-  mock: "Mock",
   liveSample: "Amostra ao vivo",
-  terminalMockPreview: "Terminal mock · preview ao vivo",
 };
 
 mutableResources["fr-FR"].translation.runtime.room = {
@@ -9322,9 +9322,7 @@ mutableResources["fr-FR"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Mise à jour de l'environnement runtime enregistrée.",
   completed: "{{label}} terminé.",
-  mock: "Mock",
   liveSample: "Échantillon live",
-  terminalMockPreview: "Terminal mock · aperçu live",
 };
 
 mutableResources["de-DE"].translation.runtime.room = {
@@ -9407,9 +9405,7 @@ mutableResources["de-DE"].translation.runtime.room = {
   phasePreview: "Phase {{value}}.",
   environmentUpdateRecorded: "Runtime-Umgebungsupdate erfasst.",
   completed: "{{label}} abgeschlossen.",
-  mock: "Mock",
   liveSample: "Live-Sample",
-  terminalMockPreview: "Mock-Terminal · Live-Vorschau",
 };
 
 mutableResources["es-ES"].translation.runtime.room = {
@@ -9492,9 +9488,7 @@ mutableResources["es-ES"].translation.runtime.room = {
   phasePreview: "Fase {{value}}.",
   environmentUpdateRecorded: "Actualización del entorno registrada por el runtime.",
   completed: "{{label}} completado.",
-  mock: "Mock",
   liveSample: "Muestra en vivo",
-  terminalMockPreview: "Terminal mock · vista previa en vivo",
 };
 
 mutableResources["en-US"].translation.runtime.files = {

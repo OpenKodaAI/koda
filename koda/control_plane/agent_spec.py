@@ -702,6 +702,84 @@ def normalize_effort_overrides(value: Any) -> dict[str, Any]:
     return normalized
 
 
+def normalize_model_effort_selection(
+    value: Any,
+    *,
+    provider_id: str | None = None,
+    model_id: str | None = None,
+) -> dict[str, Any]:
+    """Normalize a singular effort selection for one provider/model pair.
+
+    Legacy maps are intentionally handled by ``normalize_effort_overrides``;
+    this function accepts the new persisted shape:
+    ``{"provider_id": "...", "model_id": "...", "value": ...}``.
+    """
+    payload = _safe_json_object(value)
+    expected_provider = _trimmed(provider_id).lower()
+    expected_model = _trimmed(model_id)
+    normalized_provider = _trimmed(payload.get("provider_id") or expected_provider).lower()
+    normalized_model = _trimmed(payload.get("model_id") or expected_model)
+    if not normalized_provider or not normalized_model:
+        return {}
+    if expected_provider and normalized_provider != expected_provider:
+        return {}
+    if expected_model and normalized_model != expected_model:
+        return {}
+
+    cap = get_model_effort_capability(normalized_provider, normalized_model)
+    if cap is None:
+        return {}
+
+    raw_value = payload.get("value")
+    if cap["kind"] == "enum":
+        text_value = _trimmed(raw_value).lower()
+        if text_value and text_value in cap["values"]:
+            return {
+                "provider_id": normalized_provider,
+                "model_id": normalized_model,
+                "value": text_value,
+            }
+        return {}
+
+    if cap["kind"] == "tokens":
+        int_value = _as_int(raw_value)
+        if int_value is not None and cap["min"] <= int_value <= cap["max"]:
+            return {
+                "provider_id": normalized_provider,
+                "model_id": normalized_model,
+                "value": int_value,
+            }
+    return {}
+
+
+def normalize_legacy_effort_selection(value: Any, *, provider_id: str, model_id: str) -> dict[str, Any]:
+    """Convert the deprecated per-model effort map into the singular shape."""
+    normalized_provider = _trimmed(provider_id).lower()
+    normalized_model = _trimmed(model_id)
+    if not normalized_provider or not normalized_model:
+        return {}
+    slug = f"{normalized_provider}:{normalized_model}"
+    legacy = normalize_effort_overrides(value)
+    if slug not in legacy:
+        return {}
+    return {
+        "provider_id": normalized_provider,
+        "model_id": normalized_model,
+        "value": legacy[slug],
+    }
+
+
+def _general_effort_target_from_policy(policy: dict[str, Any]) -> tuple[str, str]:
+    functional_defaults = _safe_json_object(policy.get("functional_defaults"))
+    general_selection = _safe_json_object(functional_defaults.get("general"))
+    provider_id = (
+        _trimmed(general_selection.get("provider_id")).lower() or _trimmed(policy.get("default_provider")).lower()
+    )
+    default_models = _safe_json_object(policy.get("default_models"))
+    model_id = _trimmed(general_selection.get("model_id")) or _trimmed(default_models.get(provider_id))
+    return provider_id, model_id
+
+
 def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(_safe_json_object(policy))
     if not raw:
@@ -739,11 +817,24 @@ def normalize_model_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     max_total_budget = _as_float(raw.get("max_total_budget_usd"))
     if max_total_budget is not None:
         raw["max_total_budget_usd"] = max_total_budget
-    effort_overrides = normalize_effort_overrides(raw.get("effort_overrides"))
-    if effort_overrides:
-        raw["effort_overrides"] = effort_overrides
-    elif "effort_overrides" in raw:
-        raw.pop("effort_overrides")
+    legacy_effort_overrides = normalize_effort_overrides(raw.get("effort_overrides"))
+    target_provider, target_model = _general_effort_target_from_policy(raw)
+    effort_override = normalize_model_effort_selection(
+        raw.get("effort_override"),
+        provider_id=target_provider,
+        model_id=target_model,
+    )
+    if not effort_override and legacy_effort_overrides and target_provider and target_model:
+        effort_override = normalize_legacy_effort_selection(
+            legacy_effort_overrides,
+            provider_id=target_provider,
+            model_id=target_model,
+        )
+    if effort_override:
+        raw["effort_override"] = effort_override
+    else:
+        raw.pop("effort_override", None)
+    raw.pop("effort_overrides", None)
     return _compact_mapping(raw)
 
 

@@ -1588,66 +1588,67 @@ export function SectionModels() {
     [draft.catalogs.functional_model_catalog],
   );
 
-  const effortCapableModels = useMemo(() => {
-    const seen = new Set<string>();
-    const items: Array<{
-      providerId: string;
-      modelId: string;
-      providerTitle: string;
-      modelTitle: string;
-      capability: EffortCapability;
-    }> = [];
-    for (const list of Object.values(functionalCatalog)) {
-      for (const item of list) {
-        if (!item.effort_kind) continue;
-        const slug = `${item.provider_id}:${item.model_id}`;
-        if (seen.has(slug)) continue;
-        seen.add(slug);
-        let capability: EffortCapability;
-        if (item.effort_kind === "enum") {
-          const values: string[] = Array.isArray(item.effort_enum_values)
-            ? item.effort_enum_values.map(String)
-            : [];
-          capability = {
-            kind: "enum",
-            values,
-            defaultValue:
-              typeof item.effort_default === "string" ? item.effort_default : undefined,
-          };
-        } else {
-          capability = {
-            kind: "tokens",
-            min: Number(item.effort_token_min ?? 0),
-            max: Number(item.effort_token_max ?? 0),
-            defaultValue:
-              typeof item.effort_default === "number" ? item.effort_default : undefined,
-          };
-        }
-        items.push({
-          providerId: item.provider_id,
-          modelId: item.model_id,
-          providerTitle: item.provider_title || item.provider_id,
-          modelTitle: item.title,
-          capability,
-        });
-      }
-    }
-    items.sort((a, b) =>
-      a.providerTitle.localeCompare(b.providerTitle) || a.modelTitle.localeCompare(b.modelTitle),
+  const selectedGeneralEffortModel = useMemo(() => {
+    const selected = draft.values.models.functional_defaults?.general;
+    const generalOptions = functionalCatalog.general || [];
+    const providerId =
+      selected?.provider_id ||
+      draft.values.models.default_provider ||
+      enabledGeneralProviders[0] ||
+      "";
+    const providerDefaultModel = String(
+      draft.catalogs.providers.find((provider) => provider.id === providerId)?.default_model || "",
     );
-    return items;
-  }, [functionalCatalog]);
-
-  function updateEffortDefault(slug: string, next: string | number | null) {
-    const current = { ...(draft.values.models.effort_defaults || {}) };
-    if (next === null) {
-      delete current[slug];
+    const selectedModelId = selected?.model_id || providerDefaultModel;
+    const item =
+      generalOptions.find(
+        (option) => option.provider_id === providerId && option.model_id === selectedModelId,
+      ) ||
+      generalOptions.find((option) => option.provider_id === providerId) ||
+      generalOptions[0];
+    if (!item?.provider_id || !item?.model_id || !item.effort_kind) return null;
+    let capability: EffortCapability;
+    if (item.effort_kind === "enum") {
+      capability = {
+        kind: "enum",
+        values: Array.isArray(item.effort_enum_values) ? item.effort_enum_values.map(String) : [],
+        defaultValue: typeof item.effort_default === "string" ? item.effort_default : undefined,
+      };
     } else {
-      current[slug] = next;
+      capability = {
+        kind: "tokens",
+        min: Number(item.effort_token_min ?? 0),
+        max: Number(item.effort_token_max ?? 0),
+        defaultValue: typeof item.effort_default === "number" ? item.effort_default : undefined,
+      };
     }
+    return {
+      providerId: item.provider_id,
+      modelId: item.model_id,
+      providerTitle: item.provider_title || item.provider_id,
+      modelTitle: item.title,
+      capability,
+    };
+  }, [
+    draft.values.models.default_provider,
+    draft.values.models.functional_defaults,
+    draft.catalogs.providers,
+    enabledGeneralProviders,
+    functionalCatalog,
+  ]);
+
+  function updateEffortDefault(next: string | number | null) {
+    const selected = selectedGeneralEffortModel;
     setField("models", {
       ...draft.values.models,
-      effort_defaults: current,
+      effort_default:
+        next === null || !selected
+          ? null
+          : {
+              provider_id: selected.providerId,
+              model_id: selected.modelId,
+              value: next,
+            },
     });
   }
 
@@ -1676,6 +1677,9 @@ export function SectionModels() {
       ...draft.values.models,
       functional_defaults: nextDefaults,
     };
+    if (functionId === "general") {
+      nextModels.effort_default = null;
+    }
     const generalSelection = nextDefaults.general;
     if (generalSelection?.provider_id && enabledGeneralProviders.includes(generalSelection.provider_id)) {
       nextModels.default_provider = generalSelection.provider_id;
@@ -1713,6 +1717,7 @@ export function SectionModels() {
                 setField("models", {
                   ...draft.values.models,
                   default_provider: next,
+                  effort_default: null,
                   fallback_order: normalizeFallbackOrder(
                     enabledGeneralProviders,
                     draft.values.models.fallback_order,
@@ -1957,43 +1962,37 @@ export function SectionModels() {
         </div>
       </SettingsFieldGroup>
 
-      {effortCapableModels.length > 0 && (
+      {selectedGeneralEffortModel && (
         <SettingsFieldGroup title={t("modelEffort.sectionTitle")}>
           <p className="-mt-2 text-xs text-[var(--text-tertiary)] leading-relaxed">
             {t("modelEffort.sectionDescription")}
           </p>
-          <div className="flex flex-col">
-            {effortCapableModels.map((item, index) => {
-              const slug = `${item.providerId}:${item.modelId}`;
-              const stored = draft.values.models.effort_defaults?.[slug];
-              const value: string | number | null =
-                typeof stored === "string" || typeof stored === "number" ? stored : null;
-              return (
-                <div
-                  key={slug}
-                  className={`flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-6 ${
-                    index === 0 ? "" : "border-t border-[color:var(--divider-hair)]"
-                  }`}
-                >
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm font-medium text-[var(--text-primary)]">
-                      {item.modelTitle}
-                    </span>
-                    <span className="text-xs text-[var(--text-tertiary)]">
-                      {item.providerTitle}
-                    </span>
-                  </div>
-                  <div className="sm:w-[360px]">
-                    <EffortPicker
-                      capability={item.capability}
-                      value={value ?? item.capability.defaultValue ?? null}
-                      onChange={(next) => updateEffortDefault(slug, next)}
-                      context="global"
-                    />
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-6">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {selectedGeneralEffortModel.modelTitle}
+              </span>
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {selectedGeneralEffortModel.providerTitle}
+              </span>
+            </div>
+            <div className="sm:w-[360px]">
+              <EffortPicker
+                capability={selectedGeneralEffortModel.capability}
+                value={
+                  draft.values.models.effort_default?.provider_id === selectedGeneralEffortModel.providerId &&
+                  draft.values.models.effort_default?.model_id === selectedGeneralEffortModel.modelId
+                    ? draft.values.models.effort_default.value
+                    : selectedGeneralEffortModel.capability.defaultValue ?? null
+                }
+                onChange={updateEffortDefault}
+                context="global"
+                readOnly={
+                  selectedGeneralEffortModel.capability.kind === "enum" &&
+                  selectedGeneralEffortModel.capability.values.length <= 1
+                }
+              />
+            </div>
           </div>
         </SettingsFieldGroup>
       )}

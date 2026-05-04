@@ -94,6 +94,8 @@ markers = [
     "slow: long-running test (>60s); skipped on PR fast tier",
     "local_only: only runs on developer machines; skipped in CI",
     "flags: parametrized over feature flags",
+    "security: adversarial guardrail and permission-boundary tests",
+    "guardrail: focused tests for security blocking/approval behavior",
 ]
 
 [tool.coverage.report]

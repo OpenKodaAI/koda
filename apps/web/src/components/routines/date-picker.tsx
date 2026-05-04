@@ -133,7 +133,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
                   "flex h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] text-[0.8125rem]",
                   "transition-[background-color,color,border-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   isSelected
-                    ? "bg-[var(--accent)] text-white"
+                    ? "bg-[var(--accent)] text-[var(--accent-text)]"
                     : sameMonth
                       ? "text-[var(--text-primary)] hover:bg-[var(--hover-tint)]"
                       : "text-[var(--text-quaternary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-tertiary)]",

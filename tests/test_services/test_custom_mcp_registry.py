@@ -46,6 +46,12 @@ def test_validate_rejects_command_outside_allowlist():
     assert "allowlist" in str(excinfo.value)
 
 
+def test_validate_rejects_non_string_command_arg():
+    with pytest.raises(ValidationError) as excinfo:
+        validate_payload(_payload(command=["npx", {"bad": "shape"}]))
+    assert "command[1] must be a string" in str(excinfo.value)
+
+
 def test_validate_rejects_filesystem_path_command():
     with pytest.raises(ValidationError):
         validate_payload(_payload(command=["/usr/bin/sh"]))

@@ -553,7 +553,8 @@ def register_mcp_resources_for_agent(
     agent_tools = _agent_mcp_tools.setdefault(agent_id, set())
     for resource in resources:
         uri = str(resource.get("uri") or "")
-        if not uri or uri in blocked:
+        uri_hash = hashlib.sha256(uri.encode("utf-8")).hexdigest() if uri else ""
+        if not uri or uri in blocked or uri_hash in blocked:
             continue
         tid = mcp_resource_tool_id(server_key, uri)
         tool_handlers[tid] = _make_mcp_handler(tid, agent_id)

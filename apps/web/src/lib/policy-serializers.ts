@@ -426,7 +426,7 @@ export interface ModelPolicyData {
   default_models: Record<string, string>;
   tier_models: Record<string, { small?: string; medium?: string; large?: string }>;
   functional_defaults: Record<string, { provider_id: string; model_id: string }>;
-  effort_overrides: Record<string, string | number>;
+  effort_override: { provider_id: string; model_id: string; value: string | number } | null;
   max_budget_usd: number | null;
   max_total_budget_usd: number | null;
   _extra: Record<string, unknown>;
@@ -440,6 +440,7 @@ const MODEL_POLICY_KEYS = [
   "default_models",
   "tier_models",
   "functional_defaults",
+  "effort_override",
   "effort_overrides",
   "max_budget_usd",
   "max_total_budget_usd",
@@ -471,6 +472,21 @@ function asEffortOverrides(value: unknown): Record<string, string | number> {
   return result;
 }
 
+function asEffortSelection(value: unknown): { provider_id: string; model_id: string; value: string | number } | null {
+  const obj = asObject(value);
+  const providerId = asString(obj.provider_id).trim();
+  const modelId = asString(obj.model_id).trim();
+  const rawValue = obj.value;
+  if (!providerId || !modelId) return null;
+  if (typeof rawValue === "string" && rawValue.trim()) {
+    return { provider_id: providerId, model_id: modelId, value: rawValue.trim() };
+  }
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    return { provider_id: providerId, model_id: modelId, value: rawValue };
+  }
+  return null;
+}
+
 export function parseModelPolicy(json: string): ModelPolicyData {
   const obj = safeParseJson(json);
   const { known, extra } = extractKnown(obj, MODEL_POLICY_KEYS);
@@ -484,7 +500,17 @@ export function parseModelPolicy(json: string): ModelPolicyData {
     default_models: asStringMap(known.default_models),
     tier_models: asTierModels(known.tier_models),
     functional_defaults: asFunctionalDefaults(known.functional_defaults),
-    effort_overrides: asEffortOverrides(known.effort_overrides),
+    effort_override:
+      asEffortSelection(known.effort_override) ??
+      (() => {
+        const legacy = asEffortOverrides(known.effort_overrides);
+        const first = Object.entries(legacy)[0];
+        if (!first) return null;
+        const [slug, value] = first;
+        const [providerId, ...modelParts] = slug.split(":");
+        const modelId = modelParts.join(":");
+        return providerId && modelId ? { provider_id: providerId, model_id: modelId, value } : null;
+      })(),
     max_budget_usd:
       known.max_budget_usd === undefined || known.max_budget_usd === null
         ? null
@@ -509,7 +535,7 @@ export function serializeModelPolicy(data: ModelPolicyData): string {
         default_models: data.default_models,
         tier_models: data.tier_models,
         functional_defaults: data.functional_defaults,
-        effort_overrides: data.effort_overrides,
+        effort_override: data.effort_override,
         max_budget_usd: data.max_budget_usd,
         max_total_budget_usd: data.max_total_budget_usd,
       },
@@ -607,6 +633,11 @@ export function normalizeModelPolicyForCore(
     available_models_by_provider: availableModelsByProvider,
     default_models: defaultModels,
     tier_models: tierModels,
+    effort_override:
+      data.effort_override?.provider_id === defaultProvider &&
+      data.effort_override?.model_id === defaultModels[defaultProvider]
+        ? data.effort_override
+        : null,
   };
 }
 

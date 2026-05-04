@@ -83,7 +83,7 @@ function RuntimeOverviewSkeleton() {
   );
 }
 
-function LiveRow({ row, index, mock }: { row: RuntimeRoomRow; index: number; mock?: boolean }) {
+function LiveRow({ row, index }: { row: RuntimeRoomRow; index: number }) {
   const { t } = useAppI18n();
   const agentColor = getAgentColor(row.agentId);
   const summary = truncateText(getRuntimeRowSummary(row), 120);
@@ -93,7 +93,7 @@ function LiveRow({ row, index, mock }: { row: RuntimeRoomRow; index: number; moc
 
   return (
     <Link
-      href={`/runtime/${row.agentId}/tasks/${row.taskId}${mock ? "?mock=1" : ""}`}
+      href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
       className={cn(
         "group grid w-full gap-x-3 gap-y-1.5 px-3 py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "grid-cols-[auto_1fr_auto] items-center sm:grid-cols-[auto_auto_auto_1fr_auto]",
@@ -218,12 +218,10 @@ function AgentRailRow({
 
 export function RuntimeOverviewScreen({
   initialBotIds,
-  mock = false,
 }: {
   initialBotIds?: string[];
-  mock?: boolean;
 }) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const { agents } = useAgentCatalog();
   const lastErrorToastRef = useRef<string | null>(null);
@@ -237,7 +235,7 @@ export function RuntimeOverviewScreen({
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
   );
-  const { overviews, loading, connected, error } = useRuntimeOverview(selectedBotIds, { mock });
+  const { overviews, loading, connected, error } = useRuntimeOverview(selectedBotIds);
 
   const selectedOverviews = useMemo(() => {
     return visibleBotIds
@@ -446,11 +444,6 @@ export function RuntimeOverviewScreen({
             className="flex flex-col"
             data-testid="runtime-live-list"
           >
-            {mock ? (
-              <div className="mb-2 px-3 text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                {tl("Mock visual · amostras ao vivo")}
-              </div>
-            ) : null}
             {visibleRows.length === 0 ? (
               <div
                 className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
@@ -465,7 +458,6 @@ export function RuntimeOverviewScreen({
                   key={`${row.agentId}-${row.taskId}-${row.source}`}
                   row={row}
                   index={index}
-                  mock={mock}
                 />
               ))
             )}

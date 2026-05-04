@@ -12,6 +12,7 @@ from koda.services.provider_env import (
     validate_shell_command,
 )
 from koda.services.runtime.controller import get_runtime_controller
+from koda.services.shell_safety import enforce_shell_guardrails
 
 log = get_logger(__name__)
 
@@ -29,6 +30,7 @@ async def run_shell_command(
         return "Error: command execution not approved."
 
     try:
+        command = enforce_shell_guardrails(command)
         command = validate_shell_command(command)
         validated_work_dir = validate_runtime_path(work_dir, allow_empty=True)
         proc_env = build_tool_subprocess_env(env_overrides=env)

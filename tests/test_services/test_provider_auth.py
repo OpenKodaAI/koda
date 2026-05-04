@@ -259,7 +259,7 @@ def test_gemini_api_key_verify_uses_header_not_query_string(monkeypatch):
     )
     # Project ID is not relevant to API key auth — it's a Vertex AI concept.
     assert result.account_label == "Google AI Studio"
-    assert result.details == {}
+    assert result.details == {"model_ids": ["gemini-1.5-pro"]}
 
 
 # Native HTTP provider verify contracts (auth header + URL)
@@ -420,6 +420,19 @@ def test_openai_compatible_models_probe_uses_bearer_auth(provider_id, monkeypatc
     )
     # Secret must not leak into the URL.
     assert "test-bearer-secret" not in str(captured["url"])
+
+
+def test_openai_compatible_verify_exposes_detected_model_ids(monkeypatch):
+    captured = _patch_urlopen(
+        monkeypatch,
+        body=b'{"data": [{"id": "mistral-large-latest"}, {"id": "codestral-latest"}]}',
+    )
+
+    result = provider_auth.verify_provider_api_key("mistral", "test-bearer-secret")
+
+    assert result.verified is True
+    assert captured["url"] == "https://api.mistral.ai/v1/models"
+    assert result.details["model_ids"] == ["mistral-large-latest", "codestral-latest"]
 
 
 def test_ollama_api_key_verify_ignores_localhost_caller_base_url(monkeypatch):

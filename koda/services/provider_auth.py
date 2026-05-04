@@ -842,6 +842,30 @@ _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
+def _extract_model_ids_from_payload(provider_id: str, payload: dict[str, Any]) -> list[str]:
+    """Return provider model IDs from common model-list response shapes."""
+    raw_items: Any
+    if isinstance(payload.get("data"), list):
+        raw_items = payload.get("data")
+    elif isinstance(payload.get("models"), list):
+        raw_items = payload.get("models")
+    else:
+        raw_items = []
+
+    model_ids: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        raw_id = str(item.get("id") or item.get("model") or item.get("model_id") or item.get("name") or "").strip()
+        if not raw_id:
+            continue
+        if provider_id == "gemini" and raw_id.startswith("models/"):
+            raw_id = raw_id.removeprefix("models/")
+        if raw_id and raw_id not in model_ids:
+            model_ids.append(raw_id)
+    return model_ids[:250]
+
+
 def _verify_openai_compatible_api_key(
     provider_id: str,
     api_key: str,
@@ -900,7 +924,11 @@ def _verify_openai_compatible_api_key(
         account_label=str(profile.get("account_label") or provider_id.capitalize()),
         plan_label=str(profile.get("plan_label") or "API key"),
         checked_via="api_key",
-        details={"http_status": status, "models_payload": bool(payload)},
+        details={
+            "http_status": status,
+            "models_payload": bool(payload),
+            "model_ids": _extract_model_ids_from_payload(provider_id, payload),
+        },
     )
 
 
@@ -949,7 +977,7 @@ def verify_provider_api_key(
                 account_label="Anthropic Console",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "claude"},
+                details={"provider": "claude", "model_ids": _extract_model_ids_from_payload("claude", payload)},
             )
 
         if provider_id == "codex":
@@ -969,7 +997,7 @@ def verify_provider_api_key(
                 account_label="OpenAI Platform",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "codex"},
+                details={"provider": "codex", "model_ids": _extract_model_ids_from_payload("codex", payload)},
             )
 
         if provider_id == "elevenlabs":
@@ -989,7 +1017,10 @@ def verify_provider_api_key(
                 account_label="ElevenLabs",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "elevenlabs"},
+                details={
+                    "provider": "elevenlabs",
+                    "model_ids": _extract_model_ids_from_payload("elevenlabs", payload),
+                },
             )
 
         if provider_id == "ollama":
@@ -1018,7 +1049,7 @@ def verify_provider_api_key(
                 account_label="Ollama Cloud",
                 plan_label="API key",
                 checked_via="api_key",
-                details={"provider": "ollama"},
+                details={"provider": "ollama", "model_ids": _extract_model_ids_from_payload("ollama", payload)},
             )
 
         # Gemini API key auth: pass the credential via the `x-goog-api-key`
@@ -1045,7 +1076,7 @@ def verify_provider_api_key(
             account_label="Google AI Studio",
             plan_label="Gemini API key",
             checked_via="api_key",
-            details={},
+            details={"model_ids": _extract_model_ids_from_payload("gemini", payload)},
         )
     except urllib_error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")

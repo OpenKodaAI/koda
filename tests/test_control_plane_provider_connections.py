@@ -140,6 +140,37 @@ def test_core_provider_catalog_exposes_connection_flags():
     assert catalog["kokoro"]["connection_managed"] is False
 
 
+def test_function_model_catalog_preserves_resolved_ollama_models():
+    catalog = build_function_model_catalog(
+        {
+            "ollama": {
+                "title": "Ollama",
+                "vendor": "Ollama",
+                "category": "general",
+                "enabled": True,
+                "command_present": True,
+                "available_models": ["llama3.2:latest"],
+                "functional_models": [
+                    {
+                        "provider_id": "ollama",
+                        "model_id": "llama3.2:latest",
+                        "title": "Llama 3.2 Latest",
+                        "function_id": "general",
+                        "description": "Familia llama, 3B parametros.",
+                        "family": "llama",
+                        "parameter_size": "3B",
+                    }
+                ],
+            }
+        }
+    )
+
+    ollama_item = next(item for item in catalog["general"] if item["provider_id"] == "ollama")
+    assert ollama_item["model_id"] == "llama3.2:latest"
+    assert ollama_item["family"] == "llama"
+    assert ollama_item["parameter_size"] == "3B"
+
+
 def test_function_model_catalog_skips_hidden_standalone_providers():
     catalog = _build_provider_catalog()
 

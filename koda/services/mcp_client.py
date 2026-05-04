@@ -7,10 +7,11 @@ import contextlib
 import ipaddress
 import json
 import socket
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from koda.logging_config import get_logger
 
@@ -316,6 +317,11 @@ def _validate_url(url: str) -> None:
                 raise ValueError(f"Private/internal destination not allowed: {hostname}") from None
 
 
+def validate_mcp_http_url(url: str) -> None:
+    """Public wrapper for validating MCP HTTP transport destinations."""
+    _validate_url(url)
+
+
 class HttpSseTransport:
     """Speaks JSON-RPC 2.0 over HTTP POST (stdlib only)."""
 
@@ -351,7 +357,7 @@ class HttpSseTransport:
         )
 
         loop = asyncio.get_running_loop()
-        response_data: bytes = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=30).read())
+        response_data: bytes = await loop.run_in_executor(None, lambda: _urlopen_safely(req, timeout=30))
         response = json.loads(response_data)
 
         if "error" in response:
@@ -380,7 +386,7 @@ class HttpSseTransport:
             method="POST",
         )
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=30).read())
+        await loop.run_in_executor(None, lambda: _urlopen_safely(req, timeout=30))
 
     async def close(self) -> None:
         pass  # Stateless transport; nothing to close.
@@ -388,6 +394,77 @@ class HttpSseTransport:
     @property
     def is_alive(self) -> bool:
         return True  # Stateless; always considered alive.
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Disable urllib's automatic redirect following so we can revalidate hops."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        return None
+
+
+def _open_url_without_redirects(req: urllib.request.Request, *, timeout: float) -> Any:
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    try:
+        return opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308):
+            return exc
+        raise
+
+
+def _response_status(response: Any) -> int:
+    status = getattr(response, "status", None)
+    if isinstance(status, int):
+        return status
+    getcode = getattr(response, "getcode", None)
+    if callable(getcode):
+        return int(getcode())
+    return 0
+
+
+def _urlopen_safely(req: urllib.request.Request, *, timeout: float, max_redirects: int = 10) -> bytes:
+    """Open an MCP HTTP request while revalidating every redirect target."""
+    current_url = req.full_url
+    body = req.data
+    method = req.get_method()
+    headers = dict(req.header_items())
+
+    for _ in range(max_redirects + 1):
+        _validate_url(current_url)
+        current_req = urllib.request.Request(
+            current_url,
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        response = _open_url_without_redirects(current_req, timeout=timeout)
+        status = _response_status(response)
+        if status not in (301, 302, 303, 307, 308):
+            try:
+                return cast(bytes, response.read())
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+
+        location = response.headers.get("Location", "")
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+        if not location:
+            raise ValueError("MCP HTTP redirect missing Location header.")
+        current_url = urljoin(current_url, location)
+
+    raise ValueError("Too many MCP HTTP redirects.")
 
 
 # Session

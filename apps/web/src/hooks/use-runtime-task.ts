@@ -12,19 +12,10 @@ import { useRuntimeQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { parseResponseError } from "@/lib/http-client";
 import { queryKeys } from "@/lib/query/keys";
-import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
-import {
-  buildMockRuntimeTaskBundle,
-  readMockWorkspaceFile,
-  readMockWorkspaceSearch,
-  readMockWorkspaceTree,
-} from "@/lib/runtime-mocks";
 import type {
   RuntimeEvent,
   RuntimeMutationResult,
   RuntimeTaskBundle,
-  RuntimeTerminal,
-  RuntimeWorkspaceTreeEntry,
 } from "@/lib/runtime-types";
 
 function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {
@@ -63,14 +54,10 @@ interface UseRuntimeTaskResult {
 export function useRuntimeTask(
   agentId: string,
   taskId: number,
-  options?: { mock?: boolean },
 ): UseRuntimeTaskResult {
   const { tl } = useAppI18n();
-  const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
-  const mock = Boolean(options?.mock);
   const [connected, setConnected] = useState(false);
-  const [mockTick, setMockTick] = useState(0);
   const lastSeqRef = useRef(0);
 
   const taskQueryKey = queryKeys.runtime.task(agentId, taskId);
@@ -101,20 +88,12 @@ export function useRuntimeTask(
 
   const taskQuery = useRuntimeQuery<RuntimeTaskBundle>({
     queryKey: taskQueryKey,
-    enabled: !mock && Boolean(agentId && taskId),
+    enabled: Boolean(agentId && taskId),
     refetchInterval: 18_000,
     queryFn: async ({ signal }) => fetchBundle(signal),
   });
 
-  useEffect(() => {
-    if (!mock) return undefined;
-    const timer = window.setInterval(() => setMockTick((current) => current + 1), 1_800);
-    return () => window.clearInterval(timer);
-  }, [mock]);
-
-  const bundle = mock
-    ? buildMockRuntimeTaskBundle(agents, agentId, taskId, mockTick)
-    : taskQuery.data ?? null;
+  const bundle = taskQuery.data ?? null;
 
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: taskQueryKey });
@@ -125,27 +104,6 @@ export function useRuntimeTask(
       resourcePath: string,
       searchParams?: URLSearchParams,
     ) => {
-      if (mock) {
-        if (resourcePath === "terminals") {
-          return { items: bundle?.terminals ?? [] } as T;
-        }
-        if (resourcePath === "workspace/tree") {
-          return {
-            items: readMockWorkspaceTree(searchParams?.get("path") ?? ""),
-          } as T;
-        }
-        if (resourcePath === "workspace/file") {
-          return readMockWorkspaceFile(searchParams?.get("path") ?? "") as T;
-        }
-        if (resourcePath === "workspace/search") {
-          return readMockWorkspaceSearch(searchParams?.get("q") ?? "") as T;
-        }
-        if (resourcePath === "browser") {
-          return { browser: bundle?.browser ?? null } as T;
-        }
-        return {} as T;
-      }
-
       const suffix = searchParams?.toString()
         ? `?${searchParams.toString()}`
         : "";
@@ -165,7 +123,7 @@ export function useRuntimeTask(
 
       return readJson<T>(response);
     },
-    [agentId, bundle, mock, taskId, tl],
+    [agentId, taskId, tl],
   );
 
   const mutate = useCallback(
@@ -176,37 +134,6 @@ export function useRuntimeTask(
         body?: Record<string, unknown>;
       },
     ): Promise<RuntimeMutationResult | Record<string, unknown>> => {
-      if (mock) {
-        setMockTick((current) => current + 1);
-        if (resourcePath === "attach/terminal") {
-          const terminal = bundle?.terminals.at(-1) as RuntimeTerminal | undefined;
-          return {
-            ok: true,
-            terminal,
-            attach: {
-              task_id: taskId,
-              terminal_id: terminal?.id ?? 1,
-              can_write: true,
-              status: "mock",
-            },
-          };
-        }
-        if (resourcePath === "attach/browser") {
-          return { ok: true, browser: bundle?.browser ?? null };
-        }
-        if (resourcePath === "workspace/file") {
-          return readMockWorkspaceFile(
-            options?.searchParams?.get("path") ?? "",
-          ) as unknown as Record<string, unknown>;
-        }
-        if (resourcePath === "workspace/tree") {
-          return {
-            items: readMockWorkspaceTree(options?.searchParams?.get("path") ?? ""),
-          } as { items: RuntimeWorkspaceTreeEntry[] };
-        }
-        return { ok: true, action: resourcePath, task_id: taskId };
-      }
-
       const suffix = options?.searchParams?.toString()
         ? `?${options.searchParams.toString()}`
         : "";
@@ -232,13 +159,10 @@ export function useRuntimeTask(
       void queryClient.invalidateQueries({ queryKey: taskQueryKey });
       return (payload ?? {}) as RuntimeMutationResult | Record<string, unknown>;
     },
-    [agentId, bundle, mock, queryClient, taskId, taskQueryKey, tl],
+    [agentId, queryClient, taskId, taskQueryKey, tl],
   );
 
   useEffect(() => {
-    if (mock) {
-      return () => undefined;
-    }
     let disposed = false;
     let reconnectTimer: number | null = null;
 
@@ -297,14 +221,14 @@ export function useRuntimeTask(
       source?.close();
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
     };
-  }, [agentId, mock, queryClient, taskId, taskQueryKey]);
+  }, [agentId, queryClient, taskId, taskQueryKey]);
 
   return {
     bundle,
-    loading: !mock && taskQuery.isLoading && !bundle,
+    loading: taskQuery.isLoading && !bundle,
     refreshing: taskQuery.isFetching && !taskQuery.isLoading,
     error: taskQuery.error?.message ?? null,
-    connected: mock || connected,
+    connected,
     refresh,
     mutate,
     fetchResource,

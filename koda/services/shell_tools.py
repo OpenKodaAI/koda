@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from koda.config import SHELL_BG_MAX_PROCESSES, SHELL_BG_OUTPUT_MAX, SHELL_TIMEOUT
 from koda.logging_config import get_logger
 from koda.services.provider_env import build_tool_subprocess_env, validate_runtime_path, validate_shell_command
+from koda.services.shell_safety import enforce_shell_guardrails
 
 log = get_logger(__name__)
 
@@ -17,6 +18,7 @@ log = get_logger(__name__)
 @dataclass
 class BackgroundProcess:
     handle_id: str
+    user_id: int
     command: str
     work_dir: str
     started_at: float
@@ -57,6 +59,7 @@ class BackgroundProcessManager:
             return "", f"Too many background processes (max {SHELL_BG_MAX_PROCESSES}). Kill some first."
 
         try:
+            command = enforce_shell_guardrails(command)
             command = validate_shell_command(command)
             validated_dir = validate_runtime_path(work_dir, allow_empty=True)
         except ValueError as e:
@@ -79,6 +82,7 @@ class BackgroundProcessManager:
 
         bg = BackgroundProcess(
             handle_id=handle_id,
+            user_id=user_id,
             command=command,
             work_dir=validated_dir,
             started_at=time.monotonic(),
@@ -103,11 +107,16 @@ class BackgroundProcessManager:
         bg._collection_task = asyncio.create_task(_collect())
         return handle_id, None
 
-    def get(self, handle_id: str) -> BackgroundProcess | None:
-        return self._processes.get(handle_id)
-
-    async def kill(self, handle_id: str) -> str | None:
+    def get(self, handle_id: str, *, user_id: int | None = None) -> BackgroundProcess | None:
         bg = self._processes.get(handle_id)
+        if bg is None:
+            return None
+        if user_id is not None and bg.user_id != user_id:
+            return None
+        return bg
+
+    async def kill(self, handle_id: str, *, user_id: int | None = None) -> str | None:
+        bg = self.get(handle_id, user_id=user_id)
         if not bg:
             return f"No process with handle '{handle_id}'."
         if bg.finished:

@@ -28,7 +28,7 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     return {str(key): str(value) for key, value in dict(metadata or {}).items()}
 
 
-_RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
+RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "workspace-provisioning",
     "workspace-cleanup",
     "environment-tracking",
@@ -47,17 +47,21 @@ _RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "snapshot-collection",
     "reconcile",
 )
-_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
+RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
     "create_environment",
     "start_task",
     "execute_command",
+    "attach_terminal",
     "stream_terminal",
     "open_terminal",
     "write_terminal",
     "resize_terminal",
     "close_terminal",
     "stream_terminal_session",
+    "pause_task",
+    "resume_task",
     "terminate_task",
+    "finalize_task",
     "cleanup_environment",
     "start_browser_session",
     "stop_browser_session",
@@ -66,6 +70,8 @@ _RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS: tuple[str, ...] = (
     "get_checkpoint",
     "restore_checkpoint",
 )
+_RUNTIME_KERNEL_CAPABILITY_DEFAULTS = RUNTIME_KERNEL_CAPABILITY_DEFAULTS
+_RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS = RUNTIME_KERNEL_AUTHORITATIVE_OPERATION_DEFAULTS
 
 
 class RuntimeKernelClient(Protocol):

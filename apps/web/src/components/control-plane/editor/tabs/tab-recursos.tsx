@@ -209,7 +209,10 @@ export function TabRecursos() {
       ? providerEntries[effectiveDefaultProvider].available_models.map(String)
       : []);
   const defaultModel =
-    modelPolicy.default_models[effectiveDefaultProvider] || availableModels[0] || "";
+    modelPolicy.default_models[effectiveDefaultProvider] ||
+    String(providerEntries[effectiveDefaultProvider]?.default_model || "") ||
+    availableModels[0] ||
+    "";
   const modelFunctions = core.providers.model_functions ?? [];
   const functionalModelCatalog = useMemo(
     () => core.providers.functional_model_catalog ?? {},
@@ -264,14 +267,17 @@ export function TabRecursos() {
     return lookup;
   }, [functionalModelCatalog]);
 
-  function setEffortOverride(slug: string, next: string | number | null) {
-    const current = { ...modelPolicy.effort_overrides };
-    if (next === null) {
-      delete current[slug];
-    } else {
-      current[slug] = next;
-    }
-    updateModelPolicy({ effort_overrides: current });
+  function setEffortOverride(next: string | number | null) {
+    updateModelPolicy({
+      effort_override:
+        next === null || !effectiveDefaultProvider || !defaultModel
+          ? null
+          : {
+              provider_id: effectiveDefaultProvider,
+              model_id: defaultModel,
+              value: next,
+            },
+    });
   }
   const currentProviderLabel =
     providerOptions.find((item) => item.value === effectiveDefaultProvider)?.label ??
@@ -320,6 +326,7 @@ export function TabRecursos() {
       const providerDefault =
         next.default_models?.[provider] ||
         defaultModels[provider] ||
+        String(providerEntries[provider]?.default_model || "") ||
         providerModels[0] ||
         "";
       if (providerDefault) {
@@ -456,7 +463,7 @@ export function TabRecursos() {
                   <button
                     key={providerId}
                     type="button"
-                    onClick={() => updateModelPolicy({ default_provider: providerId })}
+                    onClick={() => updateModelPolicy({ default_provider: providerId, effort_override: null })}
                     className={cn(
                       "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
                       isDefault
@@ -493,6 +500,7 @@ export function TabRecursos() {
                     ...modelPolicy.default_models,
                     [pId]: mId,
                   },
+                  effort_override: null,
                   tier_models: {
                     ...modelPolicy.tier_models,
                     [pId]: {
@@ -535,7 +543,11 @@ export function TabRecursos() {
             const slug = `${effectiveDefaultProvider}:${defaultModel}`;
             const capability = effortCapabilityLookup[slug];
             if (!capability) return null;
-            const stored = modelPolicy.effort_overrides[slug];
+            const stored =
+              modelPolicy.effort_override?.provider_id === effectiveDefaultProvider &&
+              modelPolicy.effort_override?.model_id === defaultModel
+                ? modelPolicy.effort_override.value
+                : null;
             const value: string | number | null =
               typeof stored === "string" || typeof stored === "number" ? stored : null;
             return (
@@ -543,8 +555,9 @@ export function TabRecursos() {
                 <EffortPicker
                   capability={capability}
                   value={value}
-                  onChange={(next) => setEffortOverride(slug, next)}
+                  onChange={setEffortOverride}
                   context="agent"
+                  readOnly={capability.kind === "enum" && capability.values.length <= 1}
                 />
               </div>
             );

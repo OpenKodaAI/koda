@@ -79,8 +79,13 @@ const modelsSchema = z
     providers_enabled: z.array(z.string()).optional(),
     default_provider: z.string().optional(),
     functional_defaults: z.record(z.string(), functionalDefaultSelectionSchema).optional(),
-    effort_defaults: z
-      .record(z.string(), z.union([z.string(), z.number()]))
+    effort_default: z
+      .object({
+        provider_id: z.string(),
+        model_id: z.string(),
+        value: z.union([z.string(), z.number()]),
+      })
+      .nullable()
       .optional(),
   })
   .passthrough()

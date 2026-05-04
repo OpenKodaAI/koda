@@ -35,10 +35,13 @@ export interface EffortPickerProps {
   context: "global" | "agent";
   /** Optional override label for the field title. */
   labelKey?: string;
+  readOnly?: boolean;
 }
 
 const DEFAULT_LABEL_KEY = "modelEffort.title";
 const ENUM_VALUE_LABELS: Record<string, string> = {
+  none: "modelEffort.enumNone",
+  default: "modelEffort.enumDefault",
   minimal: "modelEffort.enumMinimal",
   low: "modelEffort.enumLow",
   medium: "modelEffort.enumMedium",
@@ -48,7 +51,7 @@ const ENUM_VALUE_LABELS: Record<string, string> = {
 };
 
 export function EffortPicker(props: EffortPickerProps) {
-  const { capability, value, inheritedValue, onChange, context, labelKey } = props;
+  const { capability, value, inheritedValue, onChange, context, labelKey, readOnly } = props;
   const { t } = useAppI18n();
   const inputId = useId();
 
@@ -71,7 +74,7 @@ export function EffortPicker(props: EffortPickerProps) {
     <div className="flex flex-col gap-2">
       <span className="eyebrow flex items-center justify-between gap-2">
         <span>{labelText}</span>
-        {context === "agent" && (
+        {context === "agent" && !readOnly && (
           <button
             type="button"
             onClick={() => onChange(isInheriting ? (inheritedValue ?? capability.defaultValue ?? null) : null)}
@@ -85,7 +88,15 @@ export function EffortPicker(props: EffortPickerProps) {
         )}
       </span>
 
-      {capability.kind === "enum" ? (
+      {capability.kind === "enum" && (readOnly || capability.values.length <= 1) ? (
+        <div className="field-shell min-h-9 bg-[var(--panel-soft)] text-sm text-[var(--text-secondary)]">
+          {t(
+            ENUM_VALUE_LABELS[String(effectiveValue ?? capability.defaultValue ?? capability.values[0] ?? "")] ??
+              `modelEffort.enum.${String(effectiveValue ?? capability.defaultValue ?? "")}`,
+            { defaultValue: String(effectiveValue ?? capability.defaultValue ?? capability.values[0] ?? "") },
+          )}
+        </div>
+      ) : capability.kind === "enum" ? (
         <SoftTabs
           items={items}
           value={String(effectiveValue ?? capability.defaultValue ?? items[0]?.id ?? "")}
@@ -103,6 +114,7 @@ export function EffortPicker(props: EffortPickerProps) {
             step={Math.max(1, Math.round((capability.max - capability.min) / 100))}
             value={Number(effectiveValue ?? capability.defaultValue ?? capability.min)}
             onChange={(event) => onChange(Number(event.target.value))}
+            disabled={readOnly}
             className={cn("h-1 flex-1 cursor-pointer accent-[var(--accent)]", isInheriting && "opacity-60")}
             aria-label={labelText}
           />
@@ -115,6 +127,7 @@ export function EffortPicker(props: EffortPickerProps) {
               const n = Number(event.target.value);
               if (Number.isFinite(n)) onChange(n);
             }}
+            disabled={readOnly}
             className={cn(
               "h-9 w-20 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-right text-sm font-mono text-[var(--text-primary)]",
               "focus:outline-none focus:ring-1 focus:ring-[var(--accent-muted)]",

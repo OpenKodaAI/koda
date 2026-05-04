@@ -259,6 +259,85 @@ const EMPTY_KOKORO_VOICE_CATALOG: KokoroVoiceCatalog = {
   provider_connected: true,
 };
 
+function prettifyOllamaModelId(modelId: string) {
+  return modelId
+    .replace(/[:_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase()) || modelId;
+}
+
+function applyOllamaModelCatalogToSettings(
+  settings: GeneralSystemSettings,
+  catalog: OllamaModelCatalog,
+): GeneralSystemSettings {
+  const modelIds = Array.from(
+    new Set(
+      (catalog.items || [])
+        .map((item) => String(item.model_id || item.name || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const ollamaProvider = settings.catalogs.providers.find((provider) => provider.id === "ollama");
+  const providerTitle = String(ollamaProvider?.title || "Ollama");
+  const providerVendor = String(ollamaProvider?.vendor || providerTitle);
+  const commandPresent = Boolean(ollamaProvider?.command_present ?? catalog.provider_connected);
+  const enabledByDefault = Boolean(ollamaProvider?.enabled_by_default ?? catalog.provider_connected);
+  const detectedModels = modelIds.map((modelId) => {
+    const metadata = (catalog.items || []).find(
+      (item) => String(item.model_id || item.name || "").trim() === modelId,
+    );
+    const details = [
+      metadata?.family ? `Familia ${metadata.family}` : "",
+      metadata?.parameter_size ? `${metadata.parameter_size} parametros` : "",
+      metadata?.quantization_level ? `quantizacao ${metadata.quantization_level}` : "",
+    ].filter(Boolean);
+    return {
+      provider_id: "ollama",
+      provider_title: providerTitle,
+      provider_vendor: providerVendor,
+      provider_category: "general",
+      provider_enabled: enabledByDefault,
+      command_present: commandPresent,
+      model_id: modelId,
+      title: prettifyOllamaModelId(modelId),
+      description: details.length > 0 ? `${details.join(", ")}.` : "Modelo local Ollama.",
+      status: "current",
+      function_id: "general",
+      family: metadata?.family || null,
+      parameter_size: metadata?.parameter_size || null,
+      quantization_level: metadata?.quantization_level || null,
+      format: metadata?.format || null,
+      size_bytes: metadata?.size || null,
+    };
+  });
+
+  return {
+    ...settings,
+    catalogs: {
+      ...settings.catalogs,
+      providers: settings.catalogs.providers.map((provider) =>
+        provider.id === "ollama"
+          ? {
+              ...provider,
+              available_models: modelIds,
+              functional_models: detectedModels,
+            }
+          : provider,
+      ),
+      functional_model_catalog: {
+        ...settings.catalogs.functional_model_catalog,
+        general: [
+          ...(settings.catalogs.functional_model_catalog.general || []).filter(
+            (item) => item.provider_id !== "ollama",
+          ),
+          ...detectedModels,
+        ],
+      },
+    },
+  };
+}
+
 function buildProviderConnectionDrafts(settings: GeneralSystemSettings) {
   const connections = settings.values.provider_connections || {};
   return Object.fromEntries(
@@ -490,12 +569,14 @@ export function SystemSettingsProvider({
 
   const resetOllamaModelState = useCallback((connection?: GeneralSystemSettingsProviderConnection | null) => {
     ollamaModelCacheRef.current = {};
-    setOllamaModelCatalog({
+    const emptyCatalog: OllamaModelCatalog = {
       ...EMPTY_OLLAMA_MODEL_CATALOG,
       base_url: connection?.base_url || "",
       auth_mode: connection?.auth_mode || "local",
       provider_connected: false,
-    });
+    };
+    setOllamaModelCatalog(emptyCatalog);
+    setDraft((current) => applyOllamaModelCatalogToSettings(current, emptyCatalog));
   }, []);
 
   useEffect(() => {
@@ -782,6 +863,7 @@ export function SystemSettingsProvider({
       const now = Date.now();
       if (!options?.force && cached && cached.expiresAt > now) {
         setOllamaModelCatalog(cached.data);
+        setDraft((current) => applyOllamaModelCatalogToSettings(current, cached.data));
         return cached.data;
       }
 
@@ -793,6 +875,7 @@ export function SystemSettingsProvider({
           data: payload,
         };
         setOllamaModelCatalog(payload);
+        setDraft((current) => applyOllamaModelCatalogToSettings(current, payload));
         return payload;
       } finally {
         setOllamaModelsLoading(false);

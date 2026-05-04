@@ -1708,7 +1708,7 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         selector = 'input[type="file"]'
     from koda.services.browser_manager import browser_manager
 
-    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path)
+    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path, allowed_root=ctx.work_dir)
     success = not result.startswith("Error")
     return AgentToolResult(tool="browser_upload", success=success, output=result)
 
@@ -2544,7 +2544,7 @@ async def _handle_shell_status(params: dict, ctx: ToolContext) -> AgentToolResul
         return AgentToolResult(tool="shell_status", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    bg = bg_process_manager.get(handle_id)
+    bg = bg_process_manager.get(handle_id, user_id=ctx.user_id)
     if not bg:
         return AgentToolResult(tool="shell_status", success=False, output=f"No process with handle '{handle_id}'.")
     import time
@@ -2570,7 +2570,7 @@ async def _handle_shell_kill(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="shell_kill", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    error = await bg_process_manager.kill(handle_id)
+    error = await bg_process_manager.kill(handle_id, user_id=ctx.user_id)
     if error:
         return AgentToolResult(tool="shell_kill", success=False, output=error)
     return AgentToolResult(tool="shell_kill", success=True, output=f"Killed process: {handle_id}")
@@ -2585,7 +2585,7 @@ async def _handle_shell_output(params: dict, ctx: ToolContext) -> AgentToolResul
         return AgentToolResult(tool="shell_output", success=False, output="Missing required param: 'handle_id'.")
     from koda.services.shell_tools import bg_process_manager
 
-    bg = bg_process_manager.get(handle_id)
+    bg = bg_process_manager.get(handle_id, user_id=ctx.user_id)
     if not bg:
         return AgentToolResult(tool="shell_output", success=False, output=f"No process with handle '{handle_id}'.")
     if not bg.finished:

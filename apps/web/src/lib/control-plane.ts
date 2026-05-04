@@ -412,10 +412,14 @@ export type GeneralSystemSettings = {
         }
       >;
       /**
-       * Per-model default effort overrides keyed by `provider:model`.
-       * String values for enum-kind models, integers for tokens-kind models.
+       * Singular default effort for the currently selected general model.
+       * Legacy per-model maps are read by the backend only for migration.
        */
-      effort_defaults?: Record<string, string | number>;
+      effort_default?: {
+        provider_id: string;
+        model_id: string;
+        value: string | number;
+      } | null;
     };
     resources: {
       global_tools: string[];
@@ -1069,7 +1073,7 @@ export type GeneralSystemSettingsCatalogProvider = {
   category?: string;
   enabled_by_default?: boolean;
   command_present?: boolean;
-  available_models?: Array<Record<string, unknown>>;
+  available_models?: string[];
   default_model?: string;
   supported_auth_modes?: string[];
   supports_api_key?: boolean;

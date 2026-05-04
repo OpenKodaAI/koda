@@ -192,10 +192,7 @@ class TestHttpSseTransport:
     async def test_sends_request(self) -> None:
         response_body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"status": "ok"}}).encode()
 
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = response_body
-
-        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+        with patch("koda.services.mcp_client._urlopen_safely", return_value=response_body) as mock_open:
             transport = HttpSseTransport("https://mcp.example.com/rpc")
             result = await transport.send_request("ping")
 
@@ -215,10 +212,7 @@ class TestHttpSseTransport:
             }
         ).encode()
 
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = response_body
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("koda.services.mcp_client._urlopen_safely", return_value=response_body):
             transport = HttpSseTransport("https://mcp.example.com/rpc")
             with pytest.raises(McpError) as exc_info:
                 await transport.send_request("bad")

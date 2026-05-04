@@ -459,6 +459,18 @@ describe("useSystemSettings", () => {
       expect(result.current.elevenlabsVoiceCatalog.items).toHaveLength(1);
       expect(result.current.ollamaModelCatalog.items).toHaveLength(1);
     });
+    expect(
+      result.current.draft.catalogs.providers.find((provider) => provider.id === "ollama")?.available_models,
+    ).toEqual(["llama3"]);
+    expect(result.current.draft.catalogs.functional_model_catalog.general).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider_id: "ollama",
+          model_id: "llama3",
+          function_id: "general",
+        }),
+      ]),
+    );
 
     await act(async () => {
       await result.current.disconnectProviderConnection("elevenlabs");
@@ -469,6 +481,9 @@ describe("useSystemSettings", () => {
     expect(result.current.elevenlabsVoiceCatalog.provider_connected).toBe(false);
     expect(result.current.ollamaModelCatalog.items).toHaveLength(0);
     expect(result.current.ollamaModelCatalog.provider_connected).toBe(false);
+    expect(
+      result.current.draft.catalogs.providers.find((provider) => provider.id === "ollama")?.available_models,
+    ).toEqual([]);
     expect(result.current.providerConnectionDrafts.ollama.auth_mode).toBe("local");
   });
 

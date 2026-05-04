@@ -643,7 +643,12 @@ def _build_chat_payload(
         cap = get_model_effort_capability(profile.provider_id, model)
         if cap is not None:
             if cap["kind"] == "enum" and isinstance(effort, str) and effort in cap["values"]:
-                payload["reasoning_effort"] = effort
+                if profile.provider_id == "xai":
+                    payload["reasoning"] = {"effort": effort}
+                else:
+                    payload["reasoning_effort"] = effort
+                if profile.provider_id == "deepseek":
+                    payload["thinking"] = {"type": "enabled"}
             elif cap["kind"] == "tokens":
                 try:
                     budget = int(effort)
@@ -1073,6 +1078,7 @@ def _build_xai_profile() -> ProviderHttpProfile:
         vision_models=frozenset(
             {
                 "grok-4.3",
+                "grok-4.20-multi-agent",
                 "grok-4.1-fast",
                 "grok-4-fast",
                 "grok-4-0709",

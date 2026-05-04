@@ -8,6 +8,7 @@ written by the UI survive the backend pipeline and are returned intact.
 from __future__ import annotations
 
 import koda.control_plane.manager as manager_mod
+from koda.provider_models import resolve_provider_function_model_catalog
 
 
 def _mk_manager():
@@ -79,6 +80,45 @@ def _mock_storage(manager, monkeypatch) -> dict[str, dict[str, object]]:
     monkeypatch.setattr(manager_mod, "execute", lambda *args, **kwargs: 1)
 
     return store
+
+
+def _install_codex_catalog(manager) -> None:
+    functional_models = resolve_provider_function_model_catalog(
+        "codex",
+        available_models=["gpt-5", "gpt-5-pro"],
+    )
+    catalog = {
+        "providers": {
+            "codex": {
+                "id": "codex",
+                "title": "OpenAI",
+                "vendor": "OpenAI",
+                "category": "general",
+                "enabled": True,
+                "show_in_settings": True,
+                "available_models": ["gpt-5", "gpt-5-pro"],
+                "default_model": "gpt-5",
+                "functional_models": functional_models,
+            }
+        },
+        "default_provider": "codex",
+        "enabled_providers": ["codex"],
+        "fallback_order": ["codex"],
+    }
+    manager.get_core_providers = lambda: catalog  # type: ignore[attr-defined]
+    manager._provider_catalog_from_env = lambda env: catalog  # type: ignore[attr-defined]
+    manager._functional_model_catalog = lambda provider_catalog: {  # type: ignore[attr-defined]
+        "general": functional_models,
+    }
+    manager._resolve_general_functional_defaults = lambda **kwargs: dict(  # type: ignore[attr-defined]
+        kwargs.get("providers_section", {}).get("functional_defaults") or {}
+    )
+    manager.get_provider_connection = lambda provider_id: {  # type: ignore[attr-defined]
+        "provider_id": provider_id,
+        "verified": provider_id == "codex",
+        "configured": provider_id == "codex",
+        "api_key_present": provider_id == "codex",
+    }
 
 
 def test_memory_enabled_toggle_round_trips_true(monkeypatch):
@@ -394,3 +434,101 @@ def test_metal_enabled_true_round_trips_after_being_off(monkeypatch):
     )
     got = manager_mod.ControlPlaneManager.get_general_system_settings(manager)
     assert got["values"]["models"]["metal_enabled"] is True
+
+
+def test_effort_default_round_trips_as_singular_selection(monkeypatch):
+    manager = _mk_manager()
+    store = _mock_storage(manager, monkeypatch)
+    _install_codex_catalog(manager)
+
+    manager_mod.ControlPlaneManager.put_general_system_settings(
+        manager,
+        {
+            "models": {
+                "providers_enabled": ["codex"],
+                "default_provider": "codex",
+                "functional_defaults": {
+                    "general": {"provider_id": "codex", "model_id": "gpt-5"},
+                },
+                "effort_default": {"provider_id": "codex", "model_id": "gpt-5", "value": "high"},
+            }
+        },
+    )
+
+    got = manager_mod.ControlPlaneManager.get_general_system_settings(manager)
+    assert got["values"]["models"]["effort_default"] == {
+        "provider_id": "codex",
+        "model_id": "gpt-5",
+        "value": "high",
+    }
+    env = store["providers"]["env"]  # type: ignore[index]
+    assert "MODEL_EFFORT_DEFAULT_JSON" in env
+    assert "MODEL_EFFORT_DEFAULTS_JSON" not in env
+
+
+def test_effort_default_migrates_legacy_map_only_for_effective_model(monkeypatch):
+    manager = _mk_manager()
+    store = _mock_storage(manager, monkeypatch)
+    _install_codex_catalog(manager)
+
+    manager_mod.ControlPlaneManager.put_general_system_settings(
+        manager,
+        {
+            "models": {
+                "providers_enabled": ["codex"],
+                "default_provider": "codex",
+                "functional_defaults": {
+                    "general": {"provider_id": "codex", "model_id": "gpt-5"},
+                },
+                "effort_defaults": {
+                    "codex:gpt-5": "low",
+                    "codex:gpt-5-pro": "high",
+                },
+            }
+        },
+    )
+
+    got = manager_mod.ControlPlaneManager.get_general_system_settings(manager)
+    assert got["values"]["models"]["effort_default"] == {
+        "provider_id": "codex",
+        "model_id": "gpt-5",
+        "value": "low",
+    }
+    env = store["providers"]["env"]  # type: ignore[index]
+    assert "MODEL_EFFORT_DEFAULT_JSON" in env
+    assert "MODEL_EFFORT_DEFAULTS_JSON" not in env
+
+
+def test_effort_default_clears_when_general_model_changes(monkeypatch):
+    manager = _mk_manager()
+    _mock_storage(manager, monkeypatch)
+    _install_codex_catalog(manager)
+
+    manager_mod.ControlPlaneManager.put_general_system_settings(
+        manager,
+        {
+            "models": {
+                "providers_enabled": ["codex"],
+                "default_provider": "codex",
+                "functional_defaults": {
+                    "general": {"provider_id": "codex", "model_id": "gpt-5"},
+                },
+                "effort_default": {"provider_id": "codex", "model_id": "gpt-5", "value": "high"},
+            }
+        },
+    )
+    manager_mod.ControlPlaneManager.put_general_system_settings(
+        manager,
+        {
+            "models": {
+                "providers_enabled": ["codex"],
+                "default_provider": "codex",
+                "functional_defaults": {
+                    "general": {"provider_id": "codex", "model_id": "gpt-5-pro"},
+                },
+            }
+        },
+    )
+
+    got = manager_mod.ControlPlaneManager.get_general_system_settings(manager)
+    assert got["values"]["models"]["effort_default"] == {}
