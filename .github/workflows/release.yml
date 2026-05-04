@@ -372,7 +372,17 @@ jobs:
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit
-        run: cargo audit --file rust/Cargo.lock
+        # Keep release auditing aligned with security.yml. The ignored
+        # advisories are documented there with dependency paths and exposure
+        # rationale; release must use the same policy so a green main security
+        # gate can actually publish the matching artifact set.
+        run: |
+          cargo audit --file rust/Cargo.lock \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104 \
+            --ignore RUSTSEC-2025-0134 \
+            --ignore RUSTSEC-2026-0097
 
   sast:
     name: sast

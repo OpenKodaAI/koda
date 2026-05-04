@@ -454,6 +454,15 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     assert "--require-hashes" in security_workflow_text
     assert "--disable-pip" in release_workflow_text
     assert "--disable-pip" in security_workflow_text
+    for advisory in (
+        "RUSTSEC-2026-0098",
+        "RUSTSEC-2026-0099",
+        "RUSTSEC-2026-0104",
+        "RUSTSEC-2025-0134",
+        "RUSTSEC-2026-0097",
+    ):
+        assert f"--ignore {advisory}" in release_workflow_text
+        assert f"--ignore {advisory}" in security_workflow_text
 
     trivy_targets = (
         "koda.sarif --exit-code 1 koda:",

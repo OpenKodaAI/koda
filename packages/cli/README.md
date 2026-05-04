@@ -3,7 +3,7 @@
 # Koda
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.11/docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.12/docs/assets/brand/koda_hero.jpg" alt="Koda" width="100%" />
 </p>
 
 <p align="center">
@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/install/local.md">Quickstart</a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/install/local.md">Quickstart</a>
   ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/README.md">Docs</a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/README.md">Docs</a>
   ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/reference/api.md">API</a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/reference/api.md">API</a>
   ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/architecture/overview.md">Architecture</a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/architecture/overview.md">Architecture</a>
 </p>
 
 Koda gives AI agents the operational layer they need: setup, provider connections, agent configuration, durable state, runtime inspection, memory, retrieval, artifacts, schedules, costs, and audit trails. Bring the providers and workflows that fit your domain; Koda supplies the local-first harness around them.
@@ -27,9 +27,9 @@ Koda is control-plane-first: operators configure the system in the dashboard and
 ## Product Tour
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.11/docs/assets/screenshots/overview.png" alt="Koda dashboard overview" width="32%" />
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.11/docs/assets/screenshots/costs.png" alt="Koda costs dashboard" width="32%" />
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.11/docs/assets/screenshots/runtime.png" alt="Koda runtime dashboard" width="32%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.12/docs/assets/screenshots/overview.png" alt="Koda dashboard overview" width="32%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.12/docs/assets/screenshots/costs.png" alt="Koda costs dashboard" width="32%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/v1.0.12/docs/assets/screenshots/runtime.png" alt="Koda runtime dashboard" width="32%" />
 </p>
 
 - **Home:** activity, recent work, setup progress, and the command bar.
@@ -144,19 +144,19 @@ docker compose exec app python scripts/seed_demo_data.py --clear
 - `/api/control-plane/agents/*` agent configuration API
 - `/api/control-plane/*` broader public control-plane API
 - `/api/runtime/*` runtime inspection and control
-- [`docs/openapi/control-plane.json`](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/openapi/control-plane.json) maintained OpenAPI contract
+- [`docs/openapi/control-plane.json`](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/openapi/control-plane.json) maintained OpenAPI contract
 
 ## Docs
 
-- [Documentation index](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/README.md)
-- [Local install](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/install/local.md)
-- [Architecture overview](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/architecture/overview.md)
-- [Runtime architecture](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/architecture/runtime.md)
-- [Configuration reference](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/config/reference.md)
-- [Operations runbooks](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/operations/README.md)
-- [Security readiness](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/security/README.md)
-- [API reference](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/reference/api.md)
-- [Release distribution](https://github.com/OpenKodaAI/koda/blob/v1.0.11/docs/reference/releases.md)
+- [Documentation index](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/README.md)
+- [Local install](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/install/local.md)
+- [Architecture overview](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/architecture/overview.md)
+- [Runtime architecture](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/architecture/runtime.md)
+- [Configuration reference](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/config/reference.md)
+- [Operations runbooks](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/operations/README.md)
+- [Security readiness](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/security/README.md)
+- [API reference](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/reference/api.md)
+- [Release distribution](https://github.com/OpenKodaAI/koda/blob/v1.0.12/docs/reference/releases.md)
 
 ## Development
 
