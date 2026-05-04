@@ -1,13 +1,16 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type UIEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, Loader2, Plus, Search } from "lucide-react";
 import { AgentGlyph } from "@/components/ui/agent-glyph";
@@ -15,10 +18,12 @@ import { AgentGlyphGroup } from "@/components/ui/agent-glyph-group";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useCreateAgent } from "@/hooks/use-create-agent";
+import { requestJson } from "@/lib/http-client";
 import {
   resolveAgentSelection,
   toggleAgentSelection,
 } from "@/lib/agent-selection";
+import type { AgentDisplay } from "@/lib/agent-constants";
 import { cn } from "@/lib/utils";
 
 interface AgentSwitcherProps {
@@ -42,6 +47,63 @@ interface AgentSwitcherProps {
   showCreate?: boolean;
 }
 
+const AGENT_SWITCHER_PAGE_SIZE = 5;
+const AGENT_SWITCHER_SCROLL_THRESHOLD = 28;
+
+type AgentSummaryLike = {
+  id: string;
+  display_name?: string | null;
+  appearance?: {
+    label?: string | null;
+    color?: string | null;
+    color_rgb?: string | null;
+  } | null;
+};
+
+type AgentCatalogPage = {
+  items: AgentSummaryLike[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+function toAgentDisplay(agent: AgentSummaryLike): AgentDisplay {
+  return {
+    id: agent.id,
+    label: String(agent.appearance?.label || agent.display_name || agent.id),
+    color: String(agent.appearance?.color || "#A7ADB4"),
+    colorRgb: String(agent.appearance?.color_rgb || "167, 173, 180"),
+  };
+}
+
+function mergeAgentLists(
+  primary: AgentDisplay[],
+  secondary: AgentDisplay[],
+): AgentDisplay[] {
+  if (secondary.length === 0) return primary;
+  const byId = new Map(primary.map((agent) => [agent.id, agent]));
+  for (const agent of secondary) {
+    byId.set(agent.id, agent);
+  }
+  return Array.from(byId.values());
+}
+
+async function fetchAgentSwitcherPage(search: string, offset: number) {
+  const params = new URLSearchParams({
+    limit: String(AGENT_SWITCHER_PAGE_SIZE),
+    offset: String(offset),
+  });
+  if (search.trim()) params.set("q", search.trim());
+  const payload = await requestJson<AgentCatalogPage>(
+    `/api/control-plane/agents?${params.toString()}`,
+  );
+  return {
+    ...payload,
+    items: payload.items.map(toAgentDisplay),
+  };
+}
+
 export function AgentSwitcher({
   selectedBotIds,
   onSelectionChange,
@@ -58,10 +120,11 @@ export function AgentSwitcher({
   showCreate = true,
 }: AgentSwitcherProps) {
   const { t } = useAppI18n();
-  const { agents } = useAgentCatalog();
+  const { agents, mergeAgents } = useAgentCatalog();
   const { creating, createAgent } = useCreateAgent();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -73,7 +136,43 @@ export function AgentSwitcher({
     placeAbove: boolean;
   } | null>(null);
 
-  const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
+  const normalizedSearch = search.trim();
+  const agentPagesQuery = useInfiniteQuery({
+    queryKey: ["control-plane", "agents", "switcher", normalizedSearch],
+    queryFn: ({ pageParam }) =>
+      fetchAgentSwitcherPage(normalizedSearch, Number(pageParam)),
+    initialPageParam: 0,
+    enabled: open,
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more && lastPage.items.length > 0
+        ? lastPage.offset + lastPage.items.length
+        : undefined,
+  });
+
+  const pagedAgents = useMemo(
+    () => agentPagesQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [agentPagesQuery.data],
+  );
+
+  useEffect(() => {
+    if (pagedAgents.length > 0) mergeAgents(pagedAgents);
+  }, [mergeAgents, pagedAgents]);
+
+  useEffect(() => {
+    if (open && listRef.current) listRef.current.scrollTop = 0;
+  }, [normalizedSearch, open]);
+
+  const catalogAgents = useMemo(
+    () => mergeAgentLists(agents, pagedAgents),
+    [agents, pagedAgents],
+  );
+
+  const availableBotIds = useMemo(
+    () => catalogAgents.map((agent) => agent.id),
+    [catalogAgents],
+  );
   const resolvedActiveBotId = useMemo(() => {
     if (!activeBotId) return undefined;
     return (
@@ -95,21 +194,39 @@ export function AgentSwitcher({
 
   const selectedSet = useMemo(() => new Set(resolvedBotIds), [resolvedBotIds]);
   const selectedAgents = useMemo(
-    () => agents.filter((agent) => selectedSet.has(agent.id)),
-    [agents, selectedSet],
+    () => catalogAgents.filter((agent) => selectedSet.has(agent.id)),
+    [catalogAgents, selectedSet],
   );
 
-  const visibleAgents = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return agents;
-    return agents.filter((agent) =>
+  const filteredCatalogAgents = useMemo(() => {
+    const query = normalizedSearch.toLowerCase();
+    if (!query) return catalogAgents;
+    return catalogAgents.filter((agent) =>
       `${agent.label} ${agent.id}`.toLowerCase().includes(query),
     );
-  }, [agents, search]);
+  }, [catalogAgents, normalizedSearch]);
+
+  const visibleAgents = useMemo(
+    () =>
+      agentPagesQuery.data
+        ? pagedAgents
+        : filteredCatalogAgents.slice(0, AGENT_SWITCHER_PAGE_SIZE),
+    [agentPagesQuery.data, filteredCatalogAgents, pagedAgents],
+  );
+
+  const firstPage = agentPagesQuery.data?.pages[0];
+  const catalogTotal = Math.max(
+    catalogAgents.length,
+    normalizedSearch ? 0 : (firstPage?.total ?? 0),
+  );
 
   const shouldShowSearch = showSearch ?? true;
 
-  const allSelected = multiple && resolvedBotIds.length === agents.length && agents.length > 0;
+  const allSelected =
+    multiple &&
+    catalogAgents.length > 0 &&
+    (resolvedBotIds.length === catalogAgents.length ||
+      (selectedBotIds?.length ?? 0) === 0);
 
   const summaryLabel = multiple
     ? resolvedBotIds.length === 0 || allSelected
@@ -118,7 +235,7 @@ export function AgentSwitcher({
         ? selectedAgents[0]?.label ?? resolvedBotIds[0]
         : t("agentSwitcher.agentsSelectedOutOfTotal", {
             selected: resolvedBotIds.length,
-            total: agents.length,
+            total: catalogTotal,
           })
     : resolvedActiveBotId
       ? selectedAgents[0]?.label ?? resolvedActiveBotId
@@ -130,6 +247,30 @@ export function AgentSwitcher({
     setOpen(false);
     setSearch("");
   }
+
+  const {
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+  } = agentPagesQuery;
+
+  const handleListScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      const target = event.currentTarget;
+      const distanceToBottom =
+        target.scrollHeight - target.scrollTop - target.clientHeight;
+      if (
+        distanceToBottom > AGENT_SWITCHER_SCROLL_THRESHOLD ||
+        !hasNextPage ||
+        isFetchingNextPage
+      ) {
+        return;
+      }
+      void fetchNextPage();
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -287,7 +428,7 @@ export function AgentSwitcher({
               // Otherwise preview only the explicitly selected ones.
               const previewAgents =
                 multiple && (allSelected || resolvedBotIds.length === 0)
-                  ? agents
+                  ? catalogAgents
                   : selectedAgents;
               if (previewAgents.length === 0) return null;
               return (
@@ -390,7 +531,12 @@ export function AgentSwitcher({
                     </div>
                   ) : null}
 
-                  <div className="flex-1 overflow-y-auto">
+                  <div
+                    ref={listRef}
+                    className="flex-1 overflow-y-auto"
+                    onScroll={handleListScroll}
+                    aria-busy={isFetching}
+                  >
                     {showAll ? (
                       <button
                         type="button"
@@ -404,7 +550,7 @@ export function AgentSwitcher({
                         onClick={handleSelectAll}
                       >
                         <AgentGlyphGroup
-                          agents={agents.map((a) => ({
+                          agents={catalogAgents.map((a) => ({
                             id: a.id,
                             color: a.color,
                           }))}
@@ -414,7 +560,7 @@ export function AgentSwitcher({
                           {t("agentSwitcher.allAgents")}
                         </span>
                         <span className="agent-board-ws-selector__item-count">
-                          {agents.length}
+                          {catalogTotal}
                         </span>
                       </button>
                     ) : null}
@@ -448,11 +594,21 @@ export function AgentSwitcher({
                           </button>
                         );
                       })
+                    ) : isFetching ? (
+                      <div className="px-3 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                        {t("agentSwitcher.loadingAgents")}
+                      </div>
                     ) : (
                       <div className="px-3 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
                         {t("agentSwitcher.noResults")}
                       </div>
                     )}
+                    {visibleAgents.length > 0 &&
+                    isFetchingNextPage ? (
+                      <div className="border-t border-[color:var(--divider-hair)] px-3 py-2 text-center text-[0.75rem] text-[var(--text-quaternary)]">
+                        {t("agentSwitcher.loadingAgents")}
+                      </div>
+                    ) : null}
                   </div>
                 </motion.div>
               ) : null}

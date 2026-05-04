@@ -207,8 +207,66 @@ async def control_plane_error_middleware(
         raise
 
 
+def _parse_optional_int(value: str | None, *, name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be greater than or equal to 0")
+    return parsed
+
+
+def _matches_agent_search(agent: dict[str, Any], query: str) -> bool:
+    appearance = agent.get("appearance")
+    organization = agent.get("organization")
+    values = [
+        agent.get("id"),
+        agent.get("display_name"),
+    ]
+    if isinstance(appearance, dict):
+        values.append(appearance.get("label"))
+    if isinstance(organization, dict):
+        values.extend(
+            [
+                organization.get("workspace_id"),
+                organization.get("workspace_name"),
+                organization.get("squad_id"),
+                organization.get("squad_name"),
+            ]
+        )
+    haystack = " ".join(str(value) for value in values if value)
+    return query in haystack.lower()
+
+
 async def list_agents(request: web.Request) -> web.Response:
-    return web.json_response({"items": _manager().list_agents()})
+    items = _manager().list_agents()
+    raw_query = (request.query.get("q") or request.query.get("search") or "").strip()
+    if raw_query:
+        query = raw_query.lower()
+        items = [item for item in items if _matches_agent_search(item, query)]
+
+    total = len(items)
+    offset = _parse_optional_int(request.query.get("offset"), name="offset") or 0
+    requested_limit = _parse_optional_int(request.query.get("limit"), name="limit")
+    if requested_limit is None:
+        page = items[offset:] if offset else items
+        limit = len(page)
+    else:
+        limit = min(requested_limit, 100)
+        page = items[offset : offset + limit]
+
+    return web.json_response(
+        {
+            "items": page,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(page) < total,
+        }
+    )
 
 
 async def setup_landing(request: web.Request) -> web.Response:

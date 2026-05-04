@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
@@ -87,24 +88,29 @@ describe("RuntimeOverviewScreen", () => {
     });
 
     const { RuntimeOverviewScreen } = await import("@/components/runtime/runtime-overview");
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
 
     render(
-      <I18nProvider initialLanguage="pt-BR">
-        <ToastProvider>
-          <AgentCatalogProvider
-            initialAgents={[
-              {
-                id: "ATLAS",
-                label: "ATLAS",
-                color: "#6E97D9",
-                colorRgb: "110, 151, 217",
-              },
-            ]}
-          >
-            <RuntimeOverviewScreen />
-          </AgentCatalogProvider>
-        </ToastProvider>
-      </I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLanguage="pt-BR">
+          <ToastProvider>
+            <AgentCatalogProvider
+              initialAgents={[
+                {
+                  id: "ATLAS",
+                  label: "ATLAS",
+                  color: "#6E97D9",
+                  colorRgb: "110, 151, 217",
+                },
+              ]}
+            >
+              <RuntimeOverviewScreen />
+            </AgentCatalogProvider>
+          </ToastProvider>
+        </I18nProvider>
+      </QueryClientProvider>
     );
 
     expect(screen.getByTestId("runtime-overview-screen")).toBeInTheDocument();

@@ -458,6 +458,7 @@ export const resources = {
         noAgentFilter: "No bot filter",
         selectOne: "Choose a bot",
         noResults: "No bots found",
+        loadingAgents: "Loading bots",
       },
       async: {
         loading: "Loading",
@@ -1154,6 +1155,7 @@ export const resources = {
         noAgentFilter: "Sem filtro por bot",
         selectOne: "Selecione um bot",
         noResults: "Nenhum bot encontrado",
+        loadingAgents: "Carregando bots",
       },
       async: {
         loading: "Carregando",
@@ -1830,6 +1832,7 @@ export const resources = {
         noAgentFilter: "Sin filtro por bot",
         selectOne: "Selecciona un bot",
         noResults: "Ningún bot encontrado",
+        loadingAgents: "Cargando bots",
       },
       async: {
         loading: "Cargando",
@@ -2507,6 +2510,7 @@ export const resources = {
         noAgentFilter: "Aucun filtre bot",
         selectOne: "Choisissez un bot",
         noResults: "Aucun bot trouvé",
+        loadingAgents: "Chargement des bots",
       },
       async: {
         loading: "Chargement",
@@ -3185,6 +3189,7 @@ export const resources = {
         noAgentFilter: "Kein Bot-Filter",
         selectOne: "Bot wählen",
         noResults: "Keine Bots gefunden",
+        loadingAgents: "Bots werden geladen",
       },
       async: {
         loading: "Lädt",

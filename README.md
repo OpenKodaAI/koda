@@ -1,15 +1,6 @@
-<table align="center">
-  <tr>
-    <td align="center" bgcolor="#050505" width="520">
-      <br />
-      <img src="docs/assets/brand/koda-logo.svg" alt="Koda mark" width="84" />
-      <br />
-      <font color="#ffffff" size="7"><strong>Koda</strong></font>
-      <br />
-      <br />
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/assets/brand/koda-banner.png" alt="Koda banner" width="100%" />
+</p>
 
 <p align="center">
   <strong>Open-source control plane for running, supervising, and documenting multi-agent AI systems.</strong>
