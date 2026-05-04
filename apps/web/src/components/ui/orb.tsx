@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+import { MAX_AGENT_ORB_COLORS } from "@/components/ui/agent-orb-constants";
 
 export type AgentState = null | "thinking" | "listening" | "talking";
 
@@ -12,14 +13,12 @@ export type OrbColorPair = { light: string; dark: string };
 
 const PERLIN_NOISE_TEXTURE_URL = "/textures/perlin-noise.png";
 
-const MAX_AGENT_COLORS = 8;
-
 interface OrbProps {
   colors?: [string, string];
   // Multi-agent palette: each entry is the agent's lightened/darkened tonal
-  // pair. When more than one entry is provided the shader divides the orb
-  // into N angular wedges with smooth blending between adjacent agents, so
-  // every selected agent's color is visible inside a single animated orb.
+  // pair. When more than one entry is provided the shader divides the orb into
+  // a capped set of angular wedges with smooth blending between adjacent
+  // agents, keeping dense selections legible and cheap to render.
   // Falls back to `colors` (legacy single agent) when omitted.
   agentColors?: OrbColorPair[];
   colorsRef?: RefObject<[string, string]>;
@@ -57,11 +56,15 @@ export function Orb({
   return (
     <div className={className ?? "relative h-full w-full"} style={style}>
       <Canvas
+        dpr={[1, 1.5]}
+        performance={{ min: 0.5 }}
         resize={{ debounce: resizeDebounce }}
         gl={{
           alpha: true,
           antialias: true,
+          failIfMajorPerformanceCaveat: false,
           premultipliedAlpha: true,
+          powerPreference: "low-power",
         }}
       >
         <Scene
@@ -165,21 +168,26 @@ function Scene({
 
   // Build the multi-agent palette: first slot is the legacy single-agent pair
   // (so single-agent rendering is unchanged), additional slots come from the
-  // explicit agentColors array. Padded out to MAX_AGENT_COLORS so the shader's
-  // fixed-size uniform array always has valid colors at every index.
+  // explicit agentColors array. Padded out to MAX_AGENT_ORB_COLORS so the
+  // shader's fixed-size uniform array always has valid colors at every index.
   const palette = useMemo(() => {
-    const pairs: OrbColorPair[] =
+    const pairs: OrbColorPair[] = (
       agentColors && agentColors.length > 0
         ? agentColors
-        : [{ light: colors[0], dark: colors[1] }];
+        : [{ light: colors[0], dark: colors[1] }]
+    ).slice(0, MAX_AGENT_ORB_COLORS);
     const lights: THREE.Color[] = [];
     const darks: THREE.Color[] = [];
-    for (let i = 0; i < MAX_AGENT_COLORS; i += 1) {
+    for (let i = 0; i < MAX_AGENT_ORB_COLORS; i += 1) {
       const pair = pairs[i % pairs.length];
       lights.push(new THREE.Color(pair.light));
       darks.push(new THREE.Color(pair.dark));
     }
-    return { lights, darks, count: Math.min(pairs.length, MAX_AGENT_COLORS) };
+    return {
+      lights,
+      darks,
+      count: Math.min(pairs.length, MAX_AGENT_ORB_COLORS),
+    };
   }, [agentColors, colors]);
 
   useEffect(() => {
@@ -279,15 +287,24 @@ function Scene({
 
   useEffect(() => {
     const canvas = gl.domElement;
+    let restoreTimer: ReturnType<typeof setTimeout> | null = null;
     const onContextLost = (event: Event) => {
       event.preventDefault();
-      setTimeout(() => {
+      if (restoreTimer !== null) {
+        clearTimeout(restoreTimer);
+      }
+      restoreTimer = setTimeout(() => {
+        restoreTimer = null;
         gl.forceContextRestore();
-      }, 1);
+      }, 250);
     };
     canvas.addEventListener("webglcontextlost", onContextLost, false);
-    return () =>
+    return () => {
+      if (restoreTimer !== null) {
+        clearTimeout(restoreTimer);
+      }
       canvas.removeEventListener("webglcontextlost", onContextLost, false);
+    };
   }, [gl]);
 
   const uniforms = useMemo(() => {
@@ -314,7 +331,7 @@ function Scene({
     );
     const initialLights: THREE.Color[] = [];
     const initialDarks: THREE.Color[] = [];
-    for (let i = 0; i < MAX_AGENT_COLORS; i += 1) {
+    for (let i = 0; i < MAX_AGENT_ORB_COLORS; i += 1) {
       initialLights.push(new THREE.Color(initialColorsRef.current[0]));
       initialDarks.push(new THREE.Color(initialColorsRef.current[1]));
     }
@@ -385,8 +402,8 @@ uniform float uOffsets[7];
 uniform vec3 uColor1;
 uniform vec3 uColor2;
 uniform vec3 uCanvasBg;
-uniform vec3 uAgentColorsLight[8];
-uniform vec3 uAgentColorsDark[8];
+uniform vec3 uAgentColorsLight[5];
+uniform vec3 uAgentColorsDark[5];
 uniform int uAgentColorCount;
 uniform float uInputVolume;
 uniform float uOutputVolume;
@@ -559,9 +576,8 @@ void main() {
     //
     // For the mid-tone color stops we sample the agent palette at this
     // pixel's angle. With one agent the array is filled with a single pair
-    // (so behavior is unchanged); with N agents the orb is divided into N
-    // angular wedges with smooth blending between adjacent agents — every
-    // selected agent's color is visible inside the same animated orb.
+    // (so behavior is unchanged); with N capped agent colors the orb is
+    // divided into smooth blended wedges without overloading dense selectors.
     float wedgeCount = float(max(uAgentColorCount, 1));
     float scaledAngle = (theta / (2.0 * PI)) * wedgeCount;
     float idx1f = mod(floor(scaledAngle), wedgeCount);

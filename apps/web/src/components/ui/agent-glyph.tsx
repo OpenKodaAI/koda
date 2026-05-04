@@ -1,21 +1,22 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { MAX_AGENT_ORB_COLORS } from "@/components/ui/agent-orb-constants";
 import { Orb, type AgentState, type OrbColorPair } from "@/components/ui/orb";
 import { useInViewport } from "@/hooks/use-in-viewport";
 import { cn } from "@/lib/utils";
 
 export type { AgentState };
+export { MAX_AGENT_ORB_COLORS };
 
 interface AgentGlyphProps {
   agentId: string;
   color: string;
   /**
-   * Multi-agent palette. When provided, the shader splits the orb into one
-   * angular wedge per agent so every selected agent's color is visible
-   * inside a single animated orb. Falls back to the single `color` prop
-   * when omitted.
+   * Multi-agent palette. Dense selections are capped to a representative
+   * palette before they reach WebGL, keeping the selector orb readable and
+   * cheap to mount. Falls back to the single `color` prop when omitted.
    */
   colors?: string[];
   className?: string;
@@ -26,6 +27,8 @@ interface AgentGlyphProps {
 }
 
 const FALLBACK_COLOR = "#A7ADB4";
+const ORB_VIEWPORT_ROOT_MARGIN = "160px 0px";
+const ORB_MOUNT_STAGGER_MS = 160;
 
 export function getAgentOrbColor(color: string): string {
   return color || FALLBACK_COLOR;
@@ -155,6 +158,23 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+function useDeferredOrbMount(enabled: boolean, seed: number): boolean {
+  const [readySeed, setReadySeed] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => setReadySeed(seed),
+      seed % ORB_MOUNT_STAGGER_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [enabled, seed]);
+
+  return enabled && readySeed === seed;
+}
+
 export function AgentGlyph({
   agentId,
   color,
@@ -173,7 +193,9 @@ export function AgentGlyph({
   const primaryPair = useMemo(() => tonalPair(orbColor), [orbColor]);
   const palette = useMemo<OrbColorPair[] | undefined>(() => {
     if (!colors || colors.length <= 1) return undefined;
-    return colors.map((c) => tonalPair(c || FALLBACK_COLOR));
+    return colors
+      .slice(0, MAX_AGENT_ORB_COLORS)
+      .map((c) => tonalPair(c || FALLBACK_COLOR));
   }, [colors]);
 
   const orbStyle = {
@@ -185,8 +207,9 @@ export function AgentGlyph({
   // than the browser allows (~16 in Chrome). Called unconditionally — the
   // swatch branch ignores `ref` and `inView`.
   const { ref, inView } = useInViewport<HTMLSpanElement>({
-    rootMargin: "400px 0px",
+    rootMargin: ORB_VIEWPORT_ROOT_MARGIN,
   });
+  const shouldMountOrb = useDeferredOrbMount(shape === "orb" && inView, seed);
 
   if (shape === "swatch") {
     return (
@@ -221,7 +244,7 @@ export function AgentGlyph({
       style={orbStyle}
       aria-hidden="true"
     >
-      {inView ? (
+      {shouldMountOrb ? (
         <Orb
           colors={[primaryPair.light, primaryPair.dark]}
           agentColors={palette}
