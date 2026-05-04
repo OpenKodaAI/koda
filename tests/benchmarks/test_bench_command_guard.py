@@ -8,10 +8,20 @@ caught at PR time."""
 
 from __future__ import annotations
 
+import pytest
+
 from .conftest import load_baseline, measure_ns_per_op
 
 
 def test_command_guard_is_blocked_shell_within_baseline() -> None:
+    from koda.services.command_guard import native_available
+
+    if not native_available():
+        pytest.skip(
+            "command_guard benchmark requires the native koda_command_guard wheel; "
+            "run scripts/dev/build_command_guard.sh or the dedicated benchmarks workflow."
+        )
+
     from koda.services.blocked_patterns import is_blocked_shell
 
     samples_inputs = [

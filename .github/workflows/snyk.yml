@@ -67,7 +67,11 @@ jobs:
 
       - name: Sync Python dependencies
         if: env.SNYK_TOKEN != ''
-        run: uv sync --locked
+        run: uv sync --locked --all-groups --all-extras
+
+      - name: Expose Python virtualenv to Snyk
+        if: env.SNYK_TOKEN != ''
+        run: echo "${PWD}/.venv/bin" >> "${GITHUB_PATH}"
 
       - name: Install web dependencies
         if: env.SNYK_TOKEN != ''
@@ -119,6 +123,7 @@ jobs:
           snyk test \
             --file=artifacts/security/snyk/python-requirements.txt \
             --package-manager=pip \
+            --command=python \
             --severity-threshold=high \
             --sarif-file-output=artifacts/security/snyk/python-open-source.sarif
           status=$?
@@ -148,7 +153,8 @@ jobs:
             --exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release
           snyk monitor \
             --file=artifacts/security/snyk/python-requirements.txt \
-            --package-manager=pip
+            --package-manager=pip \
+            --command=python
 
       - name: Upload Snyk artifacts
         if: always() && env.SNYK_TOKEN != ''

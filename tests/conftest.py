@@ -216,6 +216,16 @@ def _reset_approval_runtime_state():
     _APPROVAL_GRANTS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_internal_rpc_breakers():
+    """Keep process-local sidecar breaker state from leaking between tests."""
+    from koda.internal_rpc.circuit_breaker import reset_registry_for_tests
+
+    reset_registry_for_tests()
+    yield
+    reset_registry_for_tests()
+
+
 @pytest.fixture
 def unauthorized_update():
     """Create a mock Update for an unauthorized user."""
