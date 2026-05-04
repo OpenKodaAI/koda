@@ -95,13 +95,20 @@ async def test_renewal_loop_swallows_transient_errors(monkeypatch: pytest.Monkey
             raise RuntimeError("transient db error")
         return True
 
-    monkeypatch.setattr(queue_manager, "extend_task_lease", fake_extend)
-
     cancel = asyncio.Event()
+    retried = asyncio.Event()
+    event_loop = asyncio.get_running_loop()
+
+    def fake_extend_until_retry(task_id: int, owner: str, lease_seconds: int) -> bool:
+        result = fake_extend(task_id, owner, lease_seconds)
+        if len(calls) >= 2:
+            event_loop.call_soon_threadsafe(retried.set)
+        return result
+
+    monkeypatch.setattr(queue_manager, "extend_task_lease", fake_extend_until_retry)
+
     loop_task = asyncio.create_task(queue_manager._task_lease_renewal_loop(task_id=1, owner="W", cancel=cancel))
-    # Two iterations need the heartbeat sleep + the to_thread dispatch
-    # latency, so allow enough wall time for both extend calls to land.
-    await asyncio.sleep(0.3)
+    await asyncio.wait_for(retried.wait(), timeout=1.0)
     cancel.set()
     await asyncio.wait_for(loop_task, timeout=0.5)
     assert len(calls) >= 2, "loop must retry after a transient error"

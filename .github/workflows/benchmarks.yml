@@ -46,4 +46,6 @@ jobs:
           (cd rust/koda-command-guard && maturin build --release --interpreter "$(which python)")
           pip install --force-reinstall rust/koda-command-guard/target/wheels/koda_command_guard-*.whl
       - name: Run benchmarks
+        env:
+          KODA_RUN_BENCHMARKS: '1'
         run: pytest tests/benchmarks/ -v --no-cov

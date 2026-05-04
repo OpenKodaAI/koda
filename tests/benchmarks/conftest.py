@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Any
 
+import pytest
+
 BASELINES_DIR = Path(__file__).resolve().parent / "baselines"
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if os.environ.get("KODA_RUN_BENCHMARKS") == "1":
+        return
+
+    skip = pytest.mark.skip(reason="benchmarks run in the dedicated benchmarks workflow")
+    benchmarks_dir = Path(__file__).resolve().parent
+    for item in items:
+        raw_path = getattr(item, "path", None)
+        if raw_path is None:
+            raw_path = item.fspath
+        item_path = Path(str(raw_path)).resolve()
+        if item_path == benchmarks_dir or benchmarks_dir in item_path.parents:
+            item.add_marker(skip)
 
 
 def load_baseline(name: str) -> dict[str, Any]:
