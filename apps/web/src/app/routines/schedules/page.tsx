@@ -390,6 +390,16 @@ export default function SchedulesPage() {
         })),
     [agents, jobsByAgent, visibleBotIds],
   );
+  const scheduleRows = useMemo(
+    () =>
+      visibleAgents.flatMap((entry) =>
+        entry.jobs.map((job) => ({
+          job,
+          agent: entry.agent,
+        })),
+      ),
+    [visibleAgents],
+  );
 
   const totalJobs = visibleAgents.reduce((sum, entry) => sum + entry.jobs.length, 0);
   const enabledJobs = visibleAgents.reduce(
@@ -526,39 +536,15 @@ export default function SchedulesPage() {
               />
             </div>
           ) : (
-            <section
-              className={`animate-in stagger-2 grid gap-4 ${
-                botsWithJobs.length > 1 ? "xl:grid-cols-2" : "grid-cols-1"
-              }`}
-            >
-              {botsWithJobs.map((entry) => {
-                return (
-                  <div key={entry.agent.id} className="flex flex-col gap-3">
-                    <header className="flex items-baseline justify-between px-1">
-                      <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                        {entry.agent.label}
-                      </span>
-                      <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-                        {t("schedules.page.configured", {
-                          count: entry.jobs.length,
-                          defaultValue: "{{count}} configured",
-                        })}
-                      </span>
-                    </header>
-
-                    <CronTable
-                      jobs={entry.jobs}
-                      agentLabel={entry.agent.label}
-                      agentColor={entry.agent.color}
-                      busyJobId={busyJobId}
-                      onInspect={(job) => void loadDetail(job)}
-                      onEdit={(job) => void loadDetail(job)}
-                      onRun={(job) => void runAction(job, "run")}
-                      onLifecycleAction={(job, action) => void runAction(job, action)}
-                    />
-                  </div>
-                );
-              })}
+            <section className="animate-in stagger-2">
+              <CronTable
+                rows={scheduleRows}
+                busyJobId={busyJobId}
+                onInspect={(job) => void loadDetail(job)}
+                onEdit={(job) => void loadDetail(job)}
+                onRun={(job) => void runAction(job, "run")}
+                onLifecycleAction={(job, action) => void runAction(job, action)}
+              />
             </section>
           )}
         </>

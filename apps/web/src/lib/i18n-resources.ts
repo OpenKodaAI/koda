@@ -13030,11 +13030,15 @@ mutableResources["en-US"].translation.schedules.page = {
   unavailable: "Schedules unavailable",
   unavailableDescription: "Unable to load canonical schedules.",
   visibleAgents: "Visible agents",
+  title: "Scheduled routines",
+  description: "One operational table for agent cadence, task execution, scope, and actions.",
 };
 
 mutableResources["en-US"].translation.schedules.table = {
   ...(mutableResources["en-US"].translation.schedules.table ?? {}),
   nextRun: "Next run",
+  lastRun: "Last run",
+  execution: "Execution",
 };
 
 mutableResources["en-US"].translation.screenTime = {
@@ -13464,11 +13468,15 @@ mutableResources["pt-BR"].translation.schedules.page = {
   unavailable: "Agendamentos indisponíveis",
   unavailableDescription: "Não foi possível carregar os agendamentos canônicos.",
   visibleAgents: "Agentes visíveis",
+  title: "Rotinas programadas",
+  description: "Uma tabela operacional para cadência do agente, execução das tarefas, escopo e ações.",
 };
 
 mutableResources["pt-BR"].translation.schedules.table = {
   ...(mutableResources["pt-BR"].translation.schedules.table ?? {}),
   nextRun: "Próxima execução",
+  lastRun: "Última execução",
+  execution: "Execução",
 };
 
 mutableResources["pt-BR"].translation.screenTime = {
@@ -13895,14 +13903,18 @@ mutableResources["es-ES"].translation.runtime.overview.metrics = {
 
 mutableResources["es-ES"].translation.schedules.page = {
   ...(mutableResources["es-ES"].translation.schedules.page ?? {}),
-  unavailable: "Schedules unavailable",
-  unavailableDescription: "Unable to load canonical schedules.",
-  visibleAgents: "Visible agents",
+  unavailable: "Programaciones no disponibles",
+  unavailableDescription: "No se pudieron cargar las programaciones canónicas.",
+  visibleAgents: "Agentes visibles",
+  title: "Rutinas programadas",
+  description: "Una tabla operativa para cadencia del agente, ejecución de tareas, alcance y acciones.",
 };
 
 mutableResources["es-ES"].translation.schedules.table = {
   ...(mutableResources["es-ES"].translation.schedules.table ?? {}),
-  nextRun: "Next run",
+  nextRun: "Próxima ejecución",
+  lastRun: "Última ejecución",
+  execution: "Ejecución",
 };
 
 mutableResources["es-ES"].translation.screenTime = {
@@ -14329,14 +14341,18 @@ mutableResources["fr-FR"].translation.runtime.overview.metrics = {
 
 mutableResources["fr-FR"].translation.schedules.page = {
   ...(mutableResources["fr-FR"].translation.schedules.page ?? {}),
-  unavailable: "Schedules unavailable",
-  unavailableDescription: "Unable to load canonical schedules.",
-  visibleAgents: "Visible agents",
+  unavailable: "Planifications indisponibles",
+  unavailableDescription: "Impossible de charger les planifications canoniques.",
+  visibleAgents: "Agents visibles",
+  title: "Routines planifiées",
+  description: "Un tableau opérationnel pour cadence agent, exécution des tâches, portée et actions.",
 };
 
 mutableResources["fr-FR"].translation.schedules.table = {
   ...(mutableResources["fr-FR"].translation.schedules.table ?? {}),
-  nextRun: "Next run",
+  nextRun: "Prochaine exécution",
+  lastRun: "Dernière exécution",
+  execution: "Exécution",
 };
 
 mutableResources["fr-FR"].translation.screenTime = {
@@ -14763,14 +14779,18 @@ mutableResources["de-DE"].translation.runtime.overview.metrics = {
 
 mutableResources["de-DE"].translation.schedules.page = {
   ...(mutableResources["de-DE"].translation.schedules.page ?? {}),
-  unavailable: "Schedules unavailable",
-  unavailableDescription: "Unable to load canonical schedules.",
-  visibleAgents: "Visible agents",
+  unavailable: "Zeitpläne nicht verfügbar",
+  unavailableDescription: "Kanonische Zeitpläne konnten nicht geladen werden.",
+  visibleAgents: "Sichtbare Agenten",
+  title: "Geplante Routinen",
+  description: "Eine operative Tabelle für Agent-Taktung, Aufgabenausführung, Geltungsbereich und Aktionen.",
 };
 
 mutableResources["de-DE"].translation.schedules.table = {
   ...(mutableResources["de-DE"].translation.schedules.table ?? {}),
-  nextRun: "Next run",
+  nextRun: "Nächste Ausführung",
+  lastRun: "Letzte Ausführung",
+  execution: "Ausführung",
 };
 
 mutableResources["de-DE"].translation.screenTime = {
