@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -168,3 +169,16 @@ def test_tracked_package_manager_manifests_are_whitelisted_for_security_scans() 
     assert "composer.json" not in manifest_names
     assert "composer.lock" not in manifest_names
     assert manifests <= allowed_manifests, sorted(manifests - allowed_manifests)
+
+
+def test_legacy_requirements_mirrors_runtime_dependencies() -> None:
+    """Keep Snyk's legacy requirements.txt discovery aligned with pyproject.toml."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime_dependencies = project["project"]["dependencies"]
+    legacy_requirements = [
+        line.strip()
+        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+    assert legacy_requirements == runtime_dependencies
