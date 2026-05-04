@@ -58,6 +58,43 @@ async def test_dashboard_agent_summaries_include_agent_metadata() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_agents_supports_search_and_pagination() -> None:
+    manager = MagicMock()
+    manager.list_agents.return_value = [
+        {
+            "id": f"AGENT_{index:02d}",
+            "display_name": f"Agent {index:02d}",
+            "appearance": {
+                "label": f"Agent {index:02d}",
+                "color": "#fff",
+            },
+            "organization": {
+                "workspace_id": "alpha" if index < 6 else "beta",
+                "workspace_name": "Alpha Workspace" if index < 6 else "Beta Workspace",
+            },
+        }
+        for index in range(12)
+    ]
+    request = _Request(query={"q": "beta", "limit": "5", "offset": "0"})
+
+    with patch("koda.control_plane.api._manager", return_value=manager):
+        response = await control_plane_api.list_agents(request)
+
+    payload = json.loads(response.text)
+    assert [item["id"] for item in payload["items"]] == [
+        "AGENT_06",
+        "AGENT_07",
+        "AGENT_08",
+        "AGENT_09",
+        "AGENT_10",
+    ]
+    assert payload["total"] == 6
+    assert payload["limit"] == 5
+    assert payload["offset"] == 0
+    assert payload["has_more"] is True
+
+
+@pytest.mark.asyncio
 async def test_dashboard_agent_stats_route_strips_nested_agent_summary() -> None:
     request = _Request(match_info={"agent_id": "AGENT_A"})
     manager = MagicMock()
