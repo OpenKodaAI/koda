@@ -1,3 +1,16 @@
+<table align="center">
+  <tr>
+    <td align="center" bgcolor="#050505" width="520">
+      <br />
+      <img src="assets/brand/koda-logo.svg" alt="Koda mark" width="84" />
+      <br />
+      <font color="#ffffff" size="7"><strong>Koda</strong></font>
+      <br />
+      <br />
+    </td>
+  </tr>
+</table>
+
 # Koda Documentation
 
 Koda is documented as an operator product first: install it, configure it from the dashboard, run agents, inspect the runtime, and keep the deployment safe.
