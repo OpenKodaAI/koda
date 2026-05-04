@@ -4,6 +4,7 @@
 !apps/web/.env.example
 !packages/cli/release/bundle/.env.bootstrap
 .claude/
+.codex/
 .pnpm-store/
 .pnpm-debug.log*
 node_modules/
