@@ -32,7 +32,7 @@ PUBLIC_DOCS = [
 REQUIRED_ASSETS = [
     ROOT / "docs" / "assets" / "brand" / "koda-logo.svg",
     ROOT / "docs" / "assets" / "brand" / "koda-logo.png",
-    ROOT / "docs" / "assets" / "brand" / "koda_hero.jpg",
+    ROOT / "docs" / "assets" / "brand" / "koda-banner.png",
     ROOT / "docs" / "assets" / "brand" / "koda-og.png",
     ROOT / "docs" / "assets" / "screenshots" / "setup.png",
     ROOT / "docs" / "assets" / "diagrams" / "platform-topology.svg",
@@ -85,6 +85,8 @@ def test_public_docs_use_current_branding() -> None:
 def test_readme_covers_public_entrypoints() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "Koda" in readme
+    assert "docs/assets/brand/koda-banner.png" in readme
+    assert "docs/assets/brand/koda_hero" not in readme
     assert "Core Capabilities" in readme
     assert "Installation Paths" in readme
     assert "apps/web" in readme

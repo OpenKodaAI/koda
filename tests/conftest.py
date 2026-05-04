@@ -205,8 +205,11 @@ def _auto_approve_execution():
 @pytest.fixture(autouse=True)
 def _reset_approval_runtime_state():
     """Keep approval/pending-op globals isolated across tests."""
+    from koda import config as config_module
     from koda.utils.approval import _APPROVAL_GRANTS, _PENDING_AGENT_CMD_OPS, _PENDING_OPS
 
+    pending_approvals_path = config_module.STATE_ROOT_DIR / "pending_approvals.json"
+    pending_approvals_path.unlink(missing_ok=True)
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
     _APPROVAL_GRANTS.clear()
@@ -214,6 +217,7 @@ def _reset_approval_runtime_state():
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
     _APPROVAL_GRANTS.clear()
+    pending_approvals_path.unlink(missing_ok=True)
 
 
 @pytest.fixture(autouse=True)

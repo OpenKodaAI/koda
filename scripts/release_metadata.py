@@ -24,6 +24,7 @@ INIT_PATH = ROOT / "koda" / "__init__.py"
 PRODUCT_NAME = "koda"
 NPM_PACKAGE_NAME = "@openkodaai/koda"
 NPM_BIN_NAME = "koda"
+NPM_PACKAGE_DESCRIPTION = "Open-source control plane for running, supervising, and documenting multi-agent AI systems."
 GHCR_NAMESPACE = "ghcr.io/openkodaai"
 UNPUBLISHED_TIMESTAMP = "1970-01-01T00:00:00Z"
 REPOSITORY_URL = "https://github.com/OpenKodaAI/koda"
@@ -79,7 +80,7 @@ def build_package_json(version: str) -> dict:
     return {
         "name": NPM_PACKAGE_NAME,
         "version": version,
-        "description": "Official Koda Docker-first installer and lifecycle CLI",
+        "description": NPM_PACKAGE_DESCRIPTION,
         "license": "Apache-2.0",
         "type": "module",
         "bin": {

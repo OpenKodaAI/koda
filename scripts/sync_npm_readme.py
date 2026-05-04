@@ -9,7 +9,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from release_metadata import REPOSITORY_URL, load_project_version
+from release_metadata import REPOSITORY_URL
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_README_PATH = ROOT / "README.md"
@@ -21,6 +21,7 @@ GENERATED_HEADER = (
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 HTML_ATTR_RE = re.compile(r'(?P<attr>href|src)="(?P<target>[^"]+)"')
+NPM_README_GITHUB_REF = "main"
 
 
 def _split_target(target: str) -> tuple[str, str]:
@@ -40,7 +41,7 @@ def _is_external(target: str) -> bool:
     )
 
 
-def _normalize_local_target(target: str, *, image: bool, version: str) -> str:
+def _normalize_local_target(target: str, *, image: bool) -> str:
     if _is_external(target):
         return target
 
@@ -52,29 +53,28 @@ def _normalize_local_target(target: str, *, image: bool, version: str) -> str:
         raise RuntimeError(f"README reference escapes repository: {target}") from exc
 
     if image:
-        return f"https://raw.githubusercontent.com/OpenKodaAI/koda/v{version}/{relative}"
+        return f"https://raw.githubusercontent.com/OpenKodaAI/koda/{NPM_README_GITHUB_REF}/{relative}"
 
     base = "tree" if source.is_dir() else "blob"
-    return f"{REPOSITORY_URL}/{base}/v{version}/{relative}{anchor}"
+    return f"{REPOSITORY_URL}/{base}/{NPM_README_GITHUB_REF}/{relative}{anchor}"
 
 
 def build_package_readme() -> str:
-    version = load_project_version()
     text = SOURCE_README_PATH.read_text(encoding="utf-8")
     text = text.replace("http://127.0.0.1:", "http://localhost:")
 
     def replace_markdown_image(match: re.Match[str]) -> str:
         alt, target = match.groups()
-        return f"![{alt}]({_normalize_local_target(target, image=True, version=version)})"
+        return f"![{alt}]({_normalize_local_target(target, image=True)})"
 
     def replace_markdown_link(match: re.Match[str]) -> str:
         label, target = match.groups()
-        return f"[{label}]({_normalize_local_target(target, image=False, version=version)})"
+        return f"[{label}]({_normalize_local_target(target, image=False)})"
 
     def replace_html_attr(match: re.Match[str]) -> str:
         attr = match.group("attr")
         target = match.group("target")
-        normalized = _normalize_local_target(target, image=attr == "src", version=version)
+        normalized = _normalize_local_target(target, image=attr == "src")
         return f'{attr}="{normalized}"'
 
     rendered = MARKDOWN_IMAGE_RE.sub(replace_markdown_image, text)

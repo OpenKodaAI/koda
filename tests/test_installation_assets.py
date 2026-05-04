@@ -94,7 +94,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
     assert (ROOT / "scripts" / "sync_npm_readme.py").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.svg").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-logo.png").exists()
-    assert (ROOT / "docs" / "assets" / "brand" / "koda_hero.jpg").exists()
+    assert (ROOT / "docs" / "assets" / "brand" / "koda-banner.png").exists()
     assert (ROOT / "docs" / "assets" / "brand" / "koda-og.png").exists()
     assert (ROOT / "docs" / "assets" / "screenshots" / "setup.png").exists()
 
@@ -232,9 +232,11 @@ def test_release_metadata_is_publication_ready() -> None:
     assert manifest_payload["distribution"]["github_release_tag"] == f"v{package_payload['version']}"
     assert openapi_payload["info"]["version"] == package_payload["version"]
     assert package_readme.startswith("<!-- Generated from ../../README.md")
-    assert (
-        f"https://github.com/OpenKodaAI/koda/blob/v{package_payload['version']}/docs/install/local.md" in package_readme
+    assert "https://github.com/OpenKodaAI/koda/blob/main/docs/install/local.md" in package_readme
+    versioned_local_docs_link = (
+        f"https://github.com/OpenKodaAI/koda/blob/v{package_payload['version']}/docs/install/local.md"
     )
+    assert versioned_local_docs_link not in package_readme
     assert "http://localhost:3000/setup" in package_readme
 
 

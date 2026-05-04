@@ -1,7 +1,7 @@
 {
   "name": "@openkodaai/koda",
-  "version": "1.0.12",
-  "description": "Official Koda Docker-first installer and lifecycle CLI",
+  "version": "1.0.13",
+  "description": "Open-source control plane for running, supervising, and documenting multi-agent AI systems.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {

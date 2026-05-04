@@ -28,9 +28,10 @@ source tree, tests, CI helpers, or development overlays.
 
 The npm package page README is generated from the repository root README into
 [`../../packages/cli/README.md`](../../packages/cli/README.md) before publication so the registry page stays aligned
-with the product quickstart, setup flow, and reference links. npm only updates the package-page README when a new
-version is published, so README drift is blocked in CI and release validation through
-[`../../scripts/sync_npm_readme.py`](../../scripts/sync_npm_readme.py).
+with the product quickstart, setup flow, and reference links. Local README links and assets are rewritten to the
+current `main` branch so the npm page follows the live repository README instead of a stale release-tag asset.
+npm only updates the package-page README when a new version is published, so README drift is blocked in CI and
+release validation through [`../../scripts/sync_npm_readme.py`](../../scripts/sync_npm_readme.py).
 
 ## Version Source Of Truth
 
