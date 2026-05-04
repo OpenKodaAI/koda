@@ -1,8 +1,12 @@
 "use client";
 
-import { AgentGlyph, type AgentState } from "@/components/ui/agent-glyph";
+import {
+  AgentGlyph,
+  MAX_AGENT_ORB_COLORS,
+  type AgentState,
+} from "@/components/ui/agent-glyph";
 
-interface AgentLike {
+export interface AgentLike {
   id: string;
   color: string;
 }
@@ -16,10 +20,14 @@ interface AgentGlyphGroupProps {
 
 const FALLBACK_COLOR = "#A7ADB4";
 
-// Renders the canonical agent orb, but when multiple agents are passed the
-// shader splits its color ramp into one angular wedge per agent so every
-// selected agent's color is visible in a single animated orb. Use this in
-// any multi-select preview that needs to show "these N agents are picked".
+export function selectAgentGlyphPreviewAgents(
+  agents: AgentLike[],
+): AgentLike[] {
+  return agents.slice(0, MAX_AGENT_ORB_COLORS);
+}
+
+// Renders the canonical agent orb. Multi-agent previews keep only the first
+// few colors so dense selectors remain readable and inexpensive to mount.
 export function AgentGlyphGroup({
   agents,
   state,
@@ -39,11 +47,12 @@ export function AgentGlyphGroup({
       />
     );
   }
+  const previewAgents = selectAgentGlyphPreviewAgents(agents);
   return (
     <AgentGlyph
-      agentId={agents.map((a) => a.id).join(":")}
+      agentId={`${previewAgents.map((a) => a.id).join(":")}:${agents.length}`}
       color={first.color || FALLBACK_COLOR}
-      colors={agents.map((a) => a.color || FALLBACK_COLOR)}
+      colors={previewAgents.map((a) => a.color || FALLBACK_COLOR)}
       state={state}
       active={active}
       className={className}
