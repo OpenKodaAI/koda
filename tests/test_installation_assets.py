@@ -350,8 +350,8 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
 
     assert script_path.exists()
     assert "curl -fsSL" in script_text
-    assert "--retry-connrefused" in script_text
-    assert "--retry-all-errors" in script_text
+    assert "--connect-timeout 2" in script_text
+    assert "--max-time 5" in script_text
     assert "docker compose" in script_text
     assert "docker-inspect.json" in script_text
     assert "http://127.0.0.1:3000/setup" in script_text
