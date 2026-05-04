@@ -51,23 +51,26 @@ jobs:
         run: uv run mypy koda/ --ignore-missing-imports
 
   python-tests:
-    # Phase B.4 — cross-platform matrix. macOS catches darwin-specific
-    # regressions (cgroup no-op path, isolation tests under #[cfg(target_os)],
-    # path handling differences) without committing to a full macOS-only
-    # build pipeline.
-    name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}
+    # Cross-platform matrix. Ubuntu emits the branch-protected contexts;
+    # macOS catches darwin-specific path and isolation regressions.
+    name: ${{ matrix.check-name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
-        python-version: ["3.11", "3.12"]
-        # macOS runners are scarce; only run the lower Python version
-        # there to keep CI cost predictable.
-        exclude:
-          - os: macos-14
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            check-name: python-tests-3.11
+          - os: ubuntu-latest
             python-version: "3.12"
+            check-name: python-tests-3.12
+          # macOS runners are scarce; only run the lower Python version
+          # there to keep CI cost predictable.
+          - os: macos-14
+            python-version: "3.11"
+            check-name: python-tests-macos-14-3.11
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6.2.0
@@ -82,12 +85,12 @@ jobs:
         run: uv sync --locked
       - name: Run tests with coverage
         run: |
-          mkdir -p artifacts/python/${{ matrix.python-version }}
+          mkdir -p artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}
           uv run pytest \
             --cov=koda \
             --cov-report=term-missing \
-            --cov-report=xml:artifacts/python/${{ matrix.python-version }}/coverage.xml \
-            --junitxml=artifacts/python/${{ matrix.python-version }}/pytest.xml
+            --cov-report=xml:artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/pytest.xml
         env:
           AGENT_TOKEN: "test-token"
           ALLOWED_USER_IDS: "123456789"
@@ -96,8 +99,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: python-tests-${{ matrix.python-version }}-artifacts
-          path: artifacts/python/${{ matrix.python-version }}/
+          name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/
           if-no-files-found: ignore
           retention-days: 14
 
