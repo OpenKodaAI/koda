@@ -8,7 +8,7 @@ from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 from koda.agent_contract import (
     evaluate_integration_grant,
@@ -2060,7 +2060,9 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
 
     agent_spec = get_runtime_agent_spec()
     skill_policy = get_runtime_skill_policy(agent_spec) or None
-    registry = build_skill_registry_from_custom_skills(get_runtime_custom_skills(agent_spec), skill_policy)
+    custom_skills = get_runtime_custom_skills(agent_spec)
+    unfiltered_registry = build_skill_registry_from_custom_skills(custom_skills)
+    registry = build_skill_registry_from_custom_skills(custom_skills, skill_policy)
     skills = registry.get_all()
     if not skills:
         return AgentToolResult(
@@ -2069,20 +2071,28 @@ async def _handle_request_skill(params: dict, ctx: ToolContext) -> AgentToolResu
             output="No expert skills configured for this agent.",
         )
 
-    # Try exact match or alias first
-    skill_id = registry.resolve_alias(query.lower().replace(" ", "-"))
-    if not skill_id:
-        skill_id = registry.resolve_alias(query.lower())
+    def _resolve_exact(registry_to_search: Any) -> Any:
+        # Try exact match or alias before the semantic fallback.
+        for key in (query.lower().replace(" ", "-"), query.lower()):
+            skill_id = registry_to_search.resolve_alias(key)
+            if skill_id:
+                skill_match = registry_to_search.get(skill_id)
+                if skill_match is not None:
+                    return skill_match
+            skill_match = registry_to_search.get(key)
+            if skill_match is not None:
+                return skill_match
+        return None
 
-    skill = None
-    if skill_id:
-        skill = registry.get(skill_id)
+    skill = _resolve_exact(registry)
 
-    if skill is None:
-        # Also try matching by canonical skill ID directly
-        skill = registry.get(query.lower().replace(" ", "-"))
-        if skill is None:
-            skill = registry.get(query.lower())
+    if skill is None and _resolve_exact(unfiltered_registry) is not None:
+        available = ", ".join(sorted(skills.keys()))
+        return AgentToolResult(
+            tool="request_skill",
+            success=False,
+            output=f"No matching skill found for '{query}'. Skills configured for this agent: {available}",
+        )
 
     if skill is None:
         # Fall back to semantic search
