@@ -1,44 +1,26 @@
-# Playwright E2E specs
+# Web E2E Notes
 
-This directory hosts Playwright specs that exercise the 6 product surfaces
-covered by the test plan in
-`/plans/design-spec.md`:
+The web app currently relies on Vitest plus backend/API tests for most automated coverage. Browser automation in this repository is used mainly for local smoke checks and documentation screenshots.
 
-| Spec file              | Feature   | Coverage                                                         |
-| ---------------------- | --------- | ---------------------------------------------------------------- |
-| `dql.spec.ts`          | DQL       | Saved query → table → CSV export; write rejected; signed URLs    |
-| `routines.spec.ts`     | Routines  | 3-step wizard, pause/resume, run history, DLQ requeue            |
-| `memory-review.spec.ts`| Memory    | Browse/curate memories, cluster merge, undo                       |
-| `artifacts-upload.spec.ts` | Artifacts | Upload PDF, see extraction, download via signed URL              |
-| `tools.spec.ts`        | Tools     | Tool card render, approval banner for writes, cancellation        |
-| `voice.spec.ts`        | Voice     | `/voice` settings UI, voice picker, test playback                 |
-
-## Bootstrap (one-time)
+## Documentation Screenshots
 
 ```bash
-pnpm --filter web add -D @playwright/test
-pnpm --filter web exec playwright install chromium
+docker compose exec app python scripts/seed_demo_data.py --apply
+python3 scripts/capture_docs_screenshots.py \
+  --base-url http://127.0.0.1:3000 \
+  --out docs/assets/screenshots
 ```
 
-## Run
+The screenshot helper uses Python Playwright and the existing web operator session cookie format. It does not require `@playwright/test`.
 
-```bash
-# All specs (requires Next dev server + Python backend in test mode)
-pnpm --filter web test:e2e
+## Smoke Direction
 
-# Smoke subset (no backend required — uses mock fixtures)
-pnpm --filter web test:e2e -- --grep @smoke
-```
+Future Playwright specs should cover:
 
-## Notes
+- setup/login routing
+- dashboard home
+- control-plane agent catalog and detail
+- runtime overview and task room
+- costs, executions, sessions, routines, and memory review
 
-* Bootstrap is intentionally deferred until the suite has fixtures for
-  authenticated state (`globalSetup.ts` writes `tests/e2e/.auth/storage.json`)
-  and the Python backend exposes a `KODA_TEST=1` flag that bypasses real
-  Telegram auth.
-* Until then, the feature surfaces are covered by:
-  - Backend integration tests (`tests/integration/` — 27 PG + 4 chaos for DQL alone).
-  - Sanitization adversarial dataset (194 cases).
-  - Pure-logic unit tests (300+ cases across memory, scheduling, artifacts, tools).
-* Vitest specs colocated with components (`*.test.tsx`) cover unit-level
-  rendering and prop handling without a browser.
+Until a full browser suite exists, keep feature behavior covered by backend tests and colocated web unit tests.

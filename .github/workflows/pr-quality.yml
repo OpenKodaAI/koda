@@ -122,7 +122,7 @@ jobs:
       - name: Test web with JUnit output
         run: |
           mkdir -p artifacts/web
-          pnpm test:web -- --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml
+          pnpm test:web:ci
       - name: Build web
         run: pnpm build:web
       - name: Upload web test artifacts

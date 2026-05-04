@@ -295,11 +295,12 @@ def save_session(
 ) -> None:
     now = _now_iso()
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         existing = run_coro_sync(
             primary_fetch_one(
-                "SELECT id FROM sessions WHERE user_id = ? AND session_id = ?",
-                (user_id, session_id),
+                "SELECT id FROM sessions WHERE agent_id = ? AND user_id = ? AND session_id = ?",
+                (agent_scope, user_id, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -317,9 +318,10 @@ def save_session(
             run_coro_sync(
                 primary_execute(
                     "INSERT INTO sessions "
-                    "(user_id, session_id, name, provider, provider_session_id, last_model, created_at, last_used) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (user_id, session_id, name, provider, provider_session_id, model, now, now),
+                    "(agent_id, user_id, session_id, name, provider, provider_session_id, last_model, created_at, "
+                    "last_used) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (agent_scope, user_id, session_id, name, provider, provider_session_id, model, now, now),
                     agent_id=AGENT_ID,
                 )
             )
@@ -372,12 +374,13 @@ def save_session(
 
 def get_sessions(user_id: int, limit: int = 20) -> list[tuple[Any, ...]]:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         rows = run_coro_sync(
             primary_fetch_all(
                 "SELECT id, session_id, name, provider, last_model, created_at, last_used "
-                "FROM sessions WHERE user_id = ? ORDER BY last_used DESC LIMIT ?",
-                (user_id, limit),
+                "FROM sessions WHERE agent_id = ? AND user_id = ? ORDER BY last_used DESC LIMIT ?",
+                (agent_scope, user_id, limit),
                 agent_id=AGENT_ID,
             )
         )
@@ -406,11 +409,12 @@ def get_sessions(user_id: int, limit: int = 20) -> list[tuple[Any, ...]]:
 
 def rename_session(user_id: int, session_id: str, name: str) -> bool:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         updated = run_coro_sync(
             primary_execute(
-                "UPDATE sessions SET name = ? WHERE user_id = ? AND session_id = ?",
-                (name, user_id, session_id),
+                "UPDATE sessions SET name = ? WHERE agent_id = ? AND user_id = ? AND session_id = ?",
+                (name, agent_scope, user_id, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -425,11 +429,13 @@ def rename_session(user_id: int, session_id: str, name: str) -> bool:
 
 def get_session_by_id(user_id: int, row_id: int) -> tuple[Any, ...] | None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
-                "SELECT session_id, name, provider, last_model FROM sessions WHERE id = ? AND user_id = ?",
-                (row_id, user_id),
+                "SELECT session_id, name, provider, last_model FROM sessions "
+                "WHERE agent_id = ? AND id = ? AND user_id = ?",
+                (agent_scope, row_id, user_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -447,17 +453,18 @@ def get_session_by_id(user_id: int, row_id: int) -> tuple[Any, ...] | None:
 def get_session_runtime_defaults(session_id: str) -> tuple[str | None, str | None] | None:
     """Return the latest provider/model pair observed for a canonical session id."""
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
                 """
                 SELECT provider, last_model
                   FROM sessions
-                 WHERE session_id = ?
+                 WHERE agent_id = ? AND session_id = ?
               ORDER BY COALESCE(last_used, created_at) DESC, id DESC
                  LIMIT 1
                 """,
-                (session_id,),
+                (agent_scope, session_id),
                 agent_id=AGENT_ID,
             )
         )
@@ -518,6 +525,7 @@ def save_provider_session_mapping(
 
 def delete_provider_session_mapping(canonical_session_id: str, provider: str) -> None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         run_coro_sync(
             primary_execute(
@@ -528,8 +536,8 @@ def delete_provider_session_mapping(canonical_session_id: str, provider: str) ->
         )
         run_coro_sync(
             primary_execute(
-                "UPDATE sessions SET provider_session_id = NULL WHERE session_id = ? AND provider = ?",
-                (canonical_session_id, provider),
+                "UPDATE sessions SET provider_session_id = NULL WHERE agent_id = ? AND session_id = ? AND provider = ?",
+                (agent_scope, canonical_session_id, provider),
                 agent_id=AGENT_ID,
             )
         )
@@ -547,6 +555,7 @@ def delete_provider_session_mapping(canonical_session_id: str, provider: str) ->
 
 def get_provider_session_mapping(canonical_session_id: str, provider: str) -> tuple[str, str | None] | None:
     backend = _primary_backend()
+    agent_scope = _current_agent_scope()
     if backend is not None:
         row = run_coro_sync(
             primary_fetch_one(
@@ -560,8 +569,9 @@ def get_provider_session_mapping(canonical_session_id: str, provider: str) -> tu
             return (str(row["provider_session_id"]), cast(str | None, row.get("last_model")))
         legacy = run_coro_sync(
             primary_fetch_one(
-                "SELECT provider_session_id, last_model FROM sessions WHERE session_id = ? AND provider = ?",
-                (canonical_session_id, provider),
+                "SELECT provider_session_id, last_model FROM sessions "
+                "WHERE agent_id = ? AND session_id = ? AND provider = ?",
+                (agent_scope, canonical_session_id, provider),
                 agent_id=AGENT_ID,
             )
         )

@@ -343,7 +343,7 @@ def test_tool_subprocess_env_drops_secret_canary() -> None:
     env = build_tool_subprocess_env(
         {
             "PATH": "/usr/bin",
-            "HOME": "/Users/example",
+            "HOME": "/tmp/koda-home",
             "KODA_SECRET_CANARY": "do-not-leak",
             "AWS_SECRET_ACCESS_KEY": "do-not-leak",
         }

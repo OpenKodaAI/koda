@@ -1767,7 +1767,9 @@ impl RuntimeKernelService for RuntimeKernelServer {
             for record in terminal_registry.replay(&task_id, requested_stream.as_deref()) {
                 last_delivered_sequence = record.sequence;
                 last_emitted_eof = record.eof;
-                stream_eof_seen |= record.eof;
+                if requested_stream.is_some() {
+                    stream_eof_seen |= record.eof;
+                }
                 yield TerminalChunk {
                     task_id: task_id.clone(),
                     stream: record.stream,
@@ -1814,7 +1816,9 @@ impl RuntimeKernelService for RuntimeKernelServer {
                         }
                         last_delivered_sequence = record.sequence;
                         last_emitted_eof = record.eof;
-                        stream_eof_seen |= record.eof;
+                        if requested_stream.is_some() {
+                            stream_eof_seen |= record.eof;
+                        }
                         yield TerminalChunk {
                             task_id: task_id.clone(),
                             stream: record.stream,
@@ -1831,7 +1835,9 @@ impl RuntimeKernelService for RuntimeKernelServer {
                         ) {
                             last_delivered_sequence = record.sequence;
                             last_emitted_eof = record.eof;
-                            stream_eof_seen |= record.eof;
+                            if requested_stream.is_some() {
+                                stream_eof_seen |= record.eof;
+                            }
                             yield TerminalChunk {
                                 task_id: task_id.clone(),
                                 stream: record.stream,
@@ -3771,6 +3777,111 @@ mod tests {
             .collect::<Vec<String>>();
         assert_eq!(payloads, vec!["first".to_string(), "second".to_string()]);
         assert!(chunks.last().is_some_and(|chunk| chunk.eof));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn aggregate_terminal_stream_waits_for_all_process_streams() -> Result<()> {
+        let tempdir = TempDir::new()?;
+        let server = test_server(&tempdir);
+        server
+            .create_environment(Request::new(CreateEnvironmentRequest {
+                metadata: Some(metadata("agent-aggregate", "task-aggregate")),
+                agent_id: "agent-aggregate".to_string(),
+                task_id: "task-aggregate".to_string(),
+                workspace_path: String::new(),
+                worktree_ref: String::new(),
+                base_work_dir: String::new(),
+                slug: String::new(),
+                create_worktree: false,
+            }))
+            .await?;
+
+        {
+            let mut state = server.state.write().expect("kernel state poisoned");
+            state
+                .terminal_history
+                .insert("task-aggregate".to_string(), Vec::new());
+            server.terminal_registry.clear("task-aggregate");
+            let task = state
+                .tasks
+                .get_mut("task-aggregate")
+                .context("missing task")?;
+            task.process_running = true;
+            task.started_at_ms = Some(now_ms());
+            task.stdout_eof = false;
+            task.stderr_eof = false;
+        }
+
+        let mut stream = server
+            .stream_terminal(Request::new(StreamTerminalRequest {
+                metadata: Some(metadata("agent-aggregate", "task-aggregate")),
+                task_id: "task-aggregate".to_string(),
+                stream: String::new(),
+            }))
+            .await?
+            .into_inner();
+        let state = server.state.clone();
+        let terminal_registry = server.terminal_registry.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            {
+                let mut state = state.write().expect("kernel state poisoned");
+                RuntimeKernelServer::append_terminal_line(
+                    &mut state,
+                    &terminal_registry,
+                    "task-aggregate",
+                    "stdout",
+                    String::new(),
+                    true,
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            {
+                let mut state = state.write().expect("kernel state poisoned");
+                RuntimeKernelServer::append_terminal_line(
+                    &mut state,
+                    &terminal_registry,
+                    "task-aggregate",
+                    "stderr",
+                    "stderr-after-stdout-eof".to_string(),
+                    false,
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            let mut state = state.write().expect("kernel state poisoned");
+            RuntimeKernelServer::append_terminal_line(
+                &mut state,
+                &terminal_registry,
+                "task-aggregate",
+                "stderr",
+                String::new(),
+                true,
+            );
+        });
+
+        let chunks = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut chunks = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                chunks.push(chunk?);
+            }
+            Ok::<Vec<TerminalChunk>, Status>(chunks)
+        })
+        .await
+        .context("aggregate terminal stream timed out")??;
+
+        let payloads = chunks
+            .iter()
+            .map(|chunk| String::from_utf8_lossy(&chunk.data).into_owned())
+            .collect::<Vec<String>>();
+        assert!(payloads.contains(&"stderr-after-stdout-eof".to_string()));
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk.stream == "stdout" && chunk.eof));
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk.stream == "stderr" && chunk.eof));
 
         Ok(())
     }

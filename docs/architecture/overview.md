@@ -1,63 +1,69 @@
 # Architecture Overview
 
-Koda is a control-plane-first agent platform. The repository ships both the operator-facing product surfaces and the runtime services required to execute, ground, and supervise configurable AI agents in production-style environments across many domains.
+Koda is a control-plane-first harness for configurable AI agents. The repository ships the backend, the official dashboard, runtime supervision, public docs, Docker assets, and OpenAPI contract together.
 
-## System Components
+## Mental Model
 
-The platform is organized into a few stable domains:
+```text
+Operator
+  uses
+Dashboard
+  calls
+Control Plane
+  publishes configuration to
+Runtime
+  executes through
+Provider CLIs + tools
+  persists to
+Postgres + object storage
+```
 
-- **Control plane:** setup, provider configuration, secrets, agent definitions, publication, and operator APIs
-- **Runtime:** queue orchestration, execution supervision, runtime APIs, agent tools, and provider adapters
-- **Knowledge:** retrieval, evidence sourcing, and operator-approved grounding context
-- **Memory:** recall, extraction, curation, and durable semantic context
-- **Artifacts:** ingestion, metadata, object-backed binaries, and evidence generation
-- **Infrastructure:** Postgres, S3-compatible object storage, Docker, health checks, and bootstrap tooling
+Infrastructure comes up first. Product configuration happens after setup through the dashboard or `/api/control-plane/*`.
 
-Koda is intentionally harness-oriented:
+## Components
 
-- it does not force a single niche, assistant persona, or task domain
-- it supports multi-agent and multi-provider configurations as first-class operating patterns
-- it separates infrastructure bootstrap from product configuration so operators can shape agents however they need
+- **Dashboard:** Next.js app in `apps/web`, served on port `3000`.
+- **Control plane:** setup, owner auth, providers, secrets, agents, workspaces, prompts, and runtime policy.
+- **Runtime:** queues, worker supervision, task rooms, command execution, browser sessions, artifacts, and health.
+- **Knowledge and memory:** retrieval traces, durable memories, curation, and context assembly.
+- **Artifacts and storage:** metadata in Postgres, binaries through an S3-compatible object-store contract.
+- **Sidecars:** Rust services for security, retrieval, memory, artifact processing, and runtime-kernel process control.
 
-![Koda platform topology](../assets/diagrams/platform-topology.svg)
+## Default Topology
 
-## Deployment Model
+```text
+web :3000
+  |
+app :8090
+  |
+  +-- postgres :5432
+  +-- seaweedfs :8333
+  +-- security :50065
+  +-- memory :50063
+  +-- artifact :50064
+  +-- retrieval :50062
+  +-- runtime-kernel :50061
+        |
+        +-- agent worker processes
+```
 
-The official installation path is Docker-first:
+This topology is used by the local quickstart and the default single-node VPS path.
 
-- `app` runs the control plane and platform services
-- `postgres` stores durable state
-- `seaweedfs` provides the bundled S3-compatible object storage path
-- `seaweedfs-init` bootstraps the required bucket before app startup
+## State Boundaries
 
-This topology is used for both local quickstart and the default single-node VPS deployment path.
-
-## Control-Plane-First Configuration
-
-Koda intentionally separates infrastructure bootstrap from product configuration:
-
-- `.env` and Docker prepare the platform
-- `/control-plane` and `/api/control-plane/*` configure the product
-- providers, access policy, secrets, and agents are managed through the control plane
-
-This keeps external layers such as reverse proxies, Tailscale, or VPS platforms thin and infrastructure-focused.
-
-## State And Storage
-
-Koda uses durable storage by default:
-
-- Postgres is the source of truth for control-plane, runtime, memory, knowledge, and audit records
-- object binaries and artifact payloads flow through a generic S3-compatible contract
-- local disk is scratch-only and should not be treated as canonical state
+- Postgres is canonical for control-plane, runtime, queue, audit, memory, knowledge, and scheduler state.
+- Object storage is canonical for object-backed artifacts and derived evidence.
+- Local filesystem paths are scratch, runtime workspaces, or caches unless a document says otherwise.
+- Browser sessions, terminals, and process trees are runtime state, not control-plane configuration.
 
 ## Public Surfaces
 
-The main public entry points are:
-
-- `/control-plane`
 - `/setup`
+- `/`
+- `/control-plane`
+- `/runtime`
 - `/api/control-plane/*`
 - `/api/runtime/*`
 - [`../openapi/control-plane.json`](../openapi/control-plane.json)
 
-For the request/response lifecycle that powers these surfaces, continue with [Runtime Architecture](runtime.md).
+For the execution lifecycle, continue with [Runtime Architecture](runtime.md).

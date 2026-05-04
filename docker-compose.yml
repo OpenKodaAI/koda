@@ -71,7 +71,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'))\""
+          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'), timeout=4)\""
         ]
       interval: 30s
       timeout: 5s
@@ -231,6 +231,11 @@ services:
       RUNTIME_KERNEL_GRPC_TARGET: "0.0.0.0:50061"
       RUNTIME_KERNEL_SOCKET: "0.0.0.0:50061"
       RUNTIME_KERNEL_ROOT: "${RUNTIME_KERNEL_ROOT:-/tmp/koda-runtime/default/kernel}"
+    volumes:
+      - koda-state:/var/lib/koda/state
+      - koda-runtime:/var/lib/koda/runtime
+      - koda-artifacts:/var/lib/koda/artifacts
+      - tmp-images:/app/tmp_images
     tmpfs:
       - /tmp/koda-runtime
     networks:

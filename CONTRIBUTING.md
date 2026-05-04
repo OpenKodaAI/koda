@@ -38,9 +38,23 @@ Run the standard validation commands before opening a pull request:
 
 If your change touches the Rust workspace, also run:
 
-- `cargo fmt --check --manifest-path rust/Cargo.toml`
+- `cargo fmt --manifest-path rust/Cargo.toml --all --check`
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
 - `cargo test --manifest-path rust/Cargo.toml --workspace`
+
+To run the same local gate from one command:
+
+```bash
+scripts/check_pr_quality.sh
+```
+
+You can also opt into the repository pre-push hook:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+The hook runs the full PR-quality gate before `git push`. It is optional because the suite is intentionally broad.
 
 ## GitHub CI
 

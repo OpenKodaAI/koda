@@ -20,6 +20,7 @@ import {
 } from "@/components/dashboard/execution-history";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
+import { useOptionalAuth, type AuthOperator } from "@/components/providers/auth-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDailyActivity } from "@/hooks/use-daily-activity";
 import { useSetupChecklist } from "@/hooks/use-setup-checklist";
@@ -28,6 +29,17 @@ import { useAgentStats } from "@/hooks/use-agent-stats";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { cn } from "@/lib/utils";
 import type { AgentStats } from "@/lib/types";
+
+function deriveGreetingName(operator: AuthOperator | null | undefined): string {
+  const candidate =
+    operator?.display_name?.trim() ||
+    operator?.username?.trim() ||
+    "";
+  if (!candidate || candidate.includes("@") || candidate.includes(".")) {
+    return "Operator";
+  }
+  return candidate.split(/\s+/)[0] || "Operator";
+}
 
 function OverviewSkeleton() {
   return (
@@ -86,6 +98,7 @@ function OverviewPageFallback() {
 function OverviewPageContent() {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
+  const auth = useOptionalAuth();
   const router = useRouter();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const {
@@ -126,199 +139,7 @@ function OverviewPageContent() {
     [statsByAgent, visibleBotIds]
   );
 
-  // TEMP: mock roster data for design review — remove once real agents exist.
-  const [rosterMockEntries] = useState(() => {
-    const now = Date.now();
-    const iso = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
-    let taskSeed = 1000;
-    const nextTaskId = () => {
-      taskSeed += 1;
-      return taskSeed;
-    };
-    const mockTask = (overrides: Partial<import("@/lib/types").Task>): import("@/lib/types").Task => ({
-      id: nextTaskId(),
-      user_id: 1,
-      chat_id: 1,
-      status: "completed",
-      query_text: null,
-      model: null,
-      work_dir: null,
-      attempt: 1,
-      max_attempts: 3,
-      cost_usd: 0,
-      error_message: null,
-      created_at: iso(10),
-      started_at: null,
-      completed_at: null,
-      session_id: null,
-      ...overrides,
-    });
-    return [
-      {
-        agent: { id: "atlas", label: "Atlas", color: "#6e97d9", colorRgb: "110, 151, 217" },
-        stats: {
-          agentId: "atlas",
-          totalTasks: 142,
-          activeTasks: 2,
-          completedTasks: 128,
-          failedTasks: 12,
-          queuedTasks: 0,
-          totalQueries: 412,
-          totalCost: 18.24,
-          todayCost: 1.64,
-          dbExists: true,
-          dailyCosts: [],
-          recentTasks: [
-            mockTask({
-              status: "completed",
-              query_text: "Summarize yesterday's exhibition visitor feedback and highlight top themes",
-              created_at: iso(3),
-              started_at: iso(3),
-              completed_at: iso(2),
-              cost_usd: 0.18,
-            }),
-            mockTask({
-              status: "completed",
-              query_text: "Draft newsletter for subscribers — April edition",
-              created_at: iso(36),
-              completed_at: iso(34),
-              cost_usd: 0.11,
-            }),
-            mockTask({
-              status: "failed",
-              query_text: "Sync ticketing system backlog for new Picasso exhibition",
-              created_at: iso(120),
-              completed_at: iso(118),
-              error_message: "Upstream timeout",
-            }),
-          ],
-        },
-      },
-      {
-        agent: { id: "air-compass", label: "Air Compass", color: "#5da9a3", colorRgb: "93, 169, 163" },
-        stats: {
-          agentId: "air-compass",
-          totalTasks: 89,
-          activeTasks: 1,
-          completedTasks: 81,
-          failedTasks: 7,
-          queuedTasks: 0,
-          totalQueries: 276,
-          totalCost: 9.08,
-          todayCost: 0.42,
-          dbExists: true,
-          dailyCosts: [],
-          recentTasks: [
-            mockTask({
-              status: "completed",
-              query_text: "Re-evaluate Guarulhos airport delay signals for the last 6 hours",
-              created_at: iso(10),
-              started_at: iso(10),
-              completed_at: iso(7),
-              cost_usd: 0.04,
-            }),
-            mockTask({
-              status: "completed",
-              query_text: "Cross-check SBGL METAR with anomaly feed",
-              created_at: iso(82),
-              completed_at: iso(80),
-              cost_usd: 0.03,
-            }),
-          ],
-        },
-      },
-      {
-        agent: { id: "orion", label: "Orion", color: "#c07a96", colorRgb: "192, 122, 150" },
-        stats: {
-          agentId: "orion",
-          totalTasks: 54,
-          activeTasks: 0,
-          completedTasks: 51,
-          failedTasks: 3,
-          queuedTasks: 1,
-          totalQueries: 168,
-          totalCost: 5.12,
-          todayCost: 0,
-          dbExists: true,
-          dailyCosts: [],
-          recentTasks: [
-            mockTask({
-              status: "completed",
-              query_text: "Prepare weekly CRM digest for sales team — include new qualified leads",
-              created_at: iso(22),
-              completed_at: iso(20),
-              cost_usd: 0.06,
-            }),
-            mockTask({
-              status: "completed",
-              query_text: "Tag inactive accounts in the Midwest pipeline",
-              created_at: iso(150),
-              completed_at: iso(148),
-              cost_usd: 0.05,
-            }),
-          ],
-        },
-      },
-      {
-        agent: { id: "archivist", label: "Archivist", color: "#9f8ad5", colorRgb: "159, 138, 213" },
-        stats: {
-          agentId: "archivist",
-          totalTasks: 211,
-          activeTasks: 0,
-          completedTasks: 205,
-          failedTasks: 6,
-          queuedTasks: 0,
-          totalQueries: 633,
-          totalCost: 12.94,
-          todayCost: 0.08,
-          dbExists: true,
-          dailyCosts: [],
-          recentTasks: [
-            mockTask({
-              status: "completed",
-              query_text: "Index Q1 2026 meeting transcripts into memory",
-              created_at: iso(47),
-              completed_at: iso(45),
-              cost_usd: 0.02,
-            }),
-            mockTask({
-              status: "completed",
-              query_text: "Consolidate project notes from April planning sync",
-              created_at: iso(210),
-              completed_at: iso(205),
-              cost_usd: 0.03,
-            }),
-            mockTask({
-              status: "failed",
-              query_text: "Merge legacy archive shards — partition 04",
-              created_at: iso(540),
-              completed_at: iso(535),
-              error_message: "Partition checksum mismatch",
-            }),
-          ],
-        },
-      },
-      {
-        agent: { id: "scribe", label: "Scribe", color: "#d98b57", colorRgb: "217, 139, 87" },
-        stats: {
-          agentId: "scribe",
-          totalTasks: 0,
-          activeTasks: 0,
-          completedTasks: 0,
-          failedTasks: 0,
-          queuedTasks: 0,
-          totalQueries: 0,
-          totalCost: 0,
-          todayCost: 0,
-          dbExists: false,
-          dailyCosts: [],
-          recentTasks: [],
-        },
-      },
-    ];
-  });
-
-  const rosterEntries = visibleEntries.length > 0 ? visibleEntries : rosterMockEntries;
+  const rosterEntries = visibleEntries;
 
   const historyStrings = useMemo<ExecutionHistoryStrings>(
     () => ({
@@ -426,8 +247,8 @@ function OverviewPageContent() {
     else if (hour >= 12 && hour < 18) key = "afternoon";
     else if (hour >= 18 && hour < 23) key = "evening";
     else key = "night";
-    return t(`overview.greeting.${key}`, { name: "Ryan" });
-  }, [t]);
+    return t(`overview.greeting.${key}`, { name: deriveGreetingName(auth?.operator) });
+  }, [auth?.operator, t]);
 
   const quickPills = useMemo<Array<{ id: string; label: string; icon: LucideIcon; onSelect: () => void }>>(
     () => [

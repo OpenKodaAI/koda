@@ -751,7 +751,8 @@ _NON_SECRET_SYSTEM_ENV_KEYS: frozenset[str] = frozenset(
     | set(_KNOWLEDGE_POLICY_ENV_KEYS)
     | {"DEFAULT_MODEL", "MODEL_PRICING_USD"}
 )
-_CORE_ONLY_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_LOCAL_UI_TOKEN", "RUNTIME_TOKEN"})
+_CORE_ONLY_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_LOCAL_UI_TOKEN"})
+_REMOVED_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"RUNTIME_TOKEN"})
 _HIDDEN_GLOBAL_SECRET_KEYS: frozenset[str] = frozenset({"POSTGRES_URL"})
 _GENERAL_ALLOWED_USAGE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
 _GENERAL_ALLOWED_VALUE_TYPES: frozenset[str] = frozenset({"text", "secret"})
@@ -1158,7 +1159,11 @@ def _local_env_key_is_reserved(key: str) -> bool:
 
 def _global_secret_is_grantable(secret_key: str) -> bool:
     normalized = str(secret_key or "").strip().upper()
-    if normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS or normalized in _HIDDEN_GLOBAL_SECRET_KEYS:
+    if (
+        normalized in _CORE_ONLY_GLOBAL_SECRET_KEYS
+        or normalized in _REMOVED_GLOBAL_SECRET_KEYS
+        or normalized in _HIDDEN_GLOBAL_SECRET_KEYS
+    ):
         return False
     return not normalized.startswith("CONTROL_PLANE_")
 
@@ -2396,6 +2401,7 @@ class ControlPlaneManager:
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
+            if str(row["secret_key"] or "").strip().upper() not in _REMOVED_GLOBAL_SECRET_KEYS
         ]
         if include_hidden:
             return secrets
@@ -2409,9 +2415,14 @@ class ControlPlaneManager:
         sections = self._system_settings_sections()
         sections_changed = False
         secret_ids_to_delete: list[int] = []
+        removed_secret_keys: set[str] = set()
 
         for row in rows:
             secret_key = str(row["secret_key"] or "").strip().upper()
+            if secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+                secret_ids_to_delete.append(int(row["id"]))
+                removed_secret_keys.add(secret_key)
+                continue
             if secret_key not in _NON_SECRET_SYSTEM_ENV_KEYS or looks_like_secret_key(secret_key):
                 continue
             target_section = self._infer_section_from_env_key(secret_key)
@@ -2425,6 +2436,18 @@ class ControlPlaneManager:
                     sections[target_section] = section_payload
                     sections_changed = True
             secret_ids_to_delete.append(int(row["id"]))
+
+        if removed_secret_keys:
+            access_section = dict(self._access_section(sections))
+            secret_meta = dict(self._access_meta_map("global_secret_meta", sections=sections))
+            for secret_key in removed_secret_keys:
+                secret_meta.pop(secret_key, None)
+            if secret_meta:
+                access_section["global_secret_meta"] = secret_meta
+            else:
+                access_section.pop("global_secret_meta", None)
+            sections["access"] = access_section
+            sections_changed = True
 
         if sections_changed:
             for section_name, payload in sections.items():
@@ -9628,6 +9651,8 @@ class ControlPlaneManager:
 
     def get_global_secret_asset(self, secret_key: str) -> dict[str, Any] | None:
         normalized_secret_key = _normalize_secret_key(secret_key)
+        if normalized_secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+            return None
         sections = self._system_settings_sections()
         row = fetch_one(
             "SELECT * FROM cp_secret_values WHERE scope_id = 'global' AND secret_key = ?",
@@ -9660,6 +9685,8 @@ class ControlPlaneManager:
         persist_sections: bool = True,
     ) -> dict[str, Any]:
         normalized_secret_key = _normalize_secret_key(secret_key)
+        if normalized_secret_key in _REMOVED_GLOBAL_SECRET_KEYS:
+            raise ValueError("RUNTIME_TOKEN is no longer supported. Use RUNTIME_LOCAL_UI_TOKEN.")
         if normalized_secret_key in _NON_SECRET_SYSTEM_ENV_KEYS and not looks_like_secret_key(normalized_secret_key):
             raise ValueError(
                 f"'{normalized_secret_key}' is a non-sensitive system setting. Store it in global settings instead."

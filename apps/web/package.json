@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "NODE_ENV=production node --env-file-if-exists=.env.local server.mjs",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml"
   },
   "dependencies": {
     "@novnc/novnc": "^1.6.0",

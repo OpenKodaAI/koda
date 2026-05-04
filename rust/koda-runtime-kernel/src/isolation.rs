@@ -106,25 +106,7 @@ pub fn ensure_cgroup_v2_root() -> Result<()> {
 pub fn apply_workspace_limits(_limits: &WorkspaceLimits) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        let cgroup_path = workspace_cgroup_dir(&_limits.workspace_id);
-        ensure_dir(&cgroup_path)?;
-        if let Some(memory_max) = _limits.memory_max_bytes {
-            write_cgroup_file(&cgroup_path, "memory.max", &memory_max.to_string())?;
-        }
-        if let Some((quota, period)) = _limits.cpu_max_quota_period {
-            write_cgroup_file(&cgroup_path, "cpu.max", &format!("{quota} {period}"))?;
-        }
-        if let Some(pids_max) = _limits.pids_max {
-            write_cgroup_file(&cgroup_path, "pids.max", &pids_max.to_string())?;
-        }
-        if let Some(cpus) = _limits.cpu_affinity.as_ref().filter(|v| !v.is_empty()) {
-            let formatted = cpus
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            write_cgroup_file(&cgroup_path, "cpuset.cpus", &formatted)?;
-        }
+        apply_workspace_limits_with_root(_limits, &cgroup_root())?;
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -141,9 +123,7 @@ pub fn apply_workspace_limits(_limits: &WorkspaceLimits) -> Result<()> {
 pub fn place_pid(_workspace_id: &str, _pid: u32) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        let cgroup_path = workspace_cgroup_dir(_workspace_id);
-        ensure_dir(&cgroup_path)?;
-        write_cgroup_file(&cgroup_path, "cgroup.procs", &_pid.to_string())?;
+        place_pid_with_root(_workspace_id, _pid, &cgroup_root())?;
     }
     Ok(())
 }
@@ -160,9 +140,44 @@ fn cgroup_root() -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn workspace_cgroup_dir(workspace_id: &str) -> PathBuf {
+fn workspace_cgroup_dir(root: &std::path::Path, workspace_id: &str) -> PathBuf {
     let safe = sanitize_workspace_segment(workspace_id);
-    cgroup_root().join(format!("ws_{safe}"))
+    root.join(format!("ws_{safe}"))
+}
+
+#[cfg(target_os = "linux")]
+fn apply_workspace_limits_with_root(
+    limits: &WorkspaceLimits,
+    root: &std::path::Path,
+) -> Result<()> {
+    let cgroup_path = workspace_cgroup_dir(root, &limits.workspace_id);
+    ensure_dir(&cgroup_path)?;
+    if let Some(memory_max) = limits.memory_max_bytes {
+        write_cgroup_file(&cgroup_path, "memory.max", &memory_max.to_string())?;
+    }
+    if let Some((quota, period)) = limits.cpu_max_quota_period {
+        write_cgroup_file(&cgroup_path, "cpu.max", &format!("{quota} {period}"))?;
+    }
+    if let Some(pids_max) = limits.pids_max {
+        write_cgroup_file(&cgroup_path, "pids.max", &pids_max.to_string())?;
+    }
+    if let Some(cpus) = limits.cpu_affinity.as_ref().filter(|v| !v.is_empty()) {
+        let formatted = cpus
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        write_cgroup_file(&cgroup_path, "cpuset.cpus", &formatted)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn place_pid_with_root(workspace_id: &str, pid: u32, root: &std::path::Path) -> Result<()> {
+    let cgroup_path = workspace_cgroup_dir(root, workspace_id);
+    ensure_dir(&cgroup_path)?;
+    write_cgroup_file(&cgroup_path, "cgroup.procs", &pid.to_string())?;
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -212,6 +227,14 @@ pub fn sanitize_workspace_segment(workspace_id: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    fn tmp_cgroup_root(test_name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "koda-cgroup-test-{test_name}-{}",
+            std::process::id()
+        ))
+    }
+
     #[test]
     fn ensure_root_is_ok_on_any_platform() {
         ensure_cgroup_v2_root().expect("scaffold must not fail");
@@ -226,13 +249,36 @@ mod tests {
             pids_max: Some(512),
             cpu_affinity: None,
         };
-        apply_workspace_limits(&limits).unwrap();
-        apply_workspace_limits(&limits).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let tmp = tmp_cgroup_root("idempotent");
+            apply_workspace_limits_with_root(&limits, &tmp).unwrap();
+            apply_workspace_limits_with_root(&limits, &tmp).unwrap();
+            std::fs::remove_dir_all(&tmp).ok();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            apply_workspace_limits(&limits).unwrap();
+            apply_workspace_limits(&limits).unwrap();
+        }
     }
 
     #[test]
     fn place_pid_accepts_arbitrary_pid() {
-        place_pid("ws_test", 12345).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let tmp = tmp_cgroup_root("place-pid");
+            place_pid_with_root("ws_test", 12345, &tmp).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(tmp.join("ws_ws_test").join("cgroup.procs")).unwrap(),
+                "12345"
+            );
+            std::fs::remove_dir_all(&tmp).ok();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            place_pid("ws_test", 12345).unwrap();
+        }
     }
 
     #[test]
@@ -250,10 +296,7 @@ mod tests {
         // Use a tmpdir as the "cgroup root" so we exercise the real
         // file-write path without needing actual cgroup mounts. The
         // cgroup files behave like regular files at this layer.
-        let tmp = std::env::temp_dir().join(format!("koda-cgroup-test-{}", std::process::id()));
-        std::env::set_var("KODA_CGROUP_ROOT", &tmp);
-
-        ensure_cgroup_v2_root().unwrap();
+        let tmp = tmp_cgroup_root("writes");
 
         let limits = WorkspaceLimits {
             workspace_id: "ws_alpha".into(),
@@ -262,7 +305,7 @@ mod tests {
             pids_max: Some(256),
             cpu_affinity: Some(vec![0, 1]),
         };
-        apply_workspace_limits(&limits).unwrap();
+        apply_workspace_limits_with_root(&limits, &tmp).unwrap();
 
         let dir = tmp.join("ws_ws_alpha");
         assert_eq!(
@@ -282,13 +325,12 @@ mod tests {
             "0,1"
         );
 
-        place_pid("ws_alpha", 999_999).unwrap();
+        place_pid_with_root("ws_alpha", 999_999, &tmp).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.join("cgroup.procs")).unwrap(),
             "999999"
         );
 
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("KODA_CGROUP_ROOT");
     }
 }

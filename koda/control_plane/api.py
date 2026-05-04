@@ -671,6 +671,8 @@ async def post_dashboard_session_message_route(request: web.Request) -> web.Resp
             text=str(payload.get("text") or ""),
             session_id=str(payload.get("session_id") or "").strip() or None,
         )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     except RuntimeError as exc:
         return _service_unavailable(exc)
     return web.json_response(result, status=202)

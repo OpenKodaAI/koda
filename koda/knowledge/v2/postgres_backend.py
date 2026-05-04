@@ -2236,6 +2236,7 @@ class KnowledgeV2PostgresBackend:
                     # with "relation 'sessions' does not exist".
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."sessions" (
                             id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL DEFAULT 'KODA',
                             user_id BIGINT NOT NULL,
                             session_id TEXT NOT NULL,
                             name TEXT,
@@ -2248,6 +2249,8 @@ class KnowledgeV2PostgresBackend:
                         )""",
                     f"""CREATE INDEX IF NOT EXISTS idx_sessions_user_last_used
                            ON "{schema}"."sessions" (user_id, last_used DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_last_used
+                           ON "{schema}"."sessions" (agent_id, last_used DESC)""",
                 ),
             ),
             _Migration(
@@ -2692,6 +2695,20 @@ class KnowledgeV2PostgresBackend:
                            SET embedding_status = 'lexical_ready'
                            WHERE COALESCE(embedding_status, '') = 'ready'
                              AND COALESCE(vector_ref_id, '') = ''""",
+                ),
+            ),
+            _Migration(
+                "027_sessions_agent_scope",
+                (
+                    f"""ALTER TABLE "{schema}"."sessions"
+                           ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT 'KODA'""",
+                    f"""UPDATE "{schema}"."sessions"
+                           SET agent_id = 'KODA'
+                           WHERE agent_id IS NULL OR agent_id = ''""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_last_used
+                           ON "{schema}"."sessions" (agent_id, last_used DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_sessions_agent_session
+                           ON "{schema}"."sessions" (agent_id, session_id)""",
                 ),
             ),
         )

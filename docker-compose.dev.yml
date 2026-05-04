@@ -61,6 +61,16 @@ services:
       - web-pnpm-store:/root/.local/share/pnpm/store
       - web-next-cache:/workspace/apps/web/.next
 
+  runtime-kernel:
+    read_only: false
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: "/workspace"
+      PLAYWRIGHT_BROWSERS_PATH: "/var/lib/koda/playwright-browsers"
+    volumes:
+      - .:/workspace
+      - tmp-images:/workspace/tmp_images
+
 volumes:
   web-root-node-modules:
   web-app-node-modules:

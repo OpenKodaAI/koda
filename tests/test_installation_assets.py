@@ -172,6 +172,10 @@ def test_release_compose_carries_bootstrap_and_runtime_tokens_into_app_service()
 
 
 def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path) -> None:
+    build_script_text = (ROOT / "scripts" / "build_release_artifacts.py").read_text(encoding="utf-8")
+    assert '(stage_dir / "README.md").write_text(build_package_readme(), encoding="utf-8")' in build_script_text
+    assert 'copy2(CLI_PACKAGE_DIR / "README.md"' not in build_script_text
+
     output_dir = tmp_path / "release-artifacts"
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "build_release_artifacts.py"), "--output-dir", str(output_dir)],
@@ -198,6 +202,16 @@ def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path)
     assert checksums_from_npm == bundle_checksums
     assert "npm install -g @openkodaai/koda" in readme_from_npm
     assert "/setup" in readme_from_npm
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "sync_npm_readme.py"),
+            "--package-tarball",
+            str(output_dir / payload["npm_tarball"]),
+        ],
+        check=True,
+        cwd=ROOT,
+    )
 
 
 def test_release_metadata_is_publication_ready() -> None:
@@ -286,6 +300,11 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "Skip npm publish when version already exists" in workflow_text
     assert "Repair npm dist-tag with token fallback when needed" in workflow_text
     assert "Verify npm package version and dist-tag" in workflow_text
+    assert "Verify npm tarball README before publish" in workflow_text
+    assert "Verify published npm README" in workflow_text
+    assert "Generate npm README for release checks" in workflow_text
+    assert "scripts/sync_npm_readme.py --package-tarball" in workflow_text
+    assert 'npm pack "${NPM_PACKAGE_NAME}@${VERSION}"' in workflow_text
     assert 'npm dist-tag add "${NPM_PACKAGE_NAME}@${VERSION}" "${DIST_TAG}"' in workflow_text
     assert "python3 scripts/npm_registry_metadata.py exists" in workflow_text
     assert "python3 scripts/npm_registry_metadata.py state" in workflow_text
@@ -498,8 +517,9 @@ def test_snyk_policy_excludes_generated_artifacts_only() -> None:
 def test_snyk_workflow_excludes_non_source_manifests() -> None:
     workflow_text = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
 
+    assert "--no-hashes" in workflow_text
     assert (
-        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,packages/cli/release"
+        "--exclude=.git,.koda-release,.next,.mypy_cache,.pnpm-store,.pytest_cache,.ruff_cache,.venv,venv,artifacts,build,coverage,dist,downloads,node_modules,output,target,release"
         in workflow_text
     )
 

@@ -79,6 +79,18 @@ def _json_object(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
 def _duration_ms(*, started_at: Any, completed_at: Any, fallback: float | None = None) -> float | None:
     if started_at and completed_at:
         started = _parse_iso(started_at)
@@ -243,7 +255,7 @@ def _fetch_latest_traces(agent_ids: list[str], task_ids: list[int]) -> dict[int,
         agent_ids=resolved_agent_ids,
     )
     return {
-        int(row["task_id"]): dict(row.get("details_json") or {})
+        int(row["task_id"]): _json_object(row.get("details_json"))
         | {
             "_duration_ms": float(row.get("duration_ms") or 0.0),
             "_cost_usd": float(row.get("cost_usd") or 0.0),
@@ -290,11 +302,11 @@ def _serialize_execution_summary(
     episode: dict[str, Any] | None,
 ) -> dict[str, Any]:
     runtime = _trace_runtime(trace)
-    tools = _trace_tools(trace) or _safe_list((episode or {}).get("tool_trace_json"))
-    warnings = [str(item) for item in _safe_list(runtime.get("warnings"))]
-    source_refs = _safe_list((episode or {}).get("source_refs_json"))
-    winning_sources = [str(item) for item in _safe_list((episode or {}).get("winning_sources_json"))]
-    answer_gate_reasons = [str(item) for item in _safe_list((episode or {}).get("answer_gate_reasons_json"))]
+    tools = _trace_tools(trace) or _json_list((episode or {}).get("tool_trace_json"))
+    warnings = [str(item) for item in _json_list(runtime.get("warnings"))]
+    source_refs = _json_list((episode or {}).get("source_refs_json"))
+    winning_sources = [str(item) for item in _json_list((episode or {}).get("winning_sources_json"))]
+    answer_gate_reasons = [str(item) for item in _json_list((episode or {}).get("answer_gate_reasons_json"))]
     pending_approval_id = _pending_approval_id_for_task(
         agent_id=str(row.get("agent_id") or ""),
         session_id=str(row.get("session_id") or "") or None,
@@ -394,11 +406,11 @@ def get_dashboard_execution_detail(agent_id: str, task_id: int) -> dict[str, Any
     episode = _fetch_latest_episodes([normalized], [task_id]).get(task_id)
     runtime = _trace_runtime(trace)
     assistant = _trace_assistant(trace)
-    tools = _trace_tools(trace) or _safe_list((episode or {}).get("tool_trace_json"))
+    tools = _trace_tools(trace) or _json_list((episode or {}).get("tool_trace_json"))
     timeline = _trace_timeline(trace)
-    warnings = [str(item) for item in _safe_list(runtime.get("warnings"))]
+    warnings = [str(item) for item in _json_list(runtime.get("warnings"))]
     redactions = _trace_redactions(trace)
-    reasoning_summary = [str(item) for item in _safe_list(runtime.get("reasoning_summary")) if str(item or "").strip()]
+    reasoning_summary = [str(item) for item in _json_list(runtime.get("reasoning_summary")) if str(item or "").strip()]
     return {
         **_serialize_execution_summary(row, trace, episode),
         "response_text": str(assistant.get("response_text") or "") or None,
@@ -927,7 +939,7 @@ def list_dashboard_audit(
             "task_id": row.get("task_id"),
             "trace_id": str(row.get("trace_id") or "") or None,
             "details_json": "{}",
-            "details": row.get("details_json") if isinstance(row.get("details_json"), dict) else {},
+            "details": _json_object(row.get("details_json")),
             "cost_usd": float(row.get("cost_usd") or 0.0) if row.get("cost_usd") is not None else None,
             "duration_ms": float(row.get("duration_ms") or 0.0) if row.get("duration_ms") is not None else None,
         }
@@ -1133,6 +1145,7 @@ def get_dashboard_cost_insights(
             )
             session_entry["cost_usd"] += float(event["cost_usd"])
             session_entry["query_count"] += 1
+            session_entry["execution_count"] += 1
             session_entry["last_activity_at"] = event["timestamp"]
             session_entry["resolved_at"] = event["timestamp"]
             session_entry["latest_message_preview"] = (
@@ -1191,7 +1204,7 @@ def get_dashboard_cost_insights(
         "median_cost_per_resolved_conversation": median(resolved_costs) if resolved_costs else 0.0,
         "unresolved_cost_usd": 0.0,
         "total_queries": len(events),
-        "total_executions": 0,
+        "total_executions": sum(int(item["execution_count"]) for item in session_totals.values()),
         "top_model": max(by_model.items(), key=lambda item: item[1])[0] if by_model else None,
         "top_agent": max(by_agent.items(), key=lambda item: item[1])[0] if by_agent else None,
         "top_task_type": max(by_task.items(), key=lambda item: item[1])[0] if by_task else None,
@@ -1246,7 +1259,7 @@ def get_dashboard_cost_insights(
                 if resolved_conversations
                 else 0.0,
                 "query_count": sum(1 for item in events if item["agent_id"] == key),
-                "execution_count": 0,
+                "execution_count": sum(1 for item in events if item["agent_id"] == key),
             }
             for key, value in sorted(by_agent.items(), key=lambda item: item[1], reverse=True)
         ],
@@ -1256,7 +1269,7 @@ def get_dashboard_cost_insights(
                 "cost_usd": value,
                 "share_pct": (value / total_cost * 100) if total_cost else 0.0,
                 "query_count": sum(1 for item in events if (item.get("model") or "desconhecido") == key),
-                "execution_count": 0,
+                "execution_count": sum(1 for item in events if (item.get("model") or "desconhecido") == key),
                 "resolved_conversations": sum(1 for item in resolved_conversations if item["dominant_model"] == key),
             }
             for key, value in sorted(by_model.items(), key=lambda item: item[1], reverse=True)

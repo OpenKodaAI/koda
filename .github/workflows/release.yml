@@ -275,7 +275,9 @@ jobs:
         run: uv sync --locked
       - name: Check release metadata drift
         run: uv run python3 scripts/release_metadata.py
-      - name: Check npm README drift
+      - name: Generate npm README for release checks
+        run: uv run python3 scripts/sync_npm_readme.py --write
+      - name: Verify generated npm README
         run: uv run python3 scripts/sync_npm_readme.py
       - name: Validate open source hygiene
         run: |
@@ -817,6 +819,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Verify npm tarball README before publish
+        run: python3 scripts/sync_npm_readme.py --package-tarball "${{ env.RELEASE_BUNDLE_DIR }}/npm/openkodaai-koda-${{ needs.prepare.outputs.version }}.tgz"
       - name: Validate npm token fallback identity
         id: npm_token_status
         if: env.HAS_NPM_TOKEN == 'true'
@@ -920,6 +924,33 @@ jobs:
           echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} with dist-tag ${DIST_TAG}, but the npm registry did not converge." >&2
           python3 scripts/npm_registry_metadata.py dist-tags \
             --package "${NPM_PACKAGE_NAME}" || true
+          exit 1
+      - name: Verify published npm README
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          verify_dir="${RUNNER_TEMP}/npm-readme-verify"
+          mkdir -p "${verify_dir}"
+
+          for _attempt in $(seq 1 24); do
+            rm -f "${verify_dir}"/*.tgz
+            if npm pack "${NPM_PACKAGE_NAME}@${VERSION}" \
+              --pack-destination "${verify_dir}" \
+              --registry=https://registry.npmjs.org \
+              > "${verify_dir}/npm-pack.out" \
+              2> "${verify_dir}/npm-pack.err"; then
+              tarball_name="$(tail -n 1 "${verify_dir}/npm-pack.out")"
+              if python3 scripts/sync_npm_readme.py --package-tarball "${verify_dir}/${tarball_name}"; then
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+
+          echo "Expected ${NPM_PACKAGE_NAME}@${VERSION} to publish the README generated from the root README.md." >&2
+          cat "${verify_dir}/npm-pack.err" >&2 || true
           exit 1
 
   github-release:
