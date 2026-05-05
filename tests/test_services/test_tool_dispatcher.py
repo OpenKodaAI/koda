@@ -1611,7 +1611,8 @@ class TestRequestSkill:
 
         from koda.services.tool_dispatcher import _handle_request_skill
 
-        result = await _handle_request_skill(call.params, ctx)
+        with patch("koda.skills._selector.SkillSelector.select", return_value=[]):
+            result = await _handle_request_skill(call.params, ctx)
 
         assert result.success is False
         assert "No matching skill found" in result.output
