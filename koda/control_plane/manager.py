@@ -6781,6 +6781,12 @@ class ControlPlaneManager:
         for directory in config_dirs:
             with contextlib.suppress(Exception):
                 if directory.is_dir():
+                    if provider_id == "codex":
+                        for child in directory.iterdir():
+                            if child.name in {"auth.json", "credentials.json", "token.json", "tokens.json"}:
+                                with contextlib.suppress(Exception):
+                                    child.unlink(missing_ok=True)
+                        continue
                     for child in directory.iterdir():
                         with contextlib.suppress(Exception):
                             if child.is_dir():
@@ -8806,8 +8812,8 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        provider_connections = {
-            provider_id: self.get_provider_connection(provider_id)
+        provider_connections: dict[str, dict[str, Any]] = {
+            str(provider_id): self.get_provider_connection(str(provider_id))
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
         }
@@ -9345,8 +9351,8 @@ class ControlPlaneManager:
 
         provider_catalog = self.get_core_providers()
         enabled_providers = normalize_string_list(models.get("providers_enabled"))
-        provider_connections = {
-            provider_id: self.get_provider_connection(provider_id)
+        provider_connections: dict[str, dict[str, Any]] = {
+            str(provider_id): self.get_provider_connection(str(provider_id))
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
         }

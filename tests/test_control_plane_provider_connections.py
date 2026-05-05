@@ -1632,3 +1632,24 @@ def test_wipe_provider_credential_files_clears_known_dirs(monkeypatch, tmp_path)
     # mounts.
     assert config_dir.is_dir()
     assert list(config_dir.iterdir()) == []
+
+
+def test_wipe_codex_credentials_preserves_workspace_dirs(monkeypatch, tmp_path):
+    import koda.control_plane.manager as manager_mod
+
+    codex_home = tmp_path / ".codex"
+    worktrees = codex_home / "worktrees"
+    worktree_file = worktrees / "repo" / "README.md"
+    worktree_file.parent.mkdir(parents=True)
+    worktree_file.write_text("keep me")
+    auth_file = codex_home / "auth.json"
+    auth_file.write_text('{"token": "stale"}')
+
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("HOME", raising=False)
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._wipe_provider_credential_files("codex")
+
+    assert not auth_file.exists()
+    assert worktree_file.read_text() == "keep me"
