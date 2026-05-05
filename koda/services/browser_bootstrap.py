@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from koda.logging_config import get_logger
@@ -35,7 +36,23 @@ def _chromium_present(browsers_path: Path) -> bool:
     """Return True when a usable chromium build is under ``browsers_path``."""
     if not browsers_path.is_dir():
         return False
-    return any(candidate.is_file() for candidate in browsers_path.glob("chromium-*/chrome-linux/chrome"))
+    executable_patterns = (
+        "chromium-*/chrome-linux/chrome",
+        "chromium_headless_shell-*/chrome-linux/headless_shell",
+        "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+        "chromium-*/chrome-win/chrome.exe",
+    )
+    return any(candidate.is_file() for pattern in executable_patterns for candidate in browsers_path.glob(pattern))
+
+
+def ensure_browser_installed_in_background() -> None:
+    """Run browser provisioning without blocking process readiness."""
+    thread = threading.Thread(
+        target=ensure_browser_installed,
+        name="koda-browser-bootstrap",
+        daemon=True,
+    )
+    thread.start()
 
 
 def ensure_browser_installed() -> None:

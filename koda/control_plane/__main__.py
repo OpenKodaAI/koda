@@ -5,15 +5,13 @@ from __future__ import annotations
 import asyncio
 
 from koda.control_plane.supervisor import run_supervisor
-from koda.services.browser_bootstrap import ensure_browser_installed
+from koda.services.browser_bootstrap import ensure_browser_installed_in_background
 
 
 def main() -> None:
-    # Auto-provision Playwright browsers when missing so the app boots
-    # "ready to use" — browser tools would otherwise fail with "Browser is
-    # not running. It may not be installed or failed to start." whenever
-    # the runtime image was built without chromium in the expected path.
-    ensure_browser_installed()
+    # Auto-provision Playwright browsers when missing, but never block
+    # control-plane readiness on an optional browser download.
+    ensure_browser_installed_in_background()
     asyncio.run(run_supervisor())
 
 
