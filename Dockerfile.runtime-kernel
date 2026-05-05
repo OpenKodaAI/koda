@@ -21,6 +21,7 @@ FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RUNNING_IN_DOCKER=true
 ENV UV_VERSION=0.10.7
+ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
 
 RUN python -m pip install --no-cache-dir --upgrade pip==26.0 uv==${UV_VERSION}
 

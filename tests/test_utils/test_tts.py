@@ -126,6 +126,29 @@ class TestVoiceConfig:
 
 
 class TestElevenLabsSynthesize:
+    def test_elevenlabs_voice_parser_ignores_non_mapping_nested_items(self):
+        """ElevenLabs catalog responses can contain list-shaped optional fields."""
+        from koda.utils.tts import _parse_elevenlabs_voice_items
+
+        voices = _parse_elevenlabs_voice_items(
+            {
+                "voices": [
+                    {
+                        "voice_id": "voice-123",
+                        "name": "Maria",
+                        "labels": [],
+                        "verified_languages": [["pt"], {"language": "pt-br"}],
+                    },
+                    ["not-a-voice"],
+                ]
+            }
+        )
+
+        assert len(voices) == 1
+        assert voices[0].voice_id == "voice-123"
+        assert voices[0].gender == ""
+        assert voices[0].language == "pt"
+
     @pytest.mark.asyncio
     async def test_success_returns_ogg_path(self):
         """Mock aiohttp, return 200 + bytes -> OGG path."""
@@ -155,6 +178,46 @@ class TestElevenLabsSynthesize:
         assert result is not None
         assert result.endswith(".ogg")
         # Clean up temp file
+        import os
+
+        if result and os.path.exists(result):
+            os.unlink(result)
+
+    @pytest.mark.asyncio
+    async def test_elevenlabs_synthesize_sends_canonical_language_code(self):
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.read = AsyncMock(return_value=b"fake-ogg-data")
+
+        mock_session_ctx = AsyncMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_session_ctx)
+
+        mock_client_ctx = AsyncMock()
+        mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("koda.utils.tts.ELEVENLABS_API_KEY", "test-key"),
+            patch("aiohttp.ClientSession", return_value=mock_client_ctx),
+        ):
+            from koda.utils.tts import _elevenlabs_synthesize
+
+            result = await _elevenlabs_synthesize(
+                "Ola mundo",
+                "voice123",
+                model_id="eleven_flash_v2_5",
+                language="pt-br",
+            )
+
+        assert result is not None
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["model_id"] == "eleven_flash_v2_5"
+        assert payload["language_code"] == "pt"
+
         import os
 
         if result and os.path.exists(result):
@@ -223,6 +286,12 @@ class TestElevenLabsSynthesize:
             result = await _elevenlabs_synthesize("Hello", "voice123")
 
         assert result is None
+        from koda.utils.tts import get_last_tts_error
+
+        error = get_last_tts_error()
+        assert error is not None
+        assert error["code"] == "timeout"
+        assert "demorou" in error["message"]
 
     @pytest.mark.asyncio
     async def test_no_api_key_returns_none(self):
@@ -250,7 +319,7 @@ class TestSynthesizeSpeechRouting:
             result = await synthesize_speech("Hello", "brian", 1.0)
 
         assert result == "/tmp/test.ogg"
-        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.0, model_id=None)
+        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.0, model_id=None, language=None)
         mock_ko.assert_not_called()
 
     @pytest.mark.asyncio
@@ -266,7 +335,7 @@ class TestSynthesizeSpeechRouting:
 
             await synthesize_speech("Hello", "brian", 1.5)
 
-        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.5, model_id=None)
+        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.5, model_id=None, language=None)
 
     @pytest.mark.asyncio
     async def test_custom_elevenlabs_voice_id(self):
@@ -283,7 +352,7 @@ class TestSynthesizeSpeechRouting:
             result = await synthesize_speech("Hello", custom_id, 1.0)
 
         assert result == "/tmp/custom.ogg"
-        mock_el.assert_called_once_with("Hello", custom_id, 1.0, model_id=None)
+        mock_el.assert_called_once_with("Hello", custom_id, 1.0, model_id=None, language=None)
         mock_ko.assert_not_called()
 
     @pytest.mark.asyncio
@@ -302,6 +371,48 @@ class TestSynthesizeSpeechRouting:
         assert result == "/tmp/ko.ogg"
         mock_el.assert_called_once()
         mock_ko.assert_called_once_with("Hello", "pf_dora", 1.0, language=None)
+
+    @pytest.mark.asyncio
+    async def test_explicit_elevenlabs_custom_voice_does_not_fallback_to_kokoro(self):
+        """Explicit ElevenLabs provider must not mask failures with Kokoro audio."""
+        custom_id = "Xb7hH8MSUJpSbSDYk0k2"
+        with (
+            patch("koda.utils.tts._elevenlabs_synthesize", new_callable=AsyncMock, return_value=None) as mock_el,
+            patch("koda.utils.tts._kokoro_synthesize", new_callable=AsyncMock) as mock_ko,
+        ):
+            from koda.utils.tts import synthesize_speech
+
+            result = await synthesize_speech(
+                "Hello",
+                custom_id,
+                1.0,
+                provider="elevenlabs",
+                model="eleven_multilingual_v2",
+            )
+
+        assert result is None
+        mock_el.assert_called_once_with(
+            "Hello",
+            custom_id,
+            1.0,
+            model_id="eleven_multilingual_v2",
+            language=None,
+        )
+        mock_ko.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_explicit_elevenlabs_known_voice_does_not_fallback_to_kokoro(self):
+        with (
+            patch("koda.utils.tts._elevenlabs_synthesize", new_callable=AsyncMock, return_value=None) as mock_el,
+            patch("koda.utils.tts._kokoro_synthesize", new_callable=AsyncMock) as mock_ko,
+        ):
+            from koda.utils.tts import synthesize_speech
+
+            result = await synthesize_speech("Hello", "brian", 1.0, provider="elevenlabs")
+
+        assert result is None
+        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.0, model_id=None, language=None)
+        mock_ko.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_elevenlabs_failure_falls_back_to_kokoro(self):
@@ -374,7 +485,13 @@ class TestSynthesizeSpeechRouting:
             )
 
         assert result == "/tmp/test.ogg"
-        mock_el.assert_called_once_with("Hello", "nPczCjzI2devNBz1zQrb", 1.0, model_id="eleven_v3")
+        mock_el.assert_called_once_with(
+            "Hello",
+            "nPczCjzI2devNBz1zQrb",
+            1.0,
+            model_id="eleven_v3",
+            language="pt-br",
+        )
         mock_ko.assert_not_called()
 
     @pytest.mark.asyncio
@@ -466,14 +583,29 @@ class TestKokoroSynthesize:
 
 class TestCmdVoice:
     @pytest.mark.asyncio
-    async def test_toggle_on(self, mock_update, mock_context):
-        """Test /voice toggles on."""
+    async def test_voice_without_args_shows_configuration_menu(self, mock_update, mock_context):
+        """Bare /voice opens the in-channel voice configuration panel."""
         from koda.handlers.commands import cmd_voice
 
         mock_context.user_data["audio_response"] = False
         mock_context.args = []
 
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        await cmd_voice(mock_update, mock_context)
+
+        assert mock_context.user_data["audio_response"] is False
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "Voz e TTS" in call_text
+        assert mock_update.message.reply_text.call_args.kwargs["reply_markup"] is not None
+
+    @pytest.mark.asyncio
+    async def test_toggle_on(self, mock_update, mock_context):
+        """Test /voice toggle turns voice responses on."""
+        from koda.handlers.commands import cmd_voice
+
+        mock_context.user_data["audio_response"] = False
+        mock_context.args = ["toggle"]
+
+        with patch("koda.utils.command_helpers.TTS_ENABLED", True):
             await cmd_voice(mock_update, mock_context)
 
         assert mock_context.user_data["audio_response"] is True
@@ -484,28 +616,64 @@ class TestCmdVoice:
 
     @pytest.mark.asyncio
     async def test_toggle_off(self, mock_update, mock_context):
-        """Test /voice toggles off when already on."""
+        """Test /voice toggle turns voice responses off."""
         from koda.handlers.commands import cmd_voice
 
         mock_context.user_data["audio_response"] = True
-        mock_context.args = []
+        mock_context.args = ["toggle"]
 
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        with patch("koda.utils.command_helpers.TTS_ENABLED", True):
             await cmd_voice(mock_update, mock_context)
 
         assert mock_context.user_data["audio_response"] is False
 
     @pytest.mark.asyncio
-    async def test_voice_disabled(self, mock_update, mock_context):
-        """Test /voice when TTS is disabled."""
+    async def test_voice_enables_session_when_static_config_is_disabled(self, mock_update, mock_context):
+        """The /voice command itself should be able to enable voice for the session."""
         from koda.handlers.commands import cmd_voice
 
-        mock_context.args = []
-        with patch("koda.handlers.commands.TTS_ENABLED", False):
+        mock_context.args = ["on"]
+        mock_context.user_data["audio_response"] = False
+        with patch("koda.utils.command_helpers.TTS_ENABLED", False):
             await cmd_voice(mock_update, mock_context)
 
+        assert mock_context.user_data["audio_response"] is True
+        assert mock_context.user_data["tts_enabled"] is True
         call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "disabled" in call_text.lower()
+        assert "ON" in call_text
+
+    @pytest.mark.asyncio
+    async def test_voice_uses_runtime_tts_enabled_when_static_config_is_false(self, mock_update, mock_context):
+        """Runtime settings should override the boot-time TTS_ENABLED snapshot."""
+        from koda.handlers.commands import cmd_voice
+
+        mock_context.args = ["toggle"]
+        mock_context.user_data["audio_response"] = False
+        runtime_settings = {
+            "tts_enabled": True,
+            "voice_policy_mode": "disabled",
+            "voice_policy_active": False,
+            "default_provider": "claude",
+            "general_model": "claude-opus-4-6",
+            "default_models_by_provider": {"claude": "claude-opus-4-6"},
+            "functional_defaults": {"audio": {"provider_id": "kokoro", "model_id": "kokoro-v1"}},
+            "audio_provider": "kokoro",
+            "audio_model": "kokoro-v1",
+            "tts_voice": "pm_alex",
+            "tts_voice_label": "Alex",
+            "tts_voice_language": "pt-br",
+            "selectable_function_options": {},
+        }
+
+        with (
+            patch("koda.utils.command_helpers.TTS_ENABLED", False),
+            patch("koda.handlers.commands.get_agent_runtime_settings", return_value=runtime_settings),
+        ):
+            await cmd_voice(mock_update, mock_context)
+
+        assert mock_context.user_data["audio_response"] is True
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "ON" in call_text
 
     @pytest.mark.asyncio
     async def test_set_voice(self, mock_update, mock_context):
@@ -514,7 +682,7 @@ class TestCmdVoice:
 
         mock_context.args = ["brian"]
         with (
-            patch("koda.handlers.commands.TTS_ENABLED", True),
+            patch("koda.utils.command_helpers.TTS_ENABLED", True),
             patch(
                 "koda.handlers.commands.set_agent_voice_default",
                 return_value={
@@ -544,7 +712,21 @@ class TestCmdVoice:
 
         mock_context.args = ["pm_alex"]
         with (
-            patch("koda.handlers.commands.TTS_ENABLED", True),
+            patch("koda.utils.command_helpers.TTS_ENABLED", True),
+            patch(
+                "koda.handlers.commands._voice_kokoro_voice_status",
+                return_value={
+                    "voice_id": "pm_alex",
+                    "name": "Alex",
+                    "language_id": "pt-br",
+                    "downloaded": True,
+                    "active_job": None,
+                },
+            ),
+            patch(
+                "koda.handlers.commands._voice_kokoro_model_status",
+                return_value={"downloaded": True, "active_job": None},
+            ),
             patch(
                 "koda.handlers.commands.set_agent_voice_default",
                 return_value={
@@ -573,13 +755,31 @@ class TestCmdVoice:
         from koda.handlers.commands import cmd_voice
 
         mock_context.args = ["voices"]
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        with (
+            patch("koda.utils.command_helpers.TTS_ENABLED", True),
+            patch(
+                "koda.handlers.commands._voice_elevenlabs_catalog",
+                return_value={
+                    "items": [
+                        {
+                            "voice_id": "nPczCjzI2devNBz1zQrb",
+                            "name": "Brian",
+                            "gender": "male",
+                            "accent": "american",
+                            "category": "premade",
+                        }
+                    ],
+                    "available_languages": [{"code": "en", "label": "English"}],
+                    "provider_connected": True,
+                },
+            ),
+        ):
             await cmd_voice(mock_update, mock_context)
 
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "pf_dora" in call_text
         assert "pm_alex" in call_text
-        assert "brian" in call_text
+        assert "Brian" in call_text
         assert "ElevenLabs" in call_text
         assert "Kokoro" in call_text
 
@@ -589,7 +789,7 @@ class TestCmdVoice:
         from koda.handlers.commands import cmd_voice
 
         mock_context.args = ["invalid_voice"]
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        with patch("koda.utils.command_helpers.TTS_ENABLED", True):
             await cmd_voice(mock_update, mock_context)
 
         call_text = mock_update.message.reply_text.call_args[0][0]
@@ -602,7 +802,7 @@ class TestCmdVoice:
         from koda.handlers.commands import cmd_voice
 
         mock_context.args = ["search"]
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        with patch("koda.utils.command_helpers.TTS_ENABLED", True):
             await cmd_voice(mock_update, mock_context)
 
         call_text = mock_update.message.reply_text.call_args[0][0]
@@ -618,7 +818,7 @@ class TestCmdVoice:
             ElevenLabsVoice("id123456789012345678", "TestVoice", "premade", "female", "Brazilian", "pt"),
         ]
         with (
-            patch("koda.handlers.commands.TTS_ENABLED", True),
+            patch("koda.utils.command_helpers.TTS_ENABLED", True),
             patch("koda.utils.tts.search_elevenlabs_voices", new_callable=AsyncMock, return_value=mock_voices),
         ):
             mock_context.args = ["search", "portuguese"]
@@ -636,7 +836,7 @@ class TestCmdVoice:
         from koda.handlers.commands import cmd_voice
 
         with (
-            patch("koda.handlers.commands.TTS_ENABLED", True),
+            patch("koda.utils.command_helpers.TTS_ENABLED", True),
             patch("koda.utils.tts.search_elevenlabs_voices", new_callable=AsyncMock, return_value=[]),
         ):
             mock_context.args = ["search", "nonexistent"]
@@ -653,7 +853,7 @@ class TestCmdVoice:
         mock_context.user_data["tts_voice"] = "Xb7hH8MSUJpSbSDYk0k2"
         mock_context.user_data["tts_voice_label"] = "Custom Voice"
         mock_context.args = ["voices"]
-        with patch("koda.handlers.commands.TTS_ENABLED", True):
+        with patch("koda.utils.command_helpers.TTS_ENABLED", True):
             await cmd_voice(mock_update, mock_context)
 
         call_text = mock_update.message.reply_text.call_args[0][0]
@@ -705,6 +905,45 @@ class TestElevenLabsBreakerIntegration:
             result = await _elevenlabs_synthesize("Hello", "voice123")
         assert result is None
         mock_fail.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_paid_plan_error_is_exposed_as_last_tts_error(self):
+        mock_resp = AsyncMock()
+        mock_resp.status = 402
+        mock_resp.text = AsyncMock(
+            return_value=(
+                '{"detail":{"type":"payment_required","code":"paid_plan_required",'
+                '"message":"Free users cannot use library voices via the API."}}'
+            )
+        )
+
+        mock_session_ctx = AsyncMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_session_ctx)
+
+        mock_client_ctx = AsyncMock()
+        mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("koda.utils.tts.ELEVENLABS_API_KEY", "test-key"),
+            patch("koda.utils.tts.check_breaker", return_value=None),
+            patch("koda.utils.tts.record_failure"),
+            patch("aiohttp.ClientSession", return_value=mock_client_ctx),
+        ):
+            from koda.utils.tts import _elevenlabs_synthesize, get_last_tts_error
+
+            result = await _elevenlabs_synthesize("Hello", "WSBwiRQRmi2mEG7BfKwS")
+
+        assert result is None
+        error = get_last_tts_error()
+        assert error is not None
+        assert error["status"] == 402
+        assert error["code"] == "paid_plan_required"
+        assert "library voices" in error["message"]
 
     @pytest.mark.asyncio
     async def test_success_records_latency(self):
@@ -798,6 +1037,45 @@ class TestSearchElevenLabsVoices:
         assert result[0].accent == "Brazilian"
 
     @pytest.mark.asyncio
+    async def test_success_accepts_top_level_voice_list(self):
+        """Some ElevenLabs-compatible responses return voices as the top-level JSON list."""
+        api_response = [
+            {
+                "voice_id": "abc123",
+                "name": "Maria",
+                "category": "premade",
+                "labels": {"gender": "female", "accent": "Brazilian"},
+                "verified_languages": [{"language": "pt"}],
+            }
+        ]
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value=api_response)
+
+        mock_session_ctx = AsyncMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_session_ctx)
+
+        mock_client_ctx = AsyncMock()
+        mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("koda.utils.tts.ELEVENLABS_API_KEY", "test-key"),
+            patch("aiohttp.ClientSession", return_value=mock_client_ctx),
+        ):
+            from koda.utils.tts import search_elevenlabs_voices
+
+            result = await search_elevenlabs_voices("portuguese")
+
+        assert len(result) == 1
+        assert result[0].voice_id == "abc123"
+
+    @pytest.mark.asyncio
     async def test_no_api_key_returns_empty(self):
         """No API key -> empty list."""
         with patch("koda.utils.tts.ELEVENLABS_API_KEY", None):
@@ -848,7 +1126,7 @@ class TestCallbackVoiceElevenLabs:
         mock_update.callback_query = query
 
         with patch(
-            "koda.handlers.callbacks.set_agent_voice_default",
+            "koda.handlers.commands.set_agent_voice_default",
             return_value={
                 "default_provider": "claude",
                 "general_model": "claude-opus-4-6",

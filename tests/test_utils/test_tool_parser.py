@@ -66,7 +66,7 @@ class TestParseToolUses:
             }
         )
         tools = parse_tool_uses(line)
-        assert tools[0]["input"] == "npm test"
+        assert tools[0]["input"] == "execucao"
 
 
 class TestFormatToolSummary:
@@ -74,7 +74,7 @@ class TestFormatToolSummary:
         tools = [{"name": "Read", "input": "main.py"}]
         result = format_tool_summary(tools)
         assert "Read(main.py)" in result
-        assert result.startswith("🔧")
+        assert result.startswith("Ferramentas:")
 
     def test_multiple_same_tool(self):
         tools = [
@@ -105,8 +105,23 @@ class TestSummarizeToolUses:
         ]
         result = summarize_tool_uses(tool_uses)
         assert "Read(main.py)" in result
-        assert "Bash(npm test)" in result
-        assert result.startswith("🔧")
+        assert "Bash" in result
+        assert "npm test" not in result
+        assert result.startswith("Ferramentas:")
+
+    def test_summarize_does_not_expose_sensitive_inputs(self):
+        tool_uses = [
+            {"name": "Bash", "input": {"command": "curl https://api.example.test?key=sk-secret"}},
+            {"name": "fetch_url", "input": {"url": "https://api.example.test/private?token=secret"}},
+            {"name": "Grep", "input": {"pattern": "password"}},
+        ]
+
+        result = summarize_tool_uses(tool_uses)
+
+        assert "sk-secret" not in result
+        assert "token" not in result
+        assert "password" not in result
+        assert "curl" not in result
 
     def test_empty_list(self):
         assert summarize_tool_uses([]) == ""
@@ -140,6 +155,7 @@ class TestFormatToolSummaryGrouped:
         assert "Leitura:" in result
         assert "Escrita:" in result
         assert "Execu" in result  # Execução
+        assert "npm test" not in result
 
     def test_compact_format_5_or_fewer(self):
         tools = [
@@ -147,8 +163,8 @@ class TestFormatToolSummaryGrouped:
             {"name": "Edit", "input": "b.py"},
         ]
         result = format_tool_summary(tools)
-        assert "Used:" in result
-        assert "Ferramentas:" not in result
+        assert "Ferramentas:" in result
+        assert "Used:" not in result
 
 
 class TestFormatCompletionSummary:

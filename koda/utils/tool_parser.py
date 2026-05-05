@@ -1,9 +1,51 @@
-"""Parse tool_use events from Claude CLI JSON output."""
+"""Parse and summarize provider tool-use events for user-visible text."""
 
 import json
+import os
 from typing import Any, cast
 
 from koda.utils.progress import _format_elapsed
+
+_READ_TOOL_NAMES = frozenset(
+    {
+        "Read",
+        "read_file",
+        "Glob",
+        "Grep",
+        "file_read",
+        "file_list",
+        "file_search",
+        "file_grep",
+    }
+)
+_WRITE_TOOL_NAMES = frozenset(
+    {
+        "Write",
+        "write_file",
+        "Edit",
+        "edit_file",
+        "file_write",
+        "file_edit",
+        "file_move",
+        "file_delete",
+    }
+)
+_EXEC_TOOL_NAMES = frozenset({"Bash", "shell_execute", "shell_bg", "shell_status", "shell_output"})
+_BROWSER_TOOL_PREFIXES = ("browser_",)
+_SEARCH_TOOL_NAMES = frozenset({"web_search", "fetch_url", "http_request"})
+
+
+def _safe_basename(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return os.path.basename(value.strip().rstrip("/")) or value.strip()
+
+
+def _first_present(input_data: dict[str, Any], *keys: str) -> object:
+    for key in keys:
+        if key in input_data:
+            return input_data[key]
+    return None
 
 
 def parse_tool_uses(raw_output: str) -> list[dict[str, str]]:
@@ -51,30 +93,69 @@ def _extract_tools_from_data(data: dict[str, Any], tools: list[dict[str, str]]) 
 
 
 def _summarize_input(name: str, input_data: dict[str, Any]) -> str:
-    """Create a short summary of tool input."""
+    """Create a short, safe summary of tool input.
+
+    This text can be displayed to Telegram users. Avoid showing shell
+    commands, prompts, URLs, query strings, or arbitrary values because they
+    may include secrets or large provider-native traces.
+    """
     if not input_data:
         return ""
 
-    # Common tool input summaries
-    if name in ("Read", "read_file") and "file_path" in input_data:
-        return str(input_data["file_path"]).split("/")[-1]
-    if name in ("Edit", "edit_file") and "file_path" in input_data:
-        return str(input_data["file_path"]).split("/")[-1]
-    if name in ("Write", "write_file") and "file_path" in input_data:
-        return str(input_data["file_path"]).split("/")[-1]
-    if name == "Bash" and "command" in input_data:
-        cmd = str(input_data["command"])
-        return cmd[:40] + "..." if len(cmd) > 40 else cmd
-    if name == "Grep" and "pattern" in input_data:
-        return str(input_data["pattern"])[:30]
+    if name in _READ_TOOL_NAMES | _WRITE_TOOL_NAMES:
+        path = _first_present(input_data, "file_path", "path", "destination", "source")
+        return _safe_basename(path)
+    if name in _EXEC_TOOL_NAMES:
+        return "execucao"
+    if name.startswith(_BROWSER_TOOL_PREFIXES):
+        return "navegacao"
+    if name in _SEARCH_TOOL_NAMES:
+        return "consulta"
 
-    # Generic: show first key's value
-    for key in ("path", "query", "url", "name"):
-        if key in input_data:
-            val = str(input_data[key])
-            return val[:40] + "..." if len(val) > 40 else val
+    safe_name = _safe_basename(_first_present(input_data, "name", "title"))
+    if safe_name:
+        return safe_name[:40]
 
     return ""
+
+
+def _tool_category(name: str) -> str:
+    if name in _READ_TOOL_NAMES:
+        return "Leitura"
+    if name in _WRITE_TOOL_NAMES:
+        return "Escrita"
+    if name in _EXEC_TOOL_NAMES:
+        return "Execucao"
+    if name.startswith(_BROWSER_TOOL_PREFIXES):
+        return "Navegacao"
+    if name in _SEARCH_TOOL_NAMES:
+        return "Consulta"
+    return "Outras"
+
+
+def _sanitize_display_detail(name: str, detail: object) -> str:
+    value = str(detail or "").strip()
+    if not value:
+        return ""
+    if name in _READ_TOOL_NAMES | _WRITE_TOOL_NAMES:
+        return _safe_basename(value)
+    if name in _EXEC_TOOL_NAMES:
+        return "execucao"
+    if name.startswith(_BROWSER_TOOL_PREFIXES):
+        return "navegacao"
+    if name in _SEARCH_TOOL_NAMES:
+        return "consulta"
+    return ""
+
+
+def _format_tool_part(name: str, count: int, details: list[str]) -> str:
+    unique_details = list(dict.fromkeys(d for d in details if d and d != "execucao"))
+    suffix = f" x{count}" if count > 1 else ""
+    if unique_details:
+        shown = ", ".join(unique_details[:3])
+        more = f", +{len(unique_details) - 3}" if len(unique_details) > 3 else ""
+        return f"{name}({shown}{more}){suffix}"
+    return f"{name}{suffix}"
 
 
 def summarize_tool_uses(tool_uses: list[dict]) -> str:
@@ -100,59 +181,45 @@ def format_tool_summary(tools: list[dict[str, str]]) -> str:
     if not tools:
         return ""
 
-    # Deduplicate and count
+    # Deduplicate, count, and retain only safe display details.
     seen: dict[str, int] = {}
-    details: dict[str, str] = {}
+    details: dict[str, list[str]] = {}
     for t in tools:
         key = t["name"]
         seen[key] = seen.get(key, 0) + 1
-        if t.get("input") and key not in details:
-            details[key] = t["input"]
+        safe_detail = _sanitize_display_detail(key, t.get("input", ""))
+        if safe_detail:
+            details.setdefault(key, []).append(safe_detail)
 
     total = sum(seen.values())
 
     # Grouped format for >5 tools
     if total > 5:
-        _read_names = {"Read", "read_file", "Glob", "Grep"}
-        _write_names = {"Write", "write_file", "Edit", "edit_file"}
-
-        read_parts = []
-        write_parts = []
-        exec_parts = []
-        other_parts = []
+        grouped: dict[str, list[str]] = {
+            "Leitura": [],
+            "Escrita": [],
+            "Execucao": [],
+            "Navegacao": [],
+            "Consulta": [],
+            "Outras": [],
+        }
 
         for name, count in seen.items():
-            label = f"{name} x{count}" if count > 1 else name
-            if name in _read_names:
-                read_parts.append(label)
-            elif name in _write_names:
-                write_parts.append(label)
-            elif name == "Bash":
-                exec_parts.append(label)
-            else:
-                other_parts.append(label)
+            grouped[_tool_category(name)].append(_format_tool_part(name, count, details.get(name, [])))
 
-        lines = ["\U0001f527 Ferramentas:"]
-        if read_parts:
-            lines.append(f"  \U0001f4d6 Leitura: {', '.join(read_parts)}")
-        if write_parts:
-            lines.append(f"  \u270f\ufe0f Escrita: {', '.join(write_parts)}")
-        if exec_parts:
-            lines.append(f"  \u26a1 Execu\u00e7\u00e3o: {', '.join(exec_parts)}")
-        if other_parts:
-            lines.append(f"  \U0001f504 Outros: {', '.join(other_parts)}")
+        lines = ["Ferramentas:"]
+        for category in ("Leitura", "Escrita", "Execucao", "Navegacao", "Consulta", "Outras"):
+            grouped_parts = grouped[category]
+            if grouped_parts:
+                lines.append(f"  {category}: {', '.join(grouped_parts)}")
         return "\n".join(lines)
 
     # Compact format for <=5 tools
     parts: list[str] = []
     for name, count in seen.items():
-        detail = details.get(name, "")
-        if count > 1:
-            parts.append(f"{name}({detail})x{count}" if detail else f"{name}x{count}")
-        else:
-            parts.append(f"{name}({detail})" if detail else name)
+        parts.append(_format_tool_part(name, count, details.get(name, [])))
 
-    return "\U0001f527 Used: " + ", ".join(parts)
+    return "Ferramentas: " + ", ".join(parts)
 
 
 def format_completion_summary(tool_uses: list[dict], elapsed: float) -> str:
@@ -160,27 +227,27 @@ def format_completion_summary(tool_uses: list[dict], elapsed: float) -> str:
     if len(tool_uses) <= 3 or elapsed <= 10:
         return ""
 
-    reads = sum(1 for t in tool_uses if t.get("name") in ("Read", "Glob", "Grep"))
-    writes = sum(1 for t in tool_uses if t.get("name") in ("Write", "Edit", "write_file", "edit_file"))
-    execs = sum(1 for t in tool_uses if t.get("name") == "Bash")
+    reads = sum(1 for t in tool_uses if t.get("name") in _READ_TOOL_NAMES)
+    writes = sum(1 for t in tool_uses if t.get("name") in _WRITE_TOOL_NAMES)
+    execs = sum(1 for t in tool_uses if t.get("name") in _EXEC_TOOL_NAMES)
 
     file_names: set[str] = set()
     for t in tool_uses:
-        if t.get("name") in ("Write", "Edit", "write_file", "edit_file"):
+        if t.get("name") in _WRITE_TOOL_NAMES:
             inp = t.get("input", {})
-            path = inp.get("file_path", "") if isinstance(inp, dict) else ""
+            path = _first_present(inp, "file_path", "path", "destination") if isinstance(inp, dict) else ""
             if path:
-                file_names.add(path.rsplit("/", 1)[-1])
+                file_names.add(_safe_basename(path))
 
-    parts = [f"\u2705 Conclu\u00eddo em {_format_elapsed(elapsed)}"]
+    parts = [f"Concluido em {_format_elapsed(elapsed)}"]
 
     counters = []
     if reads:
-        counters.append(f"\U0001f4d6 {reads} lidos")
+        counters.append(f"{reads} lidos")
     if writes:
-        counters.append(f"\u270f\ufe0f {writes} editados")
+        counters.append(f"{writes} editados")
     if execs:
-        counters.append(f"\u26a1 {execs} comandos")
+        counters.append(f"{execs} execucoes")
     if counters:
         parts.append(" | ".join(counters))
 

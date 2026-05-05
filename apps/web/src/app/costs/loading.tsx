@@ -1,5 +1,5 @@
-import { TableRouteLoading } from "@/components/layout/route-loading";
+import { CostRouteLoading } from "@/components/layout/route-loading";
 
 export default function Loading() {
-  return <TableRouteLoading />;
+  return <CostRouteLoading />;
 }

@@ -1,5 +1,5 @@
-import { OverviewRouteLoading } from "@/components/layout/route-loading";
+import { AccountRouteLoading } from "@/components/layout/route-loading";
 
 export default function Loading() {
-  return <OverviewRouteLoading />;
+  return <AccountRouteLoading />;
 }

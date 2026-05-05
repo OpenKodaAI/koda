@@ -6,6 +6,7 @@ import { DatabaseZap, ShieldCheck } from "lucide-react";
 import { DLQTable } from "@/components/dlq/dlq-table";
 import { ErrorDetail } from "@/components/dlq/error-detail";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { DLQDataLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
@@ -131,20 +132,7 @@ export default function DLQPage() {
         </div>
 
         {loading && entries.length === 0 ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="flex h-[72px] animate-pulse flex-col gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-4"
-                >
-                  <div className="h-3 w-16 rounded bg-[var(--panel-strong)]" />
-                  <div className="h-5 w-12 rounded bg-[var(--panel-strong)]" />
-                </div>
-              ))}
-            </div>
-            <div className="min-h-[320px]" />
-          </div>
+          <DLQDataLoading />
         ) : entriesQuery.error ? (
           <ErrorState
             title={t("dlq.page.unavailable")}

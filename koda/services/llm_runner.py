@@ -547,22 +547,32 @@ async def run_llm_streaming(
 
 def summarize_native_items(native_items: list[dict[str, Any]]) -> str:
     """Build a compact provider-agnostic summary from native execution items."""
-    categories: list[str] = []
+    command_count = 0
+    tool_count = 0
+    file_names: list[str] = []
     for item in native_items:
         item_type = str(item.get("type") or "")
         if item_type == "command_execution":
-            command = item.get("command") or item.get("input", {}).get("command") or item.get("title") or "shell"
-            categories.append(f"shell({command})")
+            command_count += 1
         elif item_type in {"mcp_tool_call", "web_search", "todo_list"}:
-            categories.append(item_type.replace("_", " "))
+            tool_count += 1
         elif item_type == "file_change":
             kind = item.get("kind") or item.get("change_type") or "changed"
             path = item.get("path") or item.get("file_path") or "file"
-            categories.append(f"{kind} {path}")
-    if not categories:
+            if str(kind).lower() in {"add", "created", "changed"}:
+                file_names.append(str(path).rsplit("/", 1)[-1])
+    if not command_count and not tool_count and not file_names:
         return ""
-    unique = list(dict.fromkeys(categories))
-    return "Tools: " + ", ".join(unique[:6])
+    parts: list[str] = []
+    if file_names:
+        unique_files = list(dict.fromkeys(file_names))
+        parts.append("Arquivos: " + ", ".join(unique_files[:6]))
+    if command_count:
+        parts.append(f"{command_count} etapa{'s' if command_count != 1 else ''} de execucao")
+    if tool_count:
+        suffix = "s auxiliares" if tool_count != 1 else " auxiliar"
+        parts.append(f"{tool_count} ferramenta{suffix}")
+    return "Concluido: " + " | ".join(parts)
 
 
 def serialize_usage(usage: dict[str, Any] | None) -> str:

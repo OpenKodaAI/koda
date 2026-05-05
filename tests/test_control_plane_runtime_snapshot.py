@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -134,6 +135,96 @@ def test_runtime_snapshot_propagates_health_port_to_process_env(monkeypatch):
     assert snapshot.process_env.get("HEALTH_PORT") == "8223", (
         "HEALTH_PORT must be in process_env so the spawned worker binds the port the supervisor is polling."
     )
+
+
+def test_runtime_snapshot_overwrites_stale_model_policy_env(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    stale_policy = {"functional_defaults": {"audio": {"provider_id": "kokoro", "model_id": "kokoro-v1"}}}
+    current_policy = {"functional_defaults": {"audio": {"provider_id": "elevenlabs", "model_id": "eleven_flash_v2_5"}}}
+
+    monkeypatch.delenv("AGENT_ID", raising=False)
+
+    manager.get_published_snapshot = lambda agent_id, version=None: {  # type: ignore[attr-defined]
+        "env": {
+            "AGENT_MODEL_POLICY_JSON": json.dumps(stale_policy),
+            "MODEL_FUNCTION_DEFAULTS_JSON": json.dumps(current_policy["functional_defaults"]),
+        },
+        "agent": {"runtime_endpoint": {}},
+        "sections": {"providers": {"elevenlabs_default_voice": "nPczCjzI2devNBz1zQrb"}},
+        "skills": [],
+        "templates": [],
+        "secrets": {},
+    }
+    manager.publish_agent = lambda agent_id: {"version": 1}  # type: ignore[attr-defined]
+    manager._snapshot_version = lambda agent_id, snapshot: 1  # type: ignore[attr-defined]
+    manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_connection_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_api_key_secret_value = lambda provider_id: ""  # type: ignore[attr-defined]
+    manager.get_agent_spec = lambda agent_id, snapshot=None: {  # type: ignore[attr-defined]
+        "documents": {},
+        "model_policy": current_policy,
+    }
+    manager._general_ui_meta = lambda sections=None: {}  # type: ignore[attr-defined]
+    manager._system_settings_sections = lambda: {}  # type: ignore[attr-defined]
+    manager._bool_from_env = lambda env, key, default=False: default  # type: ignore[attr-defined]
+    manager._scoped_env = lambda agent_id, env: dict(env)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_managed_voices_storage_path",
+        lambda: Path("/tmp/kokoro-managed.bin"),
+    )
+
+    snapshot = manager._resolve_runtime_snapshot("agent_h")
+
+    assert json.loads(snapshot.env["AGENT_MODEL_POLICY_JSON"]) == current_policy
+    assert snapshot.env["ELEVENLABS_MODEL"] == "eleven_flash_v2_5"
+    assert snapshot.env["TTS_DEFAULT_VOICE"] == "nPczCjzI2devNBz1zQrb"
+
+
+def test_runtime_snapshot_rehydrates_selected_elevenlabs_api_key(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    policy = {"functional_defaults": {"audio": {"provider_id": "elevenlabs", "model_id": "eleven_multilingual_v2"}}}
+
+    monkeypatch.delenv("AGENT_ID", raising=False)
+
+    manager.get_published_snapshot = lambda agent_id, version=None: {  # type: ignore[attr-defined]
+        "env": {
+            "MODEL_FUNCTION_DEFAULTS_JSON": json.dumps(policy["functional_defaults"]),
+        },
+        "agent": {"runtime_endpoint": {}},
+        "sections": {"providers": {"elevenlabs_default_voice": "WSBwiRQRmi2mEG7BfKwS"}},
+        "skills": [],
+        "templates": [],
+        "secrets": {},
+    }
+    manager.publish_agent = lambda agent_id: {"version": 2}  # type: ignore[attr-defined]
+    manager._snapshot_version = lambda agent_id, snapshot: 2  # type: ignore[attr-defined]
+    manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_connection_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_api_key_secret_value = lambda provider_id: "xi-runtime-secret"  # type: ignore[attr-defined]
+    manager.get_agent_spec = lambda agent_id, snapshot=None: {  # type: ignore[attr-defined]
+        "documents": {},
+        "model_policy": policy,
+    }
+    manager._general_ui_meta = lambda sections=None: {}  # type: ignore[attr-defined]
+    manager._system_settings_sections = lambda: {}  # type: ignore[attr-defined]
+    manager._bool_from_env = lambda env, key, default=False: default  # type: ignore[attr-defined]
+    manager._scoped_env = lambda agent_id, env: dict(env)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_managed_voices_storage_path",
+        lambda: Path("/tmp/kokoro-managed.bin"),
+    )
+
+    snapshot = manager._resolve_runtime_snapshot("agent_h")
+
+    assert snapshot.env["ELEVENLABS_MODEL"] == "eleven_multilingual_v2"
+    assert snapshot.env["ELEVENLABS_API_KEY"] == "xi-runtime-secret"
+    assert snapshot.env["ELEVENLABS_ENABLED"] == "true"
 
 
 def test_runtime_prompt_preview_respects_agent_tool_policy():

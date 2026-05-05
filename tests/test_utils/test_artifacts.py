@@ -60,6 +60,107 @@ def test_extract_missing_file_path():
     assert extract_created_files(tool_uses) == []
 
 
+def test_extract_native_command_created_docx_from_output(tmp_path):
+    doc = tmp_path / "animais_silvestres_teste.docx"
+    doc.write_bytes(b"docx")
+    native_items = [
+        {
+            "type": "command_execution",
+            "command": "python - <<'PY'\nout = 'animais_silvestres_teste.docx'\nPY",
+            "output": "animais_silvestres_teste.docx\n",
+        }
+    ]
+
+    assert extract_created_files([], native_items, work_dir=str(tmp_path)) == [str(doc.resolve())]
+
+
+def test_extract_native_command_ignores_artifact_outside_work_dir(tmp_path):
+    outside = tmp_path.parent / "outside.pdf"
+    outside.write_bytes(b"pdf")
+    native_items = [{"type": "command_execution", "output": str(outside)}]
+
+    assert extract_created_files([], native_items, work_dir=str(tmp_path)) == []
+
+
+def test_extract_native_file_change_resolves_relative_path(tmp_path):
+    native_items = [{"type": "file_change", "kind": "add", "path": "relatorio.pdf"}]
+
+    assert extract_created_files([], native_items, work_dir=str(tmp_path)) == [str(tmp_path / "relatorio.pdf")]
+
+
+def test_extract_agent_shell_created_artifact_from_trace_output(tmp_path):
+    sheet = tmp_path / "planilha.xlsx"
+    sheet.write_bytes(b"xlsx")
+    trace = [
+        {
+            "tool": "shell_execute",
+            "success": True,
+            "output": "Created planilha.xlsx",
+            "metadata": {"category": "shell"},
+        }
+    ]
+
+    assert extract_created_files([], [], trace, work_dir=str(tmp_path)) == [str(sheet.resolve())]
+
+
+def test_extract_agent_file_write_from_trace_params(tmp_path):
+    doc = tmp_path / "resumo.docx"
+    doc.write_bytes(b"docx")
+    trace = [
+        {
+            "tool": "file_write",
+            "success": True,
+            "params": {"path": "resumo.docx"},
+            "output": "Written 4 bytes to resumo.docx",
+            "metadata": {"write": True},
+        }
+    ]
+
+    assert extract_created_files([], [], trace, work_dir=str(tmp_path)) == [str(doc.resolve())]
+
+
+def test_extract_trace_ignores_read_output_artifact_name(tmp_path):
+    doc = tmp_path / "entrada.docx"
+    doc.write_bytes(b"docx")
+    trace = [
+        {
+            "tool": "file_read",
+            "success": True,
+            "output": "entrada.docx",
+            "metadata": {"write": False},
+        }
+    ]
+
+    assert extract_created_files([], [], trace, work_dir=str(tmp_path)) == []
+
+
+def test_extract_tool_use_shell_output_without_command_leak(tmp_path):
+    pdf = tmp_path / "relatorio.pdf"
+    pdf.write_bytes(b"pdf")
+    tool_uses = [
+        {
+            "name": "Bash",
+            "input": {"command": "python generate.py --secret sk-test"},
+            "output": "relatorio.pdf",
+        }
+    ]
+
+    assert extract_created_files(tool_uses, work_dir=str(tmp_path)) == [str(pdf.resolve())]
+
+
+def test_extract_tool_use_shell_does_not_attach_command_only_path(tmp_path):
+    existing = tmp_path / "entrada.pdf"
+    existing.write_bytes(b"pdf")
+    tool_uses = [
+        {
+            "name": "Bash",
+            "input": {"command": "python process.py entrada.pdf"},
+        }
+    ]
+
+    assert extract_created_files(tool_uses, work_dir=str(tmp_path)) == []
+
+
 # -- send_created_files -------------------------------------------------------
 
 

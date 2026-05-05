@@ -114,6 +114,40 @@ def test_get_provider_download_job_supports_embedding(monkeypatch: pytest.Monkey
     assert payload["status"] == "running"
 
 
+def test_kokoro_voice_catalog_includes_active_job(monkeypatch: pytest.MonkeyPatch):
+    manager = _manager()
+    manager._system_settings_sections = lambda: {"providers": {}}  # type: ignore[method-assign]
+    manager._general_ui_meta = lambda *, sections: {}  # type: ignore[method-assign]
+    manager._active_provider_download_job = lambda provider, asset: (  # type: ignore[method-assign]
+        {"provider_id": provider, "asset_id": asset, "status": "running"} if asset == "pm_alex" else None
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_catalog_payload",
+        lambda language_id: {
+            "items": [
+                {
+                    "voice_id": "pm_alex",
+                    "name": "Alex",
+                    "language_id": language_id,
+                    "downloaded": False,
+                }
+            ],
+            "available_languages": [],
+            "downloaded_voice_ids": [],
+        },
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_voice_metadata",
+        lambda _voice_id: {"voice_id": "pm_alex", "name": "Alex", "language_id": "pt-br"},
+    )
+
+    payload = manager.get_kokoro_voice_catalog(language="pt-br")
+
+    assert payload["items"][0]["active_job"]["status"] == "running"
+
+
 def test_provider_download_runner_honors_cancel_before_network(monkeypatch: pytest.MonkeyPatch):
     manager = _manager()
     event = threading.Event()

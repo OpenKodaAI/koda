@@ -36,7 +36,7 @@ _BODY = (
     "Natural language also works, for example:\n"
     "• switch the provider to OpenAI\n"
     "• use gpt-5.2 as the general model\n"
-    "• for images, use codex gpt-image-1.5\n"
+    "• for images, use codex gpt-image-2\n"
     "• change the voice to pm_alex\n"
     "• enable supervised mode\n"
     "\n"

@@ -69,7 +69,7 @@ export function TaskTable({
     <>
       <div className="hidden md:block">
         <div className="table-shell overflow-x-auto">
-          <table className="glass-table min-w-[1040px] table-fixed">
+          <table className="glass-table glass-table--sticky-last min-w-[1040px] table-fixed">
             <colgroup>
               {showAgent && <col className="w-[108px]" />}
               <col className="w-[102px]" />

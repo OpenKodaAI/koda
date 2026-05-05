@@ -426,6 +426,14 @@ Initial validation auto-activates the job by default when it passes safely.
 - `http_request` — Make an HTTP request.
   Params: `{"method": "GET/POST/...", "url": "https://...", "body": "optional", "headers": {"key": "val"}}`
 
+### Image Generation
+- `image_generate` — Generate an image using the configured image provider/model.
+  Params: `{"prompt": "visual description"}`.
+  Optional: `{"filename": "image.png", "size": "auto|1024x1024|1536x1024|1024x1536",`
+  `"quality": "auto|low|medium|high", "background": "auto|transparent|opaque",`
+  `"output_format": "png|jpeg|webp", "n": 1}`.
+  Use this when the user asks to create, generate, render, design, or illustrate an image.
+
 ### Agent Management
 - `agent_set_workdir` — Change the agent's working directory. Params: `{"path": "/absolute/path"}`
 - `agent_get_status` — Get agent status (work_dir, model, session, mode, cost). Params: `{}`

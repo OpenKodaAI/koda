@@ -842,12 +842,14 @@ _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
-def _extract_model_ids_from_payload(provider_id: str, payload: dict[str, Any]) -> list[str]:
+def _extract_model_ids_from_payload(provider_id: str, payload: Any) -> list[str]:
     """Return provider model IDs from common model-list response shapes."""
     raw_items: Any
-    if isinstance(payload.get("data"), list):
+    if isinstance(payload, list):
+        raw_items = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("data"), list):
         raw_items = payload.get("data")
-    elif isinstance(payload.get("models"), list):
+    elif isinstance(payload, dict) and isinstance(payload.get("models"), list):
         raw_items = payload.get("models")
     else:
         raw_items = []

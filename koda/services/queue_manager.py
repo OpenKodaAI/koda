@@ -19,8 +19,10 @@ import inspect
 import json
 import os
 import random
+import re
 import subprocess
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
@@ -59,8 +61,9 @@ from koda.config import (
     TASK_RETRY_BASE_DELAY,
     TASK_RETRY_MAX_DELAY,
     TRANSCRIPT_REPLAY_LIMIT,
-    TTS_ENABLED,
+    TTS_MAX_CHARS,
     VOICE_ACTIVE_PROMPT,
+    VOICE_SPOKEN_MAX_CHARS,
 )
 from koda.logging_config import ctx_query_id, ctx_user_id, get_logger
 from koda.services.llm_runner import (
@@ -103,6 +106,8 @@ from koda.utils.command_helpers import (
     ensure_canonical_session_id,
     get_provider_model,
     normalize_provider,
+    sync_user_data_with_runtime_settings,
+    tts_enabled_for_session,
 )
 from koda.utils.images import untrack_images
 from koda.utils.progress import (
@@ -216,6 +221,156 @@ def _queue_manager_action_allowed(
     return False
 
 
+_AUDIO_RESPONSE_INTENT_RE = re.compile(
+    r"\b("
+    r"(me\s+)?(envie|envia|mande|manda)\s+(um\s+|uma\s+)?(audio|voz)"
+    r"|(?:envie|envia|mande|manda|responda|responder)\s+(?:.*\s+)?(em|por)\s+(audio|voz)"
+    r"|send\s+(me\s+)?(a\s+)?(voice|audio)(\s+message)?"
+    r"|(?:reply|answer|respond)\s+(by|with|in)\s+(voice|audio)"
+    r"|(?:voice|audio)\s+reply"
+    r"|(em|por)\s+(audio|voz)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPLETION_RE = re.compile(
+    r"\b(criei|gerei|salvei|arquivo|documento|created|generated|saved|attached)\b"
+    r".*\.(docx|doc|pdf|pptx|ppt|xlsx|xls|csv|html|zip|png|jpg|jpeg|webp|mp3|wav|ogg)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _normalize_audio_intent_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
+def _detect_audio_response_request(text: str) -> bool:
+    """Return true when the user asks for this turn as voice/audio."""
+    normalized = _normalize_audio_intent_text(text)
+    if not normalized.strip():
+        return False
+    return bool(_AUDIO_RESPONSE_INTENT_RE.search(normalized))
+
+
+def _looks_like_artifact_completion(text: str) -> bool:
+    return bool(_ARTIFACT_COMPLETION_RE.search(str(text or "")))
+
+
+def _voice_policy_from_user_data(user_data: dict[str, Any] | None) -> dict[str, Any]:
+    policy = user_data.get("voice_policy") if isinstance(user_data, dict) else None
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _voice_continuous_mode_active(user_data: dict[str, Any] | None) -> bool:
+    if not isinstance(user_data, dict):
+        return False
+    mode = str(user_data.get("voice_policy_mode") or "").strip().lower()
+    return (
+        bool(user_data.get("audio_response"))
+        or bool(user_data.get("voice_policy_active"))
+        or mode
+        in {
+            "tts",
+            "voice_active",
+        }
+    )
+
+
+def _voice_policy_int(user_data: dict[str, Any] | None, *keys: str, default: int) -> int:
+    policy = _voice_policy_from_user_data(user_data)
+    for key in keys:
+        value = policy.get(key)
+        if value is None and isinstance(user_data, dict):
+            value = user_data.get(key)
+        if value is None:
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return default
+
+
+def _voice_spoken_max_chars(user_data: dict[str, Any] | None) -> int:
+    configured = _voice_policy_int(
+        user_data,
+        "max_spoken_chars",
+        "spoken_max_chars",
+        "max_audio_chars",
+        default=VOICE_SPOKEN_MAX_CHARS,
+    )
+    return max(240, min(configured, TTS_MAX_CHARS))
+
+
+def _voice_language_is_portuguese(user_data: dict[str, Any] | None) -> bool:
+    language = str((user_data or {}).get("tts_voice_language") or "").strip().lower()
+    return language.startswith("pt")
+
+
+def _voice_delivery_note(user_data: dict[str, Any] | None) -> str:
+    if _voice_language_is_portuguese(user_data):
+        return "Deixei os detalhes completos em texto."
+    return "I left the full details in text."
+
+
+def _voice_code_note(user_data: dict[str, Any] | None) -> str:
+    if _voice_language_is_portuguese(user_data):
+        return "A resposta completa tem codigo ou detalhes tecnicos."
+    return "The full response includes code or technical details."
+
+
+def _voice_artifact_note(paths: list[str], user_data: dict[str, Any] | None) -> str:
+    names = [os.path.basename(path) for path in paths if path]
+    if not names:
+        return ""
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f", +{len(names) - 3}"
+    if _voice_language_is_portuguese(user_data):
+        return f"Anexei: {shown}."
+    return f"I attached: {shown}."
+
+
+def _safe_voice_policy_text(value: Any, *, max_len: int = 120) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    return text[:max_len].strip()
+
+
+def _build_voice_active_prompt(user_data: dict[str, Any] | None, *, force_audio_response: bool = False) -> str:
+    policy = _voice_policy_from_user_data(user_data)
+    lines: list[str] = []
+    max_chars = _voice_spoken_max_chars(user_data)
+    lines.append(f"max_spoken_chars={max_chars}")
+    for key in ("spoken_style", "style", "detail_level", "language", "tone"):
+        value = _safe_voice_policy_text(policy.get(key))
+        if value:
+            lines.append(f"{key}={value}")
+    delivery_state = (
+        "<voice_delivery_state>\n"
+        "Voice delivery is ACTIVE for this response. The runtime has already decided that this answer "
+        "will be synthesized and sent as Telegram audio/voice.\n"
+        f"continuous_voice_mode={'active' if _voice_continuous_mode_active(user_data) else 'inactive'}\n"
+        f"turn_audio_request={'true' if force_audio_response else 'false'}\n"
+        f"session_tts_enabled={'true' if tts_enabled_for_session(user_data) else 'false'}\n"
+        "Do not say voice mode, TTS, or audio is disabled. Do not tell the user to use /voice to enable "
+        "audio in this response. If you mention delivery, say the audio is being sent now.\n"
+        "</voice_delivery_state>"
+    )
+    if not lines:
+        return f"{VOICE_ACTIVE_PROMPT}\n\n{delivery_state}"
+    return (
+        f"{VOICE_ACTIVE_PROMPT}\n\n"
+        f"{delivery_state}\n\n"
+        "<agent_voice_delivery_policy>\n"
+        "These voice delivery preferences come from the active agent configuration. "
+        "Follow them as formatting guidance while preserving the agent persona and task requirements.\n"
+        + "\n".join(lines)
+        + "\n</agent_voice_delivery_policy>"
+    )
+
+
 # Dataclasses
 
 
@@ -244,6 +399,7 @@ class QueueItem:
     runtime_work_dir: str | None = None
     is_dashboard_chat: bool = False
     override_session_id: str | None = None
+    force_audio_response: bool = False
 
 
 @dataclass
@@ -300,6 +456,7 @@ class QueryContext:
     asset_refs: list[dict[str, Any]] = field(default_factory=list)
     skill_matches: list[Any] = field(default_factory=list)
     effort: str | int | None = None
+    force_audio_response: bool = False
 
 
 @dataclass
@@ -1155,6 +1312,7 @@ def _serialize_queue_payload(raw_item: Any) -> str:
                 "query_text": query_text,
                 "image_paths": list(image_paths or []),
                 "artifact_bundle": _serialize_artifact_bundle(artifact_bundle),
+                "force_audio_response": False,
             }
         elif len(raw_item) == 4:
             update, query_text, image_paths, _ = raw_item
@@ -1164,6 +1322,7 @@ def _serialize_queue_payload(raw_item: Any) -> str:
                 "chat_id": update.effective_chat.id,
                 "query_text": query_text,
                 "image_paths": list(image_paths or []),
+                "force_audio_response": False,
             }
         else:
             update, query_text = raw_item
@@ -1172,6 +1331,7 @@ def _serialize_queue_payload(raw_item: Any) -> str:
                 "_task_id": task_id,
                 "chat_id": update.effective_chat.id,
                 "query_text": query_text,
+                "force_audio_response": False,
             }
     else:
         payload = {"_unsupported_payload": True}
@@ -1207,6 +1367,7 @@ def _build_user_message_raw_item(
     update: Update | None,
     image_paths: list[str] | None,
     artifact_bundle: Any | None,
+    force_audio_response: bool = False,
 ) -> dict[str, Any]:
     return {
         "_user_message": True,
@@ -1220,6 +1381,7 @@ def _build_user_message_raw_item(
         "update": update,
         "image_paths": list(image_paths or []),
         "artifact_bundle": artifact_bundle,
+        "force_audio_response": bool(force_audio_response),
     }
 
 
@@ -1321,11 +1483,11 @@ async def _handle_queue_dispatch_failure(
                 recovery_count=recovery_count,
             ),
         )
+        _update_runtime_queue_status(task_id, "failed", last_error=error_message)
         if RUNTIME_ENVIRONMENTS_ENABLED:
             from koda.services.runtime import get_runtime_controller
 
             runtime = get_runtime_controller()
-            runtime.store.update_runtime_queue_item(task_id, status="failed", last_error=error_message)
             with contextlib.suppress(Exception):
                 await runtime.record_warning(
                     task_id=task_id,
@@ -1464,6 +1626,17 @@ async def _persist_runtime_queue_item(
         log.warning("runtime_queue_persist_failed", task_id=task_id, user_id=user_id, error=str(exc))
 
 
+def _update_runtime_queue_status(task_id: int | None, status: str, *, last_error: str | None = None) -> None:
+    if task_id is None:
+        return
+    try:
+        from koda.services.runtime import get_runtime_controller
+
+        get_runtime_controller().store.update_runtime_queue_item(task_id, status=status, last_error=last_error)
+    except Exception:
+        log.debug("runtime_queue_status_update_skipped", task_id=task_id, status=status, exc_info=True)
+
+
 def _build_recovered_raw_item(
     task_row: dict[str, Any],
     *,
@@ -1519,6 +1692,7 @@ def _build_dlq_reprocess_raw_item(
     model: str | None = None
     work_dir: str | None = None
     session_id: str | None = None
+    force_audio_response = False
     query_text = str(entry.get("query_text") or "")
     chat_id = int(entry.get("chat_id") or 0)
     if payload:
@@ -1532,6 +1706,7 @@ def _build_dlq_reprocess_raw_item(
         if isinstance(payload_image_paths, list):
             image_paths = [str(path) for path in payload_image_paths if path]
         artifact_bundle = payload.get("artifact_bundle")
+        force_audio_response = bool(payload.get("force_audio_response"))
     return _build_user_message_raw_item(
         task_id=task_id,
         chat_id=chat_id,
@@ -1543,6 +1718,7 @@ def _build_dlq_reprocess_raw_item(
         update=None,
         image_paths=image_paths,
         artifact_bundle=artifact_bundle,
+        force_audio_response=force_audio_response,
     )
 
 
@@ -1711,6 +1887,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             scheduled_model=item.get("model"),
             scheduled_work_dir=item.get("work_dir"),
             override_session_id=item.get("session_id"),
+            force_audio_response=bool(item.get("force_audio_response")),
         )
     if isinstance(item, dict) and item.get("_dashboard_chat"):
         return QueueItem(
@@ -1925,6 +2102,12 @@ async def _prepare_query_context(
     from koda.utils.command_helpers import init_user_data
 
     init_user_data(context.user_data, user_id=user_id)
+    try:
+        from koda.services.agent_settings import get_agent_runtime_settings
+
+        sync_user_data_with_runtime_settings(context.user_data, get_agent_runtime_settings())
+    except Exception:
+        log.debug("agent_runtime_settings_sync_skipped", exc_info=True)
     from koda.knowledge import classify_task_kind, default_execution_policy
 
     # Budget check
@@ -1994,11 +2177,13 @@ async def _prepare_query_context(
         )
 
     # Voice instructions
-    if context.user_data.get("audio_response") and TTS_ENABLED:
+    voice_requested = bool(item.force_audio_response or _voice_continuous_mode_active(context.user_data))
+    voice_enabled = bool(item.force_audio_response or tts_enabled_for_session(context.user_data))
+    if voice_requested and voice_enabled:
         _append_prompt_segment(
             prompt_segments,
             segment_id="voice_prompt",
-            text=VOICE_ACTIVE_PROMPT,
+            text=_build_voice_active_prompt(context.user_data, force_audio_response=item.force_audio_response),
             category="runtime_rules",
             priority=20,
             compression_strategy="head_and_tail",
@@ -2677,6 +2862,7 @@ async def _prepare_query_context(
         prompt_budget=prompt_budget,
         asset_refs=asset_refs,
         skill_matches=_resolved_skill_matches,
+        force_audio_response=item.force_audio_response,
     )
 
 
@@ -4101,6 +4287,117 @@ def _build_operational_footer(ctx: QueryContext | None, run_result: RunResult) -
     return "\n" + "\n".join(f"<i>{escape_html(line)}</i>" for line in lines)
 
 
+_LEADING_TOOL_TRANSCRIPT_RE = re.compile(r"^\s*Tools:\s*(?:shell|bash|tool|[\w.-]+)\(", re.IGNORECASE)
+_NATURAL_RESPONSE_START_RE = re.compile(
+    r"^(?:Vou|Criei|Aqui|Segue|Pronto|Nao|Não|Encontrei|I\b|I['’]ve|Created|Here|Done)\b",
+    re.IGNORECASE,
+)
+_SPOKEN_RESPONSE_BLOCK_RE = re.compile(r"<spoken_response>(.*?)</spoken_response>", re.IGNORECASE | re.DOTALL)
+_MARKDOWN_TABLE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$", re.MULTILINE)
+_BULLET_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S+", re.MULTILINE)
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _strip_leading_tool_transcript(text: str) -> str:
+    """Remove provider-generated tool transcript preambles from final text."""
+    if not text or not _LEADING_TOOL_TRANSCRIPT_RE.search(text):
+        return text
+    lines = text.splitlines()
+    for idx, line in enumerate(lines[1:], start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _NATURAL_RESPONSE_START_RE.search(stripped):
+            return "\n".join(lines[idx:]).lstrip()
+    return text
+
+
+def _extract_spoken_response_block(text: str) -> tuple[str, str | None]:
+    match = _SPOKEN_RESPONSE_BLOCK_RE.search(text or "")
+    if not match:
+        return text, None
+    spoken = match.group(1).strip()
+    visible = _SPOKEN_RESPONSE_BLOCK_RE.sub("", text, count=1).strip()
+    return visible, spoken or None
+
+
+def _truncate_spoken_text(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    for sep in (". ", "! ", "? ", ".\n", "!\n", "?\n"):
+        idx = truncated.rfind(sep)
+        if idx > max_chars // 2:
+            return truncated[: idx + 1].strip()
+    return truncated.rstrip(" ,;:") + "..."
+
+
+def _first_spoken_sentences(text: str, max_chars: int, *, max_sentences: int = 3) -> str:
+    sentences = [part.strip() for part in _SENTENCE_BOUNDARY_RE.split(text) if part.strip()]
+    selected: list[str] = []
+    for sentence in sentences:
+        candidate = " ".join([*selected, sentence]).strip()
+        if selected and len(candidate) > max_chars:
+            break
+        selected.append(sentence)
+        if len(selected) >= max_sentences:
+            break
+    return _truncate_spoken_text(" ".join(selected) if selected else text, max_chars)
+
+
+def _response_needs_spoken_summary(response: str, plain_text: str, max_chars: int) -> bool:
+    if len(plain_text) > max_chars:
+        return True
+    if "```" in response:
+        return True
+    if _MARKDOWN_TABLE_ROW_RE.search(response):
+        return True
+    return len(_BULLET_LINE_RE.findall(response)) >= 5
+
+
+def _prepare_spoken_response_for_tts(
+    response: str,
+    *,
+    explicit_spoken_response: str | None = None,
+    created_artifacts: list[str] | None = None,
+    user_data: dict[str, Any] | None = None,
+) -> tuple[str, bool]:
+    """Return concise TTS text and whether full text should also be sent."""
+    from koda.utils.tts import is_mostly_code, strip_for_tts
+
+    max_chars = _voice_spoken_max_chars(user_data)
+    artifact_note = _voice_artifact_note(created_artifacts or [], user_data)
+
+    if explicit_spoken_response:
+        spoken = strip_for_tts(explicit_spoken_response)
+        if artifact_note and artifact_note not in spoken:
+            spoken = f"{spoken} {artifact_note}".strip()
+        visible_plain = strip_for_tts(response)
+        return _truncate_spoken_text(spoken, max_chars), bool(visible_plain and visible_plain != spoken)
+
+    plain = strip_for_tts(response)
+    mostly_code = is_mostly_code(response)
+    needs_summary = mostly_code or _response_needs_spoken_summary(response, plain, max_chars)
+    if not needs_summary:
+        spoken = plain
+        if artifact_note and artifact_note not in spoken:
+            spoken = f"{spoken} {artifact_note}".strip()
+        return _truncate_spoken_text(spoken, max_chars), False
+
+    if mostly_code:
+        base = f"{_voice_code_note(user_data)} {_voice_delivery_note(user_data)}"
+    else:
+        base = _first_spoken_sentences(plain, max_chars)
+        if base:
+            base = f"{base} {_voice_delivery_note(user_data)}"
+        else:
+            base = _voice_delivery_note(user_data)
+    if artifact_note:
+        base = f"{base} {artifact_note}".strip()
+    return _truncate_spoken_text(base, max_chars), True
+
+
 def _compose_response_text(
     run_result: RunResult,
     *,
@@ -4127,10 +4424,9 @@ def _compose_response_text(
         tool_summary = format_tool_summary(tools)
 
     response = response_override if response_override is not None else strip_internal_blocks(run_result.result or "")
+    response = _strip_leading_tool_transcript(response)
     if not response and tool_summary:
         response = tool_summary
-    elif tool_summary:
-        response = f"{tool_summary}\n\n{response}"
     return response, tool_summary
 
 
@@ -4156,58 +4452,122 @@ async def _send_response(
         elapsed=elapsed,
         include_tool_summary=include_tool_summary,
     )
+    response, explicit_spoken_response = _extract_spoken_response_block(response)
+    created_artifacts: list[str] = []
+    if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace:
+        created_artifacts = extract_created_files(
+            run_result.tool_uses,
+            run_result.native_items,
+            run_result.tool_execution_trace,
+            work_dir=work_dir,
+        )
+        if not created_artifacts and not run_result.error and _looks_like_artifact_completion(response):
+            response = (
+                f"{response}\n\n"
+                "Nao encontrei esse arquivo no diretorio de trabalho, entao nao consegui anexa-lo. "
+                "Vou tratar isso como uma falha de geracao do artefato, nao como uma entrega concluida."
+            )
+            run_result.warnings.append("artifact not found")
 
     response_markup = build_response_markup(task_id)
 
     # --- TTS voice response branch ---
     audio_sent = False
-    if context.user_data.get("audio_response") and TTS_ENABLED:
-        from koda.utils.tts import is_mostly_code, strip_for_tts, synthesize_speech
+    audio_failure_notice = ""
+    send_text_with_audio = False
+    force_audio_response = bool(ctx and ctx.force_audio_response)
+    voice_requested = bool(force_audio_response or _voice_continuous_mode_active(context.user_data))
+    voice_enabled = bool(force_audio_response or tts_enabled_for_session(context.user_data))
+    if voice_requested and voice_enabled:
+        from koda.utils.tts import get_last_tts_error, synthesize_speech
 
-        if not is_mostly_code(response):
-            plain = strip_for_tts(response)
-            if plain.strip():
-                from koda.config import TTS_DEFAULT_VOICE, TTS_SPEED
+        plain, send_text_with_audio = _prepare_spoken_response_for_tts(
+            response,
+            explicit_spoken_response=explicit_spoken_response,
+            created_artifacts=created_artifacts,
+            user_data=context.user_data,
+        )
+        if plain.strip():
+            from koda.config import ELEVENLABS_TIMEOUT, TTS_DEFAULT_VOICE, TTS_SPEED
 
-                tts_voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
-                ogg_path = await synthesize_speech(
-                    plain,
-                    tts_voice,
-                    TTS_SPEED,
-                    provider=str(context.user_data.get("audio_provider") or "").strip().lower() or None,
-                    model=str(context.user_data.get("audio_model") or "").strip() or None,
-                    language=str(context.user_data.get("tts_voice_language") or "").strip().lower() or None,
-                )
-                if not ogg_path:
-                    run_result.warnings.append("audio failed")
-                if ogg_path:
-                    from pathlib import Path as _P
-
-                    try:
-                        caption = (
-                            f"Cost: ${cost:.4f} | "
-                            f"Total: ${context.user_data['total_cost']:.4f} | "
-                            f"Dir: {os.path.basename(work_dir)}"
+            tts_voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
+            audio_provider = str(context.user_data.get("audio_provider") or "").strip().lower()
+            ogg_path = await synthesize_speech(
+                plain,
+                tts_voice,
+                TTS_SPEED,
+                provider=audio_provider or None,
+                model=str(context.user_data.get("audio_model") or "").strip() or None,
+                language=str(context.user_data.get("tts_voice_language") or "").strip().lower() or None,
+            )
+            if not ogg_path:
+                if audio_provider == "elevenlabs":
+                    tts_error = get_last_tts_error() or {}
+                    error_code = str(tts_error.get("code") or "").strip().lower()
+                    error_message = str(tts_error.get("message") or "").strip()
+                    if error_code == "paid_plan_required":
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs porque a voz selecionada exige "
+                            "plano pago para uso via API. Escolha uma voz premade em /voice ou atualize "
+                            "o plano no ElevenLabs."
                         )
-                        with open(ogg_path, "rb") as vf:
-                            if update and update.message:
-                                await update.message.reply_voice(
-                                    voice=vf,
-                                    caption=caption,
-                                    reply_markup=response_markup,
-                                )
-                            else:
-                                await context.bot.send_voice(
-                                    chat_id=chat_id,
-                                    voice=vf,
-                                    caption=caption,
-                                    reply_markup=response_markup,
-                                )
-                        audio_sent = True
-                    except Exception:
-                        log.exception("tts_send_error")
-                    finally:
-                        _P(ogg_path).unlink(missing_ok=True)
+                    elif error_code in {"missing_api_key", "invalid_api_key"}:
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs. Verifique a conexao/API key em /voice."
+                        )
+                    elif error_code == "timeout":
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs porque a API demorou mais de "
+                            f"{ELEVENLABS_TIMEOUT}s para responder. Vou manter o texto e os arquivos aqui."
+                        )
+                    elif error_message:
+                        audio_failure_notice = f"Nao consegui gerar o audio com ElevenLabs: {error_message}"
+                    else:
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs. "
+                            "Verifique a conexao/API key em /voice e tente novamente."
+                        )
+                    run_result.warnings.append("audio unavailable: ElevenLabs")
+                else:
+                    run_result.warnings.append("audio unavailable; use /voice to finish setup")
+                    audio_failure_notice = (
+                        "Nao consegui gerar o audio com a configuracao atual. Revise /voice e tente novamente."
+                    )
+            if ogg_path:
+                log.info(
+                    "tts_synthesized",
+                    task_id=task_id,
+                    provider=audio_provider or "default",
+                    voice=str(tts_voice),
+                )
+                from pathlib import Path as _P
+
+                try:
+                    caption = (
+                        f"Cost: ${cost:.4f} | "
+                        f"Total: ${context.user_data['total_cost']:.4f} | "
+                        f"Dir: {os.path.basename(work_dir)}"
+                    )
+                    with open(ogg_path, "rb") as vf:
+                        if update and update.message:
+                            await update.message.reply_voice(
+                                voice=vf,
+                                caption=caption,
+                                reply_markup=response_markup,
+                            )
+                        else:
+                            await context.bot.send_voice(
+                                chat_id=chat_id,
+                                voice=vf,
+                                caption=caption,
+                                reply_markup=response_markup,
+                            )
+                    audio_sent = True
+                    log.info("send_voice", task_id=task_id, chat_id=chat_id)
+                except Exception:
+                    log.exception("tts_send_error")
+                finally:
+                    _P(ogg_path).unlink(missing_ok=True)
 
     # Send text response
     import tempfile
@@ -4220,15 +4580,19 @@ async def _send_response(
         safe_markdown_to_telegram_html,
     )
 
+    if audio_failure_notice:
+        response = f"{response}\n\n{audio_failure_notice}"
+
     code_files: list[tuple[str, str]]
+    send_text_response = (not audio_sent) or send_text_with_audio
     if run_result.error:
         modified_text, code_files = response, []
-    elif not audio_sent:
+    elif send_text_response:
         modified_text, code_files = extract_and_replace_large_blocks(response)
     else:
         modified_text, code_files = response, []
 
-    if not audio_sent:
+    if send_text_response:
         # Send code files
         for filename, content in code_files:
             with tempfile.NamedTemporaryFile(mode="w", suffix=f"_{filename}", prefix="code_", delete=False) as f:
@@ -4322,12 +4686,10 @@ async def _send_response(
                         await context.bot.send_message(chat_id=chat_id, text=plain_text)
 
     # Send created artifacts
-    if run_result.tool_uses or run_result.native_items:
-        created = extract_created_files(run_result.tool_uses, run_result.native_items)
-        if created:
-            sent = await send_created_files(created, chat_id, context, update)
-            if sent:
-                log.info("artifacts_sent", count=sent, total=len(created))
+    if created_artifacts:
+        sent = await send_created_files(created_artifacts, chat_id, context, update)
+        if sent:
+            log.info("artifacts_sent", count=sent, total=len(created_artifacts))
 
     # Supervised mode: Continue/Stop buttons
     if agent_mode == "supervised" and run_result.stop_reason == "max_turns" and run_result.session_id:
@@ -4736,6 +5098,8 @@ async def _finalize_scheduled_run(
         artifacts=extract_created_files(
             run_result.tool_uses if run_result else [],
             run_result.native_items if run_result else [],
+            run_result.tool_execution_trace if run_result else [],
+            work_dir=ctx.work_dir if ctx else None,
         ),
         telegram_bot=context.bot,
         notification_chat_id=task_info.chat_id,
@@ -4787,6 +5151,8 @@ async def _execute_single_task(
                     runtime.store.update_runtime_queue_item(task_id, status="running", queue_position=0)
                 except Exception:
                     log.debug("runtime_queue_status_update_skipped", task_id=task_id)
+            else:
+                _update_runtime_queue_status(task_id, "running")
             if RUNTIME_ENVIRONMENTS_ENABLED:
                 from koda.utils.command_helpers import init_user_data
 
@@ -4919,6 +5285,7 @@ async def _execute_single_task(
                     error_message=str(e),
                     completed_at=datetime.now().isoformat(),
                 )
+                _update_runtime_queue_status(task_id, "failed", last_error=str(e))
                 if item.update and item.update.message:
                     await item.update.message.reply_text(str(e))
                 else:
@@ -5240,6 +5607,7 @@ async def _execute_single_task(
                         model=run_result.model,
                         provider_session_id=run_result.provider_session_id,
                     )
+                    _update_runtime_queue_status(task_id, final_status)
                     log.info(
                         "task_finalized",
                         task_id=task_id,
@@ -5474,6 +5842,7 @@ async def _execute_single_task(
                                 run_result.provider_session_id if run_result else ctx.provider_session_id
                             ),
                         )
+                        _update_runtime_queue_status(task_id, "retrying", last_error=last_error)
                         log.warning(
                             "task_retrying",
                             task_id=task_id,
@@ -5519,6 +5888,7 @@ async def _execute_single_task(
                 session_id=run_result.session_id if run_result else ctx.session_id,
                 provider_session_id=run_result.provider_session_id if run_result else ctx.provider_session_id,
             )
+            _update_runtime_queue_status(task_id, "failed", last_error=last_error)
             log.warning("task_failed", task_id=task_id, error=last_error, attempts=max_attempts)
             metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status="failed").inc()
             metrics.AUTONOMY_TIER_DISTRIBUTION.labels(
@@ -5672,6 +6042,7 @@ async def _execute_single_task(
             error_message=error_str,
             completed_at=datetime.now().isoformat(),
         )
+        _update_runtime_queue_status(task_id, "failed", last_error=error_str)
         if item:
             await _finalize_scheduled_run(
                 item=item,
@@ -5696,6 +6067,7 @@ async def _execute_single_task(
             error_message=cancellation_reason,
             completed_at=datetime.now().isoformat(),
         )
+        _update_runtime_queue_status(task_id, "cancelled", last_error=cancellation_reason)
         if RUNTIME_ENVIRONMENTS_ENABLED:
             await runtime.finalize_task(
                 task_id=task_id,
@@ -5731,6 +6103,7 @@ async def _execute_single_task(
             )
         except Exception:
             log.debug("task_status_update_in_error_handler_failed", task_id=task_id)
+        _update_runtime_queue_status(task_id, "failed", last_error=error_str)
         if RUNTIME_ENVIRONMENTS_ENABLED:
             with contextlib.suppress(Exception):
                 await runtime.record_warning(
@@ -6015,6 +6388,7 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
                 error_message=error_message,
                 completed_at=datetime.now(UTC).isoformat(),
             )
+            _update_runtime_queue_status(task_id, "failed", last_error=error_message)
             dlq_insert(
                 task_id=task_id,
                 user_id=user_id,
@@ -6095,6 +6469,9 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
             recovery_count=recovery_count + 1,
             runtime_preprovisioned=runtime_preprovisioned,
         )
+        lease_owner = str(task_row.get("lease_owner") or "").strip()
+        if lease_owner:
+            release_task_lease(task_id, lease_owner)
         queue = get_queue(user_id)
         await queue.put(raw_item)
         _track_queued_task_id(user_id, task_id)
@@ -6238,6 +6615,7 @@ async def enqueue(
     artifact_bundle: Any | None = None,
 ) -> int | None:
     """Enqueue a query and ensure a worker is running. Returns task_id."""
+    enqueue_started = time.monotonic()
     if _shutting_down:
         await update.message.reply_text("Agent is shutting down. Please try again in a moment.")
         return None
@@ -6275,6 +6653,7 @@ async def enqueue(
 
     provider = context.user_data.get("provider")
     provider_sessions = context.user_data.get("provider_sessions", {})
+    force_audio_response = _detect_audio_response_request(query_text)
     task_id = create_task(
         user_id,
         chat_id,
@@ -6297,6 +6676,7 @@ async def enqueue(
         update=update,
         image_paths=image_paths,
         artifact_bundle=artifact_bundle,
+        force_audio_response=force_audio_response,
     )
 
     queue = get_queue(user_id)
@@ -6312,6 +6692,12 @@ async def enqueue(
     )
     _sync_user_queue_observability(user_id)
     audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    log.info(
+        "telegram_enqueue_completed",
+        task_id=task_id,
+        duration_ms=round((time.monotonic() - enqueue_started) * 1000),
+        force_audio_response=force_audio_response,
+    )
 
     if ahead_count > 0:
         await update.message.reply_text(_build_queue_feedback(task_id, ahead_count))

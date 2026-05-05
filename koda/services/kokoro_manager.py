@@ -6,9 +6,12 @@ import contextlib
 import hashlib
 import json
 import os
+import pickle
 import threading
 import urllib.request
+import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,12 @@ _KOKORO_MODEL_PATH = _KOKORO_MODEL_DIR / "kokoro-v1.0.onnx"
 _KOKORO_VOICES_BANK_PATH = _KOKORO_BANK_DIR / "voices-managed-v1.0.bin"
 _KOKORO_DOWNLOAD_CHUNK_SIZE = 64 * 1024
 _KOKORO_REBUILD_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class _TorchStorageType:
+    name: str
+
 
 _KOKORO_LANGUAGES: tuple[dict[str, Any], ...] = (
     {
@@ -444,11 +453,105 @@ def _write_voice_metadata_file(downloaded_voice_ids: set[str]) -> None:
     _KOKORO_METADATA_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_kokoro_voice_pt(path: Path) -> Any:
+    """Load official Kokoro PyTorch voice tensors without requiring torch."""
+    import numpy as np
+
+    storage_dtypes: dict[str, Any] = {
+        "DoubleStorage": np.dtype("<f8"),
+        "FloatStorage": np.dtype("<f4"),
+        "HalfStorage": np.dtype("<f2"),
+        "LongStorage": np.dtype("<i8"),
+        "IntStorage": np.dtype("<i4"),
+        "ShortStorage": np.dtype("<i2"),
+        "CharStorage": np.dtype("<i1"),
+        "ByteStorage": np.dtype("u1"),
+        "BoolStorage": np.dtype("?"),
+    }
+
+    def _storage_type_name(storage_type: object) -> str:
+        if isinstance(storage_type, _TorchStorageType):
+            return storage_type.name
+        return getattr(storage_type, "__name__", str(storage_type))
+
+    with zipfile.ZipFile(path) as archive:
+        pickle_member = next((name for name in archive.namelist() if name.endswith("/data.pkl")), "")
+        if not pickle_member:
+            raise ValueError(f"invalid kokoro voice file: {path}")
+        archive_prefix = pickle_member.rsplit("/", 1)[0]
+        byteorder_member = f"{archive_prefix}/byteorder"
+        byteorder = "little"
+        if byteorder_member in archive.namelist():
+            byteorder = archive.read(byteorder_member).decode("utf-8", errors="replace").strip() or "little"
+
+        def _dtype_for_storage(storage_type: object) -> Any:
+            storage_name = _storage_type_name(storage_type)
+            dtype = storage_dtypes.get(storage_name)
+            if dtype is None:
+                raise ValueError(f"unsupported kokoro voice storage type: {storage_name}")
+            if dtype.itemsize > 1 and byteorder == "big":
+                return dtype.newbyteorder(">")
+            return dtype
+
+        def _rebuild_tensor(
+            storage: Any,
+            storage_offset: int,
+            size: tuple[int, ...],
+            stride: tuple[int, ...],
+            _requires_grad: bool,
+            _backward_hooks: object,
+            *_args: object,
+        ) -> Any:
+            shape = tuple(int(item) for item in size)
+            strides = tuple(int(item) for item in stride)
+            offset = int(storage_offset)
+            if len(shape) != len(strides):
+                raise ValueError(f"invalid kokoro voice tensor metadata: {path}")
+            max_index = offset
+            if shape:
+                max_index += sum((dim - 1) * tensor_stride for dim, tensor_stride in zip(shape, strides, strict=True))
+            if offset < 0 or max_index >= len(storage):
+                raise ValueError(f"kokoro voice tensor points outside storage: {path}")
+            view = np.lib.stride_tricks.as_strided(
+                storage[offset:],
+                shape=shape,
+                strides=tuple(tensor_stride * storage.dtype.itemsize for tensor_stride in strides),
+            )
+            return np.asarray(view, dtype=np.float32).copy()
+
+        class _KokoroVoiceUnpickler(pickle.Unpickler):
+            def find_class(self, module: str, name: str) -> object:
+                if module == "torch._utils" and name == "_rebuild_tensor_v2":
+                    return _rebuild_tensor
+                if module == "torch" and name in storage_dtypes:
+                    return _TorchStorageType(name)
+                if module == "collections" and name == "OrderedDict":
+                    from collections import OrderedDict
+
+                    return OrderedDict
+                raise pickle.UnpicklingError(f"unsupported global in kokoro voice file: {module}.{name}")
+
+            def persistent_load(self, pid: object) -> Any:
+                if not isinstance(pid, tuple) or len(pid) < 5 or pid[0] != "storage":
+                    raise pickle.UnpicklingError(f"unsupported persistent id in kokoro voice file: {pid!r}")
+                _tag, storage_type, storage_key, _location, storage_size = pid[:5]
+                storage_member = f"{archive_prefix}/data/{storage_key}"
+                dtype = _dtype_for_storage(storage_type)
+                raw = archive.read(storage_member)
+                storage = np.frombuffer(raw, dtype=dtype)
+                expected_items = int(storage_size)
+                if storage.size < expected_items:
+                    raise ValueError(f"truncated kokoro voice storage: {path}")
+                return storage[:expected_items]
+
+        with archive.open(pickle_member) as pickle_file:
+            return _KokoroVoiceUnpickler(pickle_file).load()
+
+
 def rebuild_kokoro_voice_bank() -> Path:
     _ensure_storage()
     with _KOKORO_REBUILD_LOCK:
         import numpy as np
-        import torch
 
         downloaded = sorted(downloaded_kokoro_voice_ids())
         if not downloaded:
@@ -456,8 +559,7 @@ def rebuild_kokoro_voice_bank() -> Path:
 
         payload: dict[str, Any] = {}
         for voice_id in downloaded:
-            tensor = torch.load(kokoro_voice_file_path(voice_id), map_location="cpu")
-            payload[voice_id] = tensor.detach().cpu().numpy()
+            payload[voice_id] = _load_kokoro_voice_pt(kokoro_voice_file_path(voice_id))
 
         tmp_path = _KOKORO_VOICES_BANK_PATH.with_suffix(".tmp")
         with open(tmp_path, "wb") as handle:

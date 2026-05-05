@@ -126,6 +126,19 @@ def test_rejects_functional_default_pointing_to_disabled_provider() -> None:
     assert "models.functional_defaults.general.provider_id" in fields
 
 
+def test_accepts_audio_functional_default_outside_enabled_general_providers() -> None:
+    _manager()._validate_general_payload(
+        {
+            "models": {
+                "providers_enabled": ["claude"],
+                "functional_defaults": {
+                    "audio": {"provider_id": "kokoro", "model_id": "kokoro-v1"},
+                },
+            }
+        }
+    )
+
+
 def test_accepts_functional_default_when_providers_unspecified() -> None:
     # When the payload does not re-declare providers_enabled, we skip the
     # cross-reference check because we don't have authoritative state here.

@@ -109,7 +109,23 @@ def main() -> None:
         callback_settings_provider,
         callback_settings_voice,
         callback_supervised,
+        callback_voice_download,
+        callback_voice_download_cancel,
+        callback_voice_download_status,
         callback_voice_elevenlabs,
+        callback_voice_elevenlabs_model,
+        callback_voice_elevenlabs_models,
+        callback_voice_home,
+        callback_voice_language,
+        callback_voice_languages,
+        callback_voice_model_cancel,
+        callback_voice_model_download,
+        callback_voice_model_status,
+        callback_voice_pick,
+        callback_voice_provider,
+        callback_voice_providers,
+        callback_voice_toggle,
+        callback_voice_voices,
     )
     from koda.handlers.commands import (
         cmd_bookmarks,
@@ -364,6 +380,26 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(_as_handler(callback_feedback), pattern=r"^feedback:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_mode), pattern=r"^mode:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_supervised), pattern=r"^supervised:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_home), pattern=r"^voicehome$"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_toggle), pattern=r"^voicetoggle:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_providers), pattern=r"^voiceproviders$"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_provider), pattern=r"^voiceprovider:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_elevenlabs_models), pattern=r"^voiceelmodels$"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_elevenlabs_model), pattern=r"^voiceelmodel:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_languages), pattern=r"^voicelangs:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_language), pattern=r"^voicelang:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_voices), pattern=r"^voicevoices:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_download), pattern=r"^voicedl:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_download_status), pattern=r"^voicedlstatus:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_download_cancel), pattern=r"^voicedlcancel:"))
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_model_download), pattern=r"^voicemodeldl(?::.*)?$"))
+    app.add_handler(
+        CallbackQueryHandler(_as_handler(callback_voice_model_status), pattern=r"^voicemodelstatus(?::.*)?$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(_as_handler(callback_voice_model_cancel), pattern=r"^voicemodelcancel(?::.*)?$")
+    )
+    app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_pick), pattern=r"^voicepick:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_voice_elevenlabs), pattern=r"^voiceel:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_dbenv), pattern=r"^dbenv:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_link_analysis), pattern=r"^link:"))

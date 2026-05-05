@@ -15,8 +15,8 @@ import { CheckCheck, ChevronDown, FileText, FolderPlus, LoaderCircle, Pencil, Pl
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { AgentCatalogCard } from "./agent-catalog-card";
-import { WorkspaceSpecEditor, WorkspaceSpecIndicator } from "./workspace-spec-editor";
-import { SquadSpecEditor, SquadSpecIndicator } from "./squad-spec-editor";
+import { WorkspaceSpecEditor } from "./workspace-spec-editor";
+import { SquadSpecEditor } from "./squad-spec-editor";
 import { ActionButton } from "@/components/ui/action-button";
 import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
 import { FormInput } from "@/components/control-plane/shared/form-field";
@@ -1521,11 +1521,6 @@ export function AgentCatalog({
               className="flex h-10 items-center gap-1 self-start md:self-auto"
               {...tourAnchor("catalog.workspace-actions")}
             >
-              <WorkspaceSpecIndicator
-                hasPrompt={Boolean(
-                  activeSection.workspace.documents?.system_prompt_md?.trim(),
-                )}
-              />
               <ActionButton
                 type="button"
                 size="icon"
@@ -1833,11 +1828,6 @@ export function AgentCatalog({
 
                             {lane.squad && activeSection.workspace ? (
                               <div className="agent-board-lane__actions">
-                                <SquadSpecIndicator
-                                  hasPrompt={Boolean(
-                                    lane.squad.documents?.system_prompt_md?.trim(),
-                                  )}
-                                />
                                 <ActionButton
                                   type="button"
                                   size="icon"

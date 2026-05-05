@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -27,7 +28,6 @@ from koda.config import (
     SENSITIVE_DIRS,
     SHELL_ENABLED,
     TTS_DEFAULT_VOICE,
-    TTS_ENABLED,
 )
 from koda.logging_config import get_logger
 from koda.provider_models import MODEL_FUNCTION_IDS, resolve_model_function_catalog
@@ -37,6 +37,16 @@ from koda.services.agent_settings import (
     set_agent_general_model,
     set_agent_general_provider,
     set_agent_voice_default,
+    set_agent_voice_policy_enabled,
+)
+from koda.services.elevenlabs_catalog import (
+    ELEVENLABS_DEFAULT_TTS_MODEL,
+    canonicalize_elevenlabs_language,
+    elevenlabs_language_label,
+    elevenlabs_languages_for_model,
+    elevenlabs_model_label,
+    elevenlabs_tts_model_ids,
+    elevenlabs_tts_models,
 )
 from koda.services.queue_manager import (
     active_processes,
@@ -212,7 +222,7 @@ def _settings_examples_text() -> str:
         "You can also ask in natural language, for example:\n"
         "• switch the provider to OpenAI\n"
         "• use gpt-5.2 as the general model\n"
-        "• for images, use codex gpt-image-1.5\n"
+        "• for images, use codex gpt-image-2\n"
         "• change the voice to pm_alex\n"
         "• enable supervised mode"
     )
@@ -1797,16 +1807,898 @@ async def cmd_jobs(update: Update, context: BotContext) -> None:
 # --- Voice/TTS commands ---
 
 
+_ELEVENLABS_LANGUAGE_QUERIES = {
+    "pt": "portuguese",
+    "pt-br": "portuguese",
+    "pt-pt": "portuguese",
+    "en": "english",
+    "en-us": "english",
+    "en-gb": "english",
+    "es": "spanish",
+    "fr": "french",
+    "de": "german",
+    "it": "italian",
+    "ja": "japanese",
+}
+
+
+def _voice_provider_label(provider_id: str) -> str:
+    provider = provider_id.strip().lower()
+    if provider == "kokoro":
+        return "Kokoro local"
+    if provider == "elevenlabs":
+        return "ElevenLabs"
+    return provider or "automatico"
+
+
+def _voice_current_provider(user_data: dict[str, Any]) -> str:
+    provider = str(user_data.get("audio_provider") or "").strip().lower()
+    if provider:
+        return provider
+    voice_id = str(user_data.get("tts_voice") or TTS_DEFAULT_VOICE).strip()
+    from koda.services.kokoro_manager import kokoro_voice_metadata
+    from koda.utils.tts import AVAILABLE_VOICES
+
+    voice_config = AVAILABLE_VOICES.get(voice_id)
+    if voice_config is not None:
+        return str(voice_config.engine)
+    if kokoro_voice_metadata(voice_id) is not None:
+        return "kokoro"
+    return "elevenlabs" if len(voice_id) >= 20 and voice_id.isalnum() else "kokoro"
+
+
+def _voice_as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _voice_as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _voice_format_bytes(value: Any) -> str:
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        size = 0.0
+    units = ("B", "KB", "MB", "GB")
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _voice_download_status_label(status: str) -> str:
+    return {
+        "pending": "preparando",
+        "running": "baixando",
+        "completed": "concluido",
+        "error": "erro",
+        "cancelled": "cancelado",
+        "idle": "nao baixado",
+    }.get(str(status or "").strip().lower(), str(status or "desconhecido"))
+
+
+def _voice_download_compact(job: dict[str, Any] | None) -> str:
+    job = _voice_as_dict(job)
+    status = str(job.get("status") or "idle").strip().lower()
+    if status in {"pending", "running"}:
+        percent = float(job.get("progress_percent") or 0.0)
+        return f"{_voice_download_status_label(status)} {percent:.0f}%"
+    return _voice_download_status_label(status)
+
+
+def _voice_download_job_from_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _voice_as_dict(payload)
+    active = _voice_as_dict(payload.get("active_job"))
+    if active:
+        return active
+    if "status" in payload and ("downloaded_bytes" in payload or "progress_percent" in payload):
+        return payload
+    return {}
+
+
+def _voice_kokoro_model_status() -> dict[str, Any]:
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return dict(get_control_plane_manager().get_kokoro_model_status() or {})
+    except Exception:
+        log.debug("telegram_voice_kokoro_model_status_fallback", exc_info=True)
+        from koda.services.kokoro_manager import kokoro_model_status
+
+        try:
+            return {**dict(kokoro_model_status()), "active_job": None}
+        except Exception as exc:
+            log.debug("telegram_voice_kokoro_model_status_unavailable", error=str(exc))
+            return {
+                "downloaded": False,
+                "bytes": 0,
+                "local_path": "",
+                "url": "",
+                "version": "",
+                "active_job": None,
+                "last_error": str(exc),
+            }
+
+
+def _voice_kokoro_model_ready(status: dict[str, Any] | None = None) -> bool:
+    payload = _voice_as_dict(status) or _voice_kokoro_model_status()
+    job = _voice_download_job_from_payload(payload)
+    return bool(payload.get("downloaded")) or str(job.get("status") or "").lower() == "completed"
+
+
+def _voice_kokoro_voice_items(language_id: str = "") -> list[dict[str, Any]]:
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        catalog = get_control_plane_manager().get_kokoro_voice_catalog(language=language_id)
+        items = [dict(item) for item in _voice_as_list(catalog.get("items")) if isinstance(item, dict)]
+        if items:
+            return items
+    except Exception:
+        log.debug("telegram_voice_kokoro_catalog_fallback", language_id=language_id, exc_info=True)
+
+    from koda.services.kokoro_manager import list_kokoro_voices
+
+    try:
+        return [dict(item) for item in list_kokoro_voices(language_id)]
+    except Exception as exc:
+        log.debug("telegram_voice_kokoro_catalog_unavailable", language_id=language_id, error=str(exc))
+        return []
+
+
+def _voice_elevenlabs_model(user_data: dict[str, Any]) -> str:
+    provider = str(user_data.get("audio_provider") or "").strip().lower()
+    model = str(user_data.get("audio_model") or "").strip()
+    if provider == "elevenlabs" and model:
+        return model
+    return ELEVENLABS_DEFAULT_TTS_MODEL
+
+
+def _voice_elevenlabs_model_options(user_data: dict[str, Any] | None = None) -> list[dict[str, str]]:
+    """Return Telegram-safe ElevenLabs TTS model choices.
+
+    The provider catalog also includes ElevenLabs speech-to-speech,
+    text-to-voice, sound-effect and transcription models. Those are valid
+    ElevenLabs models, but not safe choices for the Text-to-Speech path used
+    by Telegram voice replies.
+    """
+    allowed_ids = elevenlabs_tts_model_ids()
+    static_by_id = {str(item["model_id"]): dict(item) for item in elevenlabs_tts_models()}
+    merged = dict(static_by_id)
+    selectable = _voice_as_dict((user_data or {}).get("selectable_function_options")).get("audio")
+    for item in _voice_as_list(selectable):
+        option = _voice_as_dict(item)
+        if str(option.get("provider_id") or "").strip().lower() != "elevenlabs":
+            continue
+        model_id = str(option.get("model_id") or "").strip()
+        if model_id not in allowed_ids:
+            continue
+        merged[model_id] = {
+            **static_by_id.get(model_id, {}),
+            "model_id": model_id,
+            "title": str(option.get("title") or static_by_id.get(model_id, {}).get("title") or model_id),
+            "description": str(option.get("description") or static_by_id.get(model_id, {}).get("description") or ""),
+            "languages": str(static_by_id.get(model_id, {}).get("languages") or ""),
+            "status": str(option.get("status") or static_by_id.get(model_id, {}).get("status") or "current"),
+        }
+    return [
+        merged[str(item["model_id"])] for item in elevenlabs_tts_models() if str(item.get("model_id") or "") in merged
+    ]
+
+
+def _voice_elevenlabs_model_label(model_id: str) -> str:
+    return elevenlabs_model_label(model_id)
+
+
+def _voice_elevenlabs_models_text(user_data: dict[str, Any]) -> str:
+    current_model = _voice_elevenlabs_model(user_data)
+    lines = [
+        "<b>Modelo de voz ElevenLabs</b>",
+        "",
+        (
+            f"Atual: <code>{escape_html(current_model)}</code> "
+            f"({escape_html(_voice_elevenlabs_model_label(current_model))})"
+        ),
+        "",
+        "Escolha o modelo usado para sintetizar as respostas em audio no Telegram.",
+    ]
+    for item in _voice_elevenlabs_model_options(user_data):
+        model_id = str(item.get("model_id") or "")
+        marker = "•" if model_id != current_model else "• atual"
+        status = str(item.get("status") or "").strip().lower()
+        status_label = f" · {status}" if status and status not in {"current"} else ""
+        languages = str(item.get("languages") or "").strip()
+        languages_label = f" · {languages}" if languages else ""
+        lines.append(
+            f"\n{marker} <b>{escape_html(str(item.get('title') or model_id))}</b>"
+            f"{escape_html(status_label)}{escape_html(languages_label)}\n"
+            f"<code>{escape_html(model_id)}</code>\n"
+            f"{escape_html(str(item.get('description') or ''))}"
+        )
+    return "\n".join(lines)
+
+
+def _voice_elevenlabs_models_markup(user_data: dict[str, Any]) -> InlineKeyboardMarkup:
+    current_model = _voice_elevenlabs_model(user_data)
+    buttons: list[list[InlineKeyboardButton]] = []
+    for item in _voice_elevenlabs_model_options(user_data):
+        model_id = str(item.get("model_id") or "")
+        if not model_id:
+            continue
+        title = str(item.get("title") or model_id)
+        marker = "> " if model_id == current_model else ""
+        languages = str(item.get("languages") or "").strip()
+        suffix = f" · {languages}" if languages else ""
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"{marker}{title}{suffix}"[:64],
+                    callback_data=f"voiceelmodel:{model_id}",
+                )
+            ]
+        )
+    buttons.append([InlineKeyboardButton("Idiomas do modelo", callback_data="voicelangs:elevenlabs")])
+    buttons.append([InlineKeyboardButton("Voltar", callback_data="voicehome")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_apply_elevenlabs_model_selection(user_data: dict[str, Any], model_id: str) -> dict[str, Any]:
+    normalized_model = str(model_id or "").strip()
+    available = {str(item.get("model_id") or "") for item in _voice_elevenlabs_model_options(user_data)}
+    if normalized_model not in available:
+        raise ValueError(f"Modelo ElevenLabs indisponivel para TTS: {normalized_model or 'vazio'}")
+
+    try:
+        updated = set_agent_functional_default("audio", "elevenlabs", normalized_model, publish=True)
+    except ValueError:
+        raise
+    except Exception:
+        log.warning("telegram_voice_elevenlabs_model_persist_failed", model_id=normalized_model, exc_info=True)
+        updated = None
+
+    if updated is not None:
+        sync_user_data_with_runtime_settings(user_data, updated)
+    user_data["audio_provider"] = "elevenlabs"
+    user_data["audio_model"] = normalized_model
+    selected_language = canonicalize_elevenlabs_language(
+        user_data.get("tts_voice_language") or user_data.get("_voice_pending_elevenlabs_language")
+    )
+    supported_languages = elevenlabs_languages_for_model(normalized_model)
+    supported_codes = {str(item.get("code") or "") for item in supported_languages}
+    if selected_language and selected_language not in supported_codes and supported_languages:
+        selected_language = str(supported_languages[0].get("code") or "")
+        user_data["tts_voice_language"] = selected_language
+        user_data["_voice_pending_elevenlabs_language"] = selected_language
+    return user_data
+
+
+def _voice_elevenlabs_catalog(language_id: str = "", user_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    model_id = _voice_elevenlabs_model(user_data or {})
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return dict(
+            get_control_plane_manager().get_elevenlabs_voice_catalog(
+                language=language_id,
+                model_id=model_id,
+            )
+            or {}
+        )
+    except Exception:
+        log.debug("telegram_voice_elevenlabs_catalog_unavailable", language_id=language_id, exc_info=True)
+        return {
+            "items": [],
+            "available_languages": elevenlabs_languages_for_model(model_id),
+            "selected_language": canonicalize_elevenlabs_language(language_id),
+            "selected_language_label": elevenlabs_language_label(language_id) if language_id else "",
+            "model_id": model_id,
+            "cached": False,
+            "provider_connected": False,
+        }
+
+
+def _voice_elevenlabs_api_available(voice: dict[str, Any]) -> tuple[bool, str]:
+    if voice.get("api_available") is False:
+        reason = str(voice.get("api_availability_reason") or "").strip()
+        return False, reason or "Esta voz nao esta disponivel para uso via API nesta conta."
+    return True, ""
+
+
+def _voice_elevenlabs_voice_entry(
+    voice_id: str,
+    user_data: dict[str, Any],
+    *,
+    language_id: str = "",
+) -> dict[str, Any]:
+    normalized_voice = str(voice_id or "").strip()
+    if not normalized_voice:
+        return {}
+    catalog = _voice_elevenlabs_catalog(language_id or str(user_data.get("tts_voice_language") or ""), user_data)
+    for item in _voice_as_list(catalog.get("items")):
+        voice = _voice_as_dict(item)
+        if str(voice.get("voice_id") or "") == normalized_voice:
+            return voice
+    if language_id:
+        catalog = _voice_elevenlabs_catalog("", user_data)
+        for item in _voice_as_list(catalog.get("items")):
+            voice = _voice_as_dict(item)
+            if str(voice.get("voice_id") or "") == normalized_voice:
+                return voice
+    return {}
+
+
+def _voice_kokoro_voice_status(voice_id: str) -> dict[str, Any]:
+    normalized_voice = str(voice_id or "").strip().lower()
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return dict(get_control_plane_manager().get_kokoro_voice_status(normalized_voice) or {})
+    except Exception:
+        log.debug("telegram_voice_kokoro_voice_status_fallback", voice_id=normalized_voice, exc_info=True)
+
+    from koda.services.kokoro_manager import kokoro_voice_file_path, kokoro_voice_metadata
+
+    metadata = kokoro_voice_metadata(normalized_voice)
+    if metadata is None:
+        return {"voice_id": normalized_voice, "downloaded": False, "active_job": None}
+    try:
+        path = kokoro_voice_file_path(normalized_voice)
+        downloaded = path.exists() and path.stat().st_size > 0
+        bytes_on_disk = int(path.stat().st_size) if downloaded else 0
+        local_path = str(path) if downloaded else ""
+    except Exception as exc:
+        log.debug("telegram_voice_kokoro_voice_storage_unavailable", voice_id=normalized_voice, error=str(exc))
+        downloaded = False
+        bytes_on_disk = 0
+        local_path = ""
+    return {
+        **dict(metadata),
+        "downloaded": downloaded,
+        "bytes": bytes_on_disk,
+        "local_path": local_path,
+        "active_job": None,
+    }
+
+
+def _voice_kokoro_voice_ready(voice_id: str, status: dict[str, Any] | None = None) -> bool:
+    payload = _voice_as_dict(status) or _voice_kokoro_voice_status(voice_id)
+    job = _voice_download_job_from_payload(payload)
+    return bool(payload.get("downloaded")) or str(job.get("status") or "").lower() == "completed"
+
+
+_VOICE_KOKORO_STATUS_CACHE_TTL_SECONDS = 3.0
+
+
+def _voice_kokoro_status_cache(user_data: dict[str, Any]) -> dict[str, Any]:
+    cache = user_data.get("_voice_kokoro_status_cache")
+    if not isinstance(cache, dict):
+        cache = {}
+        user_data["_voice_kokoro_status_cache"] = cache
+    return cache
+
+
+def _voice_cached_kokoro_status(
+    user_data: dict[str, Any],
+    key: str,
+    loader: Any,
+) -> dict[str, Any]:
+    cache = _voice_kokoro_status_cache(user_data)
+    now = time.monotonic()
+    cached = _voice_as_dict(cache.get(key))
+    if cached and (now - float(cached.get("ts") or 0.0)) <= _VOICE_KOKORO_STATUS_CACHE_TTL_SECONDS:
+        return dict(_voice_as_dict(cached.get("payload")))
+    payload = dict(loader() or {})
+    cache[key] = {"ts": now, "payload": dict(payload)}
+    return payload
+
+
+def _voice_kokoro_model_status_cached(user_data: dict[str, Any]) -> dict[str, Any]:
+    return _voice_cached_kokoro_status(user_data, "model", _voice_kokoro_model_status)
+
+
+def _voice_kokoro_voice_status_cached(user_data: dict[str, Any], voice_id: str) -> dict[str, Any]:
+    normalized_voice = str(voice_id or "").strip().lower()
+    return _voice_cached_kokoro_status(
+        user_data,
+        f"voice:{normalized_voice}",
+        lambda: _voice_kokoro_voice_status(normalized_voice),
+    )
+
+
+def _voice_download_text(title: str, payload: dict[str, Any], *, ready_label: str, missing_label: str) -> str:
+    job = _voice_download_job_from_payload(payload)
+    status = str(job.get("status") or ("completed" if payload.get("downloaded") else "idle")).strip().lower()
+    downloaded = int(job.get("downloaded_bytes") or payload.get("bytes") or 0)
+    total = int(job.get("total_bytes") or downloaded or 0)
+    percent = float(job.get("progress_percent") or (100.0 if status == "completed" else 0.0))
+    details = _voice_as_dict(job.get("details"))
+    message = str(job.get("message") or details.get("message") or "").strip()
+    error = str(job.get("last_error") or details.get("last_error") or "").strip()
+    local_path = str(job.get("local_path") or details.get("local_path") or payload.get("local_path") or "").strip()
+
+    lines = [f"<b>{escape_html(title)}</b>", "", f"Status: <b>{escape_html(_voice_download_status_label(status))}</b>"]
+    if status in {"pending", "running", "completed"} or total:
+        lines.append(
+            "Progresso: "
+            f"<code>{percent:.0f}%</code> "
+            f"({escape_html(_voice_format_bytes(downloaded))}/{escape_html(_voice_format_bytes(total))})"
+        )
+    if local_path:
+        lines.append(f"Arquivo: <code>{escape_html(local_path)}</code>")
+    if message:
+        lines.append(f"\n{escape_html(message)}")
+    elif status == "completed":
+        lines.append(f"\n{escape_html(ready_label)}")
+    elif status == "idle":
+        lines.append(f"\n{escape_html(missing_label)}")
+    if error:
+        lines.append(f"\nErro: <code>{escape_html(error)}</code>")
+    return "\n".join(lines)
+
+
+def _voice_kokoro_voice_download_text(voice_id: str, payload: dict[str, Any] | None = None) -> str:
+    status = _voice_as_dict(payload) or _voice_kokoro_voice_status(voice_id)
+    voice_name = str(status.get("voice_name") or status.get("name") or _voice_label_for_id(voice_id))
+    language = str(status.get("language_label") or status.get("language_id") or _voice_language_for_id(voice_id))
+    return _voice_download_text(
+        f"Voz Kokoro: {voice_name} ({language})",
+        status,
+        ready_label="Voz baixada. Ela pode ser usada assim que o modelo Kokoro tambem estiver pronto.",
+        missing_label="Esta voz ainda precisa ser baixada para uso local.",
+    )
+
+
+def _voice_kokoro_model_download_text(voice_id: str = "", payload: dict[str, Any] | None = None) -> str:
+    status = _voice_as_dict(payload) or _voice_kokoro_model_status()
+    text = _voice_download_text(
+        "Modelo Kokoro local",
+        status,
+        ready_label="Modelo Kokoro pronto para sintetizar audio local.",
+        missing_label="O modelo base precisa ser baixado antes de usar Kokoro.",
+    )
+    if voice_id:
+        text += f"\n\nVoz escolhida: <code>{escape_html(voice_id)}</code>"
+    return text
+
+
+def _voice_kokoro_voice_download_markup(
+    voice_id: str,
+    payload: dict[str, Any] | None = None,
+) -> InlineKeyboardMarkup:
+    status = _voice_as_dict(payload) or _voice_kokoro_voice_status(voice_id)
+    job = _voice_download_job_from_payload(status)
+    job_status = str(job.get("status") or "").strip().lower()
+    language = str(status.get("language_id") or _voice_language_for_id(voice_id) or "")
+    buttons: list[list[InlineKeyboardButton]] = []
+    if job_status in {"pending", "running"}:
+        buttons.append(
+            [
+                InlineKeyboardButton("Atualizar", callback_data=f"voicedlstatus:{voice_id}"),
+                InlineKeyboardButton("Cancelar", callback_data=f"voicedlcancel:{voice_id}"),
+            ]
+        )
+    elif _voice_kokoro_voice_ready(voice_id, status):
+        buttons.append([InlineKeyboardButton("Usar voz", callback_data=f"voicepick:{voice_id}")])
+    else:
+        buttons.append([InlineKeyboardButton("Baixar voz", callback_data=f"voicedl:{voice_id}")])
+    buttons.append([InlineKeyboardButton("Vozes do idioma", callback_data=f"voicevoices:kokoro:{language}")])
+    buttons.append([InlineKeyboardButton("Voltar", callback_data="voicehome")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_kokoro_model_download_markup(
+    voice_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> InlineKeyboardMarkup:
+    status = _voice_as_dict(payload) or _voice_kokoro_model_status()
+    job = _voice_download_job_from_payload(status)
+    job_status = str(job.get("status") or "").strip().lower()
+    suffix = f":{voice_id}" if voice_id else ":"
+    buttons: list[list[InlineKeyboardButton]] = []
+    if job_status in {"pending", "running"}:
+        buttons.append(
+            [
+                InlineKeyboardButton("Atualizar", callback_data=f"voicemodelstatus{suffix}"),
+                InlineKeyboardButton("Cancelar", callback_data=f"voicemodelcancel{suffix}"),
+            ]
+        )
+    elif _voice_kokoro_model_ready(status):
+        if voice_id:
+            buttons.append([InlineKeyboardButton("Continuar com a voz", callback_data=f"voicepick:{voice_id}")])
+        else:
+            buttons.append([InlineKeyboardButton("Modelo pronto", callback_data="voicemodelstatus:")])
+    else:
+        buttons.append([InlineKeyboardButton("Baixar modelo Kokoro", callback_data=f"voicemodeldl{suffix}")])
+    buttons.append([InlineKeyboardButton("Vozes Kokoro", callback_data="voicevoices:kokoro:")])
+    buttons.append([InlineKeyboardButton("Voltar", callback_data="voicehome")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_label_for_id(voice_id: str, *, fallback: str = "") -> str:
+    from koda.services.kokoro_manager import kokoro_voice_metadata
+    from koda.utils.tts import AVAILABLE_VOICES
+
+    voice_config = AVAILABLE_VOICES.get(voice_id)
+    if voice_config is not None:
+        return str(voice_config.label)
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata:
+        return str(metadata.get("name") or voice_id)
+    return fallback or voice_id
+
+
+def _voice_language_for_id(voice_id: str, *, fallback: str = "") -> str:
+    from koda.services.kokoro_manager import kokoro_voice_metadata
+
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata:
+        return str(metadata.get("language_id") or fallback)
+    return fallback
+
+
+def _voice_default_for_provider(provider_id: str, user_data: dict[str, Any]) -> tuple[str, str, str]:
+    provider = provider_id.strip().lower()
+    current_voice = str(user_data.get("tts_voice") or TTS_DEFAULT_VOICE).strip()
+    current_label = str(user_data.get("tts_voice_label") or "").strip()
+    from koda.services.kokoro_manager import KOKORO_DEFAULT_VOICE_ID, kokoro_voice_metadata
+    from koda.utils.tts import AVAILABLE_VOICES
+
+    if provider == "kokoro":
+        voice_id = current_voice if kokoro_voice_metadata(current_voice) is not None else KOKORO_DEFAULT_VOICE_ID
+        return voice_id, _voice_label_for_id(voice_id), _voice_language_for_id(voice_id, fallback="pt-br")
+
+    if provider == "elevenlabs":
+        voice_config = AVAILABLE_VOICES.get(current_voice)
+        if voice_config is not None and voice_config.engine == "elevenlabs":
+            return current_voice, str(voice_config.label), str(user_data.get("tts_voice_language") or "en")
+        if len(current_voice) >= 20 and current_voice.isalnum():
+            current_entry = _voice_elevenlabs_voice_entry(
+                current_voice,
+                user_data,
+                language_id=str(user_data.get("tts_voice_language") or ""),
+            )
+            current_available, _reason = _voice_elevenlabs_api_available(current_entry)
+            if current_entry and not current_available:
+                catalog = _voice_elevenlabs_catalog(str(user_data.get("tts_voice_language") or ""), user_data)
+                for item in _voice_as_list(catalog.get("items")):
+                    voice = _voice_as_dict(item)
+                    voice_id = str(voice.get("voice_id") or "")
+                    available, _reason = _voice_elevenlabs_api_available(voice)
+                    if voice_id and available:
+                        return (
+                            voice_id,
+                            str(voice.get("name") or voice_id),
+                            str(user_data.get("tts_voice_language") or "en"),
+                        )
+            return current_voice, current_label or current_voice, str(user_data.get("tts_voice_language") or "en")
+        return "brian", _voice_label_for_id("brian"), str(user_data.get("tts_voice_language") or "en")
+
+    raise ValueError("Provider de voz desconhecido. Use kokoro ou elevenlabs.")
+
+
+def _voice_apply_selection(
+    user_data: dict[str, Any],
+    voice_id: str,
+    *,
+    voice_label: str = "",
+    voice_language: str = "",
+) -> dict[str, Any]:
+    normalized_voice = str(voice_id or "").strip()
+    if not normalized_voice:
+        raise ValueError("A voz precisa ser informada.")
+
+    try:
+        updated = set_agent_voice_default(
+            normalized_voice,
+            voice_label=voice_label,
+            voice_language=voice_language,
+        )
+    except ValueError:
+        raise
+    except Exception:
+        log.warning("telegram_voice_persist_failed", voice_id=normalized_voice, exc_info=True)
+        updated = None
+
+    if updated is not None:
+        sync_user_data_with_runtime_settings(user_data, updated)
+    else:
+        from koda.services.kokoro_manager import kokoro_voice_metadata
+        from koda.utils.tts import AVAILABLE_VOICES
+
+        voice_config = AVAILABLE_VOICES.get(normalized_voice)
+        metadata = kokoro_voice_metadata(normalized_voice)
+        provider_id = str(voice_config.engine) if voice_config is not None else ("kokoro" if metadata else "elevenlabs")
+        user_data["audio_provider"] = provider_id
+        user_data["audio_model"] = (
+            "kokoro-v1" if provider_id == "kokoro" else str(user_data.get("audio_model") or "eleven_flash_v2_5")
+        )
+        user_data["tts_voice"] = normalized_voice
+        user_data["tts_voice_label"] = voice_label or _voice_label_for_id(normalized_voice)
+        user_data["tts_voice_language"] = voice_language or _voice_language_for_id(
+            normalized_voice,
+            fallback=str(user_data.get("tts_voice_language") or ""),
+        )
+
+    user_data["audio_response"] = True
+    user_data["tts_enabled"] = True
+    user_data["_audio_response_user_override"] = True
+    return user_data
+
+
+def _voice_apply_provider_selection(user_data: dict[str, Any], provider_id: str) -> dict[str, Any]:
+    voice_id, voice_label, voice_language = _voice_default_for_provider(provider_id, user_data)
+    return _voice_apply_selection(
+        user_data,
+        voice_id,
+        voice_label=voice_label,
+        voice_language=voice_language,
+    )
+
+
+def _voice_set_session_enabled(user_data: dict[str, Any], enabled: bool) -> dict[str, Any]:
+    try:
+        updated = set_agent_voice_policy_enabled(enabled)
+    except Exception:
+        log.warning("telegram_voice_policy_persist_failed", enabled=enabled, exc_info=True)
+        updated = None
+    if updated is not None:
+        sync_user_data_with_runtime_settings(user_data, updated)
+    user_data["audio_response"] = enabled
+    user_data["_audio_response_user_override"] = True
+    user_data["voice_policy_active"] = enabled
+    user_data["voice_policy_mode"] = "voice_active" if enabled else "disabled"
+    user_data["tts_enabled"] = bool(enabled)
+    return user_data
+
+
+def _voice_session_enabled(user_data: dict[str, Any]) -> bool:
+    mode = str(user_data.get("voice_policy_mode") or "").strip().lower()
+    policy_active = bool(user_data.get("voice_policy_active")) or mode in {"tts", "voice_active"}
+    return bool(user_data.get("audio_response")) or policy_active
+
+
+def _voice_home_text(user_data: dict[str, Any]) -> str:
+    enabled = _voice_session_enabled(user_data)
+    voice_id = str(user_data.get("tts_voice") or TTS_DEFAULT_VOICE)
+    voice_label = str(user_data.get("tts_voice_label") or _voice_label_for_id(voice_id))
+    provider = _voice_current_provider(user_data)
+    language = str(user_data.get("tts_voice_language") or _voice_language_for_id(voice_id) or "n/a")
+    extra = ""
+    if provider == "kokoro":
+        model_status = _voice_kokoro_model_status_cached(user_data)
+        model_job = _voice_download_job_from_payload(model_status)
+        model_state = (
+            _voice_download_compact(model_job)
+            if model_job
+            else ("pronto" if _voice_kokoro_model_ready(model_status) else "nao baixado")
+        )
+        voice_status = _voice_kokoro_voice_status_cached(user_data, voice_id)
+        voice_job = _voice_download_job_from_payload(voice_status)
+        voice_state = (
+            _voice_download_compact(voice_job)
+            if voice_job
+            else ("baixada" if _voice_kokoro_voice_ready(voice_id, voice_status) else "nao baixada")
+        )
+        extra = (
+            "\n"
+            f"Modelo Kokoro: <code>{escape_html(model_state)}</code>\n"
+            f"Voz local: <code>{escape_html(voice_state)}</code>"
+        )
+    elif provider == "elevenlabs":
+        model = _voice_elevenlabs_model(user_data)
+        extra = f"\nModelo: <code>{escape_html(model)}</code> ({escape_html(_voice_elevenlabs_model_label(model))})"
+    return (
+        "<b>Voz e TTS</b>\n\n"
+        f"Estado: <b>{'ligado' if enabled else 'desligado'}</b>\n"
+        f"Provider: <code>{escape_html(_voice_provider_label(provider))}</code>\n"
+        f"Idioma: <code>{escape_html(language)}</code>\n"
+        f"Voz: <code>{escape_html(voice_id)}</code> ({escape_html(voice_label)})"
+        f"{extra}\n\n"
+        "Use os botoes abaixo ou os atalhos:\n"
+        "<code>/voice on</code>, <code>/voice off</code>, <code>/voice provider kokoro</code>, "
+        "<code>/voice model eleven_flash_v2_5</code>, <code>/voice language pt-br</code>, "
+        "<code>/voice search portugues feminino</code>."
+    )
+
+
+def _voice_home_markup(user_data: dict[str, Any]) -> InlineKeyboardMarkup:
+    enabled = _voice_session_enabled(user_data)
+    provider = _voice_current_provider(user_data)
+    buttons: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                "Desligar" if enabled else "Ligar",
+                callback_data=f"voicetoggle:{'off' if enabled else 'on'}",
+            )
+        ],
+        [InlineKeyboardButton(f"Provider: {_voice_provider_label(provider)}", callback_data="voiceproviders")],
+        [
+            InlineKeyboardButton("Idioma", callback_data=f"voicelangs:{provider}"),
+            InlineKeyboardButton("Voz", callback_data=f"voicevoices:{provider}:"),
+        ],
+    ]
+    if provider == "kokoro":
+        model_status = _voice_kokoro_model_status_cached(user_data)
+        model_job = _voice_download_job_from_payload(model_status)
+        if model_job and str(model_job.get("status") or "").lower() in {"pending", "running"}:
+            model_label = f"Modelo Kokoro: {_voice_download_compact(model_job)}"
+            model_callback = "voicemodelstatus:"
+        elif _voice_kokoro_model_ready(model_status):
+            model_label = "Modelo Kokoro pronto"
+            model_callback = "voicemodelstatus:"
+        else:
+            model_label = "Baixar modelo Kokoro"
+            model_callback = "voicemodeldl:"
+        buttons.append([InlineKeyboardButton(model_label, callback_data=model_callback)])
+    elif provider == "elevenlabs":
+        model = _voice_elevenlabs_model(user_data)
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"Modelo: {_voice_elevenlabs_model_label(model)}",
+                    callback_data="voiceelmodels",
+                )
+            ]
+        )
+    buttons.append(
+        [
+            InlineKeyboardButton("Kokoro local", callback_data="voiceprovider:kokoro"),
+            InlineKeyboardButton("ElevenLabs", callback_data="voiceprovider:elevenlabs"),
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_providers_markup(user_data: dict[str, Any]) -> InlineKeyboardMarkup:
+    current = _voice_current_provider(user_data)
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"{'> ' if current == 'kokoro' else ''}Kokoro local",
+                    callback_data="voiceprovider:kokoro",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'> ' if current == 'elevenlabs' else ''}ElevenLabs",
+                    callback_data="voiceprovider:elevenlabs",
+                )
+            ],
+            [InlineKeyboardButton("Voltar", callback_data="voicehome")],
+        ]
+    )
+
+
+def _voice_languages_markup(provider_id: str, user_data: dict[str, Any] | None = None) -> InlineKeyboardMarkup:
+    provider = provider_id.strip().lower()
+    buttons: list[list[InlineKeyboardButton]] = []
+    if provider == "kokoro":
+        from koda.services.kokoro_manager import kokoro_voice_languages
+
+        buttons = [
+            [InlineKeyboardButton(str(item["label"]), callback_data=f"voicelang:kokoro:{item['id']}")]
+            for item in kokoro_voice_languages()
+        ]
+    else:
+        catalog = _voice_elevenlabs_catalog(user_data=user_data)
+        languages = [
+            _voice_as_dict(item)
+            for item in _voice_as_list(catalog.get("available_languages"))
+            if _voice_as_dict(item).get("code")
+        ]
+        if not languages:
+            languages = elevenlabs_languages_for_model(_voice_elevenlabs_model(user_data or {}))
+        for index in range(0, len(languages), 2):
+            row = []
+            for item in languages[index : index + 2]:
+                language_id = str(item["code"])
+                label = str(item.get("label") or elevenlabs_language_label(language_id))
+                row.append(InlineKeyboardButton(label, callback_data=f"voicelang:elevenlabs:{language_id}"))
+            buttons.append(row)
+    buttons.append([InlineKeyboardButton("Voltar", callback_data="voicehome")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_voices_markup(provider_id: str, language_id: str, user_data: dict[str, Any]) -> InlineKeyboardMarkup:
+    provider = provider_id.strip().lower()
+    current_voice = str(user_data.get("tts_voice") or "")
+    buttons: list[list[InlineKeyboardButton]] = []
+    if provider == "kokoro":
+        model_status = _voice_kokoro_model_status()
+        model_job = _voice_download_job_from_payload(model_status)
+        if model_job and str(model_job.get("status") or "").lower() in {"pending", "running"}:
+            model_label = f"Modelo Kokoro: {_voice_download_compact(model_job)}"
+            model_callback = "voicemodelstatus:"
+        elif _voice_kokoro_model_ready(model_status):
+            model_label = "Modelo Kokoro pronto"
+            model_callback = "voicemodelstatus:"
+        else:
+            model_label = "Baixar modelo Kokoro"
+            model_callback = "voicemodeldl:"
+        buttons.append([InlineKeyboardButton(model_label, callback_data=model_callback)])
+
+        for item in _voice_kokoro_voice_items(language_id)[:40]:
+            voice_id = str(item["voice_id"])
+            name = str(item.get("name") or voice_id)
+            marker = "> " if voice_id == current_voice else ""
+            active_job = _voice_as_dict(item.get("active_job"))
+            if active_job and str(active_job.get("status") or "").lower() in {"pending", "running"}:
+                label = f"{marker}{name} ({_voice_download_compact(active_job)})"
+                callback_data = f"voicedlstatus:{voice_id}"
+            elif bool(item.get("downloaded")):
+                label = f"{marker}{name}"
+                callback_data = f"voicepick:{voice_id}"
+            else:
+                label = f"{marker}Baixar {name}"
+                callback_data = f"voicedl:{voice_id}"
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        label,
+                        callback_data=callback_data,
+                    )
+                ]
+            )
+    else:
+        selected_language = canonicalize_elevenlabs_language(language_id or user_data.get("tts_voice_language"))
+        if selected_language:
+            user_data["_voice_pending_elevenlabs_language"] = selected_language
+        catalog = _voice_elevenlabs_catalog(selected_language, user_data)
+        for item in _voice_as_list(catalog.get("items"))[:40]:
+            voice = _voice_as_dict(item)
+            voice_id = str(voice.get("voice_id") or "")
+            if not voice_id:
+                continue
+            name = str(voice.get("name") or voice_id)
+            marker = "> " if voice_id == current_voice else ""
+            details = []
+            for key in ("gender", "accent", "category"):
+                value = str(voice.get(key) or "").strip()
+                if value:
+                    details.append(value)
+            if selected_language and not bool(voice.get("language_match")):
+                details.append("modelo compativel")
+            available, _reason = _voice_elevenlabs_api_available(voice)
+            if not available:
+                details.append("requer plano pago")
+            suffix = f" ({', '.join(details)})" if details else ""
+            callback_name = name.replace(":", " ")[:20]
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        f"{marker}{name[:36]}{suffix}"[:64],
+                        callback_data=f"voiceel:{voice_id}:{callback_name}",
+                    )
+                ]
+            )
+        if not buttons:
+            buttons.append([InlineKeyboardButton("Conferir idiomas ElevenLabs", callback_data="voicelangs:elevenlabs")])
+        buttons.append([InlineKeyboardButton("Pesquisar ElevenLabs", callback_data="voicelang:elevenlabs:pt")])
+    buttons.append([InlineKeyboardButton("Idiomas", callback_data=f"voicelangs:{provider}")])
+    buttons.append([InlineKeyboardButton("Voltar", callback_data="voicehome")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _voice_elevenlabs_language_query(language_id: str) -> str:
+    raw = language_id.strip().lower()
+    canonical = canonicalize_elevenlabs_language(raw)
+    return _ELEVENLABS_LANGUAGE_QUERIES.get(raw) or _ELEVENLABS_LANGUAGE_QUERIES.get(canonical, canonical or "voice")
+
+
 async def cmd_voice(update: Update, context: BotContext) -> None:
     """Toggle voice responses or configure TTS voice."""
     if not auth_check(update):
         return await reject_unauthorized(update)
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-
-    if not TTS_ENABLED:
-        await update.message.reply_text("TTS is disabled (TTS_ENABLED=false).")
-        return
+    settings = get_agent_runtime_settings()
+    if settings is not None:
+        sync_user_data_with_runtime_settings(context.user_data, settings)
 
     args = context.args
     from koda.services.kokoro_manager import kokoro_voice_metadata, list_kokoro_voices
@@ -1822,10 +2714,19 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
             return str(metadata.get("name") or voice)
         return str(ud.get("tts_voice_label", voice))
 
-    if not args:
-        # Toggle on/off
-        current = context.user_data.get("audio_response", False)
-        context.user_data["audio_response"] = not current
+    if not args or args[0].lower() in {"status", "config", "settings", "menu"}:
+        await update.message.reply_text(
+            _voice_home_text(context.user_data),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_home_markup(context.user_data),
+        )
+        return
+
+    arg = args[0].lower()
+
+    if arg == "toggle":
+        current = _voice_session_enabled(context.user_data)
+        _voice_set_session_enabled(context.user_data, not current)
         state = "ON" if not current else "OFF"
         voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
         msg = f"Voice responses: <b>{state}</b>"
@@ -1834,10 +2735,8 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return
 
-    arg = args[0].lower()
-
     if arg == "on":
-        context.user_data["audio_response"] = True
+        _voice_set_session_enabled(context.user_data, True)
         voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
         await update.message.reply_text(
             "Voice responses: <b>ON</b>\n"
@@ -1846,21 +2745,124 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
             parse_mode=ParseMode.HTML,
         )
     elif arg == "off":
-        context.user_data["audio_response"] = False
+        _voice_set_session_enabled(context.user_data, False)
         await update.message.reply_text("Voice responses: <b>OFF</b>", parse_mode=ParseMode.HTML)
+    elif arg == "provider":
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Escolha o provider de voz:",
+                reply_markup=_voice_providers_markup(context.user_data),
+            )
+            return
+        provider = args[1].strip().lower()
+        try:
+            _voice_apply_provider_selection(context.user_data, provider)
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(
+            _voice_home_text(context.user_data),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_home_markup(context.user_data),
+        )
+    elif arg in {"model", "modelo"}:
+        if len(args) < 2:
+            await update.message.reply_text(
+                _voice_elevenlabs_models_text(context.user_data),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_voice_elevenlabs_models_markup(context.user_data),
+            )
+            return
+        model_id = args[1].strip()
+        try:
+            _voice_apply_elevenlabs_model_selection(context.user_data, model_id)
+        except ValueError as exc:
+            await update.message.reply_text(str(exc))
+            return
+        await update.message.reply_text(
+            _voice_home_text(context.user_data),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_home_markup(context.user_data),
+        )
+    elif arg in {"language", "lang", "idioma"}:
+        provider = _voice_current_provider(context.user_data)
+        if len(args) < 2:
+            await update.message.reply_text(
+                f"Escolha o idioma para {_voice_provider_label(provider)}:",
+                reply_markup=_voice_languages_markup(provider, context.user_data),
+            )
+            return
+        language = args[1].strip().lower()
+        if provider == "kokoro":
+            await update.message.reply_text(
+                f"Vozes Kokoro para <code>{escape_html(language)}</code>:",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_voice_voices_markup("kokoro", language, context.user_data),
+            )
+            return
+        context.user_data["_voice_pending_elevenlabs_language"] = canonicalize_elevenlabs_language(language)
+        catalog = _voice_elevenlabs_catalog(language, context.user_data)
+        language_label = str(catalog.get("selected_language_label") or language)
+        voices = [item for item in _voice_as_list(catalog.get("items")) if _voice_as_dict(item).get("voice_id")]
+        if not bool(catalog.get("provider_connected")):
+            text = (
+                "A conexao ElevenLabs ainda nao esta pronta para listar vozes.\n"
+                "Cadastre e verifique a API key do ElevenLabs, depois tente novamente."
+            )
+        elif not voices:
+            query = _voice_elevenlabs_language_query(language)
+            text = (
+                f"Nao encontrei vozes ElevenLabs no catalogo para <b>{escape_html(language_label)}</b>.\n"
+                f"Voce ainda pode tentar pelo texto: <code>/voice search {escape_html(query)}</code>."
+            )
+        else:
+            text = f"Vozes ElevenLabs para <b>{escape_html(language_label)}</b>:"
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_voices_markup("elevenlabs", language, context.user_data),
+        )
     elif arg == "voices":
+        provider_filter = args[1].strip().lower() if len(args) > 1 else ""
+        language_filter = args[2].strip().lower() if len(args) > 2 else ""
         lines = ["Available voices:\n"]
         current_voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
-        elevenlabs_voices = [(vid, vc) for vid, vc in AVAILABLE_VOICES.items() if vc.engine == "elevenlabs"]
-        if elevenlabs_voices:
+        if provider_filter in {"", "elevenlabs"}:
+            catalog = _voice_elevenlabs_catalog(language_filter, context.user_data)
+            elevenlabs_items = [
+                _voice_as_dict(item)
+                for item in _voice_as_list(catalog.get("items"))
+                if _voice_as_dict(item).get("voice_id")
+            ]
             lines.append("\n<b>☁️ ElevenLabs:</b>")
-            for vid, vc in elevenlabs_voices:
-                marker = " ◀" if vid == current_voice else ""
-                lines.append(f"  <code>{vid}</code> — {vc.label}{marker}")
+            if not bool(catalog.get("provider_connected")):
+                lines.append("  API key ausente ou conexao ainda nao verificada.")
+            elif not elevenlabs_items:
+                selected_label = str(catalog.get("selected_language_label") or language_filter or "catalogo")
+                lines.append(f"  Nenhuma voz encontrada para {escape_html(selected_label)}.")
+            else:
+                for item in elevenlabs_items[:40]:
+                    voice_id = str(item["voice_id"])
+                    marker = " ◀" if voice_id == current_voice else ""
+                    details = ", ".join(
+                        value
+                        for value in (
+                            str(item.get("gender") or ""),
+                            str(item.get("accent") or ""),
+                            str(item.get("category") or ""),
+                            "requer plano pago" if item.get("api_available") is False else "",
+                        )
+                        if value
+                    )
+                    suffix = f" ({escape_html(details)})" if details else ""
+                    lines.append(
+                        f"  <code>{escape_html(voice_id)}</code> — "
+                        f"{escape_html(str(item.get('name') or voice_id))}{suffix}{marker}"
+                    )
         kokoro_languages: dict[str, list[dict[str, Any]]] = {}
-        for item in list_kokoro_voices():
+        for item in list_kokoro_voices(language_filter if provider_filter in {"", "kokoro"} else ""):
             kokoro_languages.setdefault(str(item["language_label"]), []).append(item)
-        if kokoro_languages:
+        if kokoro_languages and provider_filter in {"", "kokoro"}:
             lines.append("\n<b>💻 Kokoro (local):</b>")
             for language_label, items in kokoro_languages.items():
                 lines.append(f"\n<i>{escape_html(language_label)}</i>")
@@ -1882,8 +2884,13 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
             lines.append("\n<b>🎯 Custom (via search):</b>")
             lines.append(f"  <code>{escape_html(current_voice)}</code> — {escape_html(custom_label)} ◀")
         lines.append("\nUsage: /voice <voice_id> or /voice search <query>")
-        lines.append("Kokoro voices marked with ⬇ are downloaded automatically on first use.")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        lines.append("No Kokoro, use os botoes de baixar para acompanhar o status do modelo e da voz local.")
+        current_provider = provider_filter or _voice_current_provider(context.user_data)
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_voices_markup(current_provider, language_filter, context.user_data),
+        )
     elif arg == "search":
         query = " ".join(args[1:]) if len(args) > 1 else ""
         if not query:
@@ -1904,14 +2911,14 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
         lines = [f"🔍 Results for <i>{escape_html(query)}</i>:\n"]
         buttons = []
         for v in voices:
-            details = []
+            voice_details: list[str] = []
             if v.gender:
-                details.append(v.gender)
+                voice_details.append(v.gender)
             if v.accent:
-                details.append(v.accent)
+                voice_details.append(v.accent)
             if v.language:
-                details.append(v.language)
-            detail_str = f" ({', '.join(details)})" if details else ""
+                voice_details.append(v.language)
+            detail_str = f" ({', '.join(voice_details)})" if voice_details else ""
             marker = " ◀" if v.voice_id == current_voice else ""
             lines.append(f"  <b>{escape_html(v.name)}</b>{detail_str}{marker}")
 
@@ -1929,17 +2936,33 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
             reply_markup=InlineKeyboardMarkup(buttons),
         )
     elif arg in AVAILABLE_VOICES or kokoro_voice_metadata(arg) is not None:
-        voice_label = AVAILABLE_VOICES[arg].label if arg in AVAILABLE_VOICES else ""
+        voice_config = AVAILABLE_VOICES.get(arg)
+        voice_label = str(voice_config.label) if voice_config is not None else ""
         voice_language = ""
-        if not voice_label:
-            metadata = kokoro_voice_metadata(arg)
-            voice_label = str(metadata.get("name") or arg) if metadata else arg
+        metadata = kokoro_voice_metadata(arg)
+        if metadata:
+            voice_label = str(metadata.get("name") or voice_label or arg)
             voice_language = str(metadata.get("language_id") or "") if metadata else ""
+            voice_status = _voice_kokoro_voice_status(arg)
+            if not _voice_kokoro_voice_ready(arg, voice_status):
+                await update.message.reply_text(
+                    _voice_kokoro_voice_download_text(arg, voice_status),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=_voice_kokoro_voice_download_markup(arg, voice_status),
+                )
+                return
+            model_status = _voice_kokoro_model_status()
+            if not _voice_kokoro_model_ready(model_status):
+                await update.message.reply_text(
+                    _voice_kokoro_model_download_text(arg, model_status),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=_voice_kokoro_model_download_markup(arg, model_status),
+                )
+                return
+        elif not voice_label:
+            voice_label = arg
         try:
-            sync_user_data_with_runtime_settings(
-                context.user_data,
-                set_agent_voice_default(arg, voice_label=voice_label, voice_language=voice_language),
-            )
+            _voice_apply_selection(context.user_data, arg, voice_label=voice_label, voice_language=voice_language)
         except ValueError as exc:
             await update.message.reply_text(str(exc))
             return
@@ -1947,11 +2970,15 @@ async def cmd_voice(update: Update, context: BotContext) -> None:
     else:
         await update.message.reply_text(
             f"Unknown option: {arg}\n\nUsage:\n"
-            "/voice — toggle on/off\n"
-            "/voice on|off — set explicitly\n"
-            "/voice voices — list available voices\n"
-            "/voice search <query> — search ElevenLabs voices\n"
-            "/voice <voice_id> — change voice"
+            "/voice - abrir painel de configuracao\n"
+            "/voice toggle - ligar/desligar\n"
+            "/voice on|off - definir explicitamente\n"
+            "/voice provider kokoro|elevenlabs - escolher provider\n"
+            "/voice model <id> - escolher modelo TTS ElevenLabs\n"
+            "/voice language <id> - escolher idioma/voz\n"
+            "/voice voices - listar vozes disponiveis\n"
+            "/voice search <query> - buscar vozes ElevenLabs\n"
+            "/voice <voice_id> - alterar voz"
         )
 
 

@@ -134,6 +134,7 @@ const modelsSchema = z
     }
     if (Array.isArray(enabled) && value.functional_defaults) {
       for (const [fnId, selection] of Object.entries(value.functional_defaults)) {
+        if (fnId !== "general") continue;
         const pid = (selection?.provider_id ?? "").toString().trim().toLowerCase();
         if (pid && !enabled.includes(pid)) {
           ctx.addIssue({

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { setCurrentLanguage } from "@/lib/i18n";
+import type { GeneralSystemSettings } from "@/lib/control-plane";
 import {
+  cloneGeneralSystemSettings,
   normalizeFallbackOrder,
   SETTINGS_SECTIONS,
   STEP_TO_SECTION,
@@ -32,6 +34,22 @@ describe("system settings model helpers", () => {
       type: "secret",
       scope: "agent_grant",
     });
+  });
+
+  it("normalizes empty effort defaults from backend state", () => {
+    const settings = {
+      values: {
+        provider_connections: {},
+        models: {
+          functional_defaults: {},
+          effort_default: {},
+        },
+        memory_and_knowledge: {},
+      },
+      catalogs: {},
+    } as GeneralSystemSettings;
+
+    expect(cloneGeneralSystemSettings(settings).values.models.effort_default).toBeNull();
   });
 
   it("upserts variables by key", () => {

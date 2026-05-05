@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from koda.services.llm_runner import get_provider_fallback_chain, get_provider_health_snapshot, run_llm
+from koda.services.llm_runner import (
+    get_provider_fallback_chain,
+    get_provider_health_snapshot,
+    run_llm,
+    summarize_native_items,
+)
 from koda.services.provider_runtime import ProviderCapabilities
 
 
@@ -130,6 +135,30 @@ class TestProviderHealthSnapshot:
         assert snapshot["codex"]["status"] == "degraded"
         assert snapshot["codex"]["can_execute"] is True
         assert snapshot["codex"]["supports_native_resume"] is False
+
+
+class TestSummarizeNativeItems:
+    def test_command_summary_does_not_expose_shell_command(self):
+        summary = summarize_native_items(
+            [
+                {
+                    "type": "command_execution",
+                    "command": "python - <<'PY'\nsecret = 'value'\nPY",
+                }
+            ]
+        )
+
+        assert "Concluido:" in summary
+        assert "etapa" in summary
+        assert "python" not in summary
+        assert "secret" not in summary
+        assert "Tools:" not in summary
+
+    def test_file_change_summary_names_file_without_raw_event(self):
+        summary = summarize_native_items([{"type": "file_change", "kind": "add", "path": "/tmp/relatorio.docx"}])
+
+        assert "relatorio.docx" in summary
+        assert "file_change" not in summary
 
 
 class TestProviderFallbackChain:

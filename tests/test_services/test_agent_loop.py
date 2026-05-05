@@ -11,8 +11,13 @@ from koda.services.queue_manager import (
     QueryContext,
     QueueItem,
     RunResult,
+    _build_voice_active_prompt,
+    _compose_response_text,
+    _extract_spoken_response_block,
+    _prepare_spoken_response_for_tts,
     _run_agent_loop,
     _send_response,
+    _voice_continuous_mode_active,
 )
 
 # Helpers
@@ -114,6 +119,200 @@ def _resolved_agent_cmd_approval(decision: str = "approved_scope"):
         return op_id
 
     return _request
+
+
+def test_compose_response_does_not_prefix_native_shell_trace():
+    run_result = _make_result(
+        result="Criei o arquivo animais_silvestres_teste.docx.",
+        native_items=[
+            {
+                "type": "command_execution",
+                "command": "python - <<'PY'\nout = 'animais_silvestres_teste.docx'\nPY",
+            }
+        ],
+    )
+
+    response, tool_summary = _compose_response_text(run_result, elapsed=18.0)
+
+    assert response == "Criei o arquivo animais_silvestres_teste.docx."
+    assert "python" not in response
+    assert "Tools:" not in response
+    assert "etapa" in tool_summary
+
+
+def test_compose_response_strips_leading_provider_tool_transcript():
+    run_result = _make_result(
+        result=(
+            "Tools: shell(/bin/bash -lc 'pwd && ls -la'), shell(/bin/bash -lc \"python - <<'PY'\n"
+            "from docx import Document\n"
+            "out = 'animais_silvestres_teste.docx'\n"
+            "print(out)\n"
+            'PY")\n\n'
+            "Vou criar um .docx simples e anexar aqui.\n\n"
+            "Criei o arquivo animais_silvestres_teste.docx."
+        )
+    )
+
+    response, _tool_summary = _compose_response_text(run_result, elapsed=18.0)
+
+    assert response.startswith("Vou criar")
+    assert "Tools:" not in response
+    assert "/bin/bash" not in response
+    assert "from docx" not in response
+
+
+def test_extract_spoken_response_block_removes_visible_tag():
+    visible, spoken = _extract_spoken_response_block(
+        "<spoken_response>Resumo falado curto.</spoken_response>\n\nDetalhes completos em texto."
+    )
+
+    assert spoken == "Resumo falado curto."
+    assert visible == "Detalhes completos em texto."
+    assert "spoken_response" not in visible
+
+
+def test_prepare_spoken_response_uses_policy_limit_and_keeps_text_details():
+    response = (
+        "Primeira frase importante. Segunda frase com contexto. Terceira frase com detalhe. "
+        + "Mais detalhes operacionais. " * 80
+    )
+
+    spoken, send_text = _prepare_spoken_response_for_tts(
+        response,
+        user_data={
+            "tts_voice_language": "pt-br",
+            "voice_policy": {"max_spoken_chars": 280},
+        },
+    )
+
+    assert len(spoken) <= 280
+    assert "Deixei os detalhes completos em texto" in spoken
+    assert send_text is True
+
+
+def test_prepare_spoken_response_summarizes_code_and_mentions_artifact(tmp_path):
+    doc = tmp_path / "relatorio.docx"
+    doc.write_bytes(b"docx")
+    response = "Segue o codigo:\n```\n" + "print('x')\n" * 200 + "```\nArquivo relatorio.docx criado."
+
+    spoken, send_text = _prepare_spoken_response_for_tts(
+        response,
+        created_artifacts=[str(doc)],
+        user_data={"tts_voice_language": "pt-br"},
+    )
+
+    assert "codigo ou detalhes tecnicos" in spoken
+    assert "relatorio.docx" in spoken
+    assert "print" not in spoken
+    assert send_text is True
+
+
+def test_build_voice_prompt_uses_agent_policy_without_forcing_english():
+    prompt = _build_voice_active_prompt(
+        {
+            "audio_response": True,
+            "tts_voice_language": "pt-br",
+            "voice_policy_active": True,
+            "voice_policy": {
+                "max_spoken_chars": 360,
+                "spoken_style": "objetivo e acolhedor",
+                "detail_level": "resumo curto",
+            },
+        }
+    )
+
+    assert "max_spoken_chars=360" in prompt
+    assert "spoken_style=objetivo e acolhedor" in prompt
+    assert "detail_level=resumo curto" in prompt
+    assert "Voice delivery is ACTIVE for this response" in prompt
+    assert "continuous_voice_mode=active" in prompt
+    assert "turn_audio_request=false" in prompt
+    assert "Do not say voice mode, TTS, or audio is disabled" in prompt
+    assert "Write in spoken English" not in prompt
+
+
+def test_build_voice_prompt_marks_one_turn_audio_as_active_even_when_continuous_mode_is_off():
+    prompt = _build_voice_active_prompt(
+        {
+            "audio_response": False,
+            "tts_enabled": False,
+            "tts_voice_language": "pt-br",
+        },
+        force_audio_response=True,
+    )
+
+    assert "Voice delivery is ACTIVE for this response" in prompt
+    assert "continuous_voice_mode=inactive" in prompt
+    assert "turn_audio_request=true" in prompt
+    assert "Do not tell the user to use /voice to enable audio in this response" in prompt
+
+
+def test_voice_continuous_mode_active_uses_policy_even_when_audio_response_is_missing():
+    assert _voice_continuous_mode_active({"audio_response": False, "voice_policy_active": True}) is True
+    assert _voice_continuous_mode_active({"audio_response": False, "voice_policy_mode": "voice_active"}) is True
+    assert _voice_continuous_mode_active({"audio_response": False, "tts_enabled": True}) is False
+
+
+@pytest.mark.asyncio
+async def test_send_response_warns_when_claimed_artifact_is_missing(tmp_path):
+    context = _make_context()
+    run_result = _make_result(
+        result="Criei o arquivo relatorio.docx.",
+        native_items=[
+            {
+                "type": "command_execution",
+                "command": "python gerar.py",
+                "output": "relatorio.docx",
+            }
+        ],
+    )
+
+    await _send_response(
+        111,
+        None,
+        context,
+        run_result,
+        str(tmp_path),
+        "autonomous",
+        elapsed=6.0,
+        model="gpt-5.4-mini",
+    )
+
+    sent_text = context.bot.send_message.call_args.kwargs["text"]
+    assert "Nao encontrei esse arquivo" in sent_text
+    assert "artifact not found" in run_result.warnings
+
+
+@pytest.mark.asyncio
+async def test_send_response_attaches_artifact_from_agent_tool_trace(tmp_path):
+    context = _make_context()
+    doc = tmp_path / "relatorio.docx"
+    doc.write_bytes(b"docx")
+    run_result = _make_result(
+        result="Criei o arquivo relatorio.docx.",
+        tool_execution_trace=[
+            {
+                "tool": "shell_execute",
+                "success": True,
+                "output": "relatorio.docx",
+                "metadata": {"category": "shell"},
+            }
+        ],
+    )
+
+    await _send_response(
+        111,
+        None,
+        context,
+        run_result,
+        str(tmp_path),
+        "autonomous",
+        elapsed=6.0,
+        model="gpt-5.4-mini",
+    )
+
+    context.bot.send_document.assert_awaited_once()
+    assert "artifact not found" not in run_result.warnings
 
 
 SCHEDULER_WRITE_POLICY = {
@@ -829,12 +1028,13 @@ class TestAgentLoop:
                 "tts_voice_language": "pt-br",
                 "audio_provider": "kokoro",
                 "audio_model": "kokoro-v1",
+                "tts_enabled": True,
             }
         )
         run_result = _make_result(result="Resposta curta.")
 
         with (
-            patch("koda.services.queue_manager.TTS_ENABLED", True),
+            patch("koda.utils.command_helpers.TTS_ENABLED", False),
             patch("koda.utils.tts.is_mostly_code", return_value=False),
             patch("koda.utils.tts.strip_for_tts", return_value="Resposta curta"),
             patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=None) as mock_tts,
@@ -860,3 +1060,208 @@ class TestAgentLoop:
             model="kokoro-v1",
             language="pt-br",
         )
+
+    @pytest.mark.asyncio
+    async def test_send_response_force_audio_request_bypasses_disabled_session_flag(self):
+        ctx = _make_ctx(force_audio_response=True)
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": False,
+                "tts_voice": "pm_alex",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "kokoro",
+                "audio_model": "kokoro-v1",
+                "tts_enabled": False,
+            }
+        )
+        run_result = _make_result(result="Resumo curto para este turno.")
+
+        with (
+            patch("koda.utils.command_helpers.TTS_ENABLED", False),
+            patch("koda.utils.tts.is_mostly_code", return_value=False),
+            patch("koda.utils.tts.strip_for_tts", return_value="Resumo curto para este turno."),
+            patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=None) as mock_tts,
+        ):
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                "/tmp",
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        mock_tts.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_send_response_uses_voice_policy_active_when_audio_response_flag_is_stale(self):
+        ctx = _make_ctx()
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": False,
+                "voice_policy_active": True,
+                "voice_policy_mode": "voice_active",
+                "tts_voice": "pm_alex",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "kokoro",
+                "audio_model": "kokoro-v1",
+                "tts_enabled": False,
+            }
+        )
+        run_result = _make_result(result="Resposta curta com voz ativa.")
+
+        with (
+            patch("koda.utils.command_helpers.TTS_ENABLED", False),
+            patch("koda.utils.tts.is_mostly_code", return_value=False),
+            patch("koda.utils.tts.strip_for_tts", return_value="Resposta curta com voz ativa."),
+            patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=None) as mock_tts,
+        ):
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                "/tmp",
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        mock_tts.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_send_response_explains_elevenlabs_paid_plan_voice_failure(self):
+        ctx = _make_ctx()
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": True,
+                "tts_voice": "WSBwiRQRmi2mEG7BfKwS",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "elevenlabs",
+                "audio_model": "eleven_multilingual_v2",
+                "tts_enabled": True,
+            }
+        )
+        run_result = _make_result(result="Resposta curta.")
+
+        with (
+            patch("koda.utils.tts.is_mostly_code", return_value=False),
+            patch("koda.utils.tts.strip_for_tts", return_value="Resposta curta"),
+            patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=None),
+            patch(
+                "koda.utils.tts.get_last_tts_error",
+                return_value={
+                    "provider": "elevenlabs",
+                    "status": 402,
+                    "code": "paid_plan_required",
+                    "message": "Free users cannot use library voices via the API.",
+                },
+            ),
+        ):
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                "/tmp",
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        sent_text = context.bot.send_message.call_args.kwargs["text"]
+        assert "voz selecionada exige plano pago" in sent_text
+        assert "Escolha uma voz premade" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_send_response_uses_spoken_block_for_audio_and_sends_text_details(self, tmp_path):
+        ctx = _make_ctx()
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": True,
+                "tts_voice": "pm_alex",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "kokoro",
+                "audio_model": "kokoro-v1",
+                "tts_enabled": True,
+            }
+        )
+        ogg = tmp_path / "voice.ogg"
+        ogg.write_bytes(b"OggS" + b"\x00" * 16)
+        run_result = _make_result(
+            result=(
+                "<spoken_response>Resumo falado curto.</spoken_response>\n\n"
+                "Detalhes completos em texto com tabela:\n\n| A | B |\n| - | - |\n| 1 | 2 |"
+            )
+        )
+
+        with patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=str(ogg)) as mock_tts:
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                str(tmp_path),
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        mock_tts.assert_awaited_once()
+        assert mock_tts.call_args.args[0] == "Resumo falado curto."
+        context.bot.send_voice.assert_awaited_once()
+        sent_text = context.bot.send_message.call_args.kwargs["text"]
+        assert "Detalhes completos em texto" in sent_text
+        assert "spoken_response" not in sent_text
+
+    @pytest.mark.asyncio
+    async def test_send_response_speaks_code_summary_and_keeps_code_as_text(self, tmp_path):
+        ctx = _make_ctx()
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": True,
+                "tts_voice": "pm_alex",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "kokoro",
+                "audio_model": "kokoro-v1",
+                "tts_enabled": True,
+            }
+        )
+        ogg = tmp_path / "voice.ogg"
+        ogg.write_bytes(b"OggS" + b"\x00" * 16)
+        run_result = _make_result(result="Aqui esta:\n```\n" + "print('x')\n" * 200 + "```")
+
+        with patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=str(ogg)) as mock_tts:
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                str(tmp_path),
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        spoken_text = mock_tts.call_args.args[0]
+        assert "codigo ou detalhes tecnicos" in spoken_text
+        assert "print" not in spoken_text
+        context.bot.send_voice.assert_awaited_once()
+        context.bot.send_document.assert_awaited()

@@ -1646,9 +1646,10 @@ async def get_elevenlabs_voices(request: web.Request) -> web.Response:
     import asyncio
 
     language = request.rel_url.query.get("language", "")
+    model_id = request.rel_url.query.get("model_id", "")
     manager = _manager()
     voices = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: manager.get_elevenlabs_voice_catalog(language=language)
+        None, lambda: manager.get_elevenlabs_voice_catalog(language=language, model_id=model_id)
     )
     return web.json_response(voices)
 

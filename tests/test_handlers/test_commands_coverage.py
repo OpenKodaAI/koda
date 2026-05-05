@@ -446,6 +446,20 @@ class TestCmdProviderModelDbEnvCoverage:
                 },
             ),
             patch(
+                "koda.handlers.commands._voice_kokoro_voice_status",
+                return_value={
+                    "voice_id": "bf_alice",
+                    "name": "Alice",
+                    "language_id": "en-gb",
+                    "downloaded": True,
+                    "active_job": None,
+                },
+            ),
+            patch(
+                "koda.handlers.commands._voice_kokoro_model_status",
+                return_value={"downloaded": True, "active_job": None},
+            ),
+            patch(
                 "koda.handlers.commands.set_agent_voice_default",
                 return_value={
                     **_runtime_settings(provider="codex", model="gpt-5.4"),
@@ -459,6 +473,215 @@ class TestCmdProviderModelDbEnvCoverage:
 
         mock_persist.assert_called_once_with("bf_alice", voice_label="Alice", voice_language="en-gb")
         assert mock_context.user_data["tts_voice"] == "bf_alice"
+
+    def test_voice_markup_uses_download_status_callbacks_for_kokoro(self, mock_context):
+        from koda.handlers.commands import _voice_voices_markup
+
+        init_user_data(mock_context.user_data)
+        active_job = {
+            "status": "running",
+            "downloaded_bytes": 128,
+            "total_bytes": 1024,
+            "progress_percent": 12.5,
+        }
+        with (
+            patch(
+                "koda.handlers.commands._voice_kokoro_model_status",
+                return_value={"downloaded": False, "active_job": None},
+            ),
+            patch(
+                "koda.handlers.commands._voice_kokoro_voice_items",
+                return_value=[
+                    {
+                        "voice_id": "bf_alice",
+                        "name": "Alice",
+                        "language_id": "en-gb",
+                        "downloaded": False,
+                        "active_job": None,
+                    },
+                    {
+                        "voice_id": "pm_alex",
+                        "name": "Alex",
+                        "language_id": "pt-br",
+                        "downloaded": True,
+                        "active_job": None,
+                    },
+                    {
+                        "voice_id": "pm_santa",
+                        "name": "Santa",
+                        "language_id": "pt-br",
+                        "downloaded": False,
+                        "active_job": active_job,
+                    },
+                ],
+            ),
+        ):
+            markup = _voice_voices_markup("kokoro", "", mock_context.user_data)
+
+        buttons = [button for row in markup.inline_keyboard for button in row]
+        callback_by_label = {button.text: button.callback_data for button in buttons}
+        assert callback_by_label["Baixar modelo Kokoro"] == "voicemodeldl:"
+        assert callback_by_label["Baixar Alice"] == "voicedl:bf_alice"
+        assert callback_by_label["Alex"] == "voicepick:pm_alex"
+        santa_button = next(button for button in buttons if button.text.startswith("Santa (baixando"))
+        assert santa_button.callback_data == "voicedlstatus:pm_santa"
+
+    def test_voice_markup_lists_elevenlabs_catalog_for_language(self, mock_context):
+        from koda.handlers.commands import _voice_voices_markup
+
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_provider"] = "elevenlabs"
+        mock_context.user_data["audio_model"] = "eleven_flash_v2_5"
+        with patch(
+            "koda.handlers.commands._voice_elevenlabs_catalog",
+            return_value={
+                "items": [
+                    {
+                        "voice_id": "nPczCjzI2devNBz1zQrb",
+                        "name": "Brian",
+                        "gender": "male",
+                        "accent": "american",
+                        "category": "premade",
+                        "language_match": True,
+                    }
+                ],
+                "available_languages": [{"code": "pt", "label": "Portuguese"}],
+                "selected_language": "pt",
+                "selected_language_label": "Portuguese",
+                "provider_connected": True,
+            },
+        ):
+            markup = _voice_voices_markup("elevenlabs", "pt-br", mock_context.user_data)
+
+        buttons = [button for row in markup.inline_keyboard for button in row]
+        brian_button = next(button for button in buttons if button.text.startswith("Brian"))
+        assert brian_button.callback_data == "voiceel:nPczCjzI2devNBz1zQrb:Brian"
+        assert mock_context.user_data["_voice_pending_elevenlabs_language"] == "pt"
+
+    def test_voice_markup_marks_unavailable_elevenlabs_voice(self, mock_context):
+        from koda.handlers.commands import _voice_voices_markup
+
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_provider"] = "elevenlabs"
+        mock_context.user_data["audio_model"] = "eleven_multilingual_v2"
+        with patch(
+            "koda.handlers.commands._voice_elevenlabs_catalog",
+            return_value={
+                "items": [
+                    {
+                        "voice_id": "WSBwiRQRmi2mEG7BfKwS",
+                        "name": "Yuri",
+                        "gender": "male",
+                        "accent": "brazilian",
+                        "category": "professional",
+                        "language_match": True,
+                        "api_available": False,
+                        "api_availability_reason": "Voz indisponivel via API no plano free.",
+                    }
+                ],
+                "available_languages": [{"code": "pt", "label": "Portuguese"}],
+                "selected_language": "pt",
+                "selected_language_label": "Portuguese",
+                "provider_connected": True,
+            },
+        ):
+            markup = _voice_voices_markup("elevenlabs", "pt-br", mock_context.user_data)
+
+        buttons = [button for row in markup.inline_keyboard for button in row]
+        yuri_button = next(button for button in buttons if button.text.startswith("Yuri"))
+        assert "requer plano pago" in yuri_button.text
+        assert yuri_button.callback_data == "voiceel:WSBwiRQRmi2mEG7BfKwS:Yuri"
+
+    def test_voice_home_exposes_elevenlabs_model_picker(self, mock_context):
+        from koda.handlers.commands import _voice_home_markup, _voice_home_text
+
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_provider"] = "elevenlabs"
+        mock_context.user_data["audio_model"] = "eleven_turbo_v2_5"
+
+        text = _voice_home_text(mock_context.user_data)
+        markup = _voice_home_markup(mock_context.user_data)
+
+        assert "eleven_turbo_v2_5" in text
+        buttons = [button for row in markup.inline_keyboard for button in row]
+        assert any(button.callback_data == "voiceelmodels" for button in buttons)
+
+    def test_voice_home_treats_active_policy_as_enabled_when_audio_response_is_stale(self, mock_context):
+        from koda.handlers.commands import _voice_home_markup, _voice_home_text
+
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_response"] = False
+        mock_context.user_data["voice_policy_active"] = True
+        mock_context.user_data["voice_policy_mode"] = "voice_active"
+
+        text = _voice_home_text(mock_context.user_data)
+        markup = _voice_home_markup(mock_context.user_data)
+
+        assert "Estado: <b>ligado</b>" in text
+        assert markup.inline_keyboard[0][0].text == "Desligar"
+
+    def test_voice_elevenlabs_model_markup_lists_tts_models_only(self, mock_context):
+        from koda.handlers.commands import _voice_elevenlabs_models_markup
+
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_provider"] = "elevenlabs"
+        mock_context.user_data["audio_model"] = "eleven_flash_v2_5"
+
+        markup = _voice_elevenlabs_models_markup(mock_context.user_data)
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+
+        assert "voiceelmodel:eleven_v3" in callbacks
+        assert "voiceelmodel:eleven_flash_v2_5" in callbacks
+        assert "voiceelmodel:eleven_multilingual_sts_v2" not in callbacks
+        assert "voiceelmodel:eleven_text_to_sound_v2" not in callbacks
+
+    @pytest.mark.asyncio
+    async def test_voice_model_command_sets_elevenlabs_audio_model(self, mock_update, mock_context):
+        mock_context.args = ["model", "eleven_turbo_v2_5"]
+        init_user_data(mock_context.user_data)
+        mock_context.user_data["audio_provider"] = "elevenlabs"
+        mock_context.user_data["audio_model"] = "eleven_flash_v2_5"
+
+        with patch(
+            "koda.handlers.commands.set_agent_functional_default",
+            return_value={
+                **_runtime_settings(provider="codex", model="gpt-5.4"),
+                "audio_provider": "elevenlabs",
+                "audio_model": "eleven_turbo_v2_5",
+                "tts_voice": "nPczCjzI2devNBz1zQrb",
+                "tts_voice_label": "Brian",
+                "tts_voice_language": "pt",
+            },
+        ) as mock_set_default:
+            await cmd_voice(mock_update, mock_context)
+
+        mock_set_default.assert_called_once_with("audio", "elevenlabs", "eleven_turbo_v2_5", publish=True)
+        assert mock_context.user_data["audio_provider"] == "elevenlabs"
+        assert mock_context.user_data["audio_model"] == "eleven_turbo_v2_5"
+        text = mock_update.message.reply_text.call_args.args[0]
+        assert "eleven_turbo_v2_5" in text
+
+    @pytest.mark.asyncio
+    async def test_voice_direct_kokoro_selection_prompts_download_when_missing(self, mock_update, mock_context):
+        mock_context.args = ["pm_alex"]
+        init_user_data(mock_context.user_data)
+
+        with patch(
+            "koda.handlers.commands._voice_kokoro_voice_status",
+            return_value={
+                "voice_id": "pm_alex",
+                "name": "Alex",
+                "language_id": "pt-br",
+                "downloaded": False,
+                "active_job": None,
+            },
+        ):
+            await cmd_voice(mock_update, mock_context)
+
+        assert "Voz Kokoro" in mock_update.message.reply_text.call_args.args[0]
+        markup = mock_update.message.reply_text.call_args.kwargs["reply_markup"]
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        assert "Baixar voz" in labels
 
     @pytest.mark.asyncio
     async def test_voice_does_not_mutate_local_state_when_persist_fails(self, mock_update, mock_context):
@@ -880,6 +1103,7 @@ class TestCmdVoiceMemoryCoverage:
     @pytest.mark.asyncio
     async def test_voice_toggle_and_list(self, mock_update, mock_context):
         init_user_data(mock_context.user_data)
+        mock_context.args = ["toggle"]
         await cmd_voice(mock_update, mock_context)
         assert mock_context.user_data["audio_response"] is True
 

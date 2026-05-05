@@ -61,6 +61,8 @@ def _make_manager(monkeypatch):
     login_sessions: dict[str, ProviderLoginSessionState] = {}
 
     manager._provider_login_processes = {}
+    manager._elevenlabs_voice_cache = {}
+    manager._elevenlabs_subscription_cache = {}
     manager.ensure_seeded = lambda: None  # type: ignore[attr-defined]
     manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
     manager._merged_global_env_base = lambda: {}  # type: ignore[attr-defined]
@@ -181,6 +183,17 @@ def test_function_model_catalog_skips_hidden_standalone_providers():
     for entries in functional_catalog.values():
         for entry in entries:
             assert entry["provider_id"] in visible_ids
+
+
+def test_codex_image_defaults_require_api_key(monkeypatch):
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    connections = {"codex": {"verified": True, "api_key_present": False}}
+
+    assert manager._provider_selectable_for_function("general", "codex", {}, connections) is True
+    assert manager._provider_selectable_for_function("image", "codex", {}, connections) is False
+
+    connections["codex"]["api_key_present"] = True
+    assert manager._provider_selectable_for_function("image", "codex", {}, connections) is True
 
 
 def test_verify_provider_connection_flips_enabled_flag(monkeypatch):
@@ -450,6 +463,177 @@ def test_ollama_api_key_verify_targets_cloud_endpoint(monkeypatch):
         "api_key verify must target Ollama Cloud regardless of local meta or "
         f"stray OLLAMA_BASE_URL env; got {captured['base_url']!r}"
     )
+
+
+def test_elevenlabs_voice_catalog_accepts_top_level_voice_list(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager._resolve_elevenlabs_api_key = lambda: "xi-test-key"  # type: ignore[attr-defined]
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps(
+                [
+                    {
+                        "voice_id": "abc123",
+                        "name": "Maria",
+                        "labels": {"gender": "female", "accent": "brasileiro"},
+                        "category": "premade",
+                        "preview_url": "https://example.test/maria.mp3",
+                        "verified_languages": [{"language": "pt", "name": "Portuguese"}],
+                    }
+                ]
+            ).encode("utf-8")
+
+    monkeypatch.setattr(manager_mod.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+
+    catalog = manager_mod.ControlPlaneManager.get_elevenlabs_voice_catalog(manager, language="pt")
+
+    assert catalog["provider_connected"] is True
+    assert catalog["items"][0]["voice_id"] == "abc123"
+    assert catalog["items"][0]["languages"][0]["code"] == "pt"
+    assert catalog["items"][0]["languages"][0]["label"] == "Portuguese"
+
+
+def test_elevenlabs_voice_catalog_marks_library_voice_unavailable_for_free_tier(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager._resolve_elevenlabs_api_key = lambda: "xi-test-key"  # type: ignore[attr-defined]
+
+    class _Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def _urlopen(request, *args, **kwargs):
+        url = str(getattr(request, "full_url", request))
+        if url.endswith("/v1/user/subscription"):
+            return _Response({"tier": "free", "status": "free"})
+        return _Response(
+            {
+                "voices": [
+                    {"voice_id": "professional-voice", "name": "Yuri", "category": "professional"},
+                    {"voice_id": "premade-voice", "name": "Brian", "category": "premade"},
+                ],
+                "has_more": False,
+            }
+        )
+
+    monkeypatch.setattr(manager_mod.urllib.request, "urlopen", _urlopen)
+
+    catalog = manager_mod.ControlPlaneManager.get_elevenlabs_voice_catalog(manager)
+    by_id = {item["voice_id"]: item for item in catalog["items"]}
+
+    assert catalog["subscription_tier"] == "free"
+    assert by_id["professional-voice"]["api_available"] is False
+    assert "plano free" in by_id["professional-voice"]["api_availability_reason"]
+    assert by_id["premade-voice"]["api_available"] is True
+
+
+def test_elevenlabs_voice_catalog_matches_locale_to_model_language(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager._resolve_elevenlabs_api_key = lambda: "xi-test-key"  # type: ignore[attr-defined]
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "voices": [
+                        {
+                            "voice_id": "voice-pt",
+                            "name": "Maria",
+                            "high_quality_base_model_ids": ["eleven_flash_v2_5"],
+                            "verified_languages": [
+                                {
+                                    "language": "pt",
+                                    "locale": "pt-BR",
+                                    "model_id": "eleven_flash_v2_5",
+                                }
+                            ],
+                        }
+                    ],
+                    "has_more": False,
+                }
+            ).encode("utf-8")
+
+    monkeypatch.setattr(manager_mod.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+
+    catalog = manager_mod.ControlPlaneManager.get_elevenlabs_voice_catalog(
+        manager,
+        language="pt-br",
+        model_id="eleven_flash_v2_5",
+    )
+
+    assert catalog["selected_language"] == "pt"
+    assert {"code": "pt", "label": "Portuguese"} in catalog["available_languages"]
+    assert [item["voice_id"] for item in catalog["items"]] == ["voice-pt"]
+    assert catalog["items"][0]["language_match"] is True
+
+
+def test_elevenlabs_voice_catalog_falls_back_to_model_compatible_voices(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager._resolve_elevenlabs_api_key = lambda: "xi-test-key"  # type: ignore[attr-defined]
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "voices": [
+                        {
+                            "voice_id": "voice-en",
+                            "name": "Brian",
+                            "high_quality_base_model_ids": ["eleven_flash_v2_5"],
+                            "verified_languages": [{"language": "en", "model_id": "eleven_flash_v2_5"}],
+                        }
+                    ],
+                    "has_more": False,
+                }
+            ).encode("utf-8")
+
+    monkeypatch.setattr(manager_mod.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+
+    catalog = manager_mod.ControlPlaneManager.get_elevenlabs_voice_catalog(
+        manager,
+        language="pt-br",
+        model_id="eleven_flash_v2_5",
+    )
+
+    assert [item["voice_id"] for item in catalog["items"]] == ["voice-en"]
+    assert catalog["items"][0]["language_match"] is False
 
 
 def test_postgres_is_not_exposed_as_native_core_integration(monkeypatch):

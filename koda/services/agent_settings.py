@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import time
 from typing import Any
@@ -18,7 +19,12 @@ from koda.config import (
 )
 from koda.control_plane.agent_spec import normalize_model_policy
 from koda.control_plane.manager import ControlPlaneManager
-from koda.provider_models import MODEL_FUNCTION_IDS, get_model_effort_capability
+from koda.logging_config import get_logger
+from koda.provider_models import (
+    MODEL_FUNCTION_IDS,
+    get_model_effort_capability,
+    resolve_provider_function_model_catalog,
+)
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
@@ -28,6 +34,7 @@ from koda.utils.tts import AVAILABLE_VOICES
 
 _CACHE_TTL_SECONDS = 5.0
 _SETTINGS_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+log = get_logger(__name__)
 
 
 def _safe_json_object(value: Any) -> dict[str, Any]:
@@ -42,6 +49,21 @@ def _nonempty_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _boolish(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = _nonempty_text(value).lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _current_agent_id() -> str | None:
     raw = _nonempty_text(os.environ.get("AGENT_ID"))
     return raw.upper() if raw else None
@@ -49,6 +71,67 @@ def _current_agent_id() -> str | None:
 
 def _cache_key(agent_id: str) -> tuple[str, str]:
     return agent_id.upper(), ""
+
+
+def _json_env_object(name: str) -> dict[str, Any]:
+    raw = _nonempty_text(os.environ.get(name))
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return _safe_json_object(value)
+
+
+def _inline_agent_runtime_settings(agent_id: str) -> dict[str, Any] | None:
+    agent_spec = _json_env_object("AGENT_SPEC_JSON") or _json_env_object(f"{agent_id.upper()}_AGENT_SPEC_JSON")
+    model_policy = (
+        _json_env_object("AGENT_MODEL_POLICY_JSON")
+        or _json_env_object(f"{agent_id.upper()}_AGENT_MODEL_POLICY_JSON")
+        or _safe_json_object(agent_spec.get("model_policy"))
+    )
+    if not agent_spec and not model_policy:
+        return None
+
+    functional_defaults = _safe_json_object(model_policy.get("functional_defaults"))
+    default_models_by_provider = _safe_json_object(model_policy.get("default_models"))
+    default_provider = _nonempty_text(model_policy.get("default_provider")).lower() or DEFAULT_PROVIDER
+    general_default = _safe_json_object(functional_defaults.get("general"))
+    transcription_default = _safe_json_object(functional_defaults.get("transcription"))
+    audio_default = _safe_json_object(functional_defaults.get("audio"))
+    general_model = (
+        _nonempty_text(general_default.get("model_id"))
+        or _nonempty_text(default_models_by_provider.get(default_provider))
+        or PROVIDER_DEFAULT_MODELS.get(default_provider, DEFAULT_MODEL)
+    )
+    voice_policy = _safe_json_object(agent_spec.get("voice_policy"))
+    voice_policy_mode = _nonempty_text(voice_policy.get("mode")).lower() or "disabled"
+    voice_policy_active = voice_policy_mode in {"tts", "voice_active"}
+    audio_provider = _nonempty_text(audio_default.get("provider_id")).lower()
+    voice_id = _nonempty_text(os.environ.get("TTS_DEFAULT_VOICE")) or TTS_DEFAULT_VOICE
+    return {
+        "agent_id": agent_id.upper(),
+        "default_provider": default_provider,
+        "general_model": general_model,
+        "default_models_by_provider": default_models_by_provider,
+        "functional_defaults": functional_defaults,
+        "transcription_provider": _nonempty_text(transcription_default.get("provider_id")) or TRANSCRIPTION_PROVIDER,
+        "transcription_model": _nonempty_text(transcription_default.get("model_id")) or TRANSCRIPTION_MODEL,
+        "audio_provider": audio_provider,
+        "audio_model": _nonempty_text(audio_default.get("model_id")),
+        "tts_voice": voice_id,
+        "tts_voice_label": _voice_label_for_defaults(voice_id, provider_id=audio_provider),
+        "tts_voice_language": _nonempty_text(os.environ.get("KOKORO_DEFAULT_LANGUAGE")) or ELEVENLABS_DEFAULT_LANGUAGE,
+        "tts_enabled": _boolish(os.environ.get("TTS_ENABLED"), default=True) or voice_policy_active,
+        "voice_policy": copy.deepcopy(voice_policy),
+        "voice_policy_mode": voice_policy_mode,
+        "voice_policy_active": voice_policy_active,
+        "selectable_function_options": {},
+        "effort_override": _safe_json_object(model_policy.get("effort_override"))
+        or _safe_json_object(model_policy.get("effort_overrides")),
+        "effort_default_global": {},
+    }
 
 
 def invalidate_agent_settings_cache(agent_id: str | None = None) -> None:
@@ -90,6 +173,15 @@ def _effort_default_from_general_settings(settings: dict[str, Any]) -> dict[str,
     return _safe_json_object(models.get("effort_defaults"))
 
 
+def _tts_enabled_from_general_settings(settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    values = _safe_json_object(settings.get("values"))
+    resources = _safe_json_object(values.get("resources"))
+    integrations = _safe_json_object(resources.get("integrations"))
+    snapshot_env = _safe_json_object(snapshot.get("env"))
+    default = _boolish(snapshot_env.get("TTS_ENABLED"), default=True)
+    return _boolish(integrations.get("tts_enabled"), default=default)
+
+
 def _provider_catalog_map(provider_catalog: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(provider_id): _safe_json_object(payload)
@@ -126,6 +218,7 @@ def _voice_label_for_defaults(voice_id: str, *, provider_id: str) -> str:
 def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     manager = ControlPlaneManager()
     snapshot = manager.build_draft_snapshot(agent_id)
+    agent_spec = manager.get_agent_spec(agent_id, snapshot=snapshot)
     model_state = manager.get_model_policy(agent_id)
     policy = _safe_json_object(model_state.get("policy"))
     provider_catalog = _safe_json_object(model_state.get("provider_catalog"))
@@ -135,6 +228,10 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
     provider_connections = _provider_connections_from_general_settings(general_settings)
     functional_catalog = _functional_catalog_from_general_settings(general_settings)
     effort_default_global = _effort_default_from_general_settings(general_settings)
+    voice_policy = _safe_json_object(agent_spec.get("voice_policy"))
+    voice_policy_mode = _nonempty_text(voice_policy.get("mode")).lower() or "disabled"
+    voice_policy_active = voice_policy_mode in {"tts", "voice_active"}
+    tts_enabled = _tts_enabled_from_general_settings(general_settings, snapshot) or voice_policy_active
     effort_override = _safe_json_object(policy.get("effort_override"))
     if not effort_override:
         effort_override = _safe_json_object(policy.get("effort_overrides"))
@@ -238,6 +335,10 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
         "tts_voice": voice_id,
         "tts_voice_label": voice_label,
         "tts_voice_language": voice_language,
+        "tts_enabled": tts_enabled,
+        "voice_policy": copy.deepcopy(voice_policy),
+        "voice_policy_mode": voice_policy_mode,
+        "voice_policy_active": voice_policy_active,
         "selectable_function_options": selectable_function_options,
         "effort_override": effort_override,
         "effort_default_global": effort_default_global,
@@ -305,6 +406,11 @@ def get_agent_runtime_settings(*, force_refresh: bool = False) -> dict[str, Any]
     cached = _SETTINGS_CACHE.get(key)
     if cached and not force_refresh and (now - cached[0]) < _CACHE_TTL_SECONDS:
         return copy.deepcopy(cached[1])
+    if not force_refresh:
+        inline_payload = _inline_agent_runtime_settings(agent_id)
+        if inline_payload is not None:
+            _SETTINGS_CACHE[key] = (now, inline_payload)
+            return copy.deepcopy(inline_payload)
     try:
         payload = _effective_agent_runtime_settings(agent_id)
     except Exception:
@@ -319,13 +425,23 @@ def _ensure_function_option(
     provider_id: str,
     model_id: str,
 ) -> dict[str, Any]:
+    normalized_provider = provider_id.strip().lower()
     for item in settings.get("selectable_function_options", {}).get(function_id, []):
         payload = _safe_json_object(item)
         if (
-            _nonempty_text(payload.get("provider_id")).lower() == provider_id.lower()
+            _nonempty_text(payload.get("provider_id")).lower() == normalized_provider
             and _nonempty_text(payload.get("model_id")) == model_id
         ):
             return payload
+    if function_id == "audio":
+        for item in resolve_provider_function_model_catalog(normalized_provider):
+            payload = _safe_json_object(item)
+            if (
+                _nonempty_text(payload.get("provider_id")).lower() == normalized_provider
+                and _nonempty_text(payload.get("model_id")) == model_id
+                and _nonempty_text(payload.get("function_id")) == "audio"
+            ):
+                return payload
     raise ValueError(f"O modelo '{model_id}' do provider '{provider_id}' nao esta disponivel para {function_id}.")
 
 
@@ -335,6 +451,41 @@ def _current_local_providers_section(manager: ControlPlaneManager, agent_id: str
 
 def _current_local_model_policy(local_section: dict[str, Any]) -> dict[str, Any]:
     return dict(_safe_json_object(local_section.get("model_policy")))
+
+
+def _publish_agent_runtime_update(manager: ControlPlaneManager, agent_id: str) -> bool:
+    normalized_agent = _nonempty_text(agent_id)
+    if not normalized_agent:
+        return False
+    try:
+        manager.publish_agent(normalized_agent)
+    except Exception:
+        log.warning("agent_runtime_publish_failed", agent_id=normalized_agent, exc_info=True)
+        return False
+    invalidate_agent_settings_cache(normalized_agent)
+    return True
+
+
+def set_agent_voice_policy_enabled(enabled: bool) -> dict[str, Any] | None:
+    settings = get_agent_runtime_settings(force_refresh=True)
+    if settings is None:
+        return None
+    agent_id = _nonempty_text(settings.get("agent_id"))
+    if not agent_id:
+        return None
+
+    manager = ControlPlaneManager()
+    current_spec = manager.get_agent_spec(agent_id)
+    voice_policy = dict(_safe_json_object(current_spec.get("voice_policy")))
+    voice_policy["mode"] = "voice_active" if enabled else "disabled"
+    manager.put_agent_spec(agent_id, {"voice_policy": voice_policy})
+    _publish_agent_runtime_update(manager, agent_id)
+    updated = get_agent_runtime_settings(force_refresh=True)
+    if updated is not None:
+        updated["voice_policy_mode"] = voice_policy["mode"]
+        updated["voice_policy_active"] = enabled
+        updated["tts_enabled"] = bool(updated.get("tts_enabled")) or enabled
+    return updated
 
 
 def set_agent_general_provider(provider_id: str) -> dict[str, Any] | None:
@@ -401,7 +552,13 @@ def set_agent_general_model(provider_id: str, model_id: str) -> dict[str, Any] |
     return get_agent_runtime_settings(force_refresh=True)
 
 
-def set_agent_functional_default(function_id: str, provider_id: str, model_id: str) -> dict[str, Any] | None:
+def set_agent_functional_default(
+    function_id: str,
+    provider_id: str,
+    model_id: str,
+    *,
+    publish: bool = False,
+) -> dict[str, Any] | None:
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
         return None
@@ -427,6 +584,8 @@ def set_agent_functional_default(function_id: str, provider_id: str, model_id: s
         default_models[normalized_provider] = normalized_model
         local_policy["default_models"] = default_models
     manager.put_model_policy(agent_id, {"policy": normalize_model_policy(local_policy)})
+    if publish:
+        _publish_agent_runtime_update(manager, agent_id)
     invalidate_agent_settings_cache(agent_id)
     return get_agent_runtime_settings(force_refresh=True)
 
@@ -469,6 +628,10 @@ def set_agent_voice_default(
 
     manager = ControlPlaneManager()
     local_section = _current_local_providers_section(manager, agent_id)
+    current_spec = manager.get_agent_spec(agent_id)
+    voice_policy = dict(_safe_json_object(current_spec.get("voice_policy")))
+    voice_policy["mode"] = "voice_active"
+    manager.put_agent_spec(agent_id, {"voice_policy": voice_policy})
     if provider_id == "elevenlabs":
         local_section["elevenlabs_default_voice"] = persisted_voice
         local_section["elevenlabs_default_language"] = resolved_language
@@ -487,6 +650,7 @@ def set_agent_voice_default(
         audio_model = (
             _nonempty_text(local_section.get("elevenlabs_model"))
             or _nonempty_text(_safe_json_object(settings.get("providers_section")).get("elevenlabs_model"))
+            or _nonempty_text(settings.get("audio_model"))
             or _nonempty_text(_safe_json_object(audio_options[0] if audio_options else {}).get("model_id"))
             or "eleven_flash_v2_5"
         )
@@ -496,7 +660,7 @@ def set_agent_voice_default(
             or _nonempty_text(_safe_json_object(audio_options[0] if audio_options else {}).get("model_id"))
             or "kokoro-v1"
         )
-    set_agent_functional_default("audio", provider_id, audio_model)
+    set_agent_functional_default("audio", provider_id, audio_model, publish=True)
     updated = get_agent_runtime_settings(force_refresh=True)
     if updated is None:
         return None

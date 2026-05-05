@@ -26,12 +26,12 @@ interface ActivityHeatmapProps {
   legend?: { less: string; more: string };
 }
 
-const INTENSITY_OPACITY: Record<number, number> = {
-  0: 0,
-  1: 0.22,
-  2: 0.44,
-  3: 0.68,
-  4: 0.92,
+const ACTIVITY_COLORS: Record<number, string> = {
+  0: "var(--panel-soft)",
+  1: "#0e4429",
+  2: "#006d32",
+  3: "#26a641",
+  4: "#39d353",
 };
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -92,10 +92,7 @@ function ActivityHeatmapComponent({
                   key={step}
                   className="h-[10px] w-[10px] rounded-[3px] border border-[var(--divider-hair)]"
                   style={{
-                    background:
-                      step === 0
-                        ? "var(--panel-soft)"
-                        : `rgba(var(--accent-rgb), ${INTENSITY_OPACITY[step]})`,
+                    background: ACTIVITY_COLORS[step],
                   }}
                 />
               ))}
@@ -142,7 +139,7 @@ function ActivityHeatmapComponent({
             {weeks.map((week, colIdx) => (
               <div key={`col-${colIdx}`} role="row" className="flex flex-col gap-[5px]">
                 {week.map((cell, rowIdx) => {
-                  const opacity = INTENSITY_OPACITY[cell.intensity] ?? 0;
+                  const background = ACTIVITY_COLORS[cell.intensity] ?? ACTIVITY_COLORS[0];
                   const tooltip = tooltipTemplate
                     ? tooltipTemplate(cell)
                     : cell.count > 0
@@ -160,10 +157,7 @@ function ActivityHeatmapComponent({
                         "hover:scale-[1.15] hover:border-[var(--border-strong)]",
                       )}
                       style={{
-                        background:
-                          opacity === 0
-                            ? "var(--panel-soft)"
-                            : `rgba(var(--accent-rgb), ${opacity})`,
+                        background,
                       }}
                     />
                   );

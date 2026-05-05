@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { CostBreakdownCard, type CostBreakdownItem } from "@/components/costs/cost-breakdown-card";
 import { CostConversationTable } from "@/components/costs/cost-conversation-table";
+import { CostRouteLoading } from "@/components/layout/route-loading";
 import { CostDonutChart, type CostDonutMode } from "@/components/costs/cost-donut-chart";
 import { CostKpiRail } from "@/components/costs/cost-kpi-rail";
 import { CostTimeChart, type CostTimelineMode } from "@/components/costs/cost-time-chart";
@@ -104,40 +105,7 @@ function buildTaskItems(
 }
 
 function PageSkeleton() {
-  return (
-    <div className="space-y-4">
-      {/* Controls bar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="w-full md:w-[220px]">
-          <div className="skeleton h-9 w-full rounded-[var(--radius-panel-sm)]" />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="skeleton h-9 w-28 rounded-[var(--radius-panel-sm)]" />
-          <div className="skeleton h-9 w-32 rounded-[var(--radius-panel-sm)]" />
-          <div className="skeleton h-9 w-32 rounded-[var(--radius-panel-sm)]" />
-        </div>
-      </div>
-
-      {/* KPI rail */}
-      <div className="min-h-[80px] border-y border-[var(--divider-hair)]" />
-
-      {/* Charts: time + donut */}
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.92fr)]">
-        <div className="min-h-[360px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
-        <div className="min-h-[360px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
-      </div>
-
-      {/* Breakdown cards */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="min-h-[220px]" />
-        <div className="min-h-[220px]" />
-        <div className="min-h-[220px]" />
-      </div>
-
-      {/* Table */}
-      <div className="min-h-[300px] rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]" />
-    </div>
-  );
+  return <CostRouteLoading />;
 }
 
 export default function CostsPage() {

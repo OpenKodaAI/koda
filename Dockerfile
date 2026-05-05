@@ -13,6 +13,7 @@ ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RUNNING_IN_DOCKER=true
 ENV UV_VERSION=0.10.7
+ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
 
 RUN python -m pip install --no-cache-dir --upgrade pip==26.0 uv==${UV_VERSION}
 

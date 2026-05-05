@@ -34,6 +34,16 @@ def test_chromium_present_detects_installed_binary(browsers_root: Path) -> None:
     assert browser_bootstrap._chromium_present(browsers_root) is True
 
 
+def test_chromium_present_detects_headless_shell_binary(browsers_root: Path) -> None:
+    from koda.services import browser_bootstrap
+
+    install_dir = browsers_root / "chromium_headless_shell-1208" / "chrome-linux"
+    install_dir.mkdir(parents=True)
+    (install_dir / "headless_shell").write_text("fake binary")
+
+    assert browser_bootstrap._chromium_present(browsers_root) is True
+
+
 def test_chromium_present_returns_false_when_missing(browsers_root: Path) -> None:
     from koda.services import browser_bootstrap
 
@@ -135,3 +145,12 @@ def test_ensure_browser_installed_respects_env_path(tmp_path: Path, monkeypatch:
         browser_bootstrap.ensure_browser_installed()
 
     assert calls == [custom_path]
+
+
+def test_ensure_browser_installed_in_background_does_not_block() -> None:
+    from koda.services import browser_bootstrap
+
+    with patch.object(browser_bootstrap.threading.Thread, "start") as start_mock:
+        browser_bootstrap.ensure_browser_installed_in_background()
+
+    assert start_mock.call_count == 1

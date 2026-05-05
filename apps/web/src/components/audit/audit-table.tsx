@@ -93,7 +93,7 @@ export function AuditTable({
     <>
       <div className="hidden md:block">
         <div className="table-shell overflow-x-auto">
-          <table className="glass-table min-w-full">
+          <table className="glass-table glass-table--sticky-last min-w-full">
             <thead>
               <tr>
                 <th>{t("audit.table.dateTime")}</th>

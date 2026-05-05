@@ -875,6 +875,7 @@ TTS_DEFAULT_VOICE: str = _env("TTS_DEFAULT_VOICE", KOKORO_DEFAULT_VOICE or "pf_d
 ELEVENLABS_DEFAULT_LANGUAGE: str = _env("ELEVENLABS_DEFAULT_LANGUAGE", "pt")
 TTS_MAX_CHARS: int = int(_env("TTS_MAX_CHARS", "4000"))
 TTS_SPEED: float = float(_env("TTS_SPEED", "1.0"))
+VOICE_SPOKEN_MAX_CHARS: int = int(_env("VOICE_SPOKEN_MAX_CHARS", "900"))
 
 # --- ElevenLabs TTS ---
 ELEVENLABS_ENABLED: bool = _env("ELEVENLABS_ENABLED", "false").lower() == "true"
@@ -981,14 +982,19 @@ When asked to create files, images, charts, or any artifact:
 
 <voice_tts>
 The agent can send responses as voice notes (audio) in Telegram.
-- The user controls this via /voice command (toggle on/off, change voice, list voices).
+- The user controls continuous voice mode via /voice command
+  (toggle on/off, change voice, list voices).
 - When voice mode is ACTIVE, an additional "VOICE MODE ATIVO" section appears
   in this prompt with specific speech formatting rules.
   Follow those rules strictly because the response will be read aloud by a TTS engine.
+- If a voice-active section appears, voice delivery is active for the current response.
+  Never claim that voice, audio, or TTS is disabled in that response, and do not ask
+  the user to enable /voice for that same response.
 - When voice mode is INACTIVE, format responses normally with Markdown.
 - Available voices: alice (female), bill (male), brian (male),
   pf_dora (female, local), pm_alex (male, local), pm_santa (male, local).
-- If the user asks for audio response but /voice is not active, guide them to use /voice to enable it.
+- If no voice-active section appears and the user asks to configure ongoing voice mode,
+  guide them to /voice.
 </voice_tts>
 
 <professional_authorship>
@@ -1139,6 +1145,9 @@ Your response will be converted to audio by a TTS engine and sent as a voice not
 Write as if speaking aloud to a person.
 
 <voice_rules>
+Voice delivery is active for this response. Do not say that voice mode, audio, or TTS is disabled. \
+Do not ask the user to enable /voice for this response.
+
 Flowing, continuous prose with no formatting. The TTS engine does not interpret bullet points, \
 headers, bold, italic, code blocks, tables, or lists — those elements create broken, confusing audio.
 
@@ -1149,8 +1158,15 @@ like "here's the deal...".
 Keep responses short enough for comfortable listening, ideally under 60 seconds of audio. \
 If the topic is complex, give a summary and offer to go deeper.
 
-Write in spoken English, naturally. Use contractions ("it's", "you're", "don't"), everyday \
-phrasing, and soft connectors ("so", "then", "anyway") where they help the rhythm.
+Use the user's language and the agent's configured persona. Do not force English if the \
+conversation or agent prompt is in another language. Keep the spoken part concise and clear.
+
+For long, technical, or multi-part work, prioritize a brief spoken summary and keep detailed \
+steps, tables, code, logs, citations, and exact file contents in the text response or attachments.
+
+If you need separate wording for audio, include a short <spoken_response>...</spoken_response> \
+block. Keep that block self-contained, natural, and short; the runtime will use it for TTS and \
+remove the tag from the visible text.
 
 Describe URLs and file paths verbally ("in the project repo", \
 "in the React official docs"). The TTS cannot pronounce URLs.
