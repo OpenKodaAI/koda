@@ -1,6 +1,8 @@
 """Dual-engine TTS — ElevenLabs (primary) + Kokoro (fallback) for Telegram voice notes."""
 
 import asyncio
+import contextvars
+import json
 import os
 import re
 import tempfile
@@ -21,6 +23,10 @@ from koda.config import (
     TTS_MAX_CHARS,
 )
 from koda.logging_config import get_logger
+from koda.services.elevenlabs_catalog import (
+    canonicalize_elevenlabs_language,
+    elevenlabs_language_supported,
+)
 from koda.services.kokoro_manager import (
     ensure_default_kokoro_assets,
     ensure_kokoro_model,
@@ -38,6 +44,39 @@ from koda.services.resilience import (
 )
 
 log = get_logger(__name__)
+_last_tts_error: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "koda_last_tts_error",
+    default=None,
+)
+
+
+def get_last_tts_error() -> dict[str, Any] | None:
+    error = _last_tts_error.get()
+    return dict(error) if error else None
+
+
+def _clear_last_tts_error() -> None:
+    _last_tts_error.set(None)
+
+
+def _set_last_tts_error(**payload: Any) -> None:
+    _last_tts_error.set({key: value for key, value in payload.items() if value not in (None, "")})
+
+
+def _parse_elevenlabs_error_body(body: str) -> tuple[str, str]:
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return "", body.strip()[:240]
+    if not isinstance(payload, dict):
+        return "", str(payload)[:240]
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or detail.get("type") or detail.get("status") or "").strip()
+        message = str(detail.get("message") or "").strip()
+        return code, message[:240]
+    return "", str(detail or payload)[:240]
+
 
 # --- Voice configuration ---
 
@@ -164,13 +203,17 @@ async def _elevenlabs_synthesize(
     speed: float = 1.0,
     *,
     model_id: str | None = None,
+    language: str | None = None,
 ) -> str | None:
     """Call ElevenLabs TTS API. Returns OGG Opus file path or None."""
+    _clear_last_tts_error()
     if not ELEVENLABS_API_KEY:
+        _set_last_tts_error(provider="elevenlabs", code="missing_api_key", message="ElevenLabs API key ausente.")
         return None
 
     if check_breaker(elevenlabs_breaker):
         log.warning("elevenlabs_breaker_open")
+        _set_last_tts_error(provider="elevenlabs", code="breaker_open", message="Circuit breaker ElevenLabs aberto.")
         return None
 
     import time
@@ -179,11 +222,15 @@ async def _elevenlabs_synthesize(
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=opus_48000_64"
     headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+    selected_model = model_id or ELEVENLABS_MODEL
     payload = {
         "text": text,
-        "model_id": model_id or ELEVENLABS_MODEL,
+        "model_id": selected_model,
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "speed": speed},
     }
+    language_code = canonicalize_elevenlabs_language(language)
+    if language_code and elevenlabs_language_supported(selected_model, language_code):
+        payload["language_code"] = language_code
 
     try:
         timeout = aiohttp.ClientTimeout(total=ELEVENLABS_TIMEOUT)
@@ -194,7 +241,22 @@ async def _elevenlabs_synthesize(
         ):
             if resp.status != 200:
                 body = await resp.text()
-                log.error("elevenlabs_api_error", status=resp.status, body=body[:300])
+                code, message = _parse_elevenlabs_error_body(body)
+                log.error(
+                    "elevenlabs_api_error",
+                    status=resp.status,
+                    code=code,
+                    error_message=message,
+                    body=body[:300],
+                )
+                _set_last_tts_error(
+                    provider="elevenlabs",
+                    status=resp.status,
+                    code=code,
+                    message=message,
+                    voice_id=voice_id,
+                    model_id=selected_model,
+                )
                 record_failure(elevenlabs_breaker)
                 return None
             audio_bytes = await resp.read()
@@ -212,8 +274,43 @@ async def _elevenlabs_synthesize(
             f.write(audio_bytes)
         return ogg_path
 
-    except Exception:
-        log.exception("elevenlabs_synthesis_error")
+    except TimeoutError:
+        log.warning("elevenlabs_synthesis_timeout", timeout_s=ELEVENLABS_TIMEOUT)
+        _set_last_tts_error(
+            provider="elevenlabs",
+            code="timeout",
+            message=f"A API da ElevenLabs demorou mais de {ELEVENLABS_TIMEOUT}s para responder.",
+            voice_id=voice_id,
+            model_id=selected_model,
+        )
+        record_failure(elevenlabs_breaker)
+        return None
+    except aiohttp.ClientError as exc:
+        log.warning(
+            "elevenlabs_network_error",
+            error_type=type(exc).__name__,
+            error_message=str(exc)[:160],
+        )
+        _set_last_tts_error(
+            provider="elevenlabs",
+            code="network_error",
+            message="Falha de conexao com a ElevenLabs.",
+            voice_id=voice_id,
+            model_id=selected_model,
+        )
+        record_failure(elevenlabs_breaker)
+        return None
+    except Exception as exc:
+        log.warning(
+            "elevenlabs_synthesis_error",
+            error_type=type(exc).__name__,
+            error_message=str(exc)[:160],
+        )
+        _set_last_tts_error(
+            provider="elevenlabs",
+            code="synthesis_error",
+            message="Falha inesperada na sintese ElevenLabs.",
+        )
         record_failure(elevenlabs_breaker)
         return None
 
@@ -312,8 +409,10 @@ async def synthesize_speech(
     language: str | None = None,
 ) -> str | None:
     """Synthesize text to OGG Opus. Tries ElevenLabs first, falls back to Kokoro."""
+    _clear_last_tts_error()
     voice_cfg = AVAILABLE_VOICES.get(voice)
     preferred_provider = (provider or "").strip().lower()
+    explicit_elevenlabs = preferred_provider == "elevenlabs"
     resolved_language = (language or "").strip().lower() or None
 
     # Unknown voice — if it looks like an ElevenLabs voice_id, try it; otherwise Kokoro
@@ -322,22 +421,34 @@ async def synthesize_speech(
             return await _kokoro_synthesize(text, voice, speed, language=resolved_language)
         if len(voice) >= 20 and voice.isalnum():
             log.info("tts_custom_elevenlabs_voice", voice_id=voice)
-            result = await _elevenlabs_synthesize(text, voice, speed, model_id=model)
+            result = await _elevenlabs_synthesize(text, voice, speed, model_id=model, language=resolved_language)
             if result is not None:
                 return result
+            if explicit_elevenlabs:
+                log.warning("tts_elevenlabs_unavailable_no_fallback", voice_id=voice, model=model)
+                return None
             log.info("tts_custom_elevenlabs_fallback_kokoro", voice_id=voice)
             return await _kokoro_synthesize(text, KOKORO_DEFAULT_VOICE, speed, language=resolved_language)
         log.warning("tts_unknown_voice", voice=voice)
         return await _kokoro_synthesize(text, voice, speed, language=resolved_language)
 
     # ElevenLabs path
-    if preferred_provider == "elevenlabs" or (not preferred_provider and voice_cfg.engine == "elevenlabs"):
+    if explicit_elevenlabs or (not preferred_provider and voice_cfg.engine == "elevenlabs"):
         elevenlabs_voice_id = voice_cfg.engine_voice_id
         if voice_cfg.engine != "elevenlabs" and len(voice) >= 20 and voice.isalnum():
             elevenlabs_voice_id = voice
-        result = await _elevenlabs_synthesize(text, elevenlabs_voice_id, speed, model_id=model)
+        result = await _elevenlabs_synthesize(
+            text,
+            elevenlabs_voice_id,
+            speed,
+            model_id=model,
+            language=resolved_language,
+        )
         if result is not None:
             return result
+        if explicit_elevenlabs:
+            log.warning("tts_elevenlabs_unavailable_no_fallback", voice_id=elevenlabs_voice_id, model=model)
+            return None
         # Fallback to Kokoro
         if voice_cfg.fallback_kokoro:
             log.info("tts_fallback_to_kokoro", original=voice, kokoro=voice_cfg.fallback_kokoro)
@@ -353,21 +464,56 @@ async def synthesize_speech(
 ElevenLabsVoice = namedtuple("ElevenLabsVoice", ["voice_id", "name", "category", "gender", "accent", "language"])
 
 
-def _parse_elevenlabs_voice(v: dict) -> ElevenLabsVoice:
+def _parse_elevenlabs_voice(v: dict[str, Any]) -> ElevenLabsVoice | None:
     """Parse a voice dict from the ElevenLabs API into ElevenLabsVoice."""
     labels = v.get("labels") or {}
-    gender = labels.get("gender", labels.get("Gender", ""))
-    accent = labels.get("accent", labels.get("Accent", ""))
+    if not isinstance(labels, dict):
+        labels = {}
+    gender = str(labels.get("gender") or labels.get("Gender") or "")
+    accent = str(labels.get("accent") or labels.get("Accent") or "")
     langs = v.get("verified_languages") or []
-    lang_str = ", ".join(dict.fromkeys(la.get("language", "") for la in langs if la.get("language")))
+    if not isinstance(langs, list):
+        langs = []
+    lang_str = ", ".join(
+        dict.fromkeys(
+            canonicalize_elevenlabs_language(la.get("language") or la.get("locale"))
+            for la in langs
+            if isinstance(la, dict) and (la.get("language") or la.get("locale"))
+        )
+    )
+    voice_id = str(v.get("voice_id") or v.get("voiceId") or v.get("id") or "").strip()
+    if not voice_id:
+        return None
     return ElevenLabsVoice(
-        voice_id=v["voice_id"],
-        name=v.get("name", "Unknown"),
-        category=v.get("category", ""),
+        voice_id=voice_id,
+        name=str(v.get("name") or "Unknown"),
+        category=str(v.get("category") or ""),
         gender=gender,
         accent=accent,
         language=lang_str,
     )
+
+
+def _elevenlabs_voice_items(data: Any) -> list[Any]:
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("voices", "data", "items"):
+            voices = data.get(key)
+            if isinstance(voices, list):
+                return voices
+    return []
+
+
+def _parse_elevenlabs_voice_items(data: Any) -> list[ElevenLabsVoice]:
+    voices: list[ElevenLabsVoice] = []
+    for raw_voice in _elevenlabs_voice_items(data):
+        if not isinstance(raw_voice, dict):
+            continue
+        voice = _parse_elevenlabs_voice(raw_voice)
+        if voice is not None:
+            voices.append(voice)
+    return voices
 
 
 # Common search aliases → ElevenLabs label values
@@ -413,7 +559,7 @@ def _voice_matches_query(voice: ElevenLabsVoice, terms: list[str]) -> bool:
     searchable_words.update(voice.language.lower().replace(",", " ").split())
 
     for t in terms:
-        resolved = _SEARCH_ALIASES.get(t, t)
+        resolved = _SEARCH_ALIASES.get(t, canonicalize_elevenlabs_language(t) or t)
         if resolved in ("male", "female", "neutral"):
             if resolved not in searchable_words:
                 return False
@@ -447,7 +593,7 @@ async def search_elevenlabs_voices(query: str, page_size: int = 10) -> list[Elev
                     return []
                 data = await resp.json()
 
-            voices = [_parse_elevenlabs_voice(v) for v in data.get("voices", [])]
+            voices = _parse_elevenlabs_voice_items(data)
             if voices:
                 return voices[:page_size]
 
@@ -458,7 +604,7 @@ async def search_elevenlabs_voices(query: str, page_size: int = 10) -> list[Elev
                     return []
                 data = await resp.json()
 
-        all_voices = [_parse_elevenlabs_voice(v) for v in data.get("voices", [])]
+        all_voices = _parse_elevenlabs_voice_items(data)
         terms = query.lower().split()
         matched = [v for v in all_voices if _voice_matches_query(v, terms)]
         return matched[:page_size]

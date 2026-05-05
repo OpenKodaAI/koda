@@ -1,25 +1,16 @@
-"""Decision-tree tests for the voice-reply branch combining strip_for_tts,
-is_mostly_code, and synthesize_speech.
+"""Decision-tree tests for the voice-reply branch.
 
-The user emphasized that voice replies must be SPOKEN cleanly. This test pins
-the decision tree applied by koda/services/queue_manager.py:4247–4263:
-
-  if audio_response_enabled and TTS_ENABLED:
-      if not is_mostly_code(response):
-          plain = strip_for_tts(response)
-          if plain.strip():
-              synthesize_speech(plain, ...)
-
-So for any combination of (response, audio_enabled, mostly_code, plain_empty)
-we should be able to predict whether synthesize_speech is called and with
-what cleaned text.
+Voice replies must be spoken cleanly without losing the useful technical
+payload. Code-heavy, table-heavy, or very long responses should produce a short
+spoken summary while preserving the full answer in text/attachments.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from koda.utils.tts import is_mostly_code, strip_for_tts
+from koda.services.queue_manager import _prepare_spoken_response_for_tts
+from koda.utils.tts import is_mostly_code
 
 
 @dataclass(frozen=True)
@@ -29,17 +20,20 @@ class VoiceDecision:
     should_call_tts: bool
     cleaned: str
     reason: str
+    send_text_details: bool = False
 
     @classmethod
     def from_response(cls, response: str, *, audio_enabled: bool, tts_enabled: bool) -> VoiceDecision:
         if not (audio_enabled and tts_enabled):
             return cls(False, "", "audio_disabled")
-        if is_mostly_code(response):
-            return cls(False, "", "mostly_code")
-        plain = strip_for_tts(response)
+        plain, send_text_details = _prepare_spoken_response_for_tts(
+            response,
+            user_data={"tts_voice_language": "pt-br"},
+        )
         if not plain.strip():
-            return cls(False, plain, "empty_after_strip")
-        return cls(True, plain, "speak")
+            return cls(False, plain, "empty_after_strip", send_text_details)
+        reason = "summarize_with_text" if send_text_details else "speak"
+        return cls(True, plain, reason, send_text_details)
 
 
 # Audio gating
@@ -67,12 +61,15 @@ def test_speaks_for_plain_prose() -> None:
     assert d.reason == "speak"
 
 
-def test_skips_when_response_is_mostly_code() -> None:
+def test_summarizes_when_response_is_mostly_code() -> None:
     response = "Veja:\n```\n" + "x = 1\n" * 60 + "```\nFim."  # >60% in code blocks
     assert is_mostly_code(response) is True
     d = VoiceDecision.from_response(response, audio_enabled=True, tts_enabled=True)
-    assert d.should_call_tts is False
-    assert d.reason == "mostly_code"
+    assert d.should_call_tts is True
+    assert d.reason == "summarize_with_text"
+    assert d.send_text_details is True
+    assert "codigo ou detalhes tecnicos" in d.cleaned
+    assert "x = 1" not in d.cleaned
 
 
 def test_speaks_when_response_has_minor_code_block() -> None:
@@ -81,6 +78,8 @@ def test_speaks_when_response_has_minor_code_block() -> None:
     assert is_mostly_code(response) is False
     d = VoiceDecision.from_response(response, audio_enabled=True, tts_enabled=True)
     assert d.should_call_tts is True
+    assert d.reason == "summarize_with_text"
+    assert d.send_text_details is True
     assert "code block omitted" in d.cleaned
     # Triple backticks must NOT leak into spoken text.
     assert "```" not in d.cleaned
@@ -145,9 +144,9 @@ def test_real_world_response_has_no_forbidden_tokens() -> None:
 
 
 def test_long_response_truncated_at_sentence_boundary() -> None:
-    """Long response is truncated by strip_for_tts at TTS_MAX_CHARS."""
+    """Long response is summarized for speech below the dedicated spoken cap."""
     response = "Esta é uma frase. " * 1000
     d = VoiceDecision.from_response(response, audio_enabled=True, tts_enabled=True)
     assert d.should_call_tts is True
-    # Truncation pass keeps it ≤ TTS_MAX_CHARS (4000).
-    assert len(d.cleaned) <= 4000
+    assert d.send_text_details is True
+    assert len(d.cleaned) <= 900

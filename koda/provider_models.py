@@ -1377,6 +1377,9 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
 
 _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
     ProviderModelDefinition(
+        "codex", "gpt-image-2", "GPT Image 2", "image", "Modelo oficial da OpenAI para geracao de imagem."
+    ),
+    ProviderModelDefinition(
         "codex", "gpt-image-1.5", "GPT Image 1.5", "image", "Modelo oficial da OpenAI para imagem."
     ),
     ProviderModelDefinition(

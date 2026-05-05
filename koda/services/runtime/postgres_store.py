@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -49,6 +50,48 @@ def _redacted_text(value: str | None) -> str | None:
     if value is None:
         return None
     return str(redact_value(value))
+
+
+def _text_column(value: Any, *, default: str | None = None) -> str | None:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        return _redacted_json(value)
+    return str(redact_value(value))
+
+
+def _json_text_column(value: Any, *, default: str = "{}") -> str:
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        return value
+    return _redacted_json(value)
+
+
+def _json_dict_column(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(loaded) if isinstance(loaded, dict) else {}
+    return {}
+
+
+def _json_list_column(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        return list(loaded) if isinstance(loaded, list) else []
+    return []
 
 
 def _attach_token_hash(token: str) -> str:
@@ -116,11 +159,11 @@ class PostgresRuntimeStore:
                 queue_name,
                 status,
                 query_text,
-                payload_json or "{}",
+                _json_text_column(payload_json),
                 int(recovery_count or 0),
-                last_recovered_at,
-                source_kind or queue_name,
-                last_error,
+                _text_column(last_recovered_at),
+                _text_column(source_kind, default=queue_name) or queue_name,
+                _text_column(last_error),
                 now,
                 now,
             ),
@@ -145,19 +188,19 @@ class PostgresRuntimeStore:
             values.append(queue_position)
         if payload_json is not None:
             sets.append("payload_json = ?")
-            values.append(payload_json)
+            values.append(_json_text_column(payload_json))
         if recovery_count is not None:
             sets.append("recovery_count = ?")
             values.append(int(recovery_count))
         if last_recovered_at is not None:
             sets.append("last_recovered_at = ?")
-            values.append(last_recovered_at)
+            values.append(_text_column(last_recovered_at))
         if source_kind is not None:
             sets.append("source_kind = ?")
-            values.append(source_kind)
+            values.append(_text_column(source_kind))
         if last_error is not None:
             sets.append("last_error = ?")
-            values.append(last_error)
+            values.append(_text_column(last_error))
         values.extend([self._agent_scope, task_id])
         self._execute(f"UPDATE runtime_queue_items SET {', '.join(sets)} WHERE agent_id = ? AND task_id = ?", values)
 
@@ -177,10 +220,10 @@ class PostgresRuntimeStore:
                     int(item["task_id"]),
                     str(item.get("status") or "queued"),
                     item.get("queue_position"),
-                    item.get("payload_json"),
+                    _json_text_column(item.get("payload_json")) if item.get("payload_json") is not None else None,
                     int(item["recovery_count"]) if item.get("recovery_count") is not None else None,
-                    item.get("last_recovered_at"),
-                    item.get("last_error"),
+                    _text_column(item.get("last_recovered_at")),
+                    _text_column(item.get("last_error")),
                 ]
             )
         self._execute(
@@ -502,7 +545,7 @@ class PostgresRuntimeStore:
                 event_type,
                 severity,
                 payload_data,
-                artifact_refs_data,
+                _json_text_column(artifact_refs_data, default="[]"),
                 resource_snapshot_ref,
                 created_at,
             ),
@@ -1283,11 +1326,20 @@ class PostgresRuntimeStore:
     def list_runtime_queues(self) -> list[dict[str, Any]]:
         return self._fetch_all(
             """
-            SELECT task_id, user_id, chat_id, queue_name, status, queue_position, query_text, payload_json,
-                   recovery_count, last_recovered_at, source_kind, last_error, queued_at, updated_at
-            FROM runtime_queue_items
-            WHERE agent_id = ?
-            ORDER BY queued_at ASC
+            SELECT rq.task_id, rq.user_id, rq.chat_id, rq.queue_name,
+                   CASE
+                       WHEN rq.status IN ('queued', 'running', 'retrying', 'paused')
+                            AND t.status IN ('completed', 'failed', 'cancelled', 'needs_review')
+                       THEN t.status
+                       ELSE rq.status
+                   END AS status,
+                   rq.queue_position, rq.query_text, rq.payload_json,
+                   rq.recovery_count, rq.last_recovered_at, rq.source_kind, rq.last_error,
+                   rq.queued_at, rq.updated_at
+            FROM runtime_queue_items AS rq
+            LEFT JOIN tasks AS t ON lower(t.agent_id) = rq.agent_id AND t.id = rq.task_id
+            WHERE rq.agent_id = ?
+            ORDER BY rq.queued_at ASC
             """,
             (self._agent_scope,),
         )
@@ -1391,8 +1443,8 @@ class PostgresRuntimeStore:
                 "seq": row["id"],
                 "type": row["event_type"],
                 "ts": row["created_at"],
-                "payload": dict(row.get("payload_json") or {}),
-                "artifact_refs": list(row.get("artifact_refs_json") or []),
+                "payload": _json_dict_column(row.get("payload_json")),
+                "artifact_refs": _json_list_column(row.get("artifact_refs_json")),
             }
             for row in rows
         ]

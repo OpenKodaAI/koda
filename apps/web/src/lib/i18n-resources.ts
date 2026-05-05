@@ -6462,6 +6462,7 @@ mutableResources["en-US"].translation.schedules.table = {
   routine: "Routine",
   summary: "Summary",
   scope: "Scope",
+  executionsAction: "Executions",
 };
 
 mutableResources["pt-BR"].translation.schedules.table = {
@@ -6473,6 +6474,7 @@ mutableResources["pt-BR"].translation.schedules.table = {
   routine: "Rotina",
   summary: "Resumo",
   scope: "Escopo",
+  executionsAction: "Execuções",
 };
 
 mutableResources["es-ES"].translation.schedules.table = {
@@ -6484,6 +6486,7 @@ mutableResources["es-ES"].translation.schedules.table = {
   routine: "Rutina",
   summary: "Resumen",
   scope: "Alcance",
+  executionsAction: "Ejecuciones",
 };
 
 mutableResources["fr-FR"].translation.schedules.page = {
@@ -6535,6 +6538,7 @@ mutableResources["fr-FR"].translation.schedules.table = {
   routine: "Routine",
   summary: "Résumé",
   scope: "Portée",
+  executionsAction: "Exécutions",
 };
 
 mutableResources["de-DE"].translation.schedules.table = {
@@ -6546,6 +6550,42 @@ mutableResources["de-DE"].translation.schedules.table = {
   routine: "Routine",
   summary: "Zusammenfassung",
   scope: "Geltungsbereich",
+  executionsAction: "Ausführungen",
+};
+
+mutableResources["en-US"].translation.schedules.executions = {
+  title: "Routine executions",
+  empty: "No executions yet.",
+  emptyDescription: "When this routine runs, the most recent records appear here first.",
+  noSummary: "No summary recorded.",
+};
+
+mutableResources["pt-BR"].translation.schedules.executions = {
+  title: "Execuções da rotina",
+  empty: "Nenhuma execução ainda.",
+  emptyDescription: "Quando esta rotina executar, os registros mais recentes aparecem primeiro aqui.",
+  noSummary: "Sem resumo registrado.",
+};
+
+mutableResources["es-ES"].translation.schedules.executions = {
+  title: "Ejecuciones de la rutina",
+  empty: "Aún no hay ejecuciones.",
+  emptyDescription: "Cuando esta rutina se ejecute, los registros más recientes aparecerán primero aquí.",
+  noSummary: "Sin resumen registrado.",
+};
+
+mutableResources["fr-FR"].translation.schedules.executions = {
+  title: "Exécutions de la routine",
+  empty: "Aucune exécution pour l'instant.",
+  emptyDescription: "Lorsque cette routine s'exécute, les enregistrements les plus récents apparaissent ici en premier.",
+  noSummary: "Aucun résumé enregistré.",
+};
+
+mutableResources["de-DE"].translation.schedules.executions = {
+  title: "Routinen-Ausführungen",
+  empty: "Noch keine Ausführungen.",
+  emptyDescription: "Wenn diese Routine ausgeführt wird, erscheinen die neuesten Einträge hier zuerst.",
+  noSummary: "Keine Zusammenfassung erfasst.",
 };
 
 mutableResources["en-US"].translation.schedules.inspector = {

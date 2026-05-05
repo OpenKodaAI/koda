@@ -430,4 +430,29 @@ describe("control-plane fetch tiers", () => {
     expect(payload.items[0].connection_status).toBe("verified");
     expect(payload.governance?.source_of_truth).toBe("connections_catalog_and_defaults");
   });
+
+  it("treats null core integration catalog envelopes as empty lists", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (
+        url.includes("/api/control-plane/connections/catalog") ||
+        url.includes("/api/control-plane/connections/defaults")
+      ) {
+        return new Response("null", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getControlPlaneCoreIntegrations } = await import("@/lib/control-plane");
+    const payload = await getControlPlaneCoreIntegrations();
+
+    expect(payload.items).toEqual([]);
+    expect(payload.governance?.source_of_truth).toBe("connections_catalog_and_defaults");
+  });
 });

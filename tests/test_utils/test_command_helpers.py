@@ -10,6 +10,8 @@ from koda.utils.command_helpers import (
     init_user_data,
     normalize_feature_provider,
     normalize_provider,
+    sync_user_data_with_runtime_settings,
+    tts_enabled_for_session,
 )
 
 
@@ -52,6 +54,9 @@ def test_init_user_data_loads_agent_runtime_defaults():
         "tts_voice": "pm_alex",
         "tts_voice_label": "Alex",
         "tts_voice_language": "pt-br",
+        "tts_enabled": True,
+        "voice_policy_mode": "voice_active",
+        "voice_policy_active": True,
         "selectable_function_options": {
             "general": [
                 {"provider_id": "codex", "model_id": "gpt-5.4"},
@@ -70,6 +75,8 @@ def test_init_user_data_loads_agent_runtime_defaults():
     assert data["tts_voice"] == "pm_alex"
     assert data["tts_voice_label"] == "Alex"
     assert data["tts_voice_language"] == "pt-br"
+    assert data["tts_enabled"] is True
+    assert data["audio_response"] is True
     assert data["available_general_providers"] == ["codex"]
     assert data["available_models_by_provider"]["codex"] == ["gpt-5.4", "o3"]
 
@@ -90,6 +97,9 @@ def test_init_user_data_refreshes_runtime_backed_fields():
         "tts_voice": "pf_dora",
         "tts_voice_label": "Dora",
         "tts_voice_language": "pt-br",
+        "tts_enabled": True,
+        "voice_policy_mode": "voice_active",
+        "voice_policy_active": True,
         "selectable_function_options": {
             "general": [
                 {"provider_id": "codex", "model_id": "o3"},
@@ -104,6 +114,8 @@ def test_init_user_data_refreshes_runtime_backed_fields():
         "tts_voice": "bill",
         "tts_voice_label": "Bill",
         "tts_voice_language": "en",
+        "audio_response": False,
+        "_audio_response_user_override": True,
         "functional_defaults": {"general": {"provider_id": "claude", "model_id": "claude-sonnet-4-6"}},
     }
     with patch("koda.services.agent_settings.get_agent_runtime_settings", return_value=settings):
@@ -116,6 +128,56 @@ def test_init_user_data_refreshes_runtime_backed_fields():
     assert data["tts_voice"] == "pf_dora"
     assert data["tts_voice_label"] == "Dora"
     assert data["tts_voice_language"] == "pt-br"
+    assert data["audio_response"] is False
+
+
+def test_sync_user_data_voice_policy_sets_audio_default():
+    data = {}
+    sync_user_data_with_runtime_settings(
+        data,
+        {
+            "tts_enabled": True,
+            "voice_policy": {"max_spoken_chars": 360, "spoken_style": "curto"},
+            "voice_policy_mode": "tts",
+            "voice_policy_active": True,
+        },
+    )
+
+    assert data["tts_enabled"] is True
+    assert data["voice_policy"] == {"max_spoken_chars": 360, "spoken_style": "curto"}
+    assert data["voice_policy_mode"] == "tts"
+    assert data["audio_response"] is True
+
+
+def test_sync_user_data_keeps_explicit_voice_override_when_runtime_tts_false():
+    data = {
+        "audio_response": True,
+        "tts_enabled": True,
+        "_audio_response_user_override": True,
+    }
+
+    sync_user_data_with_runtime_settings(
+        data,
+        {
+            "tts_enabled": False,
+            "voice_policy_mode": "disabled",
+            "voice_policy_active": False,
+        },
+    )
+
+    assert data["audio_response"] is True
+    assert data["tts_enabled"] is True
+
+
+def test_tts_enabled_for_session_prefers_runtime_state_over_static_config():
+    with patch("koda.utils.command_helpers.TTS_ENABLED", False):
+        assert tts_enabled_for_session({"tts_enabled": True}) is True
+        assert tts_enabled_for_session({"tts_enabled": False}) is False
+
+
+def test_tts_enabled_for_session_accepts_active_voice_policy():
+    with patch("koda.utils.command_helpers.TTS_ENABLED", False):
+        assert tts_enabled_for_session({"tts_enabled": False, "voice_policy_active": True}) is True
 
 
 def test_normalize_provider_accepts_brand_aliases():

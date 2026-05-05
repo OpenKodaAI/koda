@@ -180,16 +180,50 @@ export function removeVariable(
   return variables.filter((item) => item.key !== variableKey);
 }
 
+function normalizeEffortDefault(
+  value: unknown,
+): GeneralSystemSettings["values"]["models"]["effort_default"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const item = value as Record<string, unknown>;
+  const providerId = String(item.provider_id ?? "").trim();
+  const modelId = String(item.model_id ?? "").trim();
+  const effortValue = item.value;
+  if (
+    !providerId ||
+    !modelId ||
+    (typeof effortValue !== "string" && typeof effortValue !== "number")
+  ) {
+    return null;
+  }
+  return {
+    provider_id: providerId,
+    model_id: modelId,
+    value: effortValue,
+  };
+}
+
+function ensureArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export function cloneGeneralSystemSettings(
   settings: GeneralSystemSettings,
 ): GeneralSystemSettings {
   const cloned = JSON.parse(JSON.stringify(settings)) as GeneralSystemSettings;
+  if (!cloned.catalogs || typeof cloned.catalogs !== "object") {
+    cloned.catalogs = {} as GeneralSystemSettings["catalogs"];
+  }
   if (!cloned.values.provider_connections) {
     cloned.values.provider_connections = {};
   }
   if (!cloned.values.models.functional_defaults) {
     cloned.values.models.functional_defaults = {};
   }
+  cloned.values.models.effort_default = normalizeEffortDefault(
+    cloned.values.models.effort_default,
+  );
   if (!cloned.values.memory_and_knowledge.memory_policy) {
     cloned.values.memory_and_knowledge.memory_policy = {};
   }
@@ -202,17 +236,32 @@ export function cloneGeneralSystemSettings(
   if (!cloned.catalogs.model_functions) {
     cloned.catalogs.model_functions = [];
   }
+  cloned.catalogs.providers = ensureArray(cloned.catalogs.providers);
+  cloned.catalogs.model_functions = ensureArray(cloned.catalogs.model_functions);
+  cloned.catalogs.global_tools = ensureArray(cloned.catalogs.global_tools);
+  cloned.catalogs.usage_profiles = ensureArray(cloned.catalogs.usage_profiles);
+  cloned.catalogs.memory_profiles = ensureArray(cloned.catalogs.memory_profiles);
+  cloned.catalogs.knowledge_profiles = ensureArray(cloned.catalogs.knowledge_profiles);
+  cloned.catalogs.provenance_policies = ensureArray(cloned.catalogs.provenance_policies);
   if (!cloned.catalogs.functional_model_catalog) {
     cloned.catalogs.functional_model_catalog = {};
   }
   if (!cloned.catalogs.knowledge_layers) {
     cloned.catalogs.knowledge_layers = [];
   }
+  cloned.catalogs.knowledge_layers = ensureArray(cloned.catalogs.knowledge_layers);
   if (!cloned.catalogs.approval_modes) {
     cloned.catalogs.approval_modes = [];
   }
+  cloned.catalogs.approval_modes = ensureArray(cloned.catalogs.approval_modes);
   if (!cloned.catalogs.autonomy_tiers) {
     cloned.catalogs.autonomy_tiers = [];
   }
+  cloned.catalogs.autonomy_tiers = ensureArray(cloned.catalogs.autonomy_tiers);
+  if (!cloned.review || typeof cloned.review !== "object") {
+    cloned.review = { warnings: [], hidden_sections: [] };
+  }
+  cloned.review.warnings = ensureArray(cloned.review.warnings);
+  cloned.review.hidden_sections = ensureArray(cloned.review.hidden_sections);
   return cloned;
 }

@@ -84,3 +84,11 @@ def test_catalog_dto_omits_effort_for_unsupported_models() -> None:
     assert "effort_kind" not in large
     assert "effort_enum_values" not in large
     assert "effort_token_min" not in large
+
+
+def test_codex_image_catalog_includes_gpt_image_2() -> None:
+    catalog = resolve_provider_function_model_catalog("codex")
+    image = next(item for item in catalog if item["model_id"] == "gpt-image-2")
+
+    assert image["function_id"] == "image"
+    assert image["title"] == "GPT Image 2"

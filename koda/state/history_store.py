@@ -1122,7 +1122,7 @@ def list_pending_tasks_for_recovery(limit: int | None = None) -> list[dict[str, 
     query = (
         "SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts, "
         "error_message, created_at, started_at, completed_at, session_id, provider_session_id, "
-        "source_task_id, source_action "
+        "source_task_id, source_action, lease_owner, lease_expires_at "
         "FROM tasks WHERE agent_id = ? AND status IN ('queued', 'running', 'retrying') ORDER BY created_at ASC"
     )
     params: list[Any] = [_current_agent_scope()]
@@ -1165,6 +1165,8 @@ def list_pending_tasks_for_recovery(limit: int | None = None) -> list[dict[str, 
             "provider_session_id": row[15],
             "source_task_id": row[16],
             "source_action": row[17],
+            "lease_owner": None,
+            "lease_expires_at": None,
         }
         for row in rows
     ]

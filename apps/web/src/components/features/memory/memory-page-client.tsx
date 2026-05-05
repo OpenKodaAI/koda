@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { MemoryRouteLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { Button } from "@/components/ui/button";
 import { PageEmptyState } from "@/components/ui/page-primitives";
@@ -821,14 +822,7 @@ function MemoryPageContent() {
 
 export default function MemoryPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="space-y-4">
-          <div className="h-16 animate-pulse rounded-[var(--radius-panel)] bg-[color:var(--panel-soft)]" />
-          <div className="min-h-[480px] animate-pulse rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]" />
-        </div>
-      }
-    >
+    <Suspense fallback={<MemoryRouteLoading />}>
       <MemoryPageContent />
     </Suspense>
   );

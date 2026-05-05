@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
 import { requestJson } from "@/lib/http-client";
@@ -92,23 +92,5 @@ Preferimos solucoes simples, reversiveis e com boa observabilidade.`)}
       onClose={onClose}
       onSave={() => void handleSave()}
     />
-  );
-}
-
-export function SquadSpecIndicator({
-  hasPrompt,
-}: {
-  hasPrompt: boolean;
-}) {
-  const { tl } = useAppI18n();
-  if (!hasPrompt) return null;
-
-  return (
-    <span
-      className="agent-board-lane__prompt-indicator"
-      title={tl("System prompt do time configurado")}
-    >
-      <FileText size={10} />
-    </span>
   );
 }

@@ -9,11 +9,45 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 from koda import config
 from koda.auth import auth_check
 from koda.config import AVAILABLE_AGENT_MODES, AVAILABLE_MODELS, AVAILABLE_PROVIDERS, PROVIDER_MODELS
-from koda.handlers.commands import _settings_home_markup, _settings_home_text
+from koda.handlers.commands import (
+    _settings_home_markup,
+    _settings_home_text,
+    _voice_apply_elevenlabs_model_selection,
+    _voice_apply_provider_selection,
+    _voice_apply_selection,
+    _voice_as_dict,
+    _voice_as_list,
+    _voice_download_job_from_payload,
+    _voice_elevenlabs_api_available,
+    _voice_elevenlabs_catalog,
+    _voice_elevenlabs_language_query,
+    _voice_elevenlabs_model_label,
+    _voice_elevenlabs_models_markup,
+    _voice_elevenlabs_models_text,
+    _voice_elevenlabs_voice_entry,
+    _voice_home_markup,
+    _voice_home_text,
+    _voice_kokoro_model_download_markup,
+    _voice_kokoro_model_download_text,
+    _voice_kokoro_model_ready,
+    _voice_kokoro_model_status,
+    _voice_kokoro_voice_download_markup,
+    _voice_kokoro_voice_download_text,
+    _voice_kokoro_voice_ready,
+    _voice_kokoro_voice_status,
+    _voice_label_for_id,
+    _voice_language_for_id,
+    _voice_languages_markup,
+    _voice_provider_label,
+    _voice_providers_markup,
+    _voice_set_session_enabled,
+    _voice_voices_markup,
+)
 from koda.logging_config import get_logger
 from koda.memory.quality import record_utility_event
 from koda.provider_models import MODEL_FUNCTION_IDS, resolve_model_function_catalog
@@ -22,7 +56,6 @@ from koda.services.agent_settings import (
     set_agent_functional_default,
     set_agent_general_model,
     set_agent_general_provider,
-    set_agent_voice_default,
 )
 from koda.services.feedback_policy import (
     build_success_pattern_candidate,
@@ -60,6 +93,44 @@ from koda.utils.formatting import escape_html
 from koda.utils.messaging import split_message
 
 log = get_logger(__name__)
+
+
+def _telegram_bad_request_text(exc: BadRequest) -> str:
+    return str(exc).strip().lower()
+
+
+def _telegram_query_expired(exc: BadRequest) -> bool:
+    text = _telegram_bad_request_text(exc)
+    return "query is too old" in text or "query id is invalid" in text or "response timeout expired" in text
+
+
+def _telegram_message_not_modified(exc: BadRequest) -> bool:
+    return "message is not modified" in _telegram_bad_request_text(exc)
+
+
+async def _safe_callback_answer(query: Any, *args: Any, **kwargs: Any) -> bool:
+    try:
+        await query.answer(*args, **kwargs)
+        return True
+    except BadRequest as exc:
+        if _telegram_query_expired(exc):
+            log.debug("telegram_callback_answer_expired", data=getattr(query, "data", None))
+            return False
+        raise
+
+
+async def _safe_edit_message_text(query: Any, text: str, **kwargs: Any) -> bool:
+    try:
+        await query.edit_message_text(text, **kwargs)
+        return True
+    except BadRequest as exc:
+        if _telegram_message_not_modified(exc):
+            log.debug("telegram_callback_message_not_modified", data=getattr(query, "data", None))
+            return False
+        if _telegram_query_expired(exc):
+            log.debug("telegram_callback_edit_expired", data=getattr(query, "data", None))
+            return False
+        raise
 
 
 def _optional_chat_id(value: Any) -> int | None:
@@ -363,30 +434,458 @@ async def callback_settings_mode(update: Update, context: BotContext) -> None:
     )
 
 
+def _voice_download_is_active(payload: dict[str, Any] | None) -> bool:
+    job = _voice_download_job_from_payload(payload)
+    return str(job.get("status") or "").strip().lower() in {"pending", "running"}
+
+
+def _voice_callback_suffix(data: str | None) -> str:
+    return (str(data or "").split(":", 1)[1] if ":" in str(data or "") else "").strip()
+
+
+async def _render_voice_home(query: Any, context: BotContext) -> None:
+    started = time.monotonic()
+    try:
+        await _safe_edit_message_text(
+            query,
+            _voice_home_text(context.user_data),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_home_markup(context.user_data),
+        )
+    finally:
+        log.info(
+            "telegram_voice_callback_rendered",
+            callback_data=getattr(query, "data", None),
+            duration_ms=round((time.monotonic() - started) * 1000),
+        )
+
+
+async def _render_kokoro_voice_download(
+    query: Any,
+    voice_id: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await _safe_edit_message_text(
+        query,
+        _voice_kokoro_voice_download_text(voice_id, payload),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_voice_kokoro_voice_download_markup(voice_id, payload),
+    )
+
+
+async def _render_kokoro_model_download(
+    query: Any,
+    voice_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await _safe_edit_message_text(
+        query,
+        _voice_kokoro_model_download_text(voice_id, payload),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_voice_kokoro_model_download_markup(voice_id, payload),
+    )
+
+
+async def _select_kokoro_voice_when_ready(
+    query: Any,
+    context: BotContext,
+    voice_id: str,
+    voice_payload: dict[str, Any] | None = None,
+) -> bool:
+    voice_status = voice_payload or _voice_kokoro_voice_status(voice_id)
+    if _voice_download_is_active(voice_status) or not _voice_kokoro_voice_ready(voice_id, voice_status):
+        await _render_kokoro_voice_download(query, voice_id, voice_status)
+        return False
+
+    model_status = _voice_kokoro_model_status()
+    if _voice_download_is_active(model_status) or not _voice_kokoro_model_ready(model_status):
+        await _render_kokoro_model_download(query, voice_id, model_status)
+        return False
+
+    try:
+        _voice_apply_selection(
+            context.user_data,
+            voice_id,
+            voice_label=_voice_label_for_id(voice_id),
+            voice_language=_voice_language_for_id(voice_id),
+        )
+    except ValueError as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return False
+
+    await _render_voice_home(query, context)
+    return True
+
+
 async def callback_settings_voice(update: Update, context: BotContext) -> None:
     query = update.callback_query
-    await query.answer()
+    await _safe_callback_answer(query)
 
     if not auth_check(update):
         return
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
-    voice_id = str(context.user_data.get("tts_voice") or "")
-    voice_label = str(context.user_data.get("tts_voice_label") or voice_id or "n/a")
-    language = str(context.user_data.get("tts_voice_language") or "n/a")
-    await query.edit_message_text(
-        (
-            "<b>Voice for this agent</b>\n\n"
-            f"Current: <code>{escape_html(voice_id)}</code> ({escape_html(voice_label)})\n"
-            f"Language: <code>{escape_html(language)}</code>\n\n"
-            "To change via chat, say something like:\n"
-            "• change the voice to pm_alex\n"
-            "• change the voice to Dora\n\n"
-            "Or use /voice voices to list and /voice search &lt;term&gt; to search."
-        ),
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="settings:home")]]),
+    await _render_voice_home(query, context)
+
+
+async def callback_voice_home(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    await _render_voice_home(query, context)
+
+
+async def callback_voice_toggle(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    action = (query.data or "").split(":", 1)[1] if ":" in (query.data or "") else ""
+    _voice_set_session_enabled(context.user_data, action == "on")
+    await _render_voice_home(query, context)
+
+
+async def callback_voice_providers(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    await _safe_edit_message_text(
+        query,
+        "Escolha o provider de voz:",
+        reply_markup=_voice_providers_markup(context.user_data),
     )
+
+
+async def callback_voice_provider(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    provider = (query.data or "").split(":", 1)[1] if ":" in (query.data or "") else ""
+    try:
+        _voice_apply_provider_selection(context.user_data, provider)
+    except ValueError as exc:
+        await _safe_edit_message_text(query, str(exc), reply_markup=_voice_providers_markup(context.user_data))
+        return
+    await _render_voice_home(query, context)
+
+
+async def callback_voice_elevenlabs_models(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    await _safe_edit_message_text(
+        query,
+        _voice_elevenlabs_models_text(context.user_data),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_voice_elevenlabs_models_markup(context.user_data),
+    )
+
+
+async def callback_voice_elevenlabs_model(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    model_id = (query.data or "").split(":", 1)[1] if ":" in (query.data or "") else ""
+    try:
+        _voice_apply_elevenlabs_model_selection(context.user_data, model_id)
+    except ValueError as exc:
+        await _safe_edit_message_text(
+            query,
+            str(exc),
+            reply_markup=_voice_elevenlabs_models_markup(context.user_data),
+        )
+        return
+    await _safe_edit_message_text(
+        query,
+        f"Modelo ElevenLabs definido: <b>{escape_html(_voice_elevenlabs_model_label(model_id))}</b>\n"
+        f"<code>{escape_html(model_id)}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Escolher idioma", callback_data="voicelangs:elevenlabs")],
+                [InlineKeyboardButton("Escolher voz", callback_data="voicevoices:elevenlabs:")],
+                [InlineKeyboardButton("Voltar", callback_data="voicehome")],
+            ]
+        ),
+    )
+
+
+async def callback_voice_languages(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    provider = (query.data or "").split(":", 1)[1] if ":" in (query.data or "") else "kokoro"
+    await _safe_edit_message_text(
+        query,
+        f"Escolha o idioma para {_voice_provider_label(provider)}:",
+        reply_markup=_voice_languages_markup(provider, context.user_data),
+    )
+
+
+async def callback_voice_language(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    parts = (query.data or "").split(":", 2)
+    if len(parts) != 3:
+        return
+    _, provider, language = parts
+    provider = provider.strip().lower()
+    language = language.strip().lower()
+    if provider == "kokoro":
+        await _safe_edit_message_text(
+            query,
+            f"Vozes Kokoro para <code>{escape_html(language)}</code>:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_voices_markup("kokoro", language, context.user_data),
+        )
+        return
+
+    context.user_data["_voice_pending_elevenlabs_language"] = language
+    catalog = _voice_elevenlabs_catalog(language, context.user_data)
+    language_label = str(catalog.get("selected_language_label") or language or "idioma selecionado")
+    voices = [item for item in _voice_as_list(catalog.get("items")) if _voice_as_dict(item).get("voice_id")]
+    if not bool(catalog.get("provider_connected")):
+        text = (
+            "A conexao ElevenLabs ainda nao esta pronta para listar vozes.\n"
+            "Cadastre e verifique a API key do ElevenLabs, depois volte para esta tela."
+        )
+    elif not voices:
+        search_query = _voice_elevenlabs_language_query(language)
+        text = (
+            f"Nao encontrei vozes ElevenLabs no catalogo para <b>{escape_html(language_label)}</b>.\n"
+            f"Voce ainda pode tentar pelo texto: <code>/voice search {escape_html(search_query)}</code>."
+        )
+    else:
+        text = (
+            f"Vozes ElevenLabs para <b>{escape_html(language_label)}</b>:\n"
+            "<i>Quando nao houver voz verificada especificamente no idioma, listo vozes compativeis "
+            "com o modelo de TTS selecionado.</i>"
+        )
+    await _safe_edit_message_text(
+        query,
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=_voice_voices_markup("elevenlabs", language, context.user_data),
+    )
+
+
+async def callback_voice_voices(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    parts = (query.data or "").split(":", 2)
+    provider = parts[1] if len(parts) > 1 else "kokoro"
+    language = parts[2] if len(parts) > 2 else ""
+    if provider.strip().lower() == "elevenlabs":
+        catalog = _voice_elevenlabs_catalog(language, context.user_data)
+        language_label = str(catalog.get("selected_language_label") or language or "todos os idiomas")
+        items = [item for item in _voice_as_list(catalog.get("items")) if _voice_as_dict(item).get("voice_id")]
+        if not bool(catalog.get("provider_connected")):
+            text = "A conexao ElevenLabs ainda nao esta pronta para listar vozes. Verifique a API key."
+        elif not items:
+            text = f"Nao encontrei vozes ElevenLabs para <b>{escape_html(language_label)}</b>."
+        else:
+            text = f"Escolha uma voz ElevenLabs para <b>{escape_html(language_label)}</b>:"
+        await _safe_edit_message_text(
+            query,
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=_voice_voices_markup(provider, language, context.user_data),
+        )
+        return
+    await _safe_edit_message_text(
+        query,
+        f"Escolha uma voz em {_voice_provider_label(provider)}:",
+        reply_markup=_voice_voices_markup(provider, language, context.user_data),
+    )
+
+
+async def callback_voice_pick(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = (query.data or "").split(":", 1)[1] if ":" in (query.data or "") else ""
+    from koda.services.kokoro_manager import kokoro_voice_metadata
+
+    if kokoro_voice_metadata(voice_id) is not None:
+        await _select_kokoro_voice_when_ready(query, context, voice_id)
+        return
+
+    try:
+        _voice_apply_selection(context.user_data, voice_id)
+    except ValueError as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return
+    await _render_voice_home(query, context)
+
+
+async def callback_voice_download(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    if not voice_id:
+        await _safe_edit_message_text(query, "Voz Kokoro invalida.")
+        return
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        job = get_control_plane_manager().start_kokoro_voice_download(voice_id)
+    except ValueError as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return
+    await _select_kokoro_voice_when_ready(query, context, voice_id, job)
+
+
+async def callback_voice_download_status(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    if not voice_id:
+        await _safe_edit_message_text(query, "Voz Kokoro invalida.")
+        return
+    await _select_kokoro_voice_when_ready(query, context, voice_id)
+
+
+async def callback_voice_download_cancel(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    status = _voice_kokoro_voice_status(voice_id)
+    job = _voice_download_job_from_payload(status)
+    if not job:
+        await _render_kokoro_voice_download(query, voice_id, status)
+        return
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        payload = get_control_plane_manager().cancel_provider_download_job(
+            "kokoro",
+            str(job.get("job_id") or job.get("id")),
+        )
+    except (KeyError, ValueError) as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return
+    await _render_kokoro_voice_download(query, voice_id, payload)
+
+
+async def callback_voice_model_download(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        job = get_control_plane_manager().start_kokoro_model_download()
+    except ValueError as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return
+    if voice_id and _voice_kokoro_model_ready(job) and _voice_kokoro_voice_ready(voice_id):
+        await _select_kokoro_voice_when_ready(query, context, voice_id)
+        return
+    await _render_kokoro_model_download(query, voice_id, job)
+
+
+async def callback_voice_model_status(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    model_status = _voice_kokoro_model_status()
+    if voice_id and _voice_kokoro_model_ready(model_status) and _voice_kokoro_voice_ready(voice_id):
+        await _select_kokoro_voice_when_ready(query, context, voice_id)
+        return
+    await _render_kokoro_model_download(query, voice_id, model_status)
+
+
+async def callback_voice_model_cancel(update: Update, context: BotContext) -> None:
+    query = update.callback_query
+    await _safe_callback_answer(query)
+
+    if not auth_check(update):
+        return
+
+    init_user_data(context.user_data, user_id=update.effective_user.id)
+    voice_id = _voice_callback_suffix(query.data)
+    model_status = _voice_kokoro_model_status()
+    job = _voice_download_job_from_payload(model_status)
+    if not job:
+        await _render_kokoro_model_download(query, voice_id, model_status)
+        return
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        payload = get_control_plane_manager().cancel_provider_download_job(
+            "kokoro",
+            str(job.get("job_id") or job.get("id")),
+        )
+    except (KeyError, ValueError) as exc:
+        await _safe_edit_message_text(query, str(exc))
+        return
+    await _render_kokoro_model_download(query, voice_id, payload)
 
 
 async def callback_settings_newsession(update: Update, context: BotContext) -> None:
@@ -698,7 +1197,7 @@ async def callback_supervised(update: Update, context: BotContext) -> None:
 async def callback_voice_elevenlabs(update: Update, context: BotContext) -> None:
     """Handle ElevenLabs voice selection from /voice search results."""
     query = update.callback_query
-    await query.answer()
+    await _safe_callback_answer(query)
 
     if not auth_check(update):
         return
@@ -709,19 +1208,46 @@ async def callback_voice_elevenlabs(update: Update, context: BotContext) -> None
     if len(parts) != 3:
         return
     _, voice_id, display_name = parts
+    voice_language = str(context.user_data.get("_voice_pending_elevenlabs_language") or "")
+    voice_entry = _voice_elevenlabs_voice_entry(voice_id, context.user_data, language_id=voice_language)
+    available, unavailable_reason = _voice_elevenlabs_api_available(voice_entry)
+    if voice_entry and not available:
+        reason = escape_html(unavailable_reason)
+        await _safe_edit_message_text(
+            query,
+            "Essa voz aparece no catalogo do ElevenLabs, mas nao pode ser usada via API nesta conta.\n\n"
+            f"<i>{reason}</i>\n\n"
+            "Escolha uma voz marcada como <b>premade</b> ou atualize o plano no ElevenLabs.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "Escolher outra voz",
+                            callback_data=f"voicevoices:elevenlabs:{voice_language}",
+                        )
+                    ],
+                    [InlineKeyboardButton("Voltar", callback_data="voicehome")],
+                ]
+            ),
+        )
+        return
 
     try:
-        sync_user_data_with_runtime_settings(
+        _voice_apply_selection(
             context.user_data,
-            set_agent_voice_default(voice_id, voice_label=display_name),
+            voice_id,
+            voice_label=display_name,
+            voice_language=voice_language,
         )
     except ValueError as exc:
-        await query.edit_message_text(str(exc))
+        await _safe_edit_message_text(query, str(exc))
         return
-    await query.edit_message_text(
+    await _safe_edit_message_text(
+        query,
         f"Voice set to: <b>{escape_html(display_name)}</b>\n"
         f"ID: <code>{escape_html(voice_id)}</code>\n\n"
-        f"Use /voice on to enable voice responses.",
+        "Voice responses are now ON.",
         parse_mode=ParseMode.HTML,
     )
 

@@ -243,8 +243,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "${RUNTIME_KERNEL_CPU_LIMIT:-2.0}"
+          memory: "${RUNTIME_KERNEL_MEMORY_LIMIT:-2G}"
 
   # Phase 1C — Quotas, rate limits, spend caps per workspace
   # (P2-7/P2-8 of production roadmap). Workers consult on the message

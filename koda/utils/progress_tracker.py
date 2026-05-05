@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 
 from koda.utils.progress import _format_elapsed, compact_tool_label
 
-_READ_TOOLS = frozenset({"Read", "Glob", "Grep"})
-_WRITE_TOOLS = frozenset({"Write", "Edit", "write_file", "edit_file"})
+_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "file_read", "file_list", "file_search", "file_grep"})
+_WRITE_TOOLS = frozenset({"Write", "Edit", "write_file", "edit_file", "file_write", "file_edit", "file_move"})
+_EXEC_TOOLS = frozenset({"Bash", "shell_execute", "shell_bg", "shell_status", "shell_output"})
 _TEST_PATTERNS = frozenset({"pytest", "npm test", "yarn test", "vitest", "jest", "make test"})
 _DEFAULT_PHASE_LABEL = "\u2699\ufe0f Processando"
 
@@ -28,8 +29,11 @@ class ProgressTracker:
         names = {t.get("name", "") for t in recent}
         # Check for test patterns in Bash commands
         for t in recent:
-            if t.get("name") == "Bash":
-                cmd = (t.get("input", {}).get("command", "") or "").lower()
+            if t.get("name") in _EXEC_TOOLS:
+                input_data = t.get("input", {})
+                cmd = ""
+                if isinstance(input_data, dict):
+                    cmd = str(input_data.get("command") or "").lower()
                 if any(p in cmd for p in _TEST_PATTERNS):
                     return "testing"
         if names & _WRITE_TOOLS:
@@ -53,7 +57,7 @@ class ProgressTracker:
 
         reads = sum(1 for t in tool_uses if t.get("name") in _READ_TOOLS)
         writes = sum(1 for t in tool_uses if t.get("name") in _WRITE_TOOLS)
-        execs = sum(1 for t in tool_uses if t.get("name") == "Bash")
+        execs = sum(1 for t in tool_uses if t.get("name") in _EXEC_TOOLS)
 
         counters = []
         if reads:
@@ -87,7 +91,7 @@ class ProgressTracker:
 
         reads = sum(1 for t in tool_uses if t.get("name") in _READ_TOOLS)
         writes = sum(1 for t in tool_uses if t.get("name") in _WRITE_TOOLS)
-        execs = sum(1 for t in tool_uses if t.get("name") == "Bash")
+        execs = sum(1 for t in tool_uses if t.get("name") in _EXEC_TOOLS)
 
         parts = []
         if reads:

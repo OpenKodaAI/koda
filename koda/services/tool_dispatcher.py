@@ -124,6 +124,7 @@ _WRITE_TOOLS = frozenset(
         "file_edit",
         "file_delete",
         "file_move",
+        "image_generate",
         "shell_execute",
         "shell_bg",
         "shell_kill",
@@ -316,6 +317,8 @@ def _infer_tool_category(tool: str) -> str:
         return "db"
     if tool.startswith("browser_"):
         return "browser"
+    if tool.startswith("image_"):
+        return "image"
     if tool.startswith("job_"):
         return "ops"
     if tool.startswith("shell_"):
@@ -1306,6 +1309,88 @@ async def _handle_get_status(params: dict, ctx: ToolContext) -> AgentToolResult:
         f"query_count: {ctx.user_data.get('query_count', 0)}",
     ]
     return AgentToolResult(tool="agent_get_status", success=True, output="\n".join(status_lines))
+
+
+async def _handle_image_generate(params: dict, ctx: ToolContext) -> AgentToolResult:
+    prompt = str(params.get("prompt") or params.get("description") or "").strip()
+    if not prompt:
+        return AgentToolResult(tool="image_generate", success=False, output="Missing required param: 'prompt'.")
+
+    from koda.services.generation_stubs import (
+        GenerationServiceNotImplemented,
+        ImageGenerationError,
+        generate_image,
+    )
+
+    provider_id = str(params.get("provider_id") or params.get("provider") or "").strip() or None
+    model_id = str(params.get("model_id") or params.get("model") or "").strip() or None
+    output_format = params.get("output_format", params.get("format"))
+
+    try:
+        result = await asyncio.to_thread(
+            generate_image,
+            prompt,
+            provider_id=provider_id,
+            model_id=model_id,
+            output_dir=ctx.work_dir,
+            filename=str(params.get("filename") or "").strip() or None,
+            size=str(params.get("size") or "").strip() or None,
+            quality=str(params.get("quality") or "").strip() or None,
+            background=str(params.get("background") or "").strip() or None,
+            output_format=str(output_format or "").strip() or None,
+            n=params.get("n"),
+            user=str(ctx.user_id) if ctx.user_id else None,
+        )
+    except GenerationServiceNotImplemented as exc:
+        return AgentToolResult(
+            tool="image_generate",
+            success=False,
+            output=str(exc),
+            metadata={"category": "image"},
+        )
+    except ImageGenerationError as exc:
+        return AgentToolResult(
+            tool="image_generate",
+            success=False,
+            output=f"Image generation failed: {exc}",
+            metadata={"category": "image"},
+        )
+
+    created_files = [artifact.path for artifact in result.artifacts]
+    output_lines = [
+        f"Generated {len(created_files)} image(s) with {result.provider_id}/{result.model_id}:",
+        *created_files,
+    ]
+    revised_prompts = [artifact.revised_prompt for artifact in result.artifacts if artifact.revised_prompt]
+    if revised_prompts:
+        output_lines.append("Revised prompt:")
+        output_lines.append(revised_prompts[0])
+    return AgentToolResult(
+        tool="image_generate",
+        success=True,
+        output="\n".join(output_lines),
+        metadata={
+            "category": "image",
+            "write": True,
+            "created_files": created_files,
+            "provider_id": result.provider_id,
+            "model_id": result.model_id,
+        },
+        data={
+            "provider_id": result.provider_id,
+            "model_id": result.model_id,
+            "artifacts": [
+                {
+                    "path": artifact.path,
+                    "size": artifact.size,
+                    "output_format": artifact.output_format,
+                    "revised_prompt": artifact.revised_prompt,
+                }
+                for artifact in result.artifacts
+            ],
+        },
+        data_format="json",
+    )
 
 
 async def _check_browser_available(tool_name: str) -> AgentToolResult | None:
@@ -3402,6 +3487,7 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "snapshot_diff": _handle_snapshot_diff,
     "snapshot_delete": _handle_snapshot_delete,
     "request_skill": _handle_request_skill,
+    "image_generate": _handle_image_generate,
     "file_read": _handle_file_read,
     "file_write": _handle_file_write,
     "file_edit": _handle_file_edit,

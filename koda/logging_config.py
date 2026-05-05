@@ -141,7 +141,7 @@ def setup_logging(json_output: bool | None = None) -> None:
     if json_output:
         renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer()
+        renderer = structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)
 
     structlog.configure(
         processors=[

@@ -10,27 +10,23 @@ from koda.telegram_types import BotContext
 
 
 def compact_tool_label(name: str, input_data: dict | None = None) -> str:
-    """Build a compact label like 'Read(file.py)', 'Bash(npm test...)'."""
+    """Build a compact, user-safe progress label."""
     if not input_data:
         return name
-    if name == "Read" and "file_path" in input_data:
-        path = input_data["file_path"]
-        return f"Read({path.rsplit('/', 1)[-1]})"
-    if name == "Bash" and "command" in input_data:
-        cmd = input_data["command"]
-        if len(cmd) > 30:
-            cmd = cmd[:27] + "..."
-        return f"Bash({cmd})"
-    if name == "Grep" and "pattern" in input_data:
-        pat = input_data["pattern"]
-        if len(pat) > 20:
-            pat = pat[:17] + "..."
-        return f"Grep({pat})"
-    # Generic: show first string value
-    for v in input_data.values():
-        if isinstance(v, str) and v:
-            short = v if len(v) <= 20 else v[:17] + "..."
-            return f"{name}({short})"
+    if name in {"Read", "Edit", "Write", "read_file", "edit_file", "write_file"}:
+        path = input_data.get("file_path") or input_data.get("path")
+        if isinstance(path, str) and path:
+            return f"{name}({path.rstrip('/').rsplit('/', 1)[-1]})"
+    if name.startswith("file_"):
+        path = input_data.get("file_path") or input_data.get("path") or input_data.get("destination")
+        if isinstance(path, str) and path:
+            return f"{name}({path.rstrip('/').rsplit('/', 1)[-1]})"
+    if name in {"Bash", "shell_execute", "shell_bg", "shell_status", "shell_output"}:
+        return f"{name}(execucao)"
+    if name in {"Grep", "file_grep", "file_search"}:
+        return f"{name}(busca)"
+    if name.startswith("browser_"):
+        return f"{name}(navegacao)"
     return name
 
 

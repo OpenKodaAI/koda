@@ -343,6 +343,18 @@ def test_native_provider_api_key_verify_contract(provider_id, secret, expected_u
     assert secret not in str(captured["url"]), f"{provider_id} API key leaked into the verify URL: {captured['url']!r}"
 
 
+def test_elevenlabs_api_key_verify_accepts_top_level_model_list(monkeypatch):
+    captured = _patch_urlopen(
+        monkeypatch, body=b'[{"model_id": "eleven_turbo_v2_5"}, {"name": "eleven_multilingual_v2"}]'
+    )
+
+    result = provider_auth.verify_provider_api_key("elevenlabs", "xi-test-key")
+
+    assert result.verified is True
+    assert captured["url"] == "https://api.elevenlabs.io/v1/models"
+    assert result.details["model_ids"] == ["eleven_turbo_v2_5", "eleven_multilingual_v2"]
+
+
 def test_claude_verify_includes_anthropic_version_header(monkeypatch):
     """Anthropic's docs require an `anthropic-version` header on every request."""
     captured = _patch_urlopen(monkeypatch)

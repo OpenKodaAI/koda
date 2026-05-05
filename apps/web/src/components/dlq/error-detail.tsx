@@ -126,7 +126,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
           <X className="h-4 w-4" />
         </button>
 
-        <div className="app-drawer-panel h-full overflow-y-auto p-5 lg:p-7">
+        <div className="app-drawer-panel h-full !overflow-y-auto p-5 lg:p-7">
           <div className="flex flex-col gap-6">
               <div className="flex items-start gap-4 pr-14 sm:pr-16">
                 <div className="space-y-3">

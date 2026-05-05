@@ -81,7 +81,7 @@ describe("CronTable", () => {
 
     const table = screen.getByRole("table");
     expect(within(table).getByRole("columnheader", { name: /agent/i })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: /execution/i })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: /execution/i })).not.toBeInTheDocument();
     expect(within(table).getAllByText("Atlas")).toHaveLength(2);
     expect(within(table).getAllByText("Forge")).toHaveLength(2);
     expect(within(table).getByText("Daily operator brief")).toBeInTheDocument();
@@ -89,15 +89,45 @@ describe("CronTable", () => {
   });
 
   it("keeps row actions available from the compact action rail", () => {
+    const onExecutions = vi.fn();
     const onRun = vi.fn();
     const onLifecycleAction = vi.fn();
-    renderTable({ onRun, onLifecycleAction });
+    renderTable({ onExecutions, onRun, onLifecycleAction });
 
     const table = screen.getByRole("table");
+    fireEvent.click(within(table).getAllByRole("button", { name: "Executions" })[0]);
     fireEvent.click(within(table).getAllByRole("button", { name: "Run now" })[0]);
     fireEvent.click(within(table).getAllByRole("button", { name: "Pause" })[0]);
 
+    expect(onExecutions).toHaveBeenCalledWith(rows[0].job);
     expect(onRun).toHaveBeenCalledWith(rows[0].job);
     expect(onLifecycleAction).toHaveBeenCalledWith(rows[0].job, "pause");
+  });
+
+  it("shows per-action request states on command buttons", () => {
+    renderTable({
+      busyJobId: rows[0].job.id,
+      actionStates: {
+        [rows[0].job.id]: {
+          executions: "success",
+          run: "pending",
+          lifecycle: "error",
+        },
+      },
+    });
+
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("button", { name: "Executions" })[0]).toHaveAttribute(
+      "data-action-state",
+      "success",
+    );
+    expect(within(table).getAllByRole("button", { name: "Run now" })[0]).toHaveAttribute(
+      "data-action-state",
+      "pending",
+    );
+    expect(within(table).getAllByRole("button", { name: "Pause" })[0]).toHaveAttribute(
+      "data-action-state",
+      "error",
+    );
   });
 });

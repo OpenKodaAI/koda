@@ -48,6 +48,17 @@ describe("validatePayloadClientSide", () => {
     expect(errors.some((e) => e.code === "must_be_enabled")).toBe(true);
   });
 
+  it("accepts specialized audio defaults outside general providers_enabled", () => {
+    expect(
+      validatePayloadClientSide({
+        models: {
+          providers_enabled: ["claude"],
+          functional_defaults: { audio: { provider_id: "kokoro", model_id: "kokoro-v1" } },
+        },
+      }),
+    ).toEqual([]);
+  });
+
   it("rejects variable with lowercase key", () => {
     const errors = validatePayloadClientSide({
       variables: [{ key: "lowercase", type: "text", scope: "system_only" }],

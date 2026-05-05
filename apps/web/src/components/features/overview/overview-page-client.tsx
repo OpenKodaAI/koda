@@ -19,6 +19,7 @@ import {
   type ExecutionHistoryStrings,
 } from "@/components/dashboard/execution-history";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { OverviewRouteLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useOptionalAuth, type AuthOperator } from "@/components/providers/auth-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -41,37 +42,6 @@ function deriveGreetingName(operator: AuthOperator | null | undefined): string {
   return candidate.split(/\s+/)[0] || "Operator";
 }
 
-function OverviewSkeleton() {
-  return (
-    <div className="space-y-4" {...tourRoute("overview", "loading")}>
-      {/* AgentSwitcher placeholder */}
-      <div className="max-w-[350px]" {...tourAnchor("overview.agent-switcher")}>
-        <div className="skeleton h-11 w-full rounded-xl" />
-      </div>
-
-      {/* Stats grid */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" {...tourAnchor("overview.stats")}>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="glass-card-sm p-5">
-            <div className="skeleton skeleton-text mb-3" style={{ width: "40%" }} />
-            <div className="skeleton skeleton-heading mb-2" style={{ width: "50%" }} />
-            <div className="skeleton skeleton-text" style={{ width: "65%" }} />
-          </div>
-        ))}
-      </div>
-
-      {/* Activity + Cost charts */}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <div className="app-section min-h-[340px] p-5 sm:p-6" />
-        <div className="app-section min-h-[340px] p-5 sm:p-6" />
-      </div>
-
-      {/* Live Plan */}
-      <div className="app-section min-h-[220px] p-5 sm:p-6 lg:p-7" />
-    </div>
-  );
-}
-
 export default function OverviewPage() {
   return (
     <Suspense fallback={<OverviewPageFallback />}>
@@ -81,18 +51,7 @@ export default function OverviewPage() {
 }
 
 function OverviewPageFallback() {
-  return (
-    <div className="space-y-4" {...tourRoute("overview", "loading")}>
-      <div className="max-w-[350px]" {...tourAnchor("overview.agent-switcher")}>
-        <AgentSwitcher
-          multiple
-          selectedBotIds={[]}
-          onSelectionChange={() => undefined}
-        />
-      </div>
-      <OverviewSkeleton />
-    </div>
-  );
+  return <OverviewRouteLoading />;
 }
 
 function OverviewPageContent() {
@@ -310,12 +269,7 @@ function OverviewPageContent() {
   );
 
   if (loading && !allStats) {
-    return (
-      <div className="mx-auto flex w-full max-w-[900px] flex-col items-center gap-10 pt-12">
-        <div className="h-10 w-full max-w-[420px] animate-pulse rounded-[var(--radius-input)] bg-[var(--panel-soft)]" />
-        <div className="h-24 w-full animate-pulse rounded-[var(--radius-input)] bg-[var(--panel-soft)]" />
-      </div>
-    );
+    return <OverviewRouteLoading />;
   }
 
   return (

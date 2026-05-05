@@ -23,6 +23,7 @@ import { ChatHeader } from "@/components/sessions/chat/chat-header";
 import { ChatThread, type PendingChatMessage } from "@/components/sessions/chat/chat-thread";
 import { SessionContextDrawer } from "@/components/sessions/context/session-context-drawer";
 import { SessionRail } from "@/components/sessions/rail/session-rail";
+import { SessionsRouteLoading } from "@/components/layout/route-loading";
 import { useSessionStream } from "@/hooks/use-session-stream";
 import type { SessionStreamEvent } from "@/lib/contracts/sessions";
 import {
@@ -793,37 +794,7 @@ function SessionsPageContent() {
 
 export default function SessionsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)]">
-          <div className="hidden h-full w-72 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--shell)] md:block">
-            <div className="h-14 border-b border-[var(--divider-hair)]" />
-            <div className="p-2">
-              <div className="h-9 w-full animate-pulse rounded-[var(--radius-input)] bg-[var(--panel-soft)]" />
-            </div>
-            <div className="flex flex-col gap-1 p-2">
-              {Array.from({ length: 8 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="h-[44px] w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]"
-                />
-              ))}
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="h-12 border-b border-[var(--divider-hair)]" />
-            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-6 py-8">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="h-20 w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]"
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<SessionsRouteLoading />}>
       <SessionsPageContent />
     </Suspense>
   );

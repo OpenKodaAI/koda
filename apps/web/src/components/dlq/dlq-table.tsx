@@ -56,9 +56,19 @@ function SkeletonRow({ columns }: { columns: number }) {
   return (
     <tr className="animate-pulse">
       {Array.from({ length: columns }).map((_, i) => (
-        <td key={i} className="py-3 pr-4">
+        <td
+          key={i}
+          className={cn(
+            "py-3 pr-4",
+            i === columns - 1 &&
+              "sticky-table-last w-[176px] min-w-[176px] py-3 pl-4 pr-0 text-right",
+          )}
+        >
           <div
-            className="h-3 rounded bg-[var(--panel-soft)]"
+            className={cn(
+              "h-3 rounded bg-[var(--panel-soft)]",
+              i === columns - 1 && "ml-auto",
+            )}
             style={{ width: `${52 - i * 4}%` }}
           />
         </td>
@@ -76,13 +86,24 @@ export function DLQTable({
   const { t } = useAppI18n();
   const thClass =
     "py-2.5 pr-4 text-left font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
-  const thRightClass = `${thClass} text-right`;
+  const thRightClass = cn(
+    thClass,
+    "sticky-table-last sticky-table-last--header w-[176px] min-w-[176px] pl-4 pr-0 text-right",
+  );
 
   return (
     <>
       <div className="hidden md:block">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px]">
+          <table className="w-full min-w-[1040px] border-separate border-spacing-0">
+            <colgroup>
+              <col className="w-[140px]" />
+              <col className="w-[128px]" />
+              <col className="min-w-[260px]" />
+              <col className="min-w-[260px]" />
+              <col className="w-[160px]" />
+              <col className="w-[176px]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-[color:var(--divider-hair)]">
                 <th className={thClass}>{t("dlq.table.entry")}</th>
@@ -106,10 +127,10 @@ export function DLQTable({
                       key={entry.id}
                       onClick={() => onEntryClick?.(entry)}
                       className={cn(
-                        "group transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                        "sticky-table-row group transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                         onEntryClick && "cursor-pointer",
                         isSelected
-                          ? "bg-[var(--hover-tint)]"
+                          ? "sticky-table-row--selected bg-[var(--table-row-selected)]"
                           : onEntryClick && "hover:bg-[var(--hover-tint)]",
                       )}
                     >
@@ -163,7 +184,7 @@ export function DLQTable({
                             : t("dlq.table.waitingDecision")}
                         </p>
                       </td>
-                      <td className="py-3 text-right">
+                      <td className="sticky-table-last w-[176px] min-w-[176px] py-3 pl-4 pr-0 text-right">
                         <RetryIndicator entry={entry} />
                       </td>
                     </tr>

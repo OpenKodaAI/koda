@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, DatabaseZap, Plus } from "lucide-react";
-import { CronTable } from "@/components/schedules/cron-table";
+import { Clock3, DatabaseZap, History, Plus } from "lucide-react";
+import {
+  CronTable,
+  type ScheduleTableActionKey,
+  type ScheduleTableActionState,
+  type ScheduleTableActionStates,
+} from "@/components/schedules/cron-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { RoutinesDataLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
@@ -19,10 +25,19 @@ import {
 } from "@/components/routines/routine-editor";
 import { useRoutinesContext } from "@/components/routines/routines-context";
 import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
+import { Drawer } from "@/components/ui/drawer";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useToast } from "@/hooks/use-toast";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
-import type { CronJob, ScheduleDetail } from "@/lib/types";
+import type { CronJob, ScheduleDetail, ScheduleRun } from "@/lib/types";
+import {
+  cn,
+  formatDateTime,
+  formatDuration,
+  formatRelativeTime,
+  truncateText,
+} from "@/lib/utils";
 
 type ScheduleEditDraft = {
   triggerType: string;
@@ -36,6 +51,45 @@ type ScheduleEditDraft = {
   notificationMode: string;
   verificationMode: string;
 };
+
+function getRoutineTitle(job: CronJob | null): string {
+  if (!job) return "";
+  const payloadName = typeof job.payload?.name === "string" ? job.payload.name.trim() : "";
+  return job.summary?.trim() || payloadName || truncateText(job.command, 56);
+}
+
+function getRunActivityTimestamp(run: ScheduleRun): string | null {
+  return run.completed_at || run.started_at || run.scheduled_for || run.next_attempt_at;
+}
+
+function getRunSortTime(run: ScheduleRun): number {
+  const value = getRunActivityTimestamp(run);
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+function runStatusTone(status: string | null | undefined): StatusDotTone {
+  switch (status) {
+    case "succeeded":
+      return "success";
+    case "failed":
+    case "blocked":
+      return "danger";
+    case "queued":
+      return "warning";
+    case "running":
+      return "info";
+    case "retrying":
+      return "retry";
+    default:
+      return "neutral";
+  }
+}
+
+function formatRunStatus(status: string | null | undefined): string {
+  return status ? status.replaceAll("_", " ") : "unknown";
+}
 
 function buildDraft(detail: ScheduleDetail): ScheduleEditDraft {
   const payload = detail.job.payload || {};
@@ -147,6 +201,11 @@ export default function SchedulesPage() {
   const [selectedJob, setSelectedJob] = useState<CronJob | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<ScheduleDetail | null>(null);
   const [busyJobId, setBusyJobId] = useState<number | null>(null);
+  const [tableActionStates, setTableActionStates] = useState<ScheduleTableActionStates>({});
+  const [executionDrawerJob, setExecutionDrawerJob] = useState<CronJob | null>(null);
+  const [executionDrawerDetail, setExecutionDrawerDetail] = useState<ScheduleDetail | null>(null);
+  const [executionDrawerLoading, setExecutionDrawerLoading] = useState(false);
+  const [executionDrawerError, setExecutionDrawerError] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ScheduleEditDraft | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
@@ -155,6 +214,7 @@ export default function SchedulesPage() {
   const { defaultTimezone } = useRoutinesContext();
   const { showToast } = useToast();
   const idempotencyKeyRef = useRef<string>("");
+  const tableActionClearTimersRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (creatingRoutine && !idempotencyKeyRef.current) {
@@ -167,6 +227,60 @@ export default function SchedulesPage() {
       idempotencyKeyRef.current = "";
     }
   }, [creatingRoutine]);
+
+  useEffect(
+    () => () => {
+      Object.values(tableActionClearTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+    },
+    [],
+  );
+
+  function setTableActionState(
+    jobId: number,
+    actionKey: ScheduleTableActionKey | undefined,
+    state: ScheduleTableActionState,
+  ) {
+    if (!actionKey) return;
+
+    const stateKey = `${jobId}:${actionKey}`;
+    const existingTimer = tableActionClearTimersRef.current[stateKey];
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+      delete tableActionClearTimersRef.current[stateKey];
+    }
+
+    setTableActionStates((current) => ({
+      ...current,
+      [jobId]: {
+        ...current[jobId],
+        [actionKey]: state,
+      },
+    }));
+
+    if (state === "success" || state === "error") {
+      tableActionClearTimersRef.current[stateKey] = window.setTimeout(() => {
+        setTableActionStates((current) => {
+          const currentJob = current[jobId];
+          if (!currentJob || currentJob[actionKey] !== state) return current;
+
+          const nextJob = { ...currentJob };
+          delete nextJob[actionKey];
+
+          const next = { ...current };
+          if (Object.keys(nextJob).length === 0) {
+            delete next[jobId];
+          } else {
+            next[jobId] = nextJob;
+          }
+          return next;
+        });
+        delete tableActionClearTimersRef.current[stateKey];
+      }, 1400);
+    }
+  }
+
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
@@ -211,8 +325,9 @@ export default function SchedulesPage() {
     void fetchSchedules();
   }, [agents, t, visibleBotIds, refreshNonce]);
 
-  async function loadDetail(job: CronJob) {
+  async function loadDetail(job: CronJob, actionKey?: ScheduleTableActionKey) {
     if (!job.bot_id) return;
+    setTableActionState(job.id, actionKey, "pending");
     setSelectedJob(job);
     setEditorError(null);
     try {
@@ -228,16 +343,54 @@ export default function SchedulesPage() {
       const detail = payload as ScheduleDetail;
       setSelectedDetail(detail);
       setEditDraft(buildDraft(detail));
+      setTableActionState(job.id, actionKey, "success");
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : "Unable to load schedule detail");
       setSelectedDetail(null);
       setEditDraft(null);
+      setTableActionState(job.id, actionKey, "error");
     }
   }
 
-  async function runAction(job: CronJob, action: "pause" | "resume" | "run" | "validate" | "delete") {
+  async function loadExecutionHistory(job: CronJob) {
+    if (!job.bot_id) return;
+    setExecutionDrawerJob(job);
+    setExecutionDrawerDetail(null);
+    setExecutionDrawerError(null);
+    setExecutionDrawerLoading(true);
+    setTableActionState(job.id, "executions", "pending");
+    try {
+      const response = await fetch(`/api/runtime/agents/${job.bot_id}/schedules/${job.id}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as ScheduleDetail | { error?: string };
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload
+            ? payload.error || "Unable to load schedule executions"
+            : "Unable to load schedule executions",
+        );
+      }
+      setExecutionDrawerDetail(payload as ScheduleDetail);
+      setTableActionState(job.id, "executions", "success");
+    } catch (error) {
+      setExecutionDrawerError(
+        error instanceof Error ? error.message : "Unable to load schedule executions",
+      );
+      setTableActionState(job.id, "executions", "error");
+    } finally {
+      setExecutionDrawerLoading(false);
+    }
+  }
+
+  async function runAction(
+    job: CronJob,
+    action: "pause" | "resume" | "run" | "validate" | "delete",
+    actionKey?: ScheduleTableActionKey,
+  ) {
     if (!job.bot_id) return;
     setBusyJobId(job.id);
+    setTableActionState(job.id, actionKey, "pending");
     setStatusMessage(null);
     setEditorError(null);
     try {
@@ -260,6 +413,7 @@ export default function SchedulesPage() {
         );
       }
       setStatusMessage((payload as { message?: string }).message || "Schedule updated.");
+      setTableActionState(job.id, actionKey, "success");
       if (action === "delete") {
         setSelectedJob(null);
         setSelectedDetail(null);
@@ -274,6 +428,7 @@ export default function SchedulesPage() {
       setRefreshNonce((value) => value + 1);
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : "Unable to operate on schedule");
+      setTableActionState(job.id, actionKey, "error");
     } finally {
       setBusyJobId(null);
     }
@@ -457,20 +612,7 @@ export default function SchedulesPage() {
       ) : null}
 
       {loading ? (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div
-                key={index}
-                className="flex h-[72px] animate-pulse flex-col gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-4"
-              >
-                <div className="h-3 w-16 rounded bg-[var(--panel-strong)]" />
-                <div className="h-5 w-12 rounded bg-[var(--panel-strong)]" />
-              </div>
-            ))}
-          </div>
-          <div className="min-h-[400px]" />
-        </div>
+        <RoutinesDataLoading />
       ) : (
         <>
           <PageMetricStrip className="animate-in stagger-1">
@@ -540,10 +682,12 @@ export default function SchedulesPage() {
               <CronTable
                 rows={scheduleRows}
                 busyJobId={busyJobId}
-                onInspect={(job) => void loadDetail(job)}
-                onEdit={(job) => void loadDetail(job)}
-                onRun={(job) => void runAction(job, "run")}
-                onLifecycleAction={(job, action) => void runAction(job, action)}
+                actionStates={tableActionStates}
+                onInspect={(job) => void loadDetail(job, "inspect")}
+                onEdit={(job) => void loadDetail(job, "edit")}
+                onExecutions={(job) => void loadExecutionHistory(job)}
+                onRun={(job) => void runAction(job, "run", "run")}
+                onLifecycleAction={(job, action) => void runAction(job, action, "lifecycle")}
               />
             </section>
           )}
@@ -571,6 +715,22 @@ export default function SchedulesPage() {
         }
       />
 
+      <RoutineExecutionsDrawer
+        open={Boolean(executionDrawerJob)}
+        job={executionDrawerJob}
+        detail={executionDrawerDetail}
+        loading={executionDrawerLoading}
+        error={executionDrawerError}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExecutionDrawerJob(null);
+            setExecutionDrawerDetail(null);
+            setExecutionDrawerError(null);
+            setExecutionDrawerLoading(false);
+          }
+        }}
+      />
+
       <ConfirmationDialog
         open={Boolean(pendingDeleteJob)}
         title={t("routines.editor.delete.confirmTitle")}
@@ -587,5 +747,154 @@ export default function SchedulesPage() {
         }}
       />
     </div>
+  );
+}
+
+function RoutineExecutionsDrawer({
+  open,
+  job,
+  detail,
+  loading,
+  error,
+  onOpenChange,
+}: {
+  open: boolean;
+  job: CronJob | null;
+  detail: ScheduleDetail | null;
+  loading: boolean;
+  error: string | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useAppI18n();
+  const runs = useMemo(
+    () =>
+      [...(detail?.runs ?? [])].sort(
+        (left, right) => getRunSortTime(right) - getRunSortTime(left) || right.id - left.id,
+      ),
+    [detail?.runs],
+  );
+  const title = t("schedules.executions.title", {
+    defaultValue: "Routine executions",
+  });
+  const routineTitle = getRoutineTitle(job);
+
+  return (
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      title={
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <History className="icon-sm shrink-0 text-[var(--text-quaternary)]" strokeWidth={1.75} />
+          <span className="truncate">{title}</span>
+        </span>
+      }
+      description={routineTitle || t("schedules.inspector.detailFallback")}
+      width="min(620px, 94vw)"
+      closeLabel={t("common.close", { defaultValue: "Close" })}
+    >
+      <div className="px-5 py-5">
+        {loading ? (
+          <div className="space-y-3" aria-label={t("common.loading", { defaultValue: "Loading" })}>
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={index}
+                className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] px-4 py-3"
+              >
+                <div className="skeleton-shimmer h-3 w-28 rounded-full" />
+                <div className="skeleton-shimmer mt-3 h-4 w-3/4 rounded-full" />
+                <div className="mt-3 flex gap-2">
+                  <div className="skeleton-shimmer h-3 w-20 rounded-full" />
+                  <div className="skeleton-shimmer h-3 w-24 rounded-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <InlineAlert tone="danger">{error}</InlineAlert>
+        ) : runs.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-center">
+            <History
+              className="icon-lg text-[var(--text-quaternary)]"
+              strokeWidth={1.5}
+              aria-hidden
+            />
+            <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+              {t("schedules.executions.empty", { defaultValue: "No executions yet." })}
+            </p>
+            <p className="m-0 max-w-[32rem] text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
+              {t("schedules.executions.emptyDescription", {
+                defaultValue: "When this routine runs, the most recent records appear here first.",
+              })}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {runs.map((run) => (
+              <RoutineExecutionRow key={run.id} run={run} />
+            ))}
+          </div>
+        )}
+      </div>
+    </Drawer>
+  );
+}
+
+function RoutineExecutionRow({ run }: { run: ScheduleRun }) {
+  const { t } = useAppI18n();
+  const activityAt = getRunActivityTimestamp(run);
+  const status = formatRunStatus(run.status);
+  const primaryText = run.summary_text?.trim() || run.error_message?.trim();
+
+  return (
+    <article className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel)] px-4 py-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              #{run.id}
+            </span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)]",
+                "border-[color:var(--border-subtle)] text-[var(--text-secondary)]",
+              )}
+            >
+              <StatusDot tone={runStatusTone(run.status)} pulse={run.status === "running"} />
+              {status}
+            </span>
+          </div>
+          <p
+            className="m-0 mt-2 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
+            title={primaryText || undefined}
+          >
+            {primaryText || t("schedules.executions.noSummary", { defaultValue: "No summary recorded." })}
+          </p>
+        </div>
+        <time
+          className="shrink-0 whitespace-nowrap text-right font-mono text-[0.6875rem] text-[var(--text-quaternary)]"
+          title={formatDateTime(activityAt)}
+        >
+          {formatRelativeTime(activityAt)}
+        </time>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)] sm:grid-cols-4">
+        <RunMeta label={t("schedules.inspector.runtimeTask")} value={run.task_id ? `#${run.task_id}` : "—"} />
+        <RunMeta label={t("common.duration", { defaultValue: "Duration" })} value={formatDuration(run.duration_ms)} />
+        <RunMeta label={t("common.attempts", { defaultValue: "Attempts" })} value={`${run.attempt}/${run.max_attempts}`} />
+        <RunMeta label={t("common.model", { defaultValue: "Model" })} value={run.model_effective || "—"} />
+      </div>
+    </article>
+  );
+}
+
+function RunMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="min-w-0">
+      <span className="block truncate uppercase tracking-[var(--tracking-mono)]">{label}</span>
+      <span className="mt-0.5 block truncate text-[var(--text-secondary)]" title={value}>
+        {value}
+      </span>
+    </span>
   );
 }

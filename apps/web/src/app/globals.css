@@ -2225,7 +2225,9 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .table-shell {
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel-sm);
   background: var(--surface-elevated);
@@ -2273,26 +2275,54 @@ button[aria-label="Open Next Dev Tools"] {
   border-bottom: none;
 }
 
-/* Last column sticky — always visible while scrolling */
-.glass-table thead th:last-child,
-.glass-table tbody td:last-child {
+.sticky-table-last {
   position: sticky;
   right: 0;
-  z-index: 1;
-}
-
-.glass-table thead th:last-child {
-  background: var(--table-header-bg);
-  box-shadow: -8px 0 16px rgba(0, 0, 0, 0.2);
-}
-
-.glass-table tbody td:last-child {
+  z-index: 2;
+  border-left: 1px solid var(--divider-hair);
   background: var(--surface-elevated);
-  box-shadow: -8px 0 16px rgba(0, 0, 0, 0.15);
+  background-clip: padding-box;
+  box-shadow: -18px 0 24px -22px rgba(0, 0, 0, 0.7);
 }
 
-.glass-table tbody tr:hover td:last-child {
-  background: color-mix(in srgb, var(--surface-elevated) 92%, var(--table-row-hover));
+.sticky-table-last--header {
+  z-index: 4;
+  background: var(--table-header-bg);
+}
+
+.sticky-table-row:hover .sticky-table-last {
+  background: var(--table-row-hover);
+}
+
+.sticky-table-row--selected .sticky-table-last {
+  background: var(--table-row-selected);
+}
+
+.glass-table--sticky-last thead th:last-child,
+.glass-table--sticky-last tbody td:last-child {
+  position: sticky;
+  right: 0;
+  border-left: 1px solid var(--divider-hair);
+  background-clip: padding-box;
+  box-shadow: -18px 0 24px -22px rgba(0, 0, 0, 0.7);
+}
+
+.glass-table--sticky-last thead th:last-child {
+  z-index: 4;
+  background: var(--table-header-bg);
+}
+
+.glass-table--sticky-last tbody td:last-child {
+  z-index: 2;
+  background: var(--surface-elevated);
+}
+
+.glass-table--sticky-last tbody tr:hover td:last-child {
+  background: var(--table-row-hover);
+}
+
+.glass-table--sticky-last tbody tr.bg-\[var\(--surface-tint\)\] td:last-child {
+  background: var(--table-row-selected);
 }
 
 .text-foreground {
@@ -8451,8 +8481,7 @@ input[type="range"]::-moz-range-thumb {
   transform: translateX(0);
 }
 
-.agent-board-lane__action.action-button,
-.agent-board-lane__prompt-indicator {
+.agent-board-lane__action.action-button {
   border-color: transparent;
   background: transparent;
   color: inherit;
@@ -8465,8 +8494,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .agent-board-lane__action.action-button:hover:not(:disabled),
-.agent-board-lane__action.action-button:focus-visible,
-.agent-board-lane__prompt-indicator:hover {
+.agent-board-lane__action.action-button:focus-visible {
   border-color: transparent;
   background: var(--lane-header-action-hover, rgba(255, 255, 255, 0.12));
   color: inherit;
@@ -8476,18 +8504,6 @@ input[type="range"]::-moz-range-thumb {
 .agent-board-lane__action--danger.action-button:focus-visible {
   background: var(--lane-header-action-hover, rgba(255, 255, 255, 0.12));
   color: inherit;
-}
-
-.agent-board-lane__prompt-indicator {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.9rem;
-  min-width: 1.9rem;
-  border-radius: 0.5rem;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease;
 }
 
 .agent-board-lane--default {
@@ -9415,7 +9431,8 @@ html body [contenteditable="true"]:focus-visible {
   outline-offset: 2px;
 }
 
-:where(html[data-theme="light"]) .glass-table tbody tr:hover td:last-child {
+:where(html[data-theme="light"]) .glass-table--sticky-last tbody tr:hover td:last-child,
+:where(html[data-theme="light"]) .sticky-table-row:hover .sticky-table-last {
   background: var(--table-row-hover);
 }
 
@@ -9636,14 +9653,12 @@ html body [contenteditable="true"]:focus-visible {
   color: var(--text-secondary);
 }
 
-:where(html[data-theme="light"]) .agent-board-lane__action.action-button,
-:where(html[data-theme="light"]) .agent-board-lane__prompt-indicator {
+:where(html[data-theme="light"]) .agent-board-lane__action.action-button {
   color: inherit;
 }
 
 :where(html[data-theme="light"]) .agent-board-lane__action.action-button:hover:not(:disabled),
-:where(html[data-theme="light"]) .agent-board-lane__action.action-button:focus-visible,
-:where(html[data-theme="light"]) .agent-board-lane__prompt-indicator:hover {
+:where(html[data-theme="light"]) .agent-board-lane__action.action-button:focus-visible {
   background: var(--lane-header-action-hover, var(--surface-hover-strong));
 }
 

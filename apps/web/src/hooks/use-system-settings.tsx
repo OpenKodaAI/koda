@@ -259,6 +259,78 @@ const EMPTY_KOKORO_VOICE_CATALOG: KokoroVoiceCatalog = {
   provider_connected: true,
 };
 
+const EMPTY_WHISPER_CATALOG: WhisperCatalog = {
+  items: [],
+  default_variant: "",
+  models_dir: "",
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeElevenLabsVoiceCatalogPayload(
+  payload: unknown,
+  selectedLanguage = "",
+): ElevenLabsVoiceCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_ELEVENLABS_VOICE_CATALOG,
+    ...(source as Partial<ElevenLabsVoiceCatalog>),
+    items: Array.isArray(source.items) ? (source.items as ElevenLabsVoiceCatalog["items"]) : [],
+    available_languages: Array.isArray(source.available_languages)
+      ? (source.available_languages as ElevenLabsVoiceCatalog["available_languages"])
+      : [],
+    selected_language: String(source.selected_language ?? selectedLanguage ?? ""),
+    cached: Boolean(source.cached),
+    provider_connected: Boolean(source.provider_connected),
+  };
+}
+
+function normalizeKokoroVoiceCatalogPayload(
+  payload: unknown,
+  selectedLanguage = "",
+): KokoroVoiceCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_KOKORO_VOICE_CATALOG,
+    ...(source as Partial<KokoroVoiceCatalog>),
+    items: Array.isArray(source.items) ? (source.items as KokoroVoiceCatalog["items"]) : [],
+    available_languages: Array.isArray(source.available_languages)
+      ? (source.available_languages as KokoroVoiceCatalog["available_languages"])
+      : [],
+    selected_language: String(source.selected_language ?? selectedLanguage ?? ""),
+    downloaded_voice_ids: Array.isArray(source.downloaded_voice_ids)
+      ? (source.downloaded_voice_ids as string[])
+      : [],
+    provider_connected: source.provider_connected !== false,
+  };
+}
+
+function normalizeOllamaModelCatalogPayload(payload: unknown): OllamaModelCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_OLLAMA_MODEL_CATALOG,
+    ...(source as Partial<OllamaModelCatalog>),
+    items: Array.isArray(source.items) ? (source.items as OllamaModelCatalog["items"]) : [],
+    cached: Boolean(source.cached),
+    provider_connected: Boolean(source.provider_connected),
+    base_url: String(source.base_url ?? ""),
+    auth_mode: String(source.auth_mode ?? "local"),
+  };
+}
+
+function normalizeWhisperCatalogPayload(payload: unknown): WhisperCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_WHISPER_CATALOG,
+    ...(source as Partial<WhisperCatalog>),
+    items: Array.isArray(source.items) ? (source.items as WhisperVariantStatus[]) : [],
+    default_variant: String(source.default_variant ?? ""),
+    models_dir: String(source.models_dir ?? ""),
+  };
+}
+
 function prettifyOllamaModelId(modelId: string) {
   return modelId
     .replace(/[:_-]+/g, " ")
@@ -798,8 +870,11 @@ export function SystemSettingsProvider({
       setElevenlabsVoicesLoading(true);
       try {
         const query = selectedLanguage ? `?language=${encodeURIComponent(selectedLanguage)}` : "";
-        const payload = await requestJson<ElevenLabsVoiceCatalog>(
-          `/api/elevenlabs/voices${query}`,
+        const payload = normalizeElevenLabsVoiceCatalogPayload(
+          await requestJson<ElevenLabsVoiceCatalog | null>(
+            `/api/elevenlabs/voices${query}`,
+          ),
+          selectedLanguage,
         );
         elevenlabsVoiceCacheRef.current[cacheIdentity] = {
           expiresAt: now + 5 * 60 * 1000,
@@ -830,8 +905,11 @@ export function SystemSettingsProvider({
       setKokoroVoicesLoading(true);
       try {
         const query = selectedLanguage ? `?language=${encodeURIComponent(selectedLanguage)}` : "";
-        const payload = await requestJson<KokoroVoiceCatalog>(
-          `/api/control-plane/providers/kokoro/voices${query}`,
+        const payload = normalizeKokoroVoiceCatalogPayload(
+          await requestJson<KokoroVoiceCatalog | null>(
+            `/api/control-plane/providers/kokoro/voices${query}`,
+          ),
+          selectedLanguage,
         );
         kokoroVoiceCacheRef.current[cacheIdentity] = {
           expiresAt: now + 5 * 60 * 1000,
@@ -869,7 +947,9 @@ export function SystemSettingsProvider({
 
       setOllamaModelsLoading(true);
       try {
-        const payload = await requestJson<OllamaModelCatalog>("/api/control-plane/providers/ollama/models");
+        const payload = normalizeOllamaModelCatalogPayload(
+          await requestJson<OllamaModelCatalog | null>("/api/control-plane/providers/ollama/models"),
+        );
         ollamaModelCacheRef.current[cacheIdentity] = {
           expiresAt: now + 5 * 60 * 1000,
           data: payload,
@@ -1881,7 +1961,9 @@ export function SystemSettingsProvider({
 
   const loadWhisperCatalog = useCallback(
     async (_options?: { force?: boolean }): Promise<WhisperCatalog> => {
-      const payload = await requestJson<WhisperCatalog>("/api/control-plane/providers/whispercpp/models");
+      const payload = normalizeWhisperCatalogPayload(
+        await requestJson<WhisperCatalog | null>("/api/control-plane/providers/whispercpp/models"),
+      );
       setWhisperCatalog(payload);
       return payload;
     },
@@ -2052,15 +2134,36 @@ export function SystemSettingsProvider({
       candidateProvider && enabledProviders.includes(candidateProvider)
         ? candidateProvider
         : enabledProviders[0] || "";
-    // Drop stale functional_defaults that reference providers no longer enabled.
-    // This keeps the payload consistent: providers_enabled is the source of
-    // truth, and any selection pointing outside it would be rejected by the
-    // backend with "must_be_enabled".
+    const functionalCatalog = draft.catalogs.functional_model_catalog || {};
     const sanitizedFunctionalDefaults = Object.fromEntries(
-      Object.entries(draft.values.models.functional_defaults ?? {}).filter(
-        ([, selection]) =>
-          typeof selection?.provider_id === "string" &&
-          enabledProviders.includes(selection.provider_id.toLowerCase()),
+      Object.entries(draft.values.models.functional_defaults ?? {}).flatMap(
+        ([functionId, selection]) => {
+          const providerId =
+            typeof selection?.provider_id === "string"
+              ? selection.provider_id.trim().toLowerCase()
+              : "";
+          const modelId =
+            typeof selection?.model_id === "string" ? selection.model_id.trim() : "";
+          if (!providerId || !modelId) return [];
+          const option = (functionalCatalog[functionId] || []).find(
+            (item) => item.provider_id === providerId && item.model_id === modelId,
+          );
+          if (!option) return [];
+          if (functionId === "general" && !enabledProviders.includes(providerId)) {
+            return [];
+          }
+          return [
+            [
+              functionId,
+              {
+                provider_id: providerId,
+                model_id: modelId,
+                provider_title: String(option.provider_title || selection.provider_title || providerId),
+                model_label: String(option.title || selection.model_label || modelId),
+              },
+            ],
+          ];
+        },
       ),
     ) as typeof draft.values.models.functional_defaults;
     const payload = {

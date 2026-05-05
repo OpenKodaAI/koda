@@ -487,6 +487,87 @@ describe("useSystemSettings", () => {
     expect(result.current.providerConnectionDrafts.ollama.auth_mode).toBe("local");
   });
 
+  it("normalizes null provider catalog payloads before storing them in state", async () => {
+    const settings = makeSettings({
+      providers: [
+        makeProviderCatalogProvider({
+          id: "elevenlabs",
+          title: "ElevenLabs",
+          category: "voice",
+          supported_auth_modes: ["api_key"],
+          supports_api_key: true,
+          connection_managed: true,
+        }),
+        makeProviderCatalogProvider({
+          id: "ollama",
+          title: "Ollama",
+          supported_auth_modes: ["local"],
+          supports_local_connection: true,
+          connection_managed: true,
+        }),
+      ],
+      providerConnections: {
+        elevenlabs: makeProviderConnection({
+          provider_id: "elevenlabs",
+          title: "ElevenLabs",
+          auth_mode: "api_key",
+          configured: true,
+          verified: true,
+          supports_api_key: true,
+          supported_auth_modes: ["api_key"],
+          api_key_present: true,
+          connection_status: "verified",
+        }),
+        ollama: makeProviderConnection({
+          provider_id: "ollama",
+          title: "Ollama",
+          auth_mode: "local",
+          configured: true,
+          verified: true,
+          supports_local_connection: true,
+          supported_auth_modes: ["local"],
+          connection_status: "verified",
+        }),
+      },
+    });
+
+    globalThis.fetch = vi.fn(async (input) => {
+      const path = String(input);
+      if (
+        path.includes("/api/elevenlabs/voices") ||
+        path.includes("/api/control-plane/providers/kokoro/voices") ||
+        path.includes("/api/control-plane/providers/whispercpp/models") ||
+        path.includes("/api/control-plane/providers/ollama/models")
+      ) {
+        return new Response("null", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${path}`);
+    }) as typeof fetch;
+
+    const { result } = renderUseSystemSettings(settings);
+
+    await act(async () => {
+      await result.current.loadElevenLabsVoices("pt", { force: true });
+      await result.current.loadKokoroVoices("pt-br", { force: true });
+      await result.current.loadWhisperCatalog({ force: true });
+      await result.current.loadOllamaModels({ force: true });
+    });
+
+    expect(result.current.elevenlabsVoiceCatalog.items).toEqual([]);
+    expect(result.current.elevenlabsVoiceCatalog.available_languages).toEqual([]);
+    expect(result.current.kokoroVoiceCatalog.items).toEqual([]);
+    expect(result.current.kokoroVoiceCatalog.available_languages).toEqual([]);
+    expect(result.current.whisperCatalog?.items).toEqual([]);
+    expect(result.current.ollamaModelCatalog.items).toEqual([]);
+    expect(
+      result.current.draft.catalogs.providers.find((provider) => provider.id === "ollama")?.available_models,
+    ).toEqual([]);
+  });
+
   it("auto-verifies Anthropic after submitting the browser authentication code", async () => {
     const claudeProvider = makeProviderCatalogProvider({
       id: "claude",
@@ -954,6 +1035,108 @@ describe("useSystemSettings", () => {
     expect(payload).not.toHaveProperty(removedCredentialsKey);
     expect(payload).toHaveProperty("resources");
     expect(payload).toHaveProperty("variables");
+  });
+
+  it("saves general settings when the backend returns an empty effort default", async () => {
+    const settings = makeSettings();
+    settings.values.models.effort_default = {} as GeneralSystemSettings["values"]["models"]["effort_default"];
+    const fetchMock = vi.fn(async (input, init) => {
+      const path = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+
+      if (path.endsWith("/api/control-plane/system-settings/general") && method === "PUT") {
+        return new Response(JSON.stringify(makeSettings()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${path}`);
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderUseSystemSettings(settings);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+      models?: { effort_default?: unknown };
+    };
+
+    expect(payload.models?.effort_default).toBeNull();
+  });
+
+  it("preserves Kokoro as a specialized audio default when saving", async () => {
+    const settings = makeSettings({
+      providers: [
+        makeProviderCatalogProvider({
+          id: "claude",
+          title: "Anthropic",
+          category: "general",
+          command_present: true,
+        }),
+        makeProviderCatalogProvider({
+          id: "kokoro",
+          title: "Kokoro",
+          category: "voice",
+          command_present: false,
+        }),
+      ],
+    });
+    settings.values.models.default_provider = "claude";
+    settings.values.models.functional_defaults = {
+      audio: { provider_id: "kokoro", model_id: "kokoro-v1" },
+    };
+    settings.catalogs.functional_model_catalog = {
+      audio: [
+        {
+          provider_id: "kokoro",
+          provider_title: "Kokoro",
+          model_id: "kokoro-v1",
+          title: "Kokoro v1",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input, init) => {
+      const path = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+
+      if (path.endsWith("/api/control-plane/system-settings/general") && method === "PUT") {
+        return new Response(JSON.stringify(makeSettings()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${path}`);
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderUseSystemSettings(settings);
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+      models?: {
+        providers_enabled?: string[];
+        functional_defaults?: Record<string, { provider_id: string; model_id: string }>;
+      };
+    };
+
+    expect(payload.models?.providers_enabled).toEqual(["claude"]);
+    expect(payload.models?.functional_defaults?.audio).toMatchObject({
+      provider_id: "kokoro",
+      model_id: "kokoro-v1",
+    });
   });
 
   it("saves core integration defaults through the canonical connections endpoint", async () => {

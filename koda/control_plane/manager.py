@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -44,6 +45,13 @@ from koda.provider_models import (
     resolve_known_general_model_ids,
     resolve_model_function_catalog,
     resolve_provider_function_model_catalog,
+)
+from koda.services.elevenlabs_catalog import (
+    ELEVENLABS_DEFAULT_TTS_MODEL,
+    canonicalize_elevenlabs_language,
+    elevenlabs_language_label,
+    elevenlabs_languages_for_model,
+    elevenlabs_voice_language_matches,
 )
 from koda.services.embedding_catalog import (
     CATALOG as _EMBEDDING_CATALOG,
@@ -1400,6 +1408,7 @@ class ControlPlaneManager:
         init_control_plane_db()
         self._seeding_legacy_state = False
         self._elevenlabs_voice_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._elevenlabs_subscription_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ollama_model_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._provider_login_processes: dict[str, Any] = {}
         self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
@@ -5421,8 +5430,18 @@ class ControlPlaneManager:
         selected_voice = _nonempty_text(providers_section.get("kokoro_default_voice")) or KOKORO_DEFAULT_VOICE_ID
         payload = kokoro_catalog_payload(language_id=requested_language)
         voice_metadata = kokoro_voice_metadata(selected_voice)
+        items: list[dict[str, Any]] = []
+        for raw_item in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(raw_item)
+            voice_id = _nonempty_text(item.get("voice_id")).lower()
+            try:
+                item["active_job"] = self._active_provider_download_job("kokoro", voice_id) if voice_id else None
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning("kokoro_catalog_active_job_probe_failed", voice_id=voice_id, error=str(exc))
+                item["active_job"] = None
+            items.append(item)
         return {
-            "items": _safe_json_list(payload.get("items")),
+            "items": items,
             "available_languages": _safe_json_list(payload.get("available_languages")),
             "selected_language": requested_language,
             "default_language": KOKORO_DEFAULT_LANGUAGE_ID,
@@ -5432,6 +5451,28 @@ class ControlPlaneManager:
             )
             or _nonempty_text(_safe_json_object(voice_metadata).get("name")),
             "downloaded_voice_ids": _safe_json_list(payload.get("downloaded_voice_ids")),
+            "provider_connected": True,
+        }
+
+    def get_kokoro_voice_status(self, voice_id: str) -> dict[str, Any]:
+        normalized_voice = _nonempty_text(voice_id).lower()
+        metadata = kokoro_voice_metadata(normalized_voice)
+        if metadata is None:
+            raise ValueError(f"unknown kokoro voice: {voice_id}")
+
+        voice_path = kokoro_voice_file_path(normalized_voice)
+        downloaded = voice_path.exists() and voice_path.stat().st_size > 0
+        try:
+            active_job = self._active_provider_download_job("kokoro", normalized_voice)
+        except Exception as exc:  # noqa: BLE001 - status should survive job table issues
+            log.warning("kokoro_voice_active_job_probe_failed", voice_id=normalized_voice, error=str(exc))
+            active_job = None
+        return {
+            **dict(metadata),
+            "downloaded": downloaded,
+            "bytes": int(voice_path.stat().st_size) if downloaded else 0,
+            "local_path": str(voice_path) if downloaded else "",
+            "active_job": active_job,
             "provider_connected": True,
         }
 
@@ -5510,7 +5551,11 @@ class ControlPlaneManager:
 
     def get_kokoro_model_status(self) -> dict[str, Any]:
         status = kokoro_model_status()
-        active = self._active_provider_download_job("kokoro", "model")
+        try:
+            active = self._active_provider_download_job("kokoro", "model")
+        except Exception as exc:  # noqa: BLE001 - status should survive job table issues
+            log.warning("kokoro_model_active_job_probe_failed", error=str(exc))
+            active = None
         return {**status, "active_job": active}
 
     def _run_kokoro_model_download(self, job_id: str) -> None:
@@ -8225,7 +8270,7 @@ class ControlPlaneManager:
         normalized = provider_id.strip().lower()
         if normalized in MANAGED_PROVIDER_IDS:
             connection = _safe_json_object(provider_connections.get(normalized))
-            if normalized == "codex" and function_id == "transcription":
+            if normalized == "codex" and function_id in {"image", "transcription"}:
                 return bool(connection.get("verified")) and bool(connection.get("api_key_present"))
             return bool(connection.get("verified"))
         command_present = bool(provider_payload.get("command_present", False))
@@ -8364,6 +8409,61 @@ class ControlPlaneManager:
             return "missing"
         return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
 
+    def _elevenlabs_fetch_subscription(self, api_key: str) -> dict[str, Any]:
+        import time as _time
+
+        signature = self._elevenlabs_voice_cache_signature(api_key)
+        cache_key = f"subscription_{signature}"
+        now = _time.time()
+        cached = self._elevenlabs_subscription_cache.get(cache_key)
+        if cached and (now - cached[0]) < 900:
+            return dict(cached[1])
+
+        if not api_key:
+            empty: dict[str, Any] = {}
+            self._elevenlabs_subscription_cache[cache_key] = (now, empty)
+            return dict(empty)
+
+        try:
+            request = urllib.request.Request(
+                "https://api.elevenlabs.io/v1/user/subscription",
+                headers={
+                    "xi-api-key": api_key,
+                    "User-Agent": "koda/control-plane",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = json.loads(response.read())
+            payload = _safe_json_object(data)
+        except Exception:
+            if cached:
+                return dict(cached[1])
+            payload = {}
+
+        self._elevenlabs_subscription_cache[cache_key] = (now, payload)
+        return dict(payload)
+
+    @staticmethod
+    def _elevenlabs_voice_api_availability(
+        voice: dict[str, Any],
+        subscription: dict[str, Any],
+    ) -> tuple[bool, str]:
+        tier = _nonempty_text(subscription.get("tier") or subscription.get("status")).lower()
+        status = _nonempty_text(subscription.get("status")).lower()
+        category = _nonempty_text(voice.get("category")).lower()
+        free_tier = tier == "free" or status == "free"
+        if free_tier and category in {"professional", "famous", "high_quality"}:
+            return (
+                False,
+                "Voz da ElevenLabs Voice Library indisponivel via API no plano free.",
+            )
+        if free_tier and voice.get("free_users_allowed") is False:
+            return (
+                False,
+                "Voz da ElevenLabs indisponivel via API no plano free.",
+            )
+        return True, ""
+
     def _elevenlabs_fetch_voice_catalog(self, api_key: str) -> dict[str, Any]:
         import time as _time
 
@@ -8379,17 +8479,33 @@ class ControlPlaneManager:
             self._elevenlabs_voice_cache[cache_key] = (now, empty)
             return dict(empty)
 
-        url = "https://api.elevenlabs.io/v2/voices?page_size=100"
-        request = urllib.request.Request(
-            url,
-            headers={
-                "xi-api-key": api_key,
-                "User-Agent": "koda/control-plane",
-            },
-        )
         try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                data = json.loads(response.read())
+            raw_voices: list[Any] = []
+            next_page_token = ""
+            for _page in range(10):
+                params = {"page_size": "100", "include_total_count": "false"}
+                if next_page_token:
+                    params["next_page_token"] = next_page_token
+                url = f"https://api.elevenlabs.io/v2/voices?{urllib.parse.urlencode(params)}"
+                request = urllib.request.Request(
+                    url,
+                    headers={
+                        "xi-api-key": api_key,
+                        "User-Agent": "koda/control-plane",
+                    },
+                )
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    data = json.loads(response.read())
+                if isinstance(data, list):
+                    raw_voices.extend(data)
+                    break
+                data_obj = _safe_json_object(data)
+                raw_voices.extend(_safe_json_list(data_obj.get("voices")))
+                if not bool(data_obj.get("has_more")):
+                    break
+                next_page_token = _nonempty_text(data_obj.get("next_page_token"))
+                if not next_page_token:
+                    break
         except Exception:
             if cached:
                 stale = dict(cached[1])
@@ -8397,24 +8513,37 @@ class ControlPlaneManager:
                 return stale
             return {"items": [], "available_languages": [], "cached": False, "provider_connected": True}
 
+        subscription = self._elevenlabs_fetch_subscription(api_key)
+        subscription_tier = _nonempty_text(subscription.get("tier") or subscription.get("status"))
         items: list[dict[str, Any]] = []
-        language_labels: dict[str, str] = {}
-        for voice in _safe_json_list(data.get("voices")):
+        for voice in _safe_json_list(raw_voices):
             payload = _safe_json_object(voice)
             labels = _safe_json_object(payload.get("labels"))
             verified_languages = []
             for language_payload in _safe_json_list(payload.get("verified_languages")):
                 language_entry = _safe_json_object(language_payload)
-                language_code = _nonempty_text(language_entry.get("language")).lower()
+                language_code = canonicalize_elevenlabs_language(
+                    language_entry.get("language") or language_entry.get("locale")
+                )
                 if not language_code:
                     continue
                 language_label = (
                     _nonempty_text(language_entry.get("name"))
                     or _nonempty_text(language_entry.get("display_name"))
-                    or language_code.upper()
+                    or elevenlabs_language_label(language_code)
                 )
-                language_labels.setdefault(language_code, language_label)
-                verified_languages.append({"code": language_code, "label": language_label})
+                verified_languages.append(
+                    {
+                        "code": language_code,
+                        "label": language_label,
+                        "locale": _nonempty_text(language_entry.get("locale")),
+                        "model_id": _nonempty_text(language_entry.get("model_id")),
+                        "accent": _nonempty_text(language_entry.get("accent")),
+                        "preview_url": _nonempty_text(language_entry.get("preview_url")),
+                    }
+                )
+            model_ids = normalize_string_list(payload.get("high_quality_base_model_ids"))
+            api_available, api_availability_reason = self._elevenlabs_voice_api_availability(payload, subscription)
             items.append(
                 {
                     "voice_id": _nonempty_text(payload.get("voice_id")),
@@ -8423,49 +8552,78 @@ class ControlPlaneManager:
                     "accent": _nonempty_text(labels.get("accent")),
                     "category": _nonempty_text(payload.get("category")),
                     "preview_url": _nonempty_text(payload.get("preview_url")),
+                    "model_ids": model_ids,
                     "languages": verified_languages,
+                    "api_available": api_available,
+                    "api_availability_reason": api_availability_reason,
                 }
             )
 
         items = [item for item in items if item["voice_id"]]
         items.sort(key=lambda item: str(item["name"]).casefold())
-        available_languages = [
-            {"code": code, "label": label}
-            for code, label in sorted(language_labels.items(), key=lambda item: item[1].casefold())
-        ]
         catalog = {
             "items": items,
-            "available_languages": available_languages,
             "cached": False,
             "provider_connected": True,
+            "subscription_tier": subscription_tier,
         }
         self._elevenlabs_voice_cache[cache_key] = (now, catalog)
         return dict(catalog)
 
-    def get_elevenlabs_voice_catalog(self, language: str = "") -> dict[str, Any]:
-        requested_language = _nonempty_text(language).lower()
+    def get_elevenlabs_voice_catalog(self, language: str = "", model_id: str = "") -> dict[str, Any]:
+        requested_language = canonicalize_elevenlabs_language(language)
+        selected_model = _nonempty_text(model_id) or ELEVENLABS_DEFAULT_TTS_MODEL
         catalog = self._elevenlabs_fetch_voice_catalog(self._resolve_elevenlabs_api_key())
         items = list(_safe_json_list(catalog.get("items")))
+        model_languages = elevenlabs_languages_for_model(selected_model)
+        supported_language_codes = {str(item["code"]) for item in model_languages}
+        model_items = []
+        for voice in items:
+            voice_obj = _safe_json_object(voice)
+            model_ids = normalize_string_list(voice_obj.get("model_ids"))
+            if model_ids and selected_model not in model_ids:
+                continue
+            model_items.append(voice_obj)
+        if model_items:
+            items = model_items
         if requested_language:
-            filtered_items = []
+            verified_matches = []
+            compatible_matches = []
             for voice in items:
-                languages = {
-                    _nonempty_text(_safe_json_object(entry).get("code")).lower()
-                    for entry in _safe_json_list(_safe_json_object(voice).get("languages"))
-                }
-                if requested_language in languages:
-                    filtered_items.append(voice)
-            items = filtered_items
+                voice_obj = _safe_json_object(voice)
+                languages = _safe_json_list(voice_obj.get("languages"))
+                language_match = any(
+                    elevenlabs_voice_language_matches(requested_language, _safe_json_object(entry))
+                    for entry in languages
+                )
+                if language_match:
+                    enriched = dict(voice_obj)
+                    enriched["language_match"] = True
+                    verified_matches.append(enriched)
+                elif requested_language in supported_language_codes:
+                    enriched = dict(voice_obj)
+                    enriched["language_match"] = False
+                    compatible_matches.append(enriched)
+            items = verified_matches or compatible_matches
+        items.sort(
+            key=lambda item: (
+                0 if bool(_safe_json_object(item).get("language_match")) else 1,
+                str(_safe_json_object(item).get("name") or "").casefold(),
+            )
+        )
         return {
             "items": items,
-            "available_languages": _safe_json_list(catalog.get("available_languages")),
+            "available_languages": model_languages,
             "selected_language": requested_language,
+            "selected_language_label": elevenlabs_language_label(requested_language) if requested_language else "",
+            "model_id": selected_model,
             "cached": bool(catalog.get("cached")),
             "provider_connected": bool(catalog.get("provider_connected")),
+            "subscription_tier": _nonempty_text(catalog.get("subscription_tier")),
         }
 
-    def list_elevenlabs_voices(self, language: str = "") -> list[dict[str, str]]:
-        items = self.get_elevenlabs_voice_catalog(language=language).get("items")
+    def list_elevenlabs_voices(self, language: str = "", model_id: str = "") -> list[dict[str, str]]:
+        items = self.get_elevenlabs_voice_catalog(language=language, model_id=model_id).get("items")
         return [cast(dict[str, str], _safe_json_object(item)) for item in _safe_json_list(items)]
 
     def list_ollama_models(self) -> list[dict[str, Any]]:
@@ -8968,6 +9126,9 @@ class ControlPlaneManager:
         functional_defaults_payload = _safe_json_object(models.get("functional_defaults"))
         if functional_defaults_payload and enabled_providers_specified:
             for function_id, selection in functional_defaults_payload.items():
+                function_key = str(function_id or "").strip().lower()
+                if function_key != "general":
+                    continue
                 selection_obj = _safe_json_object(selection)
                 fd_provider = _nonempty_text(selection_obj.get("provider_id")).lower()
                 if fd_provider and fd_provider not in enabled_providers:
@@ -10345,6 +10506,18 @@ class ControlPlaneManager:
         )
         audio_default = _safe_json_object(functional_defaults_env.get("audio"))
         audio_provider = _trimmed_text(audio_default.get("provider_id")).lower() or "kokoro"
+        audio_model = _trimmed_text(audio_default.get("model_id"))
+        if audio_provider == "elevenlabs" and audio_model:
+            env["ELEVENLABS_MODEL"] = audio_model
+        if audio_provider == "elevenlabs" and not _nonempty_text(env.get("ELEVENLABS_API_KEY")):
+            # Provider connection secrets are stripped from the persisted snapshot.
+            # Rehydrate the selected audio provider key only in process_env so
+            # ElevenLabs TTS can run without granting the key as a generic agent
+            # resource.
+            elevenlabs_api_key = self._provider_api_key_secret_value("elevenlabs")
+            if elevenlabs_api_key:
+                env["ELEVENLABS_API_KEY"] = elevenlabs_api_key
+                env["ELEVENLABS_ENABLED"] = "true"
         elevenlabs_default_voice = _nonempty_text(providers_section.get("elevenlabs_default_voice")) or _nonempty_text(
             providers_section.get("tts_default_voice")
         )
@@ -10357,9 +10530,7 @@ class ControlPlaneManager:
             _nonempty_text(env.get("ELEVENLABS_API_KEY"))
         )
         elevenlabs_enabled = "elevenlabs" in enabled_providers
-        if audio_provider == "elevenlabs" and (
-            not elevenlabs_ready or (not elevenlabs_enabled and not elevenlabs_default_voice)
-        ):
+        if audio_provider == "elevenlabs" and not elevenlabs_default_voice:
             audio_provider = "kokoro"
         kokoro_default_voice = (
             _nonempty_text(providers_section.get("kokoro_default_voice"))
@@ -10372,7 +10543,9 @@ class ControlPlaneManager:
             or _nonempty_text(env.get("KOKORO_DEFAULT_LANGUAGE"))
             or KOKORO_DEFAULT_LANGUAGE_ID
         )
-        if elevenlabs_default_voice and elevenlabs_ready and (audio_provider == "elevenlabs" or not elevenlabs_enabled):
+        if elevenlabs_default_voice and (
+            audio_provider == "elevenlabs" or (elevenlabs_ready and not elevenlabs_enabled)
+        ):
             env["TTS_DEFAULT_VOICE"] = elevenlabs_default_voice
         else:
             env["TTS_DEFAULT_VOICE"] = kokoro_default_voice
@@ -10387,7 +10560,7 @@ class ControlPlaneManager:
             env["AGENT_RESOURCE_ACCESS_POLICY_JSON"] = json_dump(resource_access_policy)
         if _safe_json_object(agent_spec.get("tool_policy")) and "AGENT_TOOL_POLICY_JSON" not in env:
             env["AGENT_TOOL_POLICY_JSON"] = json_dump(agent_spec["tool_policy"])
-        if _safe_json_object(agent_spec.get("model_policy")) and "AGENT_MODEL_POLICY_JSON" not in env:
+        if _safe_json_object(agent_spec.get("model_policy")):
             env["AGENT_MODEL_POLICY_JSON"] = json_dump(agent_spec["model_policy"])
         if _safe_json_object(agent_spec.get("autonomy_policy")) and "AGENT_AUTONOMY_POLICY_JSON" not in env:
             env["AGENT_AUTONOMY_POLICY_JSON"] = json_dump(agent_spec["autonomy_policy"])

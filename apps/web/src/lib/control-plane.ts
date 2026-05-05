@@ -196,6 +196,8 @@ export type ElevenLabsVoiceOption = {
   accent: string;
   category: string;
   preview_url: string;
+  api_available?: boolean;
+  api_availability_reason?: string;
   languages: Array<{
     code: string;
     label: string;
@@ -1674,13 +1676,15 @@ export async function getControlPlaneCoreIntegrations() {
     getControlPlaneConnectionCatalog(),
     getControlPlaneConnectionDefaults(),
   ]);
+  const catalogItems = Array.isArray(catalog?.items) ? catalog.items : [];
+  const defaultItems = Array.isArray(defaults?.items) ? defaults.items : [];
   const defaultMap = new Map(
-    (defaults.items || [])
+    defaultItems
       .filter((item) => item.kind === "core")
       .map((item) => [item.integration_key, item] as const),
   );
 
-  const items = (catalog.items || [])
+  const items = catalogItems
     .filter((item) => item.kind === "core")
     .map((item) => {
       const connection = defaultMap.get(item.integration_key) || null;

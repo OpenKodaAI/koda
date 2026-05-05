@@ -2,11 +2,15 @@
 
 import type { ReactNode } from "react";
 import {
+  Check,
   Clock,
+  History,
+  Loader2,
   Pause,
   Pencil,
   Play,
   RotateCcw,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
@@ -20,9 +24,14 @@ import {
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import type { CronJob } from "@/lib/types";
-import { cn, formatDateTime, truncateText } from "@/lib/utils";
+import { cn, truncateText } from "@/lib/utils";
 
 type ScheduleLifecycleAction = "pause" | "resume" | "validate";
+export type ScheduleTableActionKey = "inspect" | "edit" | "executions" | "run" | "lifecycle";
+export type ScheduleTableActionState = "idle" | "pending" | "success" | "error";
+export type ScheduleTableActionStates = Partial<
+  Record<number, Partial<Record<ScheduleTableActionKey, ScheduleTableActionState>>>
+>;
 
 export interface CronTableRow {
   job: CronJob;
@@ -32,8 +41,10 @@ export interface CronTableRow {
 interface CronTableProps {
   rows: CronTableRow[];
   busyJobId?: number | null;
+  actionStates?: ScheduleTableActionStates;
   onInspect?: (job: CronJob) => void;
   onEdit?: (job: CronJob) => void;
+  onExecutions?: (job: CronJob) => void;
   onRun?: (job: CronJob) => void;
   onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
 }
@@ -97,20 +108,13 @@ function formatScheduleTimestamp(value: string | null | undefined): string {
   }).format(date);
 }
 
-function formatScheduleTimestampTitle(
-  value: string | null | undefined,
-): string | undefined {
-  if (!value) return undefined;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatDateTime(value);
-}
-
 export function CronTable({
   rows,
   busyJobId = null,
+  actionStates,
   onInspect,
   onEdit,
+  onExecutions,
   onRun,
   onLifecycleAction,
 }: CronTableProps) {
@@ -137,14 +141,14 @@ export function CronTable({
   }
 
   const cols =
-    "md:grid-cols-[minmax(160px,180px)_minmax(220px,1fr)_118px_154px_96px_minmax(140px,170px)_128px]";
+    "md:grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(128px,150px)_96px_minmax(150px,190px)_176px]";
   const headerClass =
     "px-1 font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="overflow-hidden rounded-[var(--radius-shell)] border border-[color:var(--border-subtle)] bg-[var(--panel)]">
-        <div className="hidden md:block" role="table">
+      <div className="overflow-x-auto overflow-y-hidden rounded-[var(--radius-shell)] border border-[color:var(--border-subtle)] bg-[var(--panel)] overscroll-x-contain">
+        <div className="hidden min-w-[1060px] md:block" role="table">
           <div
             className={cn(
               "grid items-center gap-3 border-b border-[color:var(--divider-hair)] px-4 py-2.5",
@@ -161,16 +165,19 @@ export function CronTable({
             <span className={headerClass} role="columnheader">
               {t("schedules.table.schedule")}
             </span>
-            <span className={headerClass} role="columnheader">
-              {t("schedules.table.execution", { defaultValue: "Execution" })}
-            </span>
             <span className={cn(headerClass, "text-right")} role="columnheader">
               {t("common.status")}
             </span>
             <span className={headerClass} role="columnheader">
               {t("schedules.table.scope")}
             </span>
-            <span className={cn(headerClass, "text-right")} role="columnheader">
+            <span
+              className={cn(
+                headerClass,
+                "sticky-table-last sticky-table-last--header -mr-4 py-1.5 pl-4 pr-4 text-right",
+              )}
+              role="columnheader"
+            >
               {t("common.actions", { defaultValue: "Actions" })}
             </span>
           </div>
@@ -183,8 +190,10 @@ export function CronTable({
                 cols={cols}
                 index={index}
                 busy={busyJobId === row.job.id}
+                actionStates={actionStates?.[row.job.id]}
                 onInspect={onInspect}
                 onEdit={onEdit}
+                onExecutions={onExecutions}
                 onRun={onRun}
                 onLifecycleAction={onLifecycleAction}
               />
@@ -198,8 +207,10 @@ export function CronTable({
               key={`${row.agent.id}-${row.job.id}`}
               row={row}
               busy={busyJobId === row.job.id}
+              actionStates={actionStates?.[row.job.id]}
               onInspect={onInspect}
               onEdit={onEdit}
+              onExecutions={onExecutions}
               onRun={onRun}
               onLifecycleAction={onLifecycleAction}
             />
@@ -215,8 +226,10 @@ function ScheduleDesktopRow({
   cols,
   index,
   busy,
+  actionStates,
   onInspect,
   onEdit,
+  onExecutions,
   onRun,
   onLifecycleAction,
 }: {
@@ -224,8 +237,10 @@ function ScheduleDesktopRow({
   cols: string;
   index: number;
   busy: boolean;
+  actionStates?: Partial<Record<ScheduleTableActionKey, ScheduleTableActionState>>;
   onInspect?: (job: CronJob) => void;
   onEdit?: (job: CronJob) => void;
+  onExecutions?: (job: CronJob) => void;
   onRun?: (job: CronJob) => void;
   onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
 }) {
@@ -238,7 +253,8 @@ function ScheduleDesktopRow({
   return (
     <div
       className={cn(
-        "grid items-center gap-3 border-b border-[color:var(--divider-hair)] px-4 py-3 last:border-b-0",
+        "group grid items-center gap-3 border-b border-[color:var(--divider-hair)] px-4 py-3 last:border-b-0",
+        "sticky-table-row",
         "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)]",
         cols,
         staggerClass,
@@ -287,17 +303,6 @@ function ScheduleDesktopRow({
         </span>
       </div>
 
-      <div className="min-w-0 font-mono text-[0.6875rem]" role="cell">
-        <RunTimeLabel
-          label={t("schedules.table.nextRun", { defaultValue: "Next run" })}
-          value={job.next_run_at}
-        />
-        <RunTimeLabel
-          label={t("schedules.table.lastRun", { defaultValue: "Last run" })}
-          value={job.last_run_at ?? job.last_success_at ?? job.last_failure_at}
-        />
-      </div>
-
       <div className="flex justify-end" role="cell">
         <StatusBadge status={job.status} />
       </div>
@@ -311,7 +316,10 @@ function ScheduleDesktopRow({
         </span>
       </div>
 
-      <div className="flex justify-end" role="cell">
+      <div
+        className="sticky-table-last -mr-4 flex justify-end py-1 pl-4 pr-4"
+        role="cell"
+      >
         <JobActions
           job={job}
           busy={busy}
@@ -319,7 +327,9 @@ function ScheduleDesktopRow({
           onEdit={onEdit}
           onRun={onRun}
           onLifecycleAction={onLifecycleAction}
+          actionStates={actionStates}
           compact
+          onExecutions={onExecutions}
         />
       </div>
     </div>
@@ -329,15 +339,19 @@ function ScheduleDesktopRow({
 function ScheduleMobileRow({
   row,
   busy,
+  actionStates,
   onInspect,
   onEdit,
+  onExecutions,
   onRun,
   onLifecycleAction,
 }: {
   row: CronTableRow;
   busy: boolean;
+  actionStates?: Partial<Record<ScheduleTableActionKey, ScheduleTableActionState>>;
   onInspect?: (job: CronJob) => void;
   onEdit?: (job: CronJob) => void;
+  onExecutions?: (job: CronJob) => void;
   onRun?: (job: CronJob) => void;
   onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
 }) {
@@ -398,30 +412,12 @@ function ScheduleMobileRow({
         busy={busy}
         onInspect={onInspect}
         onEdit={onEdit}
+        onExecutions={onExecutions}
         onRun={onRun}
         onLifecycleAction={onLifecycleAction}
+        actionStates={actionStates}
       />
     </article>
-  );
-}
-
-function RunTimeLabel({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | null | undefined;
-}) {
-  return (
-    <span className="flex min-w-0 items-center justify-between gap-2 text-[var(--text-quaternary)]">
-      <span className="truncate">{label}</span>
-      <span
-        className="truncate text-right tabular-nums text-[var(--text-secondary)]"
-        title={formatScheduleTimestampTitle(value)}
-      >
-        {formatScheduleTimestamp(value)}
-      </span>
-    </span>
   );
 }
 
@@ -430,36 +426,70 @@ function JobActions({
   busy,
   onInspect,
   onEdit,
+  onExecutions,
   onRun,
   onLifecycleAction,
+  actionStates,
   compact = false,
 }: {
   job: CronJob;
   busy: boolean;
   onInspect?: (job: CronJob) => void;
   onEdit?: (job: CronJob) => void;
+  onExecutions?: (job: CronJob) => void;
   onRun?: (job: CronJob) => void;
   onLifecycleAction?: (job: CronJob, action: ScheduleLifecycleAction) => void;
+  actionStates?: Partial<Record<ScheduleTableActionKey, ScheduleTableActionState>>;
   compact?: boolean;
 }) {
+  const { t } = useAppI18n();
   const lifecycle = getLifecycleAction(job);
   const LifecycleIcon = lifecycle.icon;
+  const inspectState = actionStates?.inspect ?? "idle";
+  const editState = actionStates?.edit ?? "idle";
+  const executionsState = actionStates?.executions ?? "idle";
+  const runState = actionStates?.run ?? "idle";
+  const lifecycleState = actionStates?.lifecycle ?? "idle";
 
   return (
     <div className={cn("flex gap-1", compact ? "justify-end" : "flex-wrap")}>
-      <ActionButton label="Inspect" onClick={() => onInspect?.(job)} disabled={busy}>
+      <ActionButton
+        label="Inspect"
+        onClick={() => onInspect?.(job)}
+        disabled={busy}
+        state={inspectState}
+      >
         <Clock className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
-      <ActionButton label="Edit" onClick={() => onEdit?.(job)} disabled={busy}>
+      <ActionButton
+        label="Edit"
+        onClick={() => onEdit?.(job)}
+        disabled={busy}
+        state={editState}
+      >
         <Pencil className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
-      <ActionButton label="Run now" onClick={() => onRun?.(job)} disabled={busy}>
+      <ActionButton
+        label={t("schedules.table.executionsAction", { defaultValue: "Executions" })}
+        onClick={() => onExecutions?.(job)}
+        disabled={busy}
+        state={executionsState}
+      >
+        <History className="icon-xs" strokeWidth={1.75} aria-hidden />
+      </ActionButton>
+      <ActionButton
+        label="Run now"
+        onClick={() => onRun?.(job)}
+        disabled={busy}
+        state={runState}
+      >
         <Play className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
       <ActionButton
         label={lifecycle.label}
         onClick={() => lifecycle.action && onLifecycleAction?.(job, lifecycle.action)}
         disabled={busy || lifecycle.disabled}
+        state={lifecycleState}
       >
         <LifecycleIcon className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
@@ -471,31 +501,50 @@ function ActionButton({
   label,
   onClick,
   disabled,
+  state = "idle",
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  state?: ScheduleTableActionState;
   children: ReactNode;
 }) {
+  const isPending = state === "pending";
+  const isResolved = state === "success" || state === "error";
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           aria-label={label}
+          aria-busy={isPending || undefined}
           title={label}
+          data-action-state={state}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-chip)] border border-transparent text-[var(--text-tertiary)]",
             "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "hover:border-[color:var(--border-subtle)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]",
             "disabled:cursor-not-allowed disabled:opacity-50",
+            state === "pending" && "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-secondary)] opacity-100",
+            state === "success" && "border-[color:var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-dot)] opacity-100",
+            state === "error" && "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-dot)] opacity-100",
           )}
           onClick={onClick}
-          disabled={disabled}
+          disabled={disabled || isPending}
         >
-          {children}
+          {isPending ? (
+            <Loader2 className="icon-xs animate-spin" strokeWidth={1.75} aria-hidden />
+          ) : state === "success" ? (
+            <Check className="icon-xs" strokeWidth={1.75} aria-hidden />
+          ) : state === "error" ? (
+            <X className="icon-xs" strokeWidth={1.75} aria-hidden />
+          ) : (
+            children
+          )}
+          {isResolved ? <span className="sr-only">{state}</span> : null}
         </button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

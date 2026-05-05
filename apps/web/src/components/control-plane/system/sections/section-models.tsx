@@ -222,8 +222,16 @@ export function elevenlabsVoiceOptionLabel(voice: {
   accent: string;
   gender: string;
   category: string;
+  api_available?: boolean;
 }) {
-  const metadata = [voice.accent, voice.gender, voice.category].filter(Boolean).join(" · ");
+  const metadata = [
+    voice.accent,
+    voice.gender,
+    voice.category,
+    voice.api_available === false ? "requer plano pago/API" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return metadata ? `${voice.name} — ${metadata}` : voice.name;
 }
 
@@ -1259,7 +1267,11 @@ export function ProviderAuthPanel({
                           </SelectItem>
                         ) : null}
                         {elevenlabsVoiceCatalog.items.map((voice) => (
-                          <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                          <SelectItem
+                            key={voice.voice_id}
+                            value={voice.voice_id}
+                            disabled={voice.api_available === false}
+                          >
                             {elevenlabsVoiceOptionLabel(voice)}
                           </SelectItem>
                         ))}

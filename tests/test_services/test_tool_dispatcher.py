@@ -227,6 +227,76 @@ class TestBrowserScope:
 # Feature flags
 
 
+class TestImageGenerateTool:
+    @pytest.mark.asyncio
+    async def test_image_generate_invokes_generation_service(self, tmp_path):
+        from koda.services.generation_stubs import GeneratedImageArtifact, ImageGenerationResult
+
+        ctx = _make_ctx(work_dir=str(tmp_path))
+        image_path = tmp_path / "scene.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        def _fake_generate(prompt: str, **kwargs):
+            assert prompt == "A clean product render"
+            assert kwargs["output_dir"] == str(tmp_path)
+            assert kwargs["filename"] == "scene.png"
+            assert kwargs["size"] == "1024x1024"
+            assert kwargs["quality"] == "high"
+            assert kwargs["output_format"] == "png"
+            return ImageGenerationResult(
+                provider_id="codex",
+                model_id="gpt-image-2",
+                prompt=prompt,
+                output_dir=str(tmp_path),
+                artifacts=[
+                    GeneratedImageArtifact(
+                        path=str(image_path),
+                        provider_id="codex",
+                        model_id="gpt-image-2",
+                        size="1024x1024",
+                        output_format="png",
+                    )
+                ],
+            )
+
+        call = AgentToolCall(
+            tool="image_generate",
+            params={
+                "prompt": "A clean product render",
+                "filename": "scene.png",
+                "size": "1024x1024",
+                "quality": "high",
+                "output_format": "png",
+            },
+            raw_match="",
+        )
+
+        with patch("koda.services.generation_stubs.generate_image", side_effect=_fake_generate):
+            result = await execute_tool(call, ctx)
+
+        assert result.success is True
+        assert "codex/gpt-image-2" in result.output
+        assert str(image_path) in result.output
+        assert result.metadata["category"] == "image"
+        assert result.metadata["created_files"] == [str(image_path)]
+        assert result.data is not None
+        assert result.data["artifacts"][0]["path"] == str(image_path)
+
+    @pytest.mark.asyncio
+    async def test_image_generate_requires_prompt(self):
+        ctx = _make_ctx()
+        call = AgentToolCall(tool="image_generate", params={}, raw_match="")
+
+        result = await execute_tool(call, ctx)
+
+        assert result.success is False
+        assert "prompt" in result.output
+
+    def test_image_generate_is_write_tool(self):
+        assert _is_write_tool("image_generate", {}) is True
+        assert tool_dispatcher_module._infer_tool_category("image_generate") == "image"
+
+
 class TestLegacyExternalTools:
     @pytest.mark.parametrize("tool_name", ["gws", "jira", "confluence", "gh", "glab", "aws"])
     @pytest.mark.asyncio

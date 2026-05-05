@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
 import { requestJson } from "@/lib/http-client";
@@ -90,23 +90,5 @@ Entregar respostas objetivas, com contexto suficiente para execucao segura.`)}
       onClose={onClose}
       onSave={() => void handleSave()}
     />
-  );
-}
-
-export function WorkspaceSpecIndicator({
-  hasPrompt,
-}: {
-  hasPrompt: boolean;
-}) {
-  const { tl } = useAppI18n();
-  if (!hasPrompt) return null;
-
-  return (
-    <span
-      className="agent-board-lane__prompt-indicator"
-      title={tl("System prompt do espaço de trabalho configurado")}
-    >
-      <FileText size={10} />
-    </span>
   );
 }

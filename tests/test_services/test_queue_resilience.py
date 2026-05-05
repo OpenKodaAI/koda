@@ -68,6 +68,8 @@ async def test_recover_pending_tasks_requeues_persisted_fifo_item():
         "attempt": 1,
         "created_at": "2026-03-30T10:00:00+00:00",
         "session_id": "sess-1",
+        "lease_owner": "worker-old",
+        "lease_expires_at": "2026-03-30T10:01:00+00:00",
     }
     payload = {
         "_user_message": True,
@@ -102,6 +104,7 @@ async def test_recover_pending_tasks_requeues_persisted_fifo_item():
             patch("koda.services.queue_manager._persist_runtime_queue_item", new_callable=AsyncMock) as persist,
             patch("koda.services.queue_manager._sync_user_queue_observability"),
             patch("koda.services.queue_manager._ensure_queue_worker", new_callable=AsyncMock) as ensure_worker,
+            patch("koda.services.queue_manager.release_task_lease") as release_task_lease,
             patch("koda.services.queue_manager.update_task_status"),
             patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", False),
         ):
@@ -117,6 +120,7 @@ async def test_recover_pending_tasks_requeues_persisted_fifo_item():
         persist.assert_awaited_once()
         assert persist.await_args.kwargs["recovery_count"] == 1
         assert persist.await_args.kwargs["last_recovered_at"]
+        release_task_lease.assert_called_once_with(task_id, "worker-old")
         ensure_worker.assert_awaited_once()
     finally:
         _queue_workers.pop(user_id, None)

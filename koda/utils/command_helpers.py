@@ -21,6 +21,7 @@ from koda.config import (
     TRANSCRIPTION_MODEL,
     TRANSCRIPTION_PROVIDER,
     TTS_DEFAULT_VOICE,
+    TTS_ENABLED,
 )
 from koda.state.history_store import get_user_cost
 from koda.telegram_types import BotContext, MessageUpdate
@@ -176,7 +177,45 @@ def sync_user_data_with_runtime_settings(user_data: dict[str, Any], settings: di
     if settings.get("tts_voice_label"):
         user_data["tts_voice_label"] = str(settings.get("tts_voice_label"))
     user_data["tts_voice_language"] = str(settings.get("tts_voice_language") or ELEVENLABS_DEFAULT_LANGUAGE)
+    voice_policy_mode = str(settings.get("voice_policy_mode") or "disabled").strip().lower()
+    user_data["voice_policy"] = copy.deepcopy(settings.get("voice_policy") or {})
+    user_data["voice_policy_mode"] = voice_policy_mode
+    voice_policy_active = _coerce_bool(
+        settings.get("voice_policy_active"),
+        default=voice_policy_mode in {"tts", "voice_active"},
+    )
+    user_data["voice_policy_active"] = voice_policy_active
+    runtime_tts_enabled = _coerce_bool(settings.get("tts_enabled"), default=TTS_ENABLED) or voice_policy_active
+    if _coerce_bool(user_data.get("audio_response"), default=False) and user_data.get("_audio_response_user_override"):
+        user_data["tts_enabled"] = True
+    else:
+        user_data["tts_enabled"] = runtime_tts_enabled
+    if "_audio_response_user_override" not in user_data:
+        user_data["audio_response"] = voice_policy_active
     return user_data
+
+
+def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def tts_enabled_for_session(user_data: dict[str, Any] | None) -> bool:
+    """Return the current runtime TTS availability for a Telegram session."""
+    if not user_data:
+        return TTS_ENABLED
+    voice_policy_active = _coerce_bool(user_data.get("voice_policy_active"), default=False)
+    return _coerce_bool(user_data.get("tts_enabled"), default=TTS_ENABLED) or voice_policy_active
 
 
 def get_provider_model(user_data: dict[str, Any], provider: str | None = None) -> str:

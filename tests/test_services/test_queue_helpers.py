@@ -20,6 +20,7 @@ from koda.services.queue_manager import (
     TaskInfo,
     _apply_policy_overrides,
     _compact_tool_label,
+    _detect_audio_response_request,
     _get_throttle_interval,
     _parse_queue_item,
     _post_process,
@@ -57,17 +58,15 @@ class TestCompactToolLabel:
         assert _compact_tool_label("Read", {"file_path": "/workspace/main.py"}) == "Read(main.py)"
 
     def test_bash(self):
-        assert _compact_tool_label("Bash", {"command": "npm test"}) == "Bash(npm test)"
+        assert _compact_tool_label("Bash", {"command": "npm test"}) == "Bash(execucao)"
 
     def test_bash_long(self):
         long_cmd = "npm run build -- --mode production --watch"
         label = _compact_tool_label("Bash", {"command": long_cmd})
-        assert label.startswith("Bash(")
-        assert label.endswith("...)")
-        assert len(label) <= len("Bash(") + 30 + 1  # name + truncated + paren
+        assert label == "Bash(execucao)"
 
     def test_grep(self):
-        assert _compact_tool_label("Grep", {"pattern": "TODO"}) == "Grep(TODO)"
+        assert _compact_tool_label("Grep", {"pattern": "TODO"}) == "Grep(busca)"
 
     def test_generic_with_input(self):
         label = _compact_tool_label("Edit", {"file_path": "/a/b/c.py", "old_string": "foo"})
@@ -78,6 +77,19 @@ class TestCompactToolLabel:
         assert _compact_tool_label("Read") == "Read"
         assert _compact_tool_label("Read", None) == "Read"
         assert _compact_tool_label("Read", {}) == "Read"
+
+
+class TestAudioResponseIntent:
+    def test_detects_portuguese_audio_request(self):
+        assert _detect_audio_response_request("Pode me envie um audio com o resumo?")
+        assert _detect_audio_response_request("responda por voz, por favor")
+
+    def test_detects_english_audio_request(self):
+        assert _detect_audio_response_request("send me a voice message with the answer")
+        assert _detect_audio_response_request("reply by audio")
+
+    def test_ignores_configuration_discussion(self):
+        assert not _detect_audio_response_request("o modo de voz ainda nao funciona")
 
 
 class TestGetThrottleInterval:
@@ -146,6 +158,41 @@ class TestMemoryConcurrentTimeout:
 
         assert "memory timeout" in query_context.warnings
         mock_cancel.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_prepare_query_context_appends_active_voice_state_from_policy(self):
+        context = MagicMock()
+        context.user_data = {
+            "provider": "codex",
+            "work_dir": "/tmp",
+            "total_cost": 0.0,
+            "auto_model": False,
+            "manual_models_by_provider": {
+                "claude": "claude-sonnet-4-6",
+                "codex": "gpt-5.4-mini",
+            },
+            "provider_sessions": {},
+            "audio_response": False,
+            "tts_enabled": False,
+            "voice_policy_active": True,
+            "voice_policy_mode": "voice_active",
+        }
+        item = QueueItem(chat_id=111, query_text="hello")
+
+        with (
+            patch("koda.memory.config.MEMORY_ENABLED", False),
+            patch("koda.knowledge.config.KNOWLEDGE_ENABLED", False),
+            patch("koda.services.cache_config.CACHE_ENABLED", False),
+            patch("koda.services.cache_config.SCRIPT_LIBRARY_ENABLED", False),
+            patch("koda.services.queue_manager.get_provider_session_mapping", return_value=None),
+            patch("koda.services.queue_manager.save_session"),
+            patch("koda.services.queue_manager.resolve_provider_model", return_value="gpt-5.4-mini"),
+        ):
+            query_context = await _prepare_query_context(context, item, user_id=111)
+
+        assert "Voice delivery is ACTIVE for this response" in query_context.system_prompt
+        assert "continuous_voice_mode=active" in query_context.system_prompt
+        assert "Do not say voice mode, TTS, or audio is disabled" in query_context.system_prompt
 
 
 class TestRuntimeTerminalCutover:
@@ -366,6 +413,13 @@ class TestVoicePromptInjection:
         assert "TTS" in VOICE_ACTIVE_PROMPT
         assert "URLs" in VOICE_ACTIVE_PROMPT
         assert "<voice_example>" in VOICE_ACTIVE_PROMPT
+        assert "Do not say that voice mode, audio, or TTS is disabled" in VOICE_ACTIVE_PROMPT
+        assert "Write in spoken English" not in VOICE_ACTIVE_PROMPT
+        assert "user's language" in VOICE_ACTIVE_PROMPT
+
+    def test_default_system_prompt_defers_voice_state_to_runtime_section(self):
+        assert "If a voice-active section appears" in DEFAULT_SYSTEM_PROMPT
+        assert "If the user asks for audio response but /voice is not active" not in DEFAULT_SYSTEM_PROMPT
 
 
 class TestSystemPromptAutonomousWork:
@@ -414,6 +468,18 @@ class TestParseQueueItem:
         assert item.chat_id == 100
         assert item.query_text == "just text"
         assert item.image_paths is None
+
+    def test_parse_user_message_preserves_forced_audio_flag(self):
+        item = _parse_queue_item(
+            {
+                "_user_message": True,
+                "chat_id": 123,
+                "query_text": "me envie um audio",
+                "force_audio_response": True,
+            }
+        )
+
+        assert item.force_audio_response is True
 
 
 class TestVideoFramePathDetection:

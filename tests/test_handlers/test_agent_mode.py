@@ -291,4 +291,5 @@ class TestStreamingMetadataCollector:
 
         # Response should be tool summary, NOT raw JSON
         assert "Bash" in response
-        assert "{" not in response.split("Used:")[0]  # no JSON before tool summary
+        assert "{" not in response
+        assert "git status" not in response
