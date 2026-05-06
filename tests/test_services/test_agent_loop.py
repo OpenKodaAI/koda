@@ -1423,7 +1423,7 @@ class TestAgentLoop:
         assert ctx.confidence_reports[-1]["requires_human_approval"] is False
 
     @pytest.mark.asyncio
-    async def test_send_response_includes_operational_footer_for_writes(self):
+    async def test_send_response_includes_operational_footer_for_writes(self, tmp_path):
         ctx = _make_ctx(
             task_kind="code_change",
             effective_policy=default_execution_policy("code_change"),
@@ -1455,7 +1455,7 @@ class TestAgentLoop:
             None,
             context,
             run_result,
-            "/tmp",
+            str(tmp_path),
             "autonomous",
             elapsed=6.0,
             model="claude-sonnet-4-6",
@@ -1470,7 +1470,7 @@ class TestAgentLoop:
         assert "Flow: guarded, provider-fallback" in sent_text
 
     @pytest.mark.asyncio
-    async def test_send_response_uses_agent_local_audio_defaults_for_tts(self):
+    async def test_send_response_uses_agent_local_audio_defaults_for_tts(self, tmp_path):
         ctx = _make_ctx()
         context = _make_context()
         context.user_data.update(
@@ -1496,7 +1496,7 @@ class TestAgentLoop:
                 None,
                 context,
                 run_result,
-                "/tmp",
+                str(tmp_path),
                 "autonomous",
                 elapsed=1.0,
                 model="claude-sonnet-4-6",
@@ -1514,7 +1514,7 @@ class TestAgentLoop:
         )
 
     @pytest.mark.asyncio
-    async def test_send_response_force_audio_request_bypasses_disabled_session_flag(self):
+    async def test_send_response_force_audio_request_bypasses_disabled_session_flag(self, tmp_path):
         ctx = _make_ctx(force_audio_response=True)
         context = _make_context()
         context.user_data.update(
@@ -1540,7 +1540,7 @@ class TestAgentLoop:
                 None,
                 context,
                 run_result,
-                "/tmp",
+                str(tmp_path),
                 "autonomous",
                 elapsed=1.0,
                 model="claude-sonnet-4-6",
@@ -1551,7 +1551,7 @@ class TestAgentLoop:
         mock_tts.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_send_response_uses_voice_policy_active_when_audio_response_flag_is_stale(self):
+    async def test_send_response_uses_voice_policy_active_when_audio_response_flag_is_stale(self, tmp_path):
         ctx = _make_ctx()
         context = _make_context()
         context.user_data.update(
@@ -1579,7 +1579,7 @@ class TestAgentLoop:
                 None,
                 context,
                 run_result,
-                "/tmp",
+                str(tmp_path),
                 "autonomous",
                 elapsed=1.0,
                 model="claude-sonnet-4-6",
@@ -1590,7 +1590,7 @@ class TestAgentLoop:
         mock_tts.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_send_response_explains_elevenlabs_paid_plan_voice_failure(self):
+    async def test_send_response_explains_elevenlabs_paid_plan_voice_failure(self, tmp_path):
         ctx = _make_ctx()
         context = _make_context()
         context.user_data.update(
@@ -1624,7 +1624,7 @@ class TestAgentLoop:
                 None,
                 context,
                 run_result,
-                "/tmp",
+                str(tmp_path),
                 "autonomous",
                 elapsed=1.0,
                 model="claude-sonnet-4-6",
