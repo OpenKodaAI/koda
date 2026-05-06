@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from koda.agent_contract import normalize_integration_grants, normalize_string_list
 from koda.services.runtime_access_service import RuntimeAccessService
@@ -11,6 +12,48 @@ from koda.services.runtime_access_service import RuntimeAccessService
 from .agent_spec import _safe_json_object, normalize_knowledge_policy
 from .crypto import decrypt_secret
 from .database import fetch_one
+
+_LOOPBACK_RUNTIME_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _host_from_grpc_target(raw_target: str) -> str | None:
+    raw = str(raw_target or "").strip()
+    if not raw or raw.startswith(("unix:", "unix://")):
+        return None
+    if raw.startswith("dns:///"):
+        raw = raw.removeprefix("dns:///")
+    if "://" in raw:
+        parsed = urlparse(raw)
+        return parsed.hostname
+    if raw.startswith("[") and "]" in raw:
+        return raw[1 : raw.index("]")]
+    return raw.rsplit(":", 1)[0].strip() or None
+
+
+def _remote_runtime_kernel_host() -> str | None:
+    host = _host_from_grpc_target(
+        os.environ.get("RUNTIME_KERNEL_SOCKET") or os.environ.get("RUNTIME_KERNEL_GRPC_TARGET") or ""
+    )
+    if not host or host.lower() in _LOOPBACK_RUNTIME_HOSTS:
+        return None
+    return host
+
+
+def _control_plane_reachable_runtime_url(raw_url: str) -> str:
+    raw = str(raw_url or "").strip()
+    if not raw:
+        return raw
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return raw
+    runtime_host = _remote_runtime_kernel_host()
+    if not runtime_host or (parsed.hostname or "").lower() not in _LOOPBACK_RUNTIME_HOSTS:
+        return raw
+    netloc = runtime_host
+    if parsed.port:
+        netloc = f"{runtime_host}:{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 class ControlPlaneRuntimeAccessBroker:
@@ -41,6 +84,9 @@ class ControlPlaneRuntimeAccessBroker:
                 return scoped_value
         return str(os.environ.get("RUNTIME_LOCAL_UI_TOKEN") or "").strip()
 
+    def resolve_runtime_secret(self, agent_id: str, snapshot: dict[str, Any] | None = None) -> str:
+        return self._resolve_runtime_secret(agent_id, _safe_json_object(snapshot))
+
     def get_runtime_access(
         self,
         agent_id: str,
@@ -69,6 +115,8 @@ class ControlPlaneRuntimeAccessBroker:
         runtime_base_url = str(
             runtime_endpoint.get("runtime_base_url") or health_url.removesuffix("/health").rstrip("/")
         )
+        health_url = _control_plane_reachable_runtime_url(health_url)
+        runtime_base_url = _control_plane_reachable_runtime_url(runtime_base_url)
 
         runtime_secret = self._resolve_runtime_secret(normalized, snapshot)
         sections = _safe_json_object(snapshot.get("sections"))
@@ -99,9 +147,13 @@ class ControlPlaneRuntimeAccessBroker:
 
         if runtime_secret:
             access_service = RuntimeAccessService(runtime_secret)
+            requested_capability = str(capability or "read").strip().lower() or "read"
+            runtime_capabilities: tuple[str, ...] = (requested_capability,)
+            if requested_capability == "mutate":
+                runtime_capabilities = ("mutate", "read")
             request_envelope, runtime_request_token = access_service.issue(
                 agent_scope=normalized,
-                capabilities=(str(capability or "read").strip().lower() or "read",),
+                capabilities=runtime_capabilities,
                 sensitive_allowed=False,
                 ttl_seconds=300,
             )

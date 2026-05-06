@@ -16,6 +16,7 @@ import signal
 import sys
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from aiohttp import web
 
@@ -79,6 +80,9 @@ _SYSTEM_ENV_KEYS = frozenset(
         "RUNTIME_KERNEL_GRPC_TARGET",
         "RUNTIME_KERNEL_SOCKET",
         "RUNTIME_KERNEL_ROOT",
+        "RUNTIME_EPHEMERAL_ROOT",
+        "STATE_ROOT_DIR",
+        "ARTIFACT_STORE_DIR",
         "PLAYWRIGHT_BROWSERS_PATH",
     }
 )
@@ -112,6 +116,27 @@ _SAFE_RUNTIME_PARENT_ENV_KEYS = frozenset(
         "XDG_CACHE_HOME",
     }
 )
+
+_LOOPBACK_KERNEL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _host_from_grpc_target(raw_target: str) -> str | None:
+    raw = str(raw_target or "").strip()
+    if not raw or raw.startswith(("unix:", "unix://")):
+        return None
+    if raw.startswith("dns:///"):
+        raw = raw.removeprefix("dns:///")
+    if "://" in raw:
+        parsed = urlparse(raw)
+        return parsed.hostname
+    if raw.startswith("[") and "]" in raw:
+        return raw[1 : raw.index("]")]
+    return raw.rsplit(":", 1)[0].strip() or None
+
+
+def _kernel_workers_need_network_bind(raw_target: str) -> bool:
+    host = _host_from_grpc_target(raw_target)
+    return bool(host and host.lower() not in _LOOPBACK_KERNEL_HOSTS)
 
 
 def _sidecar_targets() -> list[tuple[str, str]]:
@@ -487,6 +512,8 @@ class ControlPlaneSupervisor:
             log.debug("control_plane_provider_models_resolve_skipped", exc_info=True)
         env["AGENT_ID"] = agent_id
         env["_KODA_RUNTIME_BOOTSTRAPPED"] = "1"
+        if _kernel_workers_need_network_bind(self._link.target) and not env.get("HEALTH_BIND"):
+            env["HEALTH_BIND"] = "0.0.0.0"
 
         health_port, health_path = _split_health_url(runtime.health_url)
         workspace_id = self._workspace_id_for_agent(agent_id)

@@ -1975,6 +1975,7 @@ def resolve_provider_function_model_catalog(
     *,
     available_models: list[str] | None = None,
     ollama_catalog_items: list[dict[str, Any]] | None = None,
+    whisper_catalog_items: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     normalized_provider = provider_id.strip().lower()
     general_models = list(
@@ -1993,6 +1994,39 @@ def resolve_provider_function_model_catalog(
             mid = str(cat_item.get("model_id") or cat_item.get("name") or "").strip()
             if mid:
                 ollama_lookup[mid] = cat_item
+
+    if normalized_provider == "whispercpp" and whisper_catalog_items is not None:
+        for cat_item in whisper_catalog_items:
+            if not bool(cat_item.get("downloaded")):
+                continue
+            variant_id = str(cat_item.get("variant_id") or cat_item.get("model_id") or "").strip()
+            if not variant_id:
+                continue
+            entry_key = ("transcription", variant_id)
+            if entry_key in seen:
+                continue
+            seen.add(entry_key)
+            bytes_on_disk = int(cat_item.get("bytes") or 0) or None
+            approx_size = int(cat_item.get("approx_size_bytes") or 0) or None
+            items.append(
+                {
+                    "provider_id": normalized_provider,
+                    "model_id": variant_id,
+                    "title": str(cat_item.get("label") or variant_id),
+                    "function_id": "transcription",
+                    "description": str(cat_item.get("description") or "Transcricao local via whisper.cpp."),
+                    "status": "current",
+                    "context_window": 0,
+                    "input_cost_per_1m": 0,
+                    "output_cost_per_1m": 0,
+                    "speed_tier": 3,
+                    "intelligence_tier": 3,
+                    "filename": str(cat_item.get("filename") or "") or None,
+                    "local_path": str(cat_item.get("local_path") or "") or None,
+                    "size_bytes": bytes_on_disk or approx_size,
+                    "downloaded": True,
+                }
+            )
 
     for model_id in general_models:
         normalized_model = str(model_id).strip()
@@ -2069,6 +2103,8 @@ def resolve_provider_function_model_catalog(
         items.append(entry)
 
     for definition in _STATIC_PROVIDER_MODELS:
+        if normalized_provider == "whispercpp" and whisper_catalog_items is not None:
+            continue
         if definition.provider_id != normalized_provider:
             continue
         entry_key = (definition.function_id, definition.model_id)

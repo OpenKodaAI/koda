@@ -117,6 +117,17 @@ def test_build_artifact_engine_client_uses_grpc_in_rust_mode(
     assert health["configured_target"] == "127.0.0.1:50064"
 
 
+def test_build_artifact_engine_client_defaults_to_non_empty_agent_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "AGENT_ID", None)
+
+    client = build_artifact_engine_client()
+
+    assert isinstance(client, GrpcArtifactEngineClient)
+    assert client.health()["agent_id"] == "default"
+
+
 def test_build_retrieval_engine_client_uses_grpc_in_rust_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

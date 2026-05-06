@@ -216,6 +216,43 @@ async def test_reconcile_caches_health_url_for_dashboard() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconcile_binds_worker_health_api_for_remote_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNTIME_EPHEMERAL_ROOT", "/var/lib/koda/runtime")
+    monkeypatch.setenv("STATE_ROOT_DIR", "/var/lib/koda/state")
+    monkeypatch.setenv("ARTIFACT_STORE_DIR", "/var/lib/koda/artifacts")
+    manager = _FakeManager([{"id": "AGENT_A", "status": "active", "applied_version": 1}])
+    manager.add_snapshot(_runtime_snapshot("AGENT_A", port=9100))
+    captured: dict[str, Any] = {}
+
+    async def fake_ensure(desired: list[AgentWorkerSpec]) -> EnsureOutcome:
+        captured["desired"] = desired
+        return EnsureOutcome(
+            current=(_running_status("AGENT_A"),),
+            spawned=1,
+            terminated=0,
+            restarted=0,
+            unchanged=0,
+        )
+
+    fake_link = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        ensure_agent_workers=AsyncMock(side_effect=fake_ensure),
+        target="runtime-kernel:50061",
+    )
+
+    supervisor = _make_supervisor(manager, fake_link)
+    await supervisor._reconcile_once()
+
+    desired = captured["desired"]
+    assert len(desired) == 1
+    assert desired[0].environment["HEALTH_BIND"] == "0.0.0.0"
+    assert desired[0].environment["RUNTIME_EPHEMERAL_ROOT"] == "/var/lib/koda/runtime"
+    assert desired[0].environment["STATE_ROOT_DIR"] == "/var/lib/koda/state"
+    assert desired[0].environment["ARTIFACT_STORE_DIR"] == "/var/lib/koda/artifacts"
+
+
+@pytest.mark.asyncio
 async def test_reconcile_drops_stale_status_when_agent_is_removed() -> None:
     """An agent that disappears from the manager must NOT linger in the
     /health output. Otherwise the dashboard ghosts dead agents forever."""

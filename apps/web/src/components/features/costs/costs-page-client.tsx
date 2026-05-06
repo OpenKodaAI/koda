@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { keepPreviousData } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CostBreakdownCard, type CostBreakdownItem } from "@/components/costs/cost-breakdown-card";
 import { CostConversationTable } from "@/components/costs/cost-conversation-table";
@@ -21,6 +22,7 @@ import {
 import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
@@ -143,6 +145,8 @@ export default function CostsPage() {
       language,
     }),
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+    notifyOnChangeProps: ["data", "error"],
     queryFn: ({ signal }) =>
       fetchControlPlaneDashboardJson<CostInsightsResponse>(
         "/costs",
@@ -161,8 +165,15 @@ export default function CostsPage() {
       ),
   });
 
-  const insights = insightsQuery.data ?? null;
-  const loading = insightsQuery.isLoading;
+  const stableInsightsQuery = useStableQueryData({
+    data: insightsQuery.data,
+    resetKey: "dashboard:costs",
+    isPending: insightsQuery.isPending,
+    isFetching: insightsQuery.isFetching,
+    error: insightsQuery.error,
+  });
+  const insights = stableInsightsQuery.data ?? null;
+  const loading = stableInsightsQuery.initialLoading;
   const error =
     insightsQuery.error?.message ??
     null;
@@ -199,7 +210,7 @@ export default function CostsPage() {
 
   if (loading && !insights) return <PageSkeleton />;
 
-  if (error && !insights) {
+  if (stableInsightsQuery.showBlockingError && error) {
     return (
       <ErrorState
         title={t("costs.page.unavailable", { defaultValue: "Costs unavailable" })}

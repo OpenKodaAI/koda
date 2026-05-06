@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -624,6 +625,16 @@ def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
     assert "/tmp/runtime-requirements.txt" in app_dockerfile
     assert "COPY requirements.txt ./" not in app_dockerfile
     assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
+
+
+def test_embedding_download_client_is_packaged_for_fresh_installs() -> None:
+    """Embedding model downloads call huggingface_hub.snapshot_download at runtime."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime_dependencies = project["project"]["dependencies"]
+    lock_text = (ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    assert "huggingface-hub>=0.36.0,<1.0" in runtime_dependencies
+    assert 'name = "huggingface-hub"' in lock_text
 
 
 def test_doctor_checks_dashboard_and_control_plane() -> None:

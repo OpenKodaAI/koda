@@ -379,10 +379,15 @@ def provider_command_present(provider_id: str, base_env: dict[str, str] | None =
         whisper_model = str(env.get("WHISPER_MODEL") or "").strip() or str(
             Path.home() / ".cache" / "whisper-cpp" / "models" / "ggml-large-v3-turbo-q5_0.bin"
         )
+        managed_model_present = False
+        with suppress(Exception):
+            from koda.services.whisper_manager import downloaded_whisper_variants
+
+            managed_model_present = bool(downloaded_whisper_variants())
         return (
             bool(shutil.which(whisper_bin, path=env.get("PATH")))
             and bool(whisper_model)
-            and Path(whisper_model).expanduser().exists()
+            and (Path(whisper_model).expanduser().exists() or managed_model_present)
         )
     if provider_id.strip().lower() == "ollama":
         env = _provider_command_env(base_env)

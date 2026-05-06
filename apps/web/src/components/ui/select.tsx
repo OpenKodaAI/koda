@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { Check, ChevronDown, ChevronUp } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -100,37 +100,121 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", sideOffset = 6, ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <SelectPrimitive.Content
-      ref={ref}
-      data-slot="select-content"
-      sideOffset={sideOffset}
-      position={position}
-      className={cn(
-        // z-[90] keeps the dropdown above modals/drawers (z-[70..80]). Without
-        // this bump, Selects rendered inside modals get clipped behind them.
-        "app-floating-panel relative z-[90] min-w-[10rem] overflow-hidden text-[var(--text-primary)]",
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
-        className,
-      )}
-      {...props}
-    >
-      <SelectScrollUpButton />
-      <SelectPrimitive.Viewport
+>(({ className, children, position = "popper", sideOffset = 6, ...props }, ref) => {
+  const [query, setQuery] = React.useState("");
+  const [hasMatches, setHasMatches] = React.useState(true);
+  const contentRef = React.useRef<React.ElementRef<typeof SelectPrimitive.Content>>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const setRefs = React.useCallback(
+    (node: React.ElementRef<typeof SelectPrimitive.Content> | null) => {
+      contentRef.current = node;
+      if (typeof ref === "function") {
+        ref(node);
+      } else if (ref) {
+        ref.current = node;
+      }
+    },
+    [ref],
+  );
+
+  React.useEffect(() => {
+    const items = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>("[data-slot='select-item']") ?? [],
+    );
+    if (items.length === 0) {
+      setHasMatches(true);
+      return;
+    }
+
+    let visibleCount = 0;
+    for (const item of items) {
+      const matches =
+        !normalizedQuery || item.textContent?.toLowerCase().includes(normalizedQuery);
+      item.hidden = !matches;
+      if (matches) visibleCount += 1;
+    }
+    const labels = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>("[data-slot='select-label']") ?? [],
+    );
+    for (const label of labels) {
+      const groupItems = Array.from(
+        label.parentElement?.querySelectorAll<HTMLElement>("[data-slot='select-item']") ?? [],
+      );
+      label.hidden =
+        normalizedQuery.length > 0 &&
+        groupItems.length > 0 &&
+        groupItems.every((item) => item.hidden);
+    }
+    setHasMatches(visibleCount > 0);
+  }, [normalizedQuery, children]);
+
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        ref={setRefs}
+        data-slot="select-content"
+        sideOffset={sideOffset}
+        position={position}
         className={cn(
-          "max-h-[20rem] p-1",
-          position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+          // z-[90] keeps the dropdown above modals/drawers (z-[70..80]). Without
+          // this bump, Selects rendered inside modals get clipped behind them.
+          "app-floating-panel relative z-[90] min-w-[10rem] overflow-hidden text-[var(--text-primary)]",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
+          className,
         )}
+        {...props}
       >
-        {children}
-      </SelectPrimitive.Viewport>
-      <SelectScrollDownButton />
-    </SelectPrimitive.Content>
-  </SelectPrimitive.Portal>
-));
+        <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
+          <div
+            className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:shadow-[inset_0_0_0_1px_var(--border-strong)]"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDownCapture={(event) => {
+                if (event.key !== "Escape") event.stopPropagation();
+              }}
+              placeholder="Search..."
+              aria-label="Search options"
+              className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              style={{ outline: "none", border: "none", boxShadow: "none" }}
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <SelectScrollUpButton />
+        <SelectPrimitive.Viewport
+          className={cn(
+            "max-h-[20rem] p-1",
+            position === "popper" &&
+              "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+          )}
+        >
+          {children}
+          {!hasMatches ? (
+            <div className="px-3 py-4 text-center text-xs text-[var(--text-quaternary)]">
+              No options found.
+            </div>
+          ) : null}
+        </SelectPrimitive.Viewport>
+        <SelectScrollDownButton />
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  );
+});
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
 const SelectLabel = React.forwardRef<
@@ -159,7 +243,7 @@ const SelectItem = React.forwardRef<
     className={cn(
       "relative flex w-full cursor-default select-none items-center gap-2 rounded-[var(--radius-panel-sm)] py-1.5 pl-7 pr-2 text-[0.8125rem] text-[var(--text-secondary)] outline-none",
       "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-      "focus:bg-[var(--hover-tint)] focus:text-[var(--text-primary)]",
+      "focus:text-[var(--text-primary)]",
       "data-[state=checked]:bg-[var(--panel-strong)] data-[state=checked]:text-[var(--text-primary)]",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,

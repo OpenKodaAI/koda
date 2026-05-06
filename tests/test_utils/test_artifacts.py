@@ -264,6 +264,36 @@ async def test_animation_api_error_fallback_document(mock_update, mock_context, 
 
 
 @pytest.mark.asyncio
+async def test_video_api_error_fallback_document(mock_update, mock_context, tmp_path):
+    vid = tmp_path / "broken.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100)
+    mock_update.message.reply_video = AsyncMock(side_effect=Exception("Telegram API error"))
+    sent = await send_created_files([str(vid)], 111, mock_context, mock_update)
+    assert sent == 1
+    mock_update.message.reply_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_audio_api_error_fallback_document(mock_update, mock_context, tmp_path):
+    audio = tmp_path / "broken.mp3"
+    audio.write_bytes(b"\xff\xfb\x90" + b"\x00" * 100)
+    mock_update.message.reply_audio = AsyncMock(side_effect=Exception("Telegram API error"))
+    sent = await send_created_files([str(audio)], 111, mock_context, mock_update)
+    assert sent == 1
+    mock_update.message.reply_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_voice_api_error_fallback_document(mock_update, mock_context, tmp_path):
+    voice = tmp_path / "broken.ogg"
+    voice.write_bytes(b"OggS" + b"\x00" * 100)
+    mock_update.message.reply_voice = AsyncMock(side_effect=Exception("Telegram API error"))
+    sent = await send_created_files([str(voice)], 111, mock_context, mock_update)
+    assert sent == 1
+    mock_update.message.reply_document.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_caption_includes_size(mock_update, mock_context, tmp_path):
     doc = tmp_path / "readme.txt"
     doc.write_text("hello world")

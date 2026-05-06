@@ -1,7 +1,7 @@
 "use client";
 
 
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useAnimatedPresence,
@@ -15,6 +15,7 @@ import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useContentStable } from "@/hooks/use-content-stable";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ChatComposer } from "@/components/sessions/chat/chat-composer";
 import type { ChatCommand } from "@/lib/contracts/chat-commands";
@@ -26,6 +27,8 @@ import { SessionRail } from "@/components/sessions/rail/session-rail";
 import { SessionsRouteLoading } from "@/components/layout/route-loading";
 import { useSessionStream } from "@/hooks/use-session-stream";
 import type { SessionStreamEvent } from "@/lib/contracts/sessions";
+import { parseArtifactReadyPayload } from "@/lib/contracts/artifacts";
+import { executionArtifactDedupeKey } from "@/components/sessions/artifacts/artifact-detail";
 import {
   fetchControlPlaneDashboardJson,
   fetchControlPlaneDashboardJsonAllowError,
@@ -34,6 +37,7 @@ import {
 import { queryKeys } from "@/lib/query/keys";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import type {
+  ExecutionArtifact,
   SessionDetail,
   SessionMessage,
   SessionSendRequest,
@@ -46,11 +50,113 @@ const SESSION_FETCH_LIMIT = 200;
 const SESSION_THREAD_PAGE_SIZE = 24;
 const NEW_SESSION_PLACEHOLDER_ID = "__new_session__";
 
+function createClientSessionId() {
+  const id =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `session-${id}`;
+}
+
+function artifactReadyEventToExecutionArtifact(
+  event: SessionStreamEvent,
+): ExecutionArtifact | null {
+  const payload = parseArtifactReadyPayload(event.payload);
+  if (!payload) return null;
+  const artifact = payload.artifact;
+  const executionId = artifact.source_execution_id ?? (event.task_id ? String(event.task_id) : null);
+  const path = artifact.path ?? null;
+  const url = artifact.url ?? null;
+  return {
+    id: artifact.id,
+    label: artifact.label ?? artifact.id,
+    kind: artifact.kind,
+    content: { path, url },
+    description: artifact.label ?? artifact.kind,
+    summary: artifact.label ?? artifact.kind,
+    url,
+    path,
+    mime_type: artifact.mime_type ?? null,
+    size_bytes: artifact.size_bytes ?? null,
+    source_type: "runtime_artifact",
+    status: "complete",
+    text_content: null,
+    metadata: {
+      runtime_artifact_id: artifact.id,
+      source_execution_id: executionId,
+    },
+    visual_paths: artifact.kind === "image" && path ? [path] : [],
+    preview_image_url: artifact.kind === "image" && url?.startsWith("http") ? url : null,
+    preview_image_path: artifact.kind === "image" ? path : null,
+    domain: artifact.domain ?? null,
+    site_name: null,
+    unavailable: false,
+  };
+}
+
+function attachArtifactToSessionDetail(
+  detail: SessionDetail | undefined,
+  taskId: number | null,
+  artifact: ExecutionArtifact,
+): SessionDetail | undefined {
+  if (!detail || taskId === null) return detail;
+  let changed = false;
+  const artifactKey = executionArtifactDedupeKey(artifact);
+  if (
+    detail.messages.some((message) =>
+      message.artifacts?.some((item) => executionArtifactDedupeKey(item) === artifactKey),
+    )
+  ) {
+    return detail;
+  }
+  const messages = detail.messages.map((message) => {
+    if (message.role !== "assistant" || message.linked_execution?.task_id !== taskId) {
+      return message;
+    }
+    const existing = message.artifacts ?? [];
+    if (existing.some((item) => executionArtifactDedupeKey(item) === artifactKey)) {
+      return message;
+    }
+    changed = true;
+    return { ...message, artifacts: [...existing, artifact] };
+  });
+  if (changed) return { ...detail, messages };
+
+  const linkedExecution =
+    detail.messages.find((message) => message.linked_execution?.task_id === taskId)
+      ?.linked_execution ??
+    detail.orphan_executions.find((execution) => execution.task_id === taskId) ??
+    null;
+  const timestamp =
+    linkedExecution?.completed_at ??
+    linkedExecution?.started_at ??
+    linkedExecution?.created_at ??
+    new Date().toISOString();
+  const syntheticAssistant: SessionMessage = {
+    id: `artifact-${taskId}-${artifactKey}`,
+    role: "assistant",
+    text: "",
+    timestamp,
+    model: linkedExecution?.model ?? null,
+    cost_usd: linkedExecution?.cost_usd ?? null,
+    query_id: taskId > 0 ? -taskId : -1,
+    session_id: detail.summary.session_id,
+    error: linkedExecution?.status === "failed",
+    linked_execution: linkedExecution,
+    artifacts: [artifact],
+  };
+  return {
+    ...detail,
+    messages: [...messages, syntheticAssistant],
+    orphan_executions: detail.orphan_executions.filter((execution) => execution.task_id !== taskId),
+  };
+}
+
 function normalizeSelectedBotId(
   candidate: string | null | undefined,
   availableBotIds: string[],
 ) {
   if (!candidate) return undefined;
+  if (availableBotIds.length === 0) return candidate;
   const match = availableBotIds.find((agentId) => agentId.toLowerCase() === candidate.toLowerCase());
   return match ?? undefined;
 }
@@ -102,6 +208,7 @@ function SessionsPageContent() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     searchParams.get("session")
   );
+  const [newChatSessionId, setNewChatSessionId] = useState<string | null>(null);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [draft, setDraft] = useState("");
   const [composerMentions, setComposerMentions] = useState<Mention[]>([]);
@@ -120,6 +227,8 @@ function SessionsPageContent() {
     agentId: string;
     startedAt: number;
   } | null>(null);
+  const streamInvalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSelectedContextRef = useRef<string | null>(null);
 
   const queryClient = useQueryClient();
   const deferredSearch = useDeferredValue(search.trim());
@@ -127,7 +236,7 @@ function SessionsPageContent() {
 
   useEffect(() => {
     if (availableBotIds.length === 0) {
-      setActiveBotId(undefined);
+      setActiveBotId((current) => current ?? queryBotId ?? undefined);
       return;
     }
     const normalizedQueryBotId = normalizeSelectedBotId(queryBotId, availableBotIds);
@@ -138,6 +247,15 @@ function SessionsPageContent() {
       return normalizedQueryBotId;
     });
   }, [availableBotIds, queryBotId]);
+
+  useEffect(
+    () => () => {
+      if (streamInvalidateTimerRef.current) {
+        clearTimeout(streamInvalidateTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (isDesktop) {
@@ -159,14 +277,15 @@ function SessionsPageContent() {
   }, [currentStep?.id, status]);
 
   useEffect(() => {
+    if (queryBotId && availableBotIds.length === 0) return;
     const params = new URLSearchParams(searchParams.toString());
     if (activeBotId) {
       params.set("agent", activeBotId);
     } else {
       params.delete("agent");
     }
-    if (search.trim()) {
-      params.set("search", search.trim());
+    if (debouncedSearch) {
+      params.set("search", debouncedSearch);
     } else {
       params.delete("search");
     }
@@ -179,7 +298,16 @@ function SessionsPageContent() {
     const currentQuery = searchParams.toString();
     if (nextQuery === currentQuery) return;
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [activeBotId, pathname, router, search, searchParams, selectedSessionId]);
+  }, [
+    activeBotId,
+    availableBotIds.length,
+    debouncedSearch,
+    pathname,
+    queryBotId,
+    router,
+    searchParams,
+    selectedSessionId,
+  ]);
 
   const sessionsQueryKey = queryKeys.dashboard.sessions({
     search: debouncedSearch,
@@ -192,7 +320,6 @@ function SessionsPageContent() {
   }>({
     tier: "live",
     queryKey: sessionsQueryKey,
-    enabled: availableBotIds.length > 0,
     refetchInterval: 15_000,
     notifyOnChangeProps: ["data", "error"],
     placeholderData: keepPreviousData,
@@ -218,7 +345,14 @@ function SessionsPageContent() {
     },
   });
 
-  const stableSessionsPayload = useContentStable(sessionsQuery.data);
+  const stableSessionsQuery = useStableQueryData({
+    data: sessionsQuery.data,
+    resetKey: "dashboard:sessions",
+    isPending: sessionsQuery.isPending,
+    isFetching: sessionsQuery.isFetching,
+    error: sessionsQuery.error,
+  });
+  const stableSessionsPayload = useContentStable(stableSessionsQuery.data ?? undefined);
   const sessions = useMemo(() => stableSessionsPayload?.items ?? [], [stableSessionsPayload]);
   const sessionsUnavailable = stableSessionsPayload?.unavailable ?? false;
   const selectedSessionSummary = useMemo(
@@ -258,8 +392,23 @@ function SessionsPageContent() {
         "session_completed",
       ]);
       if (!invalidating.has(event.type)) return;
-      void queryClient.invalidateQueries({ queryKey: detailQueryBaseKey });
-      void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+      if (event.type === "artifact_ready") {
+        const artifact = artifactReadyEventToExecutionArtifact(event);
+        if (artifact) {
+          queryClient.setQueriesData<SessionDetail>(
+            { queryKey: detailQueryBaseKey },
+            (current) => attachArtifactToSessionDetail(current, event.task_id, artifact),
+          );
+        }
+      }
+      if (streamInvalidateTimerRef.current) {
+        clearTimeout(streamInvalidateTimerRef.current);
+      }
+      streamInvalidateTimerRef.current = setTimeout(() => {
+        streamInvalidateTimerRef.current = null;
+        void queryClient.invalidateQueries({ queryKey: detailQueryBaseKey });
+        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+      }, 120);
     },
     [queryClient, detailQueryBaseKey, sessionsQueryKey],
   );
@@ -306,9 +455,16 @@ function SessionsPageContent() {
     },
   });
 
-  const stableDetailPayload = useContentStable(detailQuery.data);
-  const activeDetail =
-    stableDetailPayload?.summary.session_id === selectedSessionId ? stableDetailPayload : null;
+  const stableDetailQuery = useStableQueryData({
+    data: detailQuery.data,
+    resetKey: [detailBotId ?? "", selectedSessionId ?? ""],
+    isCompatible: (detail) => detail.summary.session_id === selectedSessionId,
+    isPending: detailQuery.isPending,
+    isFetching: detailQuery.isFetching,
+    error: detailQuery.error,
+  });
+  const stableDetailPayload = useContentStable(stableDetailQuery.data ?? undefined);
+  const activeDetail = stableDetailPayload ?? null;
   const loadedHistoryMessages = useMemo(
     () => mergeSessionHistoryPages(activeDetail, olderDetailPages),
     [activeDetail, olderDetailPages],
@@ -344,17 +500,28 @@ function SessionsPageContent() {
   }, [activeDetail, pendingRequest, queryClient, sessionsQueryKey]);
 
   useEffect(() => {
-    if (sessionsQuery.isLoading) return;
+    if (stableSessionsQuery.initialLoading) return;
     if (isNewChatMode) return;
+    const contextKey = `${activeBotId ?? "*"}:${debouncedSearch || "*"}`;
+    if (autoSelectedContextRef.current === contextKey) return;
     if (!selectedSessionId && sessions.length > 0 && isDesktop) {
+      autoSelectedContextRef.current = contextKey;
       setSelectedSessionId(sessions[0].session_id);
     }
-  }, [isDesktop, isNewChatMode, selectedSessionId, sessions, sessionsQuery.isLoading]);
+  }, [
+    activeBotId,
+    debouncedSearch,
+    isDesktop,
+    isNewChatMode,
+    selectedSessionId,
+    sessions,
+    stableSessionsQuery.initialLoading,
+  ]);
 
   const visiblePendingMessages = useMemo(() => {
-    const targetSessionId = selectedSessionId ?? NEW_SESSION_PLACEHOLDER_ID;
+    const targetSessionId = selectedSessionId ?? newChatSessionId ?? NEW_SESSION_PLACEHOLDER_ID;
     return pendingMessages.filter((message) => message.session_id === targetSessionId);
-  }, [pendingMessages, selectedSessionId]);
+  }, [newChatSessionId, pendingMessages, selectedSessionId]);
 
   const resetThreadState = useCallback(() => {
     setDraft("");
@@ -363,8 +530,7 @@ function SessionsPageContent() {
     setPendingMessages([]);
     setOlderDetailPages([]);
     setLoadingOlderDetailPages(false);
-    queryClient.removeQueries({ queryKey: detailQueryBaseKey });
-  }, [detailQueryBaseKey, queryClient]);
+  }, []);
 
   const loadOlderMessages = useCallback(async () => {
     if (!detailBotId || !selectedSessionId || !activeDetail || loadingOlderDetailPages) {
@@ -410,6 +576,7 @@ function SessionsPageContent() {
             normalizeSelectedBotId(agentId, availableBotIds));
 
       setActiveBotId(normalizeSelectedBotId(agentId, availableBotIds));
+      setNewChatSessionId(null);
       setComposerError(null);
       setContextDrawerOpen(false);
 
@@ -431,6 +598,7 @@ function SessionsPageContent() {
         normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id
       );
       setSelectedSessionId(session.session_id);
+      setNewChatSessionId(null);
       setIsNewChatMode(false);
       setComposerError(null);
       setPendingRequest(null);
@@ -445,12 +613,14 @@ function SessionsPageContent() {
   );
 
   const handleNewChat = useCallback((agentId?: string) => {
+    const nextSessionId = createClientSessionId();
     setActiveBotId((current) => {
       if (agentId) return normalizeSelectedBotId(agentId, availableBotIds);
       const candidate = selectedSummary?.bot_id ?? current;
       return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
     });
     setSelectedSessionId(null);
+    setNewChatSessionId(nextSessionId);
     setIsNewChatMode(true);
     setContextDrawerOpen(false);
     resetThreadState();
@@ -469,7 +639,10 @@ function SessionsPageContent() {
         options?.requestId ??
         globalThis.crypto?.randomUUID?.() ??
         `session-send-${Date.now()}`;
-      const draftSessionId = options?.sessionId ?? selectedSessionId ?? null;
+      const draftSessionId = options?.sessionId ?? selectedSessionId ?? newChatSessionId ?? createClientSessionId();
+      if (!selectedSessionId && !newChatSessionId) {
+        setNewChatSessionId(draftSessionId);
+      }
       const optimisticSessionId = draftSessionId ?? NEW_SESSION_PLACEHOLDER_ID;
       const timestamp = new Date().toISOString();
 
@@ -539,12 +712,10 @@ function SessionsPageContent() {
           agentId: sendBotId,
           startedAt: Date.now(),
         });
+        setNewChatSessionId(null);
         setSelectedSessionId(resolvedSessionId);
         setIsNewChatMode(false);
         setDraft("");
-        if (!draftSessionId) {
-          queryClient.removeQueries({ queryKey: detailQueryKey });
-        }
         void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
       } catch (error) {
         const message =
@@ -563,7 +734,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [composerMentions, effectiveBotId, composerSubmitting, detailQueryKey, queryClient, selectedSessionId, sessionsQueryKey, t]
+    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, queryClient, selectedSessionId, sessionsQueryKey, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -652,9 +823,9 @@ function SessionsPageContent() {
   }, [activeDetail]);
 
   const tourVariant =
-    sessionsQuery.error?.message || sessionsUnavailable
+    stableSessionsQuery.showBlockingError || (sessionsUnavailable && sessions.length === 0)
       ? "unavailable"
-      : sessionsQuery.isLoading && sessions.length === 0
+      : stableSessionsQuery.initialLoading && sessions.length === 0
         ? "loading"
         : sessions.length === 0
           ? "empty"
@@ -662,7 +833,7 @@ function SessionsPageContent() {
 
   return (
     <div
-      className="animate-in flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]"
+      className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]"
       {...tourRoute("sessions", tourVariant)}
     >
       <div className="hidden md:flex" {...tourAnchor("sessions.conversation-rail")}>
@@ -673,8 +844,8 @@ function SessionsPageContent() {
           onNewChat={handleNewChat}
           search={search}
           onSearchChange={setSearch}
-          loading={sessionsQuery.isLoading}
-          error={sessionsQuery.error?.message ?? null}
+          loading={stableSessionsQuery.initialLoading}
+          error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
           unavailable={sessionsUnavailable}
         />
       </div>
@@ -702,8 +873,8 @@ function SessionsPageContent() {
           pendingMessages={visiblePendingMessages}
           orphanExecutions={activeDetail?.orphan_executions ?? []}
           showThinking={showThinking}
-          loading={Boolean(selectedSessionId && detailQuery.isLoading && !activeDetail)}
-          error={detailQuery.error?.message ?? null}
+          loading={Boolean(selectedSessionId && stableDetailQuery.initialLoading)}
+          error={stableDetailQuery.showBlockingError ? detailQuery.error?.message ?? null : null}
           agentLabel={effectiveAgentLabel}
           onRetryPending={handleRetryPendingMessage}
           onLoadOlder={loadOlderMessages}
@@ -779,8 +950,8 @@ function SessionsPageContent() {
               onNewChat={handleNewChat}
               search={search}
               onSearchChange={setSearch}
-              loading={sessionsQuery.isLoading}
-              error={sessionsQuery.error?.message ?? null}
+              loading={stableSessionsQuery.initialLoading}
+              error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
               unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}
               className="border-r-0"

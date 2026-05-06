@@ -169,6 +169,98 @@ class TestRunCodex:
         assert result["usage"] == {"input_tokens": 10, "output_tokens": 5}
 
     @pytest.mark.asyncio
+    async def test_provider_artifact_event_becomes_native_file_change(self):
+        artifact_path = "/tmp/.codex/generated_images/thread-123/ig_abc.png"
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "thread-123"}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "image_generation_end",
+                            "call_id": "ig_abc",
+                            "saved_path": artifact_path,
+                            "revised_prompt": "A generated image",
+                            "result": "base64-content-that-must-not-be-persisted",
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}),
+            ]
+        ).encode()
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(stdout, b""))
+        mock_proc.returncode = 0
+
+        with patch("koda.services.codex_runner.asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await run_codex(
+                query="make an image",
+                work_dir="/tmp",
+                model="gpt-5.4",
+                turn_mode="new_turn",
+                capabilities=_ready_capability("new_turn"),
+            )
+
+        assert result["error"] is False
+        native_items = result["_native_items"]
+        assert native_items == [
+            {
+                "type": "file_change",
+                "kind": "add",
+                "path": artifact_path,
+                "source_type": "provider_event",
+                "metadata": {
+                    "source_type": "provider_event",
+                    "provider_event": "event_msg",
+                    "provider_event_type": "image_generation_end",
+                    "call_id": "ig_abc",
+                    "revised_prompt": "A generated image",
+                },
+            }
+        ]
+        assert "result" not in native_items[0]["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_nested_provider_artifact_event_becomes_native_file_change(self):
+        artifact_path = "/tmp/.codex/generated_images/thread-123/ig_nested.png"
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "thread-123"}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "response.output_item.done",
+                            "item": {
+                                "type": "image_generation_call",
+                                "id": "ig_nested",
+                                "result": {"saved_path": artifact_path},
+                            },
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}),
+            ]
+        ).encode()
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(stdout, b""))
+        mock_proc.returncode = 0
+
+        with patch("koda.services.codex_runner.asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await run_codex(
+                query="make an image",
+                work_dir="/tmp",
+                model="gpt-5.4",
+                turn_mode="new_turn",
+                capabilities=_ready_capability("new_turn"),
+            )
+
+        native_items = result["_native_items"]
+        assert native_items[0]["path"] == artifact_path
+        assert native_items[0]["metadata"]["provider_event_type"] == "response.output_item.done"
+
+    @pytest.mark.asyncio
     async def test_resume_run_uses_resume_command_without_cd(self):
         stdout = json.dumps({"type": "thread.started", "thread_id": "thread-123"}).encode()
         mock_proc = AsyncMock()
@@ -325,6 +417,82 @@ class TestRunCodexStreaming:
         assert chunks == ["Hello"]
         assert metadata_collector["session_id"] == "thread-123"
         assert metadata_collector["usage"] == {"input_tokens": 10, "output_tokens": 5}
+
+    @pytest.mark.asyncio
+    async def test_streaming_collects_provider_artifact_event(self):
+        artifact_path = "/tmp/.codex/generated_images/thread-123/ig_abc.png"
+        lines = [
+            json.dumps({"type": "thread.started", "thread_id": "thread-123"}),
+            json.dumps(
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "video_generation_end",
+                        "files": [{"path": artifact_path, "result": "base64-content"}],
+                        "status": "completed",
+                    },
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}),
+        ]
+        mock_proc = _make_stream_proc(lines)
+        metadata_collector: dict = {}
+
+        with patch("koda.services.codex_runner.asyncio.create_subprocess_exec", return_value=mock_proc):
+            chunks = []
+            async for chunk in run_codex_streaming(
+                query="make a video",
+                work_dir="/tmp",
+                model="gpt-5.4",
+                metadata_collector=metadata_collector,
+                turn_mode="new_turn",
+                capabilities=_ready_capability("new_turn"),
+            ):
+                chunks.append(chunk)
+
+        assert chunks == []
+        native_items = metadata_collector["native_items"]
+        assert native_items[0]["path"] == artifact_path
+        assert native_items[0]["kind"] == "add"
+        assert native_items[0]["metadata"]["provider_event_type"] == "video_generation_end"
+
+    @pytest.mark.asyncio
+    async def test_streaming_collects_provider_artifact_response_item(self):
+        artifact_path = "/tmp/.codex/generated_images/thread-123/ig_abc.png"
+        lines = [
+            json.dumps({"type": "thread.started", "thread_id": "thread-123"}),
+            json.dumps(
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "image_generation_call",
+                        "call_id": "ig_abc",
+                        "saved_path": artifact_path,
+                        "result": "base64-content",
+                    },
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}),
+        ]
+        mock_proc = _make_stream_proc(lines)
+        metadata_collector: dict = {}
+
+        with patch("koda.services.codex_runner.asyncio.create_subprocess_exec", return_value=mock_proc):
+            chunks = []
+            async for chunk in run_codex_streaming(
+                query="make an image",
+                work_dir="/tmp",
+                model="gpt-5.4",
+                metadata_collector=metadata_collector,
+                turn_mode="new_turn",
+                capabilities=_ready_capability("new_turn"),
+            ):
+                chunks.append(chunk)
+
+        assert chunks == []
+        native_items = metadata_collector["native_items"]
+        assert native_items[0]["path"] == artifact_path
+        assert native_items[0]["metadata"]["provider_event_type"] == "image_generation_call"
 
 
 class TestConcurrentAuthProbes:

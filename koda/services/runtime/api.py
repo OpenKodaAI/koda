@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 from uuid import uuid4
 
 from aiohttp import WSMsgType, web
@@ -56,6 +58,23 @@ class _SilentRuntimeBot:
         return _SilentRuntimeMessage(text=caption or "")
 
     async def send_voice(self, *_args: object, caption: str | None = None, **_kwargs: object) -> _SilentRuntimeMessage:
+        return _SilentRuntimeMessage(text=caption or "")
+
+    async def send_photo(self, *_args: object, caption: str | None = None, **_kwargs: object) -> _SilentRuntimeMessage:
+        return _SilentRuntimeMessage(text=caption or "")
+
+    async def send_animation(
+        self,
+        *_args: object,
+        caption: str | None = None,
+        **_kwargs: object,
+    ) -> _SilentRuntimeMessage:
+        return _SilentRuntimeMessage(text=caption or "")
+
+    async def send_video(self, *_args: object, caption: str | None = None, **_kwargs: object) -> _SilentRuntimeMessage:
+        return _SilentRuntimeMessage(text=caption or "")
+
+    async def send_audio(self, *_args: object, caption: str | None = None, **_kwargs: object) -> _SilentRuntimeMessage:
         return _SilentRuntimeMessage(text=caption or "")
 
     async def send_chat_action(self, *_args: object, **_kwargs: object) -> None:
@@ -683,6 +702,47 @@ async def _runtime_task_artifacts(request: web.Request) -> web.Response:
         return auth
     task_id = int(request.match_info["task_id"])
     return web.json_response({"items": get_runtime_controller().store.list_artifacts(task_id)})
+
+
+def _download_filename(value: object, fallback: str) -> str:
+    filename = Path(str(value or fallback)).name.strip() or fallback
+    return filename.replace("\r", "").replace("\n", "").replace('"', "")
+
+
+def _download_content_disposition(filename: str) -> str:
+    ascii_filename = filename.encode("ascii", errors="ignore").decode("ascii").strip() or "artifact"
+    return f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+
+
+async def _runtime_artifact_download(request: web.Request) -> web.StreamResponse:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+
+    artifact_id_raw = str(request.match_info["artifact_id"] or "").strip()
+    if not artifact_id_raw.isdigit():
+        return web.json_response({"error": "artifact not found"}, status=404)
+
+    artifact = get_runtime_controller().store.get_artifact(int(artifact_id_raw))
+    if not artifact:
+        return web.json_response({"error": "artifact not found"}, status=404)
+
+    path_value = str(artifact.get("path") or "").strip()
+    path = Path(path_value)
+    if not path.is_file():
+        return web.json_response({"error": "artifact file not found"}, status=404)
+
+    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    mime_type = str(metadata.get("mime_type") or "").strip() or mimetypes.guess_type(str(path))[0]
+    filename = _download_filename(artifact.get("label"), path.name)
+    headers = {
+        "Content-Disposition": _download_content_disposition(filename),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+    }
+    if mime_type:
+        headers["Content-Type"] = mime_type
+    return web.FileResponse(path=path, headers=headers)
 
 
 async def _runtime_task_checkpoints(request: web.Request) -> web.Response:
@@ -1482,6 +1542,7 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/events", _runtime_task_events)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/artifacts", _runtime_task_artifacts)
+    app.router.add_get("/api/runtime/artifacts/{artifact_id}/download", _runtime_artifact_download)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/checkpoints", _runtime_task_checkpoints)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/terminals", _runtime_task_terminals)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/browser", _runtime_task_browser)

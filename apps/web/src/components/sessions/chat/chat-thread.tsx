@@ -88,11 +88,14 @@ function ChatThreadImpl({
 }: ChatThreadProps) {
   const { t } = useAppI18n();
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const footerResizeObserverRef = useRef<ResizeObserver | null>(null);
   const prependAnchorRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const loadOlderLockRef = useRef(false);
   const previousItemCountRef = useRef(0);
   const scrolledPastTopRef = useRef(false);
   const [stuckToBottom, setStuckToBottom] = useState(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(0);
 
   const items: ThreadItem[] = useMemo(() => {
     const combined: Array<SessionMessage | PendingChatMessage> = [
@@ -129,8 +132,11 @@ function ChatThreadImpl({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const distanceFromBottom = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+    const canScroll = viewport.scrollHeight > viewport.clientHeight + 8;
     const nextStuck = distanceFromBottom <= 96;
     setStuckToBottom((current) => (current === nextStuck ? current : nextStuck));
+    const nextShowJump = canScroll && distanceFromBottom > 160;
+    setShowJumpToBottom((current) => (current === nextShowJump ? current : nextShowJump));
 
     const nextScrolledPastTop = viewport.scrollTop > 16;
     if (nextScrolledPastTop !== scrolledPastTopRef.current) {
@@ -151,6 +157,26 @@ function ChatThreadImpl({
   useEffect(() => {
     if (!loadingOlder) loadOlderLockRef.current = false;
   }, [loadingOlder]);
+
+  const bindFooterElement = useCallback((footerElement: HTMLDivElement | null) => {
+    footerResizeObserverRef.current?.disconnect();
+    footerResizeObserverRef.current = null;
+    if (!footerElement) {
+      setFooterHeight(0);
+      return;
+    }
+
+    const measure = () => {
+      const nextHeight = Math.ceil(footerElement.getBoundingClientRect().height);
+      setFooterHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(footerElement);
+    footerResizeObserverRef.current = observer;
+  }, []);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -177,10 +203,11 @@ function ChatThreadImpl({
     if (!viewport) return;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
     setStuckToBottom(true);
+    setShowJumpToBottom(false);
   }, []);
 
   const hasConversation = items.length > 0;
-  const showNewIndicator = !stuckToBottom && hasConversation;
+  const showNewIndicator = showJumpToBottom && hasConversation;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)]">
@@ -302,6 +329,7 @@ function ChatThreadImpl({
                     onOpenExecution={onOpenExecution}
                     agentId={agentId}
                     sessionId={sessionId}
+                    artifacts={message.artifacts ?? []}
                     blocks={"blocks" in message ? message.blocks : undefined}
                   />
                 </MessageTurn>
@@ -313,17 +341,34 @@ function ChatThreadImpl({
       </div>
 
       {showNewIndicator ? (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className="absolute bottom-[120px] left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel-strong)] px-3 py-1.5 text-[0.75rem] text-[var(--text-secondary)] shadow-[var(--shadow-floating)] transition-colors hover:text-[var(--text-primary)]"
+        <div
+          className="pointer-events-none absolute left-1/2 z-20 -translate-x-1/2"
+          style={{ bottom: `${Math.max(16, footerHeight + 12)}px` }}
         >
-          <ArrowDown className="icon-xs" strokeWidth={1.75} aria-hidden />
-          {t("chat.thread.newMessages", { defaultValue: "New messages" })}
-        </button>
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className={cn(
+              "pointer-events-auto !inline-flex !h-9 !w-9 !min-w-9 !max-w-9 shrink-0 items-center justify-center rounded-full",
+              "border border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[var(--text-secondary)] shadow-[var(--shadow-floating)] backdrop-blur",
+              "transition-[background-color,border-color,color,transform] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel-strong)] hover:text-[var(--text-primary)] active:scale-[0.98]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
+            )}
+            style={{ width: 36, minWidth: 36, maxWidth: 36 }}
+          >
+            <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+            <span className="sr-only">
+              {t("chat.thread.newMessages", { defaultValue: "New messages" })}
+            </span>
+          </button>
+        </div>
       ) : null}
 
-      {footer ? <div className="shrink-0">{footer}</div> : null}
+      {footer ? (
+        <div ref={bindFooterElement} className="shrink-0">
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }

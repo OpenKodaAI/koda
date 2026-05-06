@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from koda.agent_contract import resolve_core_provider_catalog
-from koda.provider_models import build_function_model_catalog
+from koda.provider_models import build_function_model_catalog, resolve_provider_function_model_catalog
 from koda.services.provider_auth import (
     MANAGED_PROVIDER_IDS,
     PROVIDER_API_KEY_ENV_KEYS,
@@ -32,6 +32,35 @@ def _build_provider_catalog() -> dict[str, dict[str, object]]:
             "default_model": "",
         }
     return catalog
+
+
+def test_whisper_function_catalog_uses_only_downloaded_variants() -> None:
+    models = resolve_provider_function_model_catalog(
+        "whispercpp",
+        whisper_catalog_items=[
+            {
+                "variant_id": "large-v3-turbo-q5_0",
+                "label": "Whisper large-v3 turbo (q5_0)",
+                "description": "Downloaded local transcription model.",
+                "downloaded": True,
+                "bytes": 574_000_000,
+                "filename": "ggml-large-v3-turbo-q5_0.bin",
+                "local_path": "/tmp/ggml-large-v3-turbo-q5_0.bin",
+            },
+            {
+                "variant_id": "medium-q5_0",
+                "label": "Whisper medium (q5_0)",
+                "description": "Available for download.",
+                "downloaded": False,
+                "approx_size_bytes": 539_000_000,
+            },
+        ],
+    )
+
+    assert [item["model_id"] for item in models] == ["large-v3-turbo-q5_0"]
+    assert models[0]["function_id"] == "transcription"
+    assert models[0]["title"] == "Whisper large-v3 turbo (q5_0)"
+    assert "whisper-cpp-local" not in {item["model_id"] for item in models}
 
 
 def _make_manager(monkeypatch):
@@ -173,6 +202,57 @@ def test_function_model_catalog_preserves_resolved_ollama_models():
     assert ollama_item["parameter_size"] == "3B"
 
 
+def test_ollama_model_catalog_includes_detected_connection_models():
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
+    manager._resolve_ollama_connection_inputs = (  # type: ignore[attr-defined]
+        lambda env=None: ("api_key", "https://ollama.com", "sk-ollama-cloud")
+    )
+    manager._fetch_ollama_model_catalog = lambda **kwargs: {  # type: ignore[attr-defined]
+        "items": [],
+        "cached": False,
+        "provider_connected": False,
+        "base_url": "https://ollama.com",
+        "auth_mode": "api_key",
+    }
+    manager._provider_detected_model_ids = lambda provider_id: ["llama3.2:latest", "qwen2.5:7b"]  # type: ignore[attr-defined]
+
+    catalog = manager_mod.ControlPlaneManager.get_ollama_model_catalog(manager)
+
+    assert catalog["provider_connected"] is True
+    assert [item["model_id"] for item in catalog["items"]] == ["llama3.2:latest", "qwen2.5:7b"]
+
+
+def test_provider_catalog_uses_detected_ollama_models_when_live_catalog_is_empty(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._resolve_ollama_connection_inputs = (  # type: ignore[attr-defined]
+        lambda env=None: ("api_key", "https://ollama.com", "sk-ollama-cloud")
+    )
+    manager._fetch_ollama_model_catalog = lambda **kwargs: {  # type: ignore[attr-defined]
+        "items": [],
+        "cached": False,
+        "provider_connected": False,
+        "base_url": "https://ollama.com",
+        "auth_mode": "api_key",
+    }
+    manager._provider_detected_model_ids = lambda provider_id: ["llama3.2:latest"]  # type: ignore[attr-defined]
+    monkeypatch.setattr(manager_mod, "provider_command_present", lambda provider_id, base_env=None: True)
+
+    catalog = manager_mod.ControlPlaneManager._provider_catalog_from_env(manager, {})
+    ollama = catalog["providers"]["ollama"]
+
+    assert ollama["available_models"] == ["llama3.2:latest"]
+    assert ollama["default_model"] == "llama3.2:latest"
+    assert any(
+        item["provider_id"] == "ollama" and item["model_id"] == "llama3.2:latest" and item["function_id"] == "general"
+        for item in ollama["functional_models"]
+    )
+
+
 def test_function_model_catalog_skips_hidden_standalone_providers():
     catalog = _build_provider_catalog()
 
@@ -187,13 +267,116 @@ def test_function_model_catalog_skips_hidden_standalone_providers():
 
 def test_codex_image_defaults_require_api_key(monkeypatch):
     manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
-    connections = {"codex": {"verified": True, "api_key_present": False}}
+    connections = {"codex": {"verified": True, "auth_mode": "api_key", "api_key_present": False}}
 
     assert manager._provider_selectable_for_function("general", "codex", {}, connections) is True
     assert manager._provider_selectable_for_function("image", "codex", {}, connections) is False
 
+    connections["codex"]["verified"] = False
     connections["codex"]["api_key_present"] = True
     assert manager._provider_selectable_for_function("image", "codex", {}, connections) is True
+    assert manager._provider_selectable_for_function("transcription", "codex", {}, connections) is True
+
+    connections["codex"]["auth_mode"] = "subscription_login"
+    assert manager._provider_selectable_for_function("image", "codex", {}, connections) is False
+
+
+def test_general_review_accepts_codex_image_default_when_api_key_is_configured(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager.get_core_providers = lambda: {  # type: ignore[attr-defined]
+        "providers": _build_provider_catalog(),
+    }
+    manager.list_connection_defaults = lambda: {"items": []}  # type: ignore[attr-defined]
+
+    values = {
+        "models": {
+            "providers_enabled": [],
+            "default_provider": "",
+            "fallback_order": [],
+            "functional_defaults": {
+                "image": {"provider_id": "codex", "model_id": "gpt-image-2"},
+            },
+            "elevenlabs_default_voice": "",
+        },
+        "provider_connections": {
+            "codex": {
+                "verified": False,
+                "auth_mode": "api_key",
+                "api_key_present": True,
+            },
+        },
+    }
+
+    warnings = manager_mod.ControlPlaneManager._general_review_warnings(manager, values)
+
+    assert not any("default de image" in warning for warning in warnings)
+
+
+def test_general_review_warns_for_codex_image_default_without_api_key(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager.get_core_providers = lambda: {  # type: ignore[attr-defined]
+        "providers": _build_provider_catalog(),
+    }
+    manager.list_connection_defaults = lambda: {"items": []}  # type: ignore[attr-defined]
+
+    warnings = manager_mod.ControlPlaneManager._general_review_warnings(
+        manager,
+        {
+            "models": {
+                "providers_enabled": [],
+                "default_provider": "",
+                "fallback_order": [],
+                "functional_defaults": {
+                    "image": {"provider_id": "codex", "model_id": "gpt-image-2"},
+                },
+                "elevenlabs_default_voice": "",
+            },
+            "provider_connections": {
+                "codex": {
+                    "verified": True,
+                    "auth_mode": "api_key",
+                    "api_key_present": False,
+                },
+            },
+        },
+    )
+
+    assert "OpenAI precisa estar disponivel para usar o default de image." in warnings
+
+
+def test_api_key_connection_does_not_report_verified_without_secret(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager, rows, _meta, secrets, _sessions = _make_manager(monkeypatch)
+    rows["elevenlabs"].update(
+        {
+            "auth_mode": "api_key",
+            "configured": 1,
+            "verified": 1,
+            "account_label": "ElevenLabs",
+            "plan_label": "API key",
+        }
+    )
+
+    stale = manager_mod.ControlPlaneManager.get_provider_connection(manager, "elevenlabs")
+
+    assert stale["api_key_present"] is False
+    assert stale["configured"] is False
+    assert stale["verified"] is False
+    assert stale["connection_status"] == "error"
+    assert "ELEVENLABS_API_KEY" in stale["last_error"]
+
+    secrets["elevenlabs"] = "xi-live"
+    active = manager_mod.ControlPlaneManager.get_provider_connection(manager, "elevenlabs")
+
+    assert active["api_key_present"] is True
+    assert active["configured"] is True
+    assert active["verified"] is True
+    assert active["connection_status"] == "verified"
 
 
 def test_verify_provider_connection_flips_enabled_flag(monkeypatch):

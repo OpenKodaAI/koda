@@ -60,6 +60,32 @@ _REQUIRED_HELP_TOKENS: dict[TurnMode, tuple[str, ...]] = {
 }
 _AUTH_STATUS_TIMEOUT = 3.0
 _AUTH_STATUS_TTL_SECONDS = 30.0
+_PROVIDER_ARTIFACT_SAVED_PATH_KEYS = ("saved_path", "saved_paths")
+_PROVIDER_ARTIFACT_GENERIC_PATH_KEYS = ("file_path", "path", "output_path", "destination", "save_path")
+_PROVIDER_ARTIFACT_COLLECTION_KEYS = ("artifact", "artifacts", "file", "files", "generated_file", "generated_files")
+_PROVIDER_ARTIFACT_TYPE_HINTS = (
+    "artifact",
+    "audio",
+    "document",
+    "download",
+    "file",
+    "generation",
+    "generated",
+    "image",
+    "media",
+    "video",
+)
+_PROVIDER_ARTIFACT_METADATA_KEYS = (
+    "call_id",
+    "id",
+    "status",
+    "mime_type",
+    "content_type",
+    "media_type",
+    "filename",
+    "file_name",
+    "revised_prompt",
+)
 
 
 def _configured_auth_mode() -> str:
@@ -504,6 +530,118 @@ def _extract_error_message(event: dict[str, Any]) -> str:
     return ""
 
 
+def _provider_payload_suggests_artifact(payload_type: str) -> bool:
+    normalized = payload_type.lower()
+    return any(hint in normalized for hint in _PROVIDER_ARTIFACT_TYPE_HINTS)
+
+
+def _provider_artifact_path_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple)):
+        paths: list[str] = []
+        for item in value:
+            paths.extend(_provider_artifact_path_values(item))
+        return paths
+    if isinstance(value, dict):
+        paths = []
+        for key in (*_PROVIDER_ARTIFACT_SAVED_PATH_KEYS, *_PROVIDER_ARTIFACT_GENERIC_PATH_KEYS):
+            if key in value:
+                paths.extend(_provider_artifact_path_values(value[key]))
+        return paths
+    return []
+
+
+def _provider_artifact_paths_from_mapping(value: dict[str, Any], *, allow_generic_keys: bool) -> list[str]:
+    paths: list[str] = []
+    for key in _PROVIDER_ARTIFACT_SAVED_PATH_KEYS:
+        if key in value:
+            paths.extend(_provider_artifact_path_values(value[key]))
+
+    if allow_generic_keys or _provider_payload_suggests_artifact(str(value.get("type") or "")):
+        for key in _PROVIDER_ARTIFACT_GENERIC_PATH_KEYS:
+            if key in value:
+                paths.extend(_provider_artifact_path_values(value[key]))
+        for key in _PROVIDER_ARTIFACT_COLLECTION_KEYS:
+            if key in value:
+                paths.extend(_provider_artifact_path_values(value[key]))
+    return paths
+
+
+def _provider_artifact_paths_recursive(value: Any, *, allow_generic_keys: bool = False) -> list[str]:
+    if isinstance(value, dict):
+        nested_allow_generic = allow_generic_keys or _provider_payload_suggests_artifact(str(value.get("type") or ""))
+        paths = _provider_artifact_paths_from_mapping(value, allow_generic_keys=nested_allow_generic)
+        for nested_value in value.values():
+            if isinstance(nested_value, (dict, list, tuple)):
+                paths.extend(_provider_artifact_paths_recursive(nested_value, allow_generic_keys=nested_allow_generic))
+        return paths
+    if isinstance(value, (list, tuple)):
+        nested_paths: list[str] = []
+        for item in value:
+            nested_paths.extend(_provider_artifact_paths_recursive(item, allow_generic_keys=allow_generic_keys))
+        return nested_paths
+    return []
+
+
+def _provider_artifact_metadata(
+    *,
+    event_type: str,
+    payload_type: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source_type": "provider_event"}
+    if event_type:
+        metadata["provider_event"] = event_type
+    if payload_type:
+        metadata["provider_event_type"] = payload_type
+
+    for key in _PROVIDER_ARTIFACT_METADATA_KEYS:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            if isinstance(value, str) and len(value) > 2000:
+                value = value[:1997] + "..."
+            metadata[key] = value
+    return metadata
+
+
+def _provider_artifact_items_from_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert provider-native media/file events into artifact-compatible items."""
+    payload_obj = event.get("payload")
+    payload = payload_obj if isinstance(payload_obj, dict) else event
+    event_type = str(event.get("type") or "")
+    payload_type = str(payload.get("type") or "")
+
+    paths = _provider_artifact_paths_recursive(
+        payload,
+        allow_generic_keys=_provider_payload_suggests_artifact(payload_type),
+    )
+
+    deduped_paths: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            deduped_paths.append(path)
+    if not deduped_paths:
+        return []
+
+    metadata = _provider_artifact_metadata(event_type=event_type, payload_type=payload_type, payload=payload)
+    return [
+        {
+            "type": "file_change",
+            "kind": "add",
+            "path": path,
+            "source_type": "provider_event",
+            "metadata": metadata,
+        }
+        for path in deduped_paths
+    ]
+
+
 def _parse_usage(event: dict[str, Any]) -> dict[str, Any]:
     usage = event.get("usage")
     return usage if isinstance(usage, dict) else {}
@@ -707,6 +845,8 @@ async def run_codex(
         event_type = event.get("type")
         if event_type == "thread.started":
             provider_session_id = event.get("thread_id") or provider_session_id
+        elif event_type in {"event_msg", "response_item"}:
+            native_items.extend(_provider_artifact_items_from_event(event))
         elif event_type in {"item.completed", "item.updated"}:
             item = event.get("item")
             if not isinstance(item, dict):
@@ -949,6 +1089,12 @@ async def run_codex_streaming(
 
             if event_type == "thread.started" and metadata_collector is not None:
                 metadata_collector["session_id"] = event.get("thread_id") or session_id
+                continue
+
+            if event_type in {"event_msg", "response_item"}:
+                artifact_items = _provider_artifact_items_from_event(event)
+                if artifact_items and metadata_collector is not None:
+                    metadata_collector.setdefault("native_items", []).extend(artifact_items)
                 continue
 
             if event_type in {"item.updated", "item.completed"}:

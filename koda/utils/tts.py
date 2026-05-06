@@ -50,6 +50,23 @@ _last_tts_error: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Con
 )
 
 
+def _resolve_elevenlabs_api_key() -> str:
+    """Resolve the ElevenLabs key from process env or the control-plane secret store."""
+    api_key = str(ELEVENLABS_API_KEY or "").strip()
+    if api_key:
+        return api_key
+    api_key = str(os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if api_key:
+        return api_key
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return str(get_control_plane_manager()._resolve_elevenlabs_api_key() or "").strip()
+    except Exception:
+        log.debug("elevenlabs_secret_resolution_unavailable", exc_info=True)
+        return ""
+
+
 def get_last_tts_error() -> dict[str, Any] | None:
     error = _last_tts_error.get()
     return dict(error) if error else None
@@ -207,7 +224,8 @@ async def _elevenlabs_synthesize(
 ) -> str | None:
     """Call ElevenLabs TTS API. Returns OGG Opus file path or None."""
     _clear_last_tts_error()
-    if not ELEVENLABS_API_KEY:
+    api_key = _resolve_elevenlabs_api_key()
+    if not api_key:
         _set_last_tts_error(provider="elevenlabs", code="missing_api_key", message="ElevenLabs API key ausente.")
         return None
 
@@ -221,7 +239,7 @@ async def _elevenlabs_synthesize(
     import aiohttp
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=opus_48000_64"
-    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+    headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
     selected_model = model_id or ELEVENLABS_MODEL
     payload = {
         "text": text,
@@ -574,13 +592,14 @@ async def search_elevenlabs_voices(query: str, page_size: int = 10) -> list[Elev
     First tries the API's `search` parameter. If no results, fetches all
     premade voices and filters locally by name/gender/accent/language.
     """
-    if not ELEVENLABS_API_KEY:
+    api_key = _resolve_elevenlabs_api_key()
+    if not api_key:
         return []
 
     import aiohttp
 
     url = "https://api.elevenlabs.io/v2/voices"
-    headers = {"xi-api-key": ELEVENLABS_API_KEY}
+    headers = {"xi-api-key": api_key}
 
     try:
         timeout = aiohttp.ClientTimeout(total=ELEVENLABS_TIMEOUT)

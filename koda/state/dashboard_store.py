@@ -384,7 +384,47 @@ def _append_execution_artifact(
     artifacts.append(artifact)
 
 
-def _build_execution_artifacts(raw_artifacts: Any, response_text: str | None, task_id: int) -> list[dict[str, Any]]:
+def _runtime_artifact_to_execution_artifact(row: dict[str, Any], task_id: int) -> dict[str, Any]:
+    metadata = _json_object(row.get("metadata_json")) or _json_object(row.get("metadata"))
+    path = _iso(row.get("path"))
+    mime_type = _iso(metadata.get("mime_type"))
+    kind = _normalize_execution_artifact_kind(row.get("artifact_kind"), mime_type=mime_type, path=path)
+    label = _iso(row.get("label")) or _read_artifact_filename(path) or f"Artifact {row.get('id') or task_id}"
+    artifact_id = str(row.get("id") or f"runtime-{task_id}")
+    return {
+        "id": artifact_id,
+        "label": label,
+        "kind": kind,
+        "content": {
+            "path": path,
+            "metadata": metadata,
+        },
+        "description": _clip_text(metadata.get("summary") or metadata.get("description") or label, 240),
+        "summary": _clip_text(metadata.get("summary") or label, 220),
+        "url": _iso(metadata.get("url")),
+        "path": path,
+        "mime_type": mime_type,
+        "size_bytes": _safe_int(metadata.get("size_bytes")) or None,
+        "source_type": _iso(metadata.get("source_type")) or "runtime_artifact",
+        "status": "complete",
+        "text_content": None,
+        "metadata": {**metadata, "runtime_artifact_id": artifact_id, "source_execution_id": str(task_id)},
+        "visual_paths": [path] if kind == "image" and path else [],
+        "preview_image_url": None,
+        "preview_image_path": path if kind == "image" else None,
+        "domain": urlparse(str(metadata.get("url") or "")).hostname if metadata.get("url") else None,
+        "site_name": _iso(metadata.get("site_name")),
+        "unavailable": False,
+    }
+
+
+def _build_execution_artifacts(
+    raw_artifacts: Any,
+    response_text: str | None,
+    task_id: int,
+    *,
+    runtime_artifacts: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     raw_payload = raw_artifacts if isinstance(raw_artifacts, dict) else {}
@@ -531,6 +571,13 @@ def _build_execution_artifacts(raw_artifacts: Any, response_text: str | None, ta
                 "site_name": None,
                 "unavailable": False,
             },
+        )
+
+    for row in runtime_artifacts or []:
+        _append_execution_artifact(
+            artifacts,
+            seen_keys,
+            _runtime_artifact_to_execution_artifact(row, task_id),
         )
 
     if artifacts:
@@ -955,6 +1002,19 @@ class DashboardStore:
             return best
         return min(queries, key=lambda row: abs(_timestamp(row.get("timestamp")) - task_ts))
 
+    def _runtime_artifact_rows_for_task(self, agent_id: str, task_id: int) -> list[dict[str, Any]]:
+        scope = _normalize_scope(agent_id)
+        return _fetch_all(
+            scope,
+            """
+            SELECT id, task_id, env_id, artifact_kind, label, path, metadata_json, created_at, expires_at
+            FROM runtime_artifacts
+            WHERE LOWER(agent_id) = LOWER(?) AND task_id = ?
+            ORDER BY id ASC
+            """,
+            (scope, task_id),
+        )
+
     def _build_execution_detail(
         self,
         agent_id: str,
@@ -1073,7 +1133,12 @@ class DashboardStore:
             if runtime.get("stop_reason"):
                 reasoning_summary.append(f"Stop reason: {runtime.get('stop_reason')}")
         raw_artifacts = (envelope or {}).get("raw_artifacts")
-        artifacts = _build_execution_artifacts(raw_artifacts, response_text, _safe_int(task.get("id")))
+        artifacts = _build_execution_artifacts(
+            raw_artifacts,
+            response_text,
+            _safe_int(task.get("id")),
+            runtime_artifacts=self._runtime_artifact_rows_for_task(scope, _safe_int(task.get("id"))),
+        )
         return {
             "task_id": _safe_int(task.get("id")),
             "agent_id": _public_agent_id(scope),
@@ -1377,7 +1442,8 @@ class DashboardStore:
                         "linked_execution": linked_execution,
                     }
                 )
-            if _clip_text(response_text, 10_000):
+            linked_artifacts = (linked_detail or {}).get("artifacts") or []
+            if _clip_text(response_text, 10_000) or linked_artifacts:
                 entry_messages.append(
                     {
                         "id": f"query-{row.get('id')}-assistant",
@@ -1391,6 +1457,7 @@ class DashboardStore:
                         "session_id": session_id,
                         "error": bool(row.get("error")),
                         "linked_execution": linked_execution,
+                        "artifacts": linked_artifacts,
                     }
                 )
             if entry_messages:
@@ -1437,7 +1504,8 @@ class DashboardStore:
                         "linked_execution": execution,
                     }
                 )
-            if _clip_text(response_text, 10_000):
+            execution_artifacts = (execution_detail or {}).get("artifacts") or []
+            if _clip_text(response_text, 10_000) or execution_artifacts:
                 execution_entry_messages.append(
                     {
                         "id": f"execution-{task_id}-assistant",
@@ -1451,6 +1519,7 @@ class DashboardStore:
                         "session_id": session_id,
                         "error": str(execution.get("status") or "") == "failed",
                         "linked_execution": execution,
+                        "artifacts": execution_artifacts,
                     }
                 )
             if execution_entry_messages:

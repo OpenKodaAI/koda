@@ -487,6 +487,104 @@ describe("useSystemSettings", () => {
     expect(result.current.providerConnectionDrafts.ollama.auth_mode).toBe("local");
   });
 
+  it("keeps Ollama API key mode and loads detected models after connecting", async () => {
+    const verifiedOllamaConnection = makeProviderConnection({
+      provider_id: "ollama",
+      title: "Ollama",
+      auth_mode: "api_key",
+      configured: true,
+      verified: true,
+      supports_api_key: true,
+      supports_local_connection: true,
+      supported_auth_modes: ["api_key", "local"],
+      api_key_present: true,
+      base_url: "https://ollama.com",
+      connection_status: "verified",
+      last_verified_at: "2026-05-05T12:00:00Z",
+    });
+    const settings = makeSettings({
+      providers: [
+        makeProviderCatalogProvider({
+          id: "ollama",
+          title: "Ollama",
+          supported_auth_modes: ["api_key", "local"],
+          supports_api_key: true,
+          supports_local_connection: true,
+          connection_managed: true,
+        }),
+      ],
+      providerConnections: {
+        ollama: makeProviderConnection({
+          provider_id: "ollama",
+          title: "Ollama",
+          auth_mode: "local",
+          supported_auth_modes: ["api_key", "local"],
+          supports_api_key: true,
+          supports_local_connection: true,
+        }),
+      },
+    });
+
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const path = String(input);
+      const method = init?.method || "GET";
+
+      if (path.endsWith("/api/control-plane/providers/ollama/connection/api-key") && method === "PUT") {
+        return new Response(JSON.stringify({ connection: verifiedOllamaConnection }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (path.endsWith("/api/control-plane/providers/ollama/connection/verify") && method === "POST") {
+        return new Response(
+          JSON.stringify({
+            connection: verifiedOllamaConnection,
+            verification: { verified: true, checked_via: "api_key", last_error: "" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (path.endsWith("/api/control-plane/providers/ollama/models") && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            items: [{ model_id: "llama3.2:latest", name: "llama3.2:latest" }],
+            cached: false,
+            provider_connected: true,
+            base_url: "https://ollama.com",
+            auth_mode: "api_key",
+          } satisfies OllamaModelCatalog),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${path}`);
+    }) as typeof fetch;
+
+    const { result } = renderUseSystemSettings(settings);
+
+    act(() => {
+      result.current.setProviderConnectionDraft("ollama", {
+        auth_mode: "api_key",
+        api_key: "sk-ollama-cloud",
+      });
+    });
+    await act(async () => {
+      await result.current.connectProviderApiKey("ollama");
+    });
+
+    await waitFor(() => {
+      expect(result.current.providerConnections.ollama.auth_mode).toBe("api_key");
+      expect(result.current.providerConnectionDrafts.ollama.auth_mode).toBe("api_key");
+      expect(result.current.ollamaModelCatalog.items).toHaveLength(1);
+    });
+    expect(result.current.providerConnectionDrafts.ollama.api_key).toBe("");
+    expect(
+      result.current.draft.catalogs.providers.find((provider) => provider.id === "ollama")?.available_models,
+    ).toEqual(["llama3.2:latest"]);
+  });
+
   it("normalizes null provider catalog payloads before storing them in state", async () => {
     const settings = makeSettings({
       providers: [
@@ -1137,6 +1235,98 @@ describe("useSystemSettings", () => {
       provider_id: "kokoro",
       model_id: "kokoro-v1",
     });
+  });
+
+  it("drops stale OpenAI image-default warnings after the API key connection becomes available", () => {
+    const settings = makeSettings({
+      providers: [
+        makeProviderCatalogProvider({
+          id: "codex",
+          title: "OpenAI",
+          supported_auth_modes: ["api_key", "subscription_login"],
+          supports_api_key: true,
+          supports_subscription_login: true,
+          connection_managed: true,
+        }),
+      ],
+      providerConnections: {
+        codex: makeProviderConnection({
+          provider_id: "codex",
+          title: "OpenAI",
+          auth_mode: "api_key",
+          configured: true,
+          verified: false,
+          api_key_present: true,
+          connection_status: "configured",
+        }),
+      },
+    });
+    settings.values.models.functional_defaults = {
+      image: { provider_id: "codex", model_id: "gpt-image-2" },
+    };
+    settings.values.memory_and_knowledge.autonomy_policy = { default_autonomy_tier: "t0" };
+    settings.catalogs.functional_model_catalog = {
+      image: [
+        {
+          provider_id: "codex",
+          provider_title: "OpenAI",
+          model_id: "gpt-image-2",
+          title: "GPT Image 2",
+        },
+      ],
+    };
+    settings.review.warnings = ["OpenAI precisa estar disponivel para usar o default de image."];
+
+    const { result } = renderUseSystemSettings(settings);
+
+    expect(result.current.localWarnings).toEqual([]);
+  });
+
+  it("recomputes OpenAI image-default warnings from the current API key state", () => {
+    const settings = makeSettings({
+      providers: [
+        makeProviderCatalogProvider({
+          id: "codex",
+          title: "OpenAI",
+          supported_auth_modes: ["api_key", "subscription_login"],
+          supports_api_key: true,
+          supports_subscription_login: true,
+          connection_managed: true,
+        }),
+      ],
+      providerConnections: {
+        codex: makeProviderConnection({
+          provider_id: "codex",
+          title: "OpenAI",
+          auth_mode: "api_key",
+          configured: false,
+          verified: false,
+          api_key_present: false,
+          connection_status: "not_configured",
+        }),
+      },
+    });
+    settings.values.models.functional_defaults = {
+      image: { provider_id: "codex", model_id: "gpt-image-2" },
+    };
+    settings.values.memory_and_knowledge.autonomy_policy = { default_autonomy_tier: "t0" };
+    settings.catalogs.functional_model_catalog = {
+      image: [
+        {
+          provider_id: "codex",
+          provider_title: "OpenAI",
+          model_id: "gpt-image-2",
+          title: "GPT Image 2",
+        },
+      ],
+    };
+    settings.review.warnings = ["OpenAI precisa estar disponivel para usar o default de image."];
+
+    const { result } = renderUseSystemSettings(settings);
+
+    expect(result.current.localWarnings).toEqual([
+      "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.",
+    ]);
   });
 
   it("saves core integration defaults through the canonical connections endpoint", async () => {

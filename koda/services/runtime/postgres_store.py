@@ -94,6 +94,12 @@ def _json_list_column(value: Any) -> list[Any]:
     return []
 
 
+def _row_with_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    payload["metadata"] = _json_dict_column(payload.pop("metadata_json", None))
+    return payload
+
+
 def _attach_token_hash(token: str) -> str:
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
@@ -981,7 +987,7 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope, task_id),
         )
-        return [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        return [_row_with_metadata(row) for row in rows]
 
     def add_service_endpoint(
         self,
@@ -1065,7 +1071,7 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope, task_id),
         )
-        return [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        return [_row_with_metadata(row) for row in rows]
 
     def add_port_allocation(
         self,
@@ -1121,7 +1127,7 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope, task_id),
         )
-        return [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        return [_row_with_metadata(row) for row in rows]
 
     def is_port_allocated(self, host: str, port: int) -> bool:
         return bool(
@@ -1464,11 +1470,23 @@ class PostgresRuntimeStore:
         rows = self._fetch_all(
             """
             SELECT id, task_id, env_id, artifact_kind, label, path, metadata_json, created_at, expires_at
-            FROM runtime_artifacts WHERE agent_id = ? AND task_id = ? ORDER BY id ASC
+            FROM runtime_artifacts WHERE lower(agent_id) = lower(?) AND task_id = ? ORDER BY id ASC
             """,
             (self._agent_scope, task_id),
         )
-        return [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        return [_row_with_metadata(row) for row in rows]
+
+    def get_artifact(self, artifact_id: int) -> dict[str, Any] | None:
+        row = self._fetch_one(
+            """
+            SELECT id, task_id, env_id, artifact_kind, label, path, metadata_json, created_at, expires_at
+            FROM runtime_artifacts WHERE lower(agent_id) = lower(?) AND id = ?
+            """,
+            (self._agent_scope, artifact_id),
+        )
+        if not row:
+            return None
+        return _row_with_metadata(row)
 
     def list_checkpoints(self, task_id: int) -> list[dict[str, Any]]:
         rows = self._fetch_all(
@@ -1479,7 +1497,7 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope, task_id),
         )
-        return [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        return [_row_with_metadata(row) for row in rows]
 
     def get_checkpoint(self, checkpoint_id: int) -> dict[str, Any] | None:
         row = self._fetch_one(
@@ -1492,8 +1510,7 @@ class PostgresRuntimeStore:
         )
         if row is None:
             return None
-        row["metadata"] = dict(row.pop("metadata_json") or {})
-        return row
+        return _row_with_metadata(row)
 
     def get_latest_checkpoint(self, task_id: int) -> dict[str, Any] | None:
         row = self._fetch_one(
@@ -1506,8 +1523,7 @@ class PostgresRuntimeStore:
         )
         if row is None:
             return None
-        row["metadata"] = dict(row.pop("metadata_json") or {})
-        return row
+        return _row_with_metadata(row)
 
     def list_terminals(self, task_id: int) -> list[dict[str, Any]]:
         return self._fetch_all(
@@ -1528,7 +1544,7 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope, task_id, limit),
         )
-        payload = [{**row, "metadata": dict(row.pop("metadata_json") or {})} for row in rows]
+        payload = [_row_with_metadata(row) for row in rows]
         return list(reversed(payload))
 
     def list_warnings(self, task_id: int) -> list[dict[str, Any]]:

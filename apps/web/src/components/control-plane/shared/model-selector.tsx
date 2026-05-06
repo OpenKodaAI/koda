@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Search, Server, Zap, Brain, HardDrive } from "lucide-react";
+import { Check, ChevronDown, Search, Server, Zap, Brain, HardDrive, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 import { FormField } from "./form-field";
@@ -266,18 +266,24 @@ function ModelRow({
   onSelect: () => void;
 }) {
   const meta = buildMergedMeta(opt);
+  const disabled = Boolean(opt.disabled);
 
   return (
     <Tooltip delayDuration={350}>
       <TooltipTrigger asChild>
         <button
           type="button"
-          onClick={onSelect}
+          onClick={() => {
+            if (!disabled) onSelect();
+          }}
+          aria-disabled={disabled || undefined}
           className={cn(
             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-            isSelected
-              ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-              : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]",
+            disabled
+              ? "cursor-not-allowed text-[var(--text-quaternary)] opacity-60"
+              : isSelected
+                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
+                : "text-[var(--text-secondary)]",
           )}
         >
           <ProviderIcon providerId={opt.providerId} size={20} />
@@ -294,6 +300,11 @@ function ModelRow({
                 </span>
               )}
             </div>
+            {opt.disabledReason && (
+              <div className="mt-0.5 truncate text-[11px] text-[var(--text-quaternary)]">
+                {opt.disabledReason}
+              </div>
+            )}
           </div>
           {isSelected && <Check size={14} className="shrink-0 text-[var(--text-primary)]" />}
         </button>
@@ -341,6 +352,8 @@ type ModelOption = {
   modelId: string;
   displayName: string;
   combinedValue: string;
+  disabled?: boolean;
+  disabledReason?: string;
   apiMeta?: {
     description?: string;
     context_window?: number;
@@ -358,6 +371,7 @@ type ModelOption = {
 export type ModelSelectorProps = {
   label: string;
   description?: string;
+  error?: string;
   value: string;
   onChange: (value: string) => void;
   providers: Record<string, Record<string, unknown>>;
@@ -365,6 +379,12 @@ export type ModelSelectorProps = {
   emptyLabel?: string;
   functionalCatalog?: Record<string, Array<Record<string, unknown>>>;
   functionId?: string;
+  isOptionDisabled?: (option: {
+    providerId: string;
+    modelId: string;
+    functionId: string;
+  }) => boolean;
+  disabledOptionLabel?: string;
 };
 
 /*  ModelSelector                                                      */
@@ -374,6 +394,7 @@ const PANEL_MAX_H = 368; // search bar (~52) + list (~320)
 export function ModelSelector({
   label,
   description,
+  error,
   value,
   onChange,
   providers,
@@ -381,6 +402,8 @@ export function ModelSelector({
   emptyLabel,
   functionalCatalog,
   functionId,
+  isOptionDisabled,
+  disabledOptionLabel,
 }: ModelSelectorProps) {
   const { tl } = useAppI18n();
   const [open, setOpen] = useState(false);
@@ -400,6 +423,9 @@ export function ModelSelector({
         const mId = String(entry.model_id || "");
         if (!pId || !mId) continue;
         if (!enabledProviders.includes(pId)) continue;
+        const disabled = Boolean(
+          isOptionDisabled?.({ providerId: pId, modelId: mId, functionId: catalogId }),
+        );
         const meta = getModelMeta(mId);
         allOptions.push({
           providerId: pId,
@@ -407,6 +433,8 @@ export function ModelSelector({
           modelId: mId,
           displayName: meta?.displayName || String(entry.title || "") || prettifyModelId(mId),
           combinedValue: `${pId}:${mId}`,
+          disabled,
+          disabledReason: disabled ? tl(disabledOptionLabel || "indisponível no momento") : undefined,
           apiMeta: {
             description: String(entry.description || ""),
             context_window: Number(entry.context_window) || undefined,
@@ -431,6 +459,9 @@ export function ModelSelector({
           : [];
         const providerLabel = String(provider.title || PROVIDER_DISPLAY[pId] || pId);
         for (const mId of models) {
+          const disabled = Boolean(
+            isOptionDisabled?.({ providerId: pId, modelId: mId, functionId: catalogId }),
+          );
           const meta = getModelMeta(mId);
           allOptions.push({
             providerId: pId,
@@ -438,6 +469,8 @@ export function ModelSelector({
             modelId: mId,
             displayName: meta?.displayName || prettifyModelId(mId),
             combinedValue: `${pId}:${mId}`,
+            disabled,
+            disabledReason: disabled ? tl(disabledOptionLabel || "indisponível no momento") : undefined,
           });
         }
       }
@@ -458,7 +491,15 @@ export function ModelSelector({
       })),
       flat: allOptions,
     };
-  }, [providers, enabledProviders, functionalCatalog, functionId]);
+  }, [
+    providers,
+    enabledProviders,
+    functionalCatalog,
+    functionId,
+    isOptionDisabled,
+    disabledOptionLabel,
+    tl,
+  ]);
 
   /* ---- Derived display for trigger ---- */
   const selectedOption = flat.find((o) => o.combinedValue === value);
@@ -538,7 +579,7 @@ export function ModelSelector({
   }, [open]);
 
   return (
-    <FormField label={label} description={description}>
+    <FormField label={label} description={description} error={error}>
       <div className="relative">
         {/* Trigger */}
         <button
@@ -579,17 +620,29 @@ export function ModelSelector({
               )}
             >
               {/* Search */}
-              <div className="flex items-center gap-2 border-b border-[rgba(255,255,255,0.06)] px-4 py-3">
-                <Search size={14} className="shrink-0 text-[var(--text-quaternary)]" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={tl("Buscar modelo...")}
-                  className="w-full min-w-0 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-                  style={{ outline: "none", border: "none", boxShadow: "none" }}
-                  autoFocus
-                />
+              <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
+                <div className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:shadow-[inset_0_0_0_1px_var(--border-strong)]">
+                  <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder={tl("Buscar modelo...")}
+                    className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                    style={{ outline: "none", border: "none", boxShadow: "none" }}
+                    autoFocus
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      aria-label={tl("Limpar busca")}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
+                    >
+                      <X size={12} />
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               {/* Model list */}
@@ -604,7 +657,7 @@ export function ModelSelector({
                         "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
                         value === ""
                           ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]",
+                          : "text-[var(--text-secondary)]",
                       )}
                     >
                       {value === "" && <Check size={14} className="shrink-0 text-[var(--text-primary)]" />}

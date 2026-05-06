@@ -201,8 +201,6 @@ export function ExecutionTable({
               const tone = executionStatusTone(execution.status);
               const isSelected =
                 selectedExecutionId === execution.task_id;
-              const staggerClass =
-                index < 6 ? `animate-in stagger-${index + 1}` : "animate-in";
               return (
                 <button
                   key={`${execution.bot_id}-${execution.task_id}`}
@@ -218,7 +216,6 @@ export function ExecutionTable({
                       ? "bg-[var(--hover-tint)]"
                       : onExecutionClick && "hover:bg-[var(--hover-tint)]",
                     cols,
-                    staggerClass,
                   )}
                 >
                   <StatusOverlay tone={tone} />

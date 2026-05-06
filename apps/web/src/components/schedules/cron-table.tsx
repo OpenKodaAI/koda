@@ -183,12 +183,11 @@ export function CronTable({
           </div>
 
           <div className="flex flex-col" role="rowgroup">
-            {rows.map((row, index) => (
+            {rows.map((row) => (
               <ScheduleDesktopRow
                 key={`${row.agent.id}-${row.job.id}`}
                 row={row}
                 cols={cols}
-                index={index}
                 busy={busyJobId === row.job.id}
                 actionStates={actionStates?.[row.job.id]}
                 onInspect={onInspect}
@@ -224,7 +223,6 @@ export function CronTable({
 function ScheduleDesktopRow({
   row,
   cols,
-  index,
   busy,
   actionStates,
   onInspect,
@@ -235,7 +233,6 @@ function ScheduleDesktopRow({
 }: {
   row: CronTableRow;
   cols: string;
-  index: number;
   busy: boolean;
   actionStates?: Partial<Record<ScheduleTableActionKey, ScheduleTableActionState>>;
   onInspect?: (job: CronJob) => void;
@@ -248,7 +245,6 @@ function ScheduleDesktopRow({
   const { agent, job } = row;
   const routineName = getRoutineName(job);
   const routineSummary = getRoutineSummary(job);
-  const staggerClass = index < 6 ? `animate-in stagger-${index + 1}` : "animate-in";
 
   return (
     <div
@@ -257,7 +253,6 @@ function ScheduleDesktopRow({
         "sticky-table-row",
         "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)]",
         cols,
-        staggerClass,
       )}
       role="row"
     >

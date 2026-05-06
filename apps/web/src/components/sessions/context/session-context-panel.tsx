@@ -84,7 +84,13 @@ function buildArtifactItems(
       ) {
         continue;
       }
+      const runtimeArtifactId =
+        typeof artifact.metadata?.runtime_artifact_id === "string" ||
+        typeof artifact.metadata?.runtime_artifact_id === "number"
+          ? String(artifact.metadata.runtime_artifact_id)
+          : null;
       const dedupeKey =
+        runtimeArtifactId ||
         artifact.url || artifact.path || `${item.detail.task_id}:${artifact.id}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);

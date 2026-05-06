@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { MessageSquare, Plus, X } from "lucide-react";
 import { SessionGroup } from "@/components/sessions/rail/session-group";
 import { SessionRow } from "@/components/sessions/rail/session-row";
@@ -80,9 +80,8 @@ function SessionRailImpl({
 }: SessionRailProps) {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
-  const [localSearch, setLocalSearch] = useState(search);
 
-  const effectiveSearch = localSearch.trim().toLowerCase();
+  const effectiveSearch = search.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!effectiveSearch) return sessions;
     return sessions.filter((session) => {
@@ -202,11 +201,8 @@ function SessionRailImpl({
 
       <div className="shrink-0 px-3 pb-2 pt-1">
         <RailSearch
-          value={localSearch}
-          onChange={(value) => {
-            setLocalSearch(value);
-            onSearchChange(value);
-          }}
+          value={search}
+          onChange={onSearchChange}
         />
       </div>
 
@@ -252,13 +248,12 @@ function SessionRailImpl({
         ) : (
           groups.map((group) => (
             <SessionGroup key={group.id} label={group.label}>
-              {group.sessions.map((session, index) => (
+              {group.sessions.map((session) => (
                 <SessionRow
                   key={`${session.bot_id}:${session.session_id}`}
                   session={session}
                   active={session.session_id === selectedSessionId}
                   onSelect={() => onSelectSession(session)}
-                  index={index}
                 />
               ))}
             </SessionGroup>

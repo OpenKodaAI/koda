@@ -17,16 +17,18 @@ const queryTierDefaults = {
   },
   live: {
     staleTime: 10_000,
-    gcTime: 3 * 60_000,
+    gcTime: 10 * 60_000,
     retry: 1,
-    refetchOnWindowFocus: true,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     refetchIntervalInBackground: false,
   },
   realtime: {
     staleTime: 5_000,
-    gcTime: 60_000,
+    gcTime: 5 * 60_000,
     retry: 0,
-    refetchOnWindowFocus: true,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     refetchIntervalInBackground: false,
   },
 } as const satisfies Record<QueryTier, Partial<QueryObserverOptions>>;

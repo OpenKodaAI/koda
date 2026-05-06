@@ -1061,6 +1061,18 @@ def _user_selectable_provider_ids(provider_catalog: dict[str, Any]) -> list[str]
     ]
 
 
+def _downloaded_whisper_catalog_models(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], str]:
+    items = [cast(dict[str, Any], _safe_json_object(item)) for item in _safe_json_list(payload.get("items")) if item]
+    downloaded = [
+        variant_id
+        for variant_id in (_nonempty_text(item.get("variant_id")) for item in items if bool(item.get("downloaded")))
+        if variant_id
+    ]
+    default_variant = _nonempty_text(payload.get("default_variant"))
+    default_model = default_variant if default_variant in downloaded else (downloaded[0] if downloaded else "")
+    return items, downloaded, default_model
+
+
 def _stringify_env_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -2210,9 +2222,50 @@ class ControlPlaneManager:
         self._ollama_model_cache[cache_key] = (now, catalog)
         return dict(catalog)
 
+    def _merge_detected_ollama_models(
+        self,
+        catalog: dict[str, Any],
+        detected_model_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        detected_ids = normalize_string_list(
+            detected_model_ids if detected_model_ids is not None else self._provider_detected_model_ids("ollama")
+        )
+        if not detected_ids:
+            return catalog
+
+        merged = dict(catalog)
+        items = [dict(_safe_json_object(item)) for item in _safe_json_list(merged.get("items")) if item]
+        seen = {
+            _nonempty_text(item.get("model_id") or item.get("name"))
+            for item in items
+            if _nonempty_text(item.get("model_id") or item.get("name"))
+        }
+        for model_id in detected_ids:
+            if model_id in seen:
+                continue
+            items.append(
+                {
+                    "model_id": model_id,
+                    "name": model_id,
+                    "family": "",
+                    "parameter_size": "",
+                    "quantization_level": "",
+                    "format": "",
+                    "modified_at": "",
+                    "size": 0,
+                }
+            )
+            seen.add(model_id)
+        items.sort(key=lambda item: str(item.get("name") or item.get("model_id") or "").casefold())
+        merged["items"] = items
+        if items:
+            merged["provider_connected"] = True
+        return merged
+
     def get_ollama_model_catalog(self) -> dict[str, Any]:
         auth_mode, base_url, api_key = self._resolve_ollama_connection_inputs(env=self._merged_global_env())
-        return self._fetch_ollama_model_catalog(auth_mode=auth_mode, base_url=base_url, api_key=api_key)
+        catalog = self._fetch_ollama_model_catalog(auth_mode=auth_mode, base_url=base_url, api_key=api_key)
+        return self._merge_detected_ollama_models(catalog)
 
     def _provider_auth_work_dir(self, provider_id: str) -> str:
         path = CONTROL_PLANE_RUNTIME_DIR / "_provider_auth" / provider_id.strip().lower()
@@ -2316,20 +2369,30 @@ class ControlPlaneManager:
         auth_mode = _trimmed_text(row["auth_mode"]) or default_auth_mode
         provider_api_key_env = PROVIDER_API_KEY_ENV_KEYS.get(cast(Any, provider_id))
         if provider_api_key_env:
-            api_key_present, _api_key_preview = self._global_secret_preview_state(provider_api_key_env)
+            api_key_present = bool(_nonempty_text(self._provider_api_key_secret_value(provider_id)))
         else:
             api_key_present = False
+        row_configured = bool(int(row["configured"] or 0))
+        row_verified = bool(int(row["verified"] or 0))
+        configured = row_configured
+        verified = row_verified
+        last_error = _trimmed_text(row["last_error"])
+        if auth_mode == "api_key" and provider_api_key_env and not api_key_present:
+            configured = False
+            verified = False
+            if row_configured or row_verified:
+                last_error = last_error or f"{provider_api_key_env} is not available in secrets or environment."
         payload = {
             "provider_id": provider_id,
             "title": _safe_json_object(catalog).get("title")
             or PROVIDER_TITLES.get(cast(Any, provider_id), provider_id),
             "auth_mode": auth_mode,
-            "configured": bool(int(row["configured"] or 0)),
-            "verified": bool(int(row["verified"] or 0)),
+            "configured": configured,
+            "verified": verified,
             "account_label": _trimmed_text(row["account_label"]),
             "plan_label": _trimmed_text(row["plan_label"]),
             "last_verified_at": _trimmed_text(row["last_verified_at"]),
-            "last_error": _trimmed_text(row["last_error"]),
+            "last_error": last_error,
             "project_id": _trimmed_text(row["project_id"]),
             "command_present": provider_command_present(provider_id, base_env=env),
             "supports_api_key": bool(_safe_json_object(catalog).get("supports_api_key", True)),
@@ -2623,6 +2686,7 @@ class ControlPlaneManager:
             else:
                 binary = "claude"
             ollama_catalog_items: list[dict[str, Any]] | None = None
+            whisper_catalog_items: list[dict[str, Any]] | None = None
             if provider == "ollama":
                 auth_mode, base_url, api_key = self._resolve_ollama_connection_inputs(env=env)
                 live_catalog = self._fetch_ollama_model_catalog(
@@ -2630,6 +2694,7 @@ class ControlPlaneManager:
                     base_url=base_url,
                     api_key=api_key,
                 )
+                live_catalog = self._merge_detected_ollama_models(live_catalog)
                 ollama_catalog_items = [
                     cast(dict[str, Any], _safe_json_object(item))
                     for item in _safe_json_list(live_catalog.get("items"))
@@ -2640,6 +2705,13 @@ class ControlPlaneManager:
                     available_models = live_models
                 if not default_model and live_models:
                     default_model = live_models[0]
+            elif provider == "whispercpp":
+                whisper_catalog_items, downloaded_models, whisper_default_model = _downloaded_whisper_catalog_models(
+                    whisper_catalog_payload()
+                )
+                available_models = downloaded_models
+                if not default_model:
+                    default_model = whisper_default_model
             command_present = provider_command_present(provider, base_env=env)
             providers[provider] = {
                 **definition,
@@ -2654,6 +2726,7 @@ class ControlPlaneManager:
                     provider,
                     available_models=available_models,
                     ollama_catalog_items=ollama_catalog_items,
+                    whisper_catalog_items=whisper_catalog_items,
                 ),
             }
             if enabled and str(definition.get("category") or "general") != "infra":
@@ -3257,6 +3330,77 @@ class ControlPlaneManager:
             ),
         )
 
+    def get_dashboard_runtime_artifact_for_download(
+        self,
+        agent_id: str,
+        artifact_id: int,
+    ) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        row = fetch_one(
+            """
+            SELECT id, agent_id, task_id, env_id, artifact_kind, label, path,
+                   metadata_json, created_at, expires_at
+              FROM runtime_artifacts
+             WHERE id = ? AND lower(agent_id) = lower(?)
+            """,
+            (artifact_id, normalized),
+        )
+        if row is None:
+            return None
+        item = dict(row)
+        item["metadata"] = _safe_json_object(json_load(item.get("metadata_json"), {}))
+        return item
+
+    def _wait_for_dashboard_runtime_api(
+        self,
+        runtime_base_url: str,
+        runtime_token: str,
+        *,
+        timeout_seconds: float = 8.0,
+    ) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        readiness_url = f"{runtime_base_url}/api/runtime/readiness"
+        while True:
+            request = urllib.request.Request(
+                readiness_url,
+                headers={
+                    "X-Runtime-Token": runtime_token,
+                    "User-Agent": "koda/control-plane",
+                },
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=1.5) as response:
+                    status = int(getattr(response, "status", 200) or 200)
+                    if 200 <= status < 300:
+                        return True
+            except urllib.error.HTTPError as exc:
+                if exc.code in {401, 403, 404}:
+                    return False
+            except urllib.error.URLError:
+                pass
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.35)
+
+    def _wake_dashboard_runtime(self, agent_id: str) -> None:
+        try:
+            from koda.control_plane.lifecycle_events import notify_lifecycle_change
+
+            notify_lifecycle_change(reason=f"dashboard-chat:{agent_id}")
+        except Exception:
+            log.exception("dashboard_runtime_wake_failed", agent_id=agent_id)
+
+    @staticmethod
+    def _runtime_http_error_message(exc: urllib.error.HTTPError) -> str:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, dict) and payload.get("error"):
+            return str(payload["error"])
+        return f"runtime request failed with status {exc.code}"
+
     def send_dashboard_session_message(
         self,
         agent_id: str,
@@ -3264,10 +3408,17 @@ class ControlPlaneManager:
         text: str,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        normalized, _ = self._require_dashboard_agent(agent_id)
+        normalized, agent_row = self._require_dashboard_agent(agent_id)
         payload_text = str(text or "").strip()
         if not payload_text:
             raise ValueError("text is required")
+        agent_status = (
+            str(agent_row["status"] or "").strip().lower()
+            if _row_has_column(agent_row, "status")
+            else str(_safe_json_object(agent_row).get("status") or "").strip().lower()
+        )
+        if agent_status and agent_status != "active":
+            raise ValueError(f"agent {normalized} is {agent_status}; activate it before sending messages")
 
         runtime_access = self.get_runtime_access(normalized, capability="mutate")
         runtime_base_url = str(runtime_access.get("runtime_base_url") or "").rstrip("/")
@@ -3275,40 +3426,45 @@ class ControlPlaneManager:
         if not runtime_base_url:
             raise RuntimeError("runtime base URL is unavailable for this agent")
         if not runtime_token:
-            raise RuntimeError("runtime token is unavailable for this agent")
+            raise RuntimeError("runtime token is not configured for this agent")
 
         request_payload = {"text": payload_text}
         if session_id:
             request_payload["session_id"] = str(session_id).strip()
 
-        request = urllib.request.Request(
-            f"{runtime_base_url}/api/runtime/sessions/messages",
-            data=json.dumps(request_payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "X-Runtime-Token": runtime_token,
-                "User-Agent": "koda/control-plane",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
-        except urllib.error.HTTPError as exc:
-            try:
-                payload = json.loads(exc.read().decode("utf-8"))
-            except Exception:
-                payload = None
-            message = (
-                str(payload.get("error"))
-                if isinstance(payload, dict) and payload.get("error")
-                else f"runtime request failed with status {exc.code}"
+        def build_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                f"{runtime_base_url}/api/runtime/sessions/messages",
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Runtime-Token": runtime_token,
+                    "User-Agent": "koda/control-plane",
+                },
+                method="POST",
             )
-            if 400 <= exc.code < 500:
-                raise ValueError(message) from exc
-            raise RuntimeError(message) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError("runtime is unavailable") from exc
+
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(build_request(), timeout=20) as response:
+                    return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
+            except urllib.error.HTTPError as exc:
+                message = self._runtime_http_error_message(exc)
+                if exc.code in {502, 503, 504} and attempt == 0:
+                    self._wake_dashboard_runtime(normalized)
+                    self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
+                    continue
+                if 400 <= exc.code < 500:
+                    raise ValueError(f"runtime rejected dashboard message: {message}") from exc
+                raise RuntimeError(message) from exc
+            except urllib.error.URLError as exc:
+                if attempt == 0:
+                    self._wake_dashboard_runtime(normalized)
+                    if self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token):
+                        continue
+                raise RuntimeError(f"runtime is unavailable for agent {normalized}") from exc
+
+        raise RuntimeError(f"runtime is unavailable for agent {normalized}")
 
     def list_dashboard_dlq(
         self,
@@ -4665,9 +4821,17 @@ class ControlPlaneManager:
                     if extra:
                         current = payload.get("available_models") or []
                         payload["available_models"] = list(dict.fromkeys(current + extra))
+            whisper_catalog_items: list[dict[str, Any]] | None = None
+            if provider_id == "whispercpp":
+                whisper_catalog_items, downloaded_models, whisper_default_model = _downloaded_whisper_catalog_models(
+                    whisper_catalog_payload()
+                )
+                payload["available_models"] = downloaded_models
+                payload["default_model"] = whisper_default_model
             payload["functional_models"] = resolve_provider_function_model_catalog(
                 provider_id,
                 available_models=[str(item) for item in _safe_json_object(payload).get("available_models") or []],
+                whisper_catalog_items=whisper_catalog_items,
             )
         catalog["model_functions"] = resolve_model_function_catalog()
         catalog["functional_model_catalog"] = self._functional_model_catalog(catalog)
@@ -8271,7 +8435,8 @@ class ControlPlaneManager:
         if normalized in MANAGED_PROVIDER_IDS:
             connection = _safe_json_object(provider_connections.get(normalized))
             if normalized == "codex" and function_id in {"image", "transcription"}:
-                return bool(connection.get("verified")) and bool(connection.get("api_key_present"))
+                auth_mode = _nonempty_text(connection.get("auth_mode")).lower()
+                return bool(connection.get("api_key_present")) and auth_mode in {"", "api_key"}
             return bool(connection.get("verified"))
         command_present = bool(provider_payload.get("command_present", False))
         enabled = bool(provider_payload.get("enabled", False))
@@ -8337,13 +8502,25 @@ class ControlPlaneManager:
                 {},
             )
             if whispercpp_available:
+                whisper_model = _nonempty_text(whispercpp_payload.get("default_model"))
+                if not whisper_model:
+                    for item in _safe_json_list(whispercpp_payload.get("functional_models")):
+                        functional_model = _safe_json_object(item)
+                        if _nonempty_text(functional_model.get("function_id")) == "transcription":
+                            whisper_model = _nonempty_text(functional_model.get("model_id"))
+                            break
                 defaults["transcription"] = {
                     "provider_id": "whispercpp",
-                    "model_id": "whisper-cpp-local",
+                    "model_id": whisper_model or "whisper-cpp-local",
                 }
             else:
                 codex_connection = _safe_json_object(_safe_json_object(providers.get("codex")).get("connection"))
-                if bool(codex_connection.get("verified")) and bool(codex_connection.get("api_key_present")):
+                if self._provider_selectable_for_function(
+                    "transcription",
+                    "codex",
+                    _safe_json_object(providers.get("codex")),
+                    {"codex": codex_connection},
+                ):
                     defaults["transcription"] = {
                         "provider_id": "codex",
                         "model_id": "whisper-1",
@@ -10684,6 +10861,16 @@ class ControlPlaneManager:
             if not encrypted_value:
                 continue
             env[secret_key] = decrypt_secret(encrypted_value)
+        if not str(env.get("RUNTIME_LOCAL_UI_TOKEN") or "").strip():
+            try:
+                from .runtime_access import ControlPlaneRuntimeAccessBroker
+
+                runtime_ui_secret = ControlPlaneRuntimeAccessBroker(self).resolve_runtime_secret(normalized, snapshot)
+            except Exception:
+                runtime_ui_secret = ""
+                log.debug("runtime_ui_secret_resolve_skipped", agent_id=normalized, exc_info=True)
+            if runtime_ui_secret:
+                env["RUNTIME_LOCAL_UI_TOKEN"] = runtime_ui_secret
         env["CONTROL_PLANE_RUNTIME_INLINE"] = "true" if inline_mode else "false"
         if composed_prompt:
             env["AGENT_COMPILED_PROMPT_TEXT"] = composed_prompt

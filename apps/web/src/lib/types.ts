@@ -360,6 +360,7 @@ export interface SessionMessage {
   session_id: string;
   error: boolean;
   linked_execution?: ExecutionSummary | null;
+  artifacts?: ExecutionArtifact[];
   /**
    * Generative-UI blocks attached to this message. Each entry is an opaque
    * payload validated by `generativeBlockSchema` (see contracts/generative-ui).

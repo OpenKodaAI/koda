@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import mimetypes
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, cast
 
 from aiohttp import ContentTypeError, web
@@ -161,6 +163,16 @@ def _optional_bool(raw_value: str | None, *, name: str) -> bool | None:
 
 def _service_unavailable(exc: RuntimeError) -> web.Response:
     return web.json_response({"error": str(exc)}, status=503)
+
+
+def _download_filename(value: object, fallback: str) -> str:
+    filename = Path(str(value or fallback)).name.strip() or fallback
+    return filename.replace("\r", "").replace("\n", "").replace('"', "")
+
+
+def _download_content_disposition(filename: str) -> str:
+    ascii_filename = filename.encode("ascii", errors="ignore").decode("ascii").strip() or "artifact"
+    return f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{urllib.parse.quote(filename)}"
 
 
 @web.middleware
@@ -723,17 +735,52 @@ async def get_dashboard_session_detail_route(request: web.Request) -> web.Respon
 
 async def post_dashboard_session_message_route(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
+    manager = _manager()
+    loop = asyncio.get_running_loop()
     try:
-        result = _manager().send_dashboard_session_message(
-            request.match_info["agent_id"],
-            text=str(payload.get("text") or ""),
-            session_id=str(payload.get("session_id") or "").strip() or None,
+        result = await loop.run_in_executor(
+            None,
+            functools.partial(
+                manager.send_dashboard_session_message,
+                request.match_info["agent_id"],
+                text=str(payload.get("text") or ""),
+                session_id=str(payload.get("session_id") or "").strip() or None,
+            ),
         )
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     except RuntimeError as exc:
         return _service_unavailable(exc)
     return web.json_response(result, status=202)
+
+
+async def download_dashboard_runtime_artifact_route(request: web.Request) -> web.StreamResponse:
+    artifact_id_raw = str(request.match_info["artifact_id"] or "").strip()
+    if not artifact_id_raw.isdigit():
+        return web.json_response({"error": "artifact not found"}, status=404)
+
+    artifact = _manager().get_dashboard_runtime_artifact_for_download(
+        request.match_info["agent_id"],
+        int(artifact_id_raw),
+    )
+    if artifact is None:
+        return web.json_response({"error": "artifact not found"}, status=404)
+
+    path = Path(str(artifact.get("path") or "").strip())
+    if not path.is_file():
+        return web.json_response({"error": "artifact file not found"}, status=404)
+
+    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    mime_type = str(metadata.get("mime_type") or "").strip() or mimetypes.guess_type(str(path))[0]
+    filename = _download_filename(artifact.get("label"), path.name)
+    headers = {
+        "Content-Disposition": _download_content_disposition(filename),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+    }
+    if mime_type:
+        headers["Content-Type"] = mime_type
+    return web.FileResponse(path=path, headers=headers)
 
 
 async def list_dashboard_session_approvals_route(request: web.Request) -> web.Response:
@@ -2384,6 +2431,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_post(
         "/api/control-plane/dashboard/agents/{agent_id}/sessions/messages",
         post_dashboard_session_message_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/agents/{agent_id}/artifacts/{artifact_id}/download",
+        download_dashboard_runtime_artifact_route,
     )
     app.router.add_get(
         "/api/control-plane/dashboard/agents/{agent_id}/sessions/{session_id}",

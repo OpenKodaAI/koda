@@ -12783,12 +12783,20 @@ mutableResources["en-US"].translation.chat.timestamp = {
 
 mutableResources["en-US"].translation.chat.toolCall = {
   ...(mutableResources["en-US"].translation.chat.toolCall ?? {}),
+  attempt: "attempt",
+  cancelled: "Cancelled",
   completed: "Completed",
   cost: "cost",
+  duration: "duration",
   failed: "Failed",
+  metadata: "Metadata",
+  model: "model",
+  paused: "Paused",
   queued: "Queued",
   retrying: "Retrying",
   running: "Running",
+  status: "status",
+  task: "task",
   tools: "tools",
   viewArgs: "Arguments",
   viewExecution: "View execution",
@@ -13096,6 +13104,12 @@ mutableResources["en-US"].translation.sessions.composer = {
   selectAgentToStart: "Select a specific agent here to start a chat.",
 };
 
+mutableResources["en-US"].translation.sessions.artifacts = {
+  ...(mutableResources["en-US"].translation.sessions.artifacts ?? {}),
+  imagePreviewUnavailable: "Image preview unavailable",
+  imagePreviewUnavailableHint: "The generated file may be missing or temporarily unavailable.",
+};
+
 mutableResources["en-US"].translation.sessions.context = {
   ...(mutableResources["en-US"].translation.sessions.context ?? {}),
   summaryLabel: "Summary",
@@ -13221,12 +13235,20 @@ mutableResources["pt-BR"].translation.chat.timestamp = {
 
 mutableResources["pt-BR"].translation.chat.toolCall = {
   ...(mutableResources["pt-BR"].translation.chat.toolCall ?? {}),
+  attempt: "tentativa",
+  cancelled: "Cancelado",
   completed: "Concluído",
   cost: "custo",
+  duration: "duração",
   failed: "Falhou",
+  metadata: "Metadados",
+  model: "modelo",
+  paused: "Pausado",
   queued: "Em fila",
   retrying: "Retentando",
   running: "Executando",
+  status: "status",
+  task: "tarefa",
   tools: "ferramentas",
   viewArgs: "Argumentos",
   viewExecution: "Ver execução",
@@ -13532,6 +13554,12 @@ mutableResources["pt-BR"].translation.screenTime = {
 mutableResources["pt-BR"].translation.sessions.composer = {
   ...(mutableResources["pt-BR"].translation.sessions.composer ?? {}),
   selectAgentToStart: "Selecione um agente específico aqui para iniciar uma conversa.",
+};
+
+mutableResources["pt-BR"].translation.sessions.artifacts = {
+  ...(mutableResources["pt-BR"].translation.sessions.artifacts ?? {}),
+  imagePreviewUnavailable: "Prévia da imagem indisponível",
+  imagePreviewUnavailableHint: "O arquivo gerado pode ter sido removido ou estar temporariamente indisponível.",
 };
 
 mutableResources["pt-BR"].translation.sessions.context = {
@@ -15751,19 +15779,39 @@ Object.assign(literalResources["fr-FR"] as Record<string, string>, generatedLite
 Object.assign(literalResources["de-DE"] as Record<string, string>, generatedLiteralResources["de-DE"]);
 
 Object.assign(literalResources["en-US"] as Record<string, string>, {
+  "Modelo de embedding": "Embedding model",
+  "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.":
+    "The model used to index memories, the knowledge base, and semantic cache. No model is installed by default: download one on demand only if needed.",
   "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
     "Choose the model used for memory, the knowledge base, and semantic cache. None is preinstalled: download one on demand when needed.",
   "Memória ativada sem modelo de embedding instalado":
     "Memory enabled without an installed embedding model",
   "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
     "We strongly recommend choosing and downloading a model below. Without one, semantic retrieval falls back to keyword matching (degraded quality).",
+  "Não foi possível carregar o catálogo": "Could not load the catalog",
   "Resposta inesperada do catálogo": "Unexpected catalog response",
   "Falha ao carregar catálogo": "Failed to load catalog",
+  "Tentar novamente": "Try again",
+  "Carregando catálogo de modelos...": "Loading model catalog...",
   "Baixando": "Downloading",
+  "Baixando...": "Downloading...",
+  "Modelo baixado e pronto para uso": "Model downloaded and ready to use",
+  "Falha ao selecionar modelo": "Failed to select model",
+  "Modelo ativo": "Active model",
+  "Falha ao apagar modelo": "Failed to delete model",
+  "Modelo apagado": "Model deleted",
+  "Ativo": "Active",
+  "Em uso": "In use",
+  "Usar este": "Use this",
+  "Confirmar — clique novamente para apagar": "Confirm — click again to delete",
+  "Apagar modelo": "Delete model",
+  "Confirmar": "Confirm",
   "CPU": "CPU",
   "CPU / Apple Silicon": "CPU / Apple Silicon",
   "Apple Silicon recomendado": "Apple Silicon recommended",
   "GPU dedicada recomendada": "Dedicated GPU recommended",
+  "multi": "multi",
+  "EN": "EN",
   "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
     "Lightweight, balanced model. A good starting point for memory and cache in PT-BR + EN. nDCG@5 ≈ 0.91 in the internal benchmark.",
   "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
@@ -15781,19 +15829,39 @@ Object.assign(literalResources["en-US"] as Record<string, string>, {
 });
 
 Object.assign(literalResources["pt-BR"] as Record<string, string>, {
+  "Modelo de embedding": "Modelo de embedding",
+  "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.":
+    "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.",
   "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
     "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.",
   "Memória ativada sem modelo de embedding instalado":
     "Memória ativada sem modelo de embedding instalado",
   "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
     "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).",
+  "Não foi possível carregar o catálogo": "Não foi possível carregar o catálogo",
   "Resposta inesperada do catálogo": "Resposta inesperada do catálogo",
   "Falha ao carregar catálogo": "Falha ao carregar catálogo",
+  "Tentar novamente": "Tentar novamente",
+  "Carregando catálogo de modelos...": "Carregando catálogo de modelos...",
   "Baixando": "Baixando",
+  "Baixando...": "Baixando...",
+  "Modelo baixado e pronto para uso": "Modelo baixado e pronto para uso",
+  "Falha ao selecionar modelo": "Falha ao selecionar modelo",
+  "Modelo ativo": "Modelo ativo",
+  "Falha ao apagar modelo": "Falha ao apagar modelo",
+  "Modelo apagado": "Modelo apagado",
+  "Ativo": "Ativo",
+  "Em uso": "Em uso",
+  "Usar este": "Usar este",
+  "Confirmar — clique novamente para apagar": "Confirmar — clique novamente para apagar",
+  "Apagar modelo": "Apagar modelo",
+  "Confirmar": "Confirmar",
   "CPU": "CPU",
   "CPU / Apple Silicon": "CPU / Apple Silicon",
   "Apple Silicon recomendado": "Apple Silicon recomendado",
   "GPU dedicada recomendada": "GPU dedicada recomendada",
+  "multi": "multi",
+  "EN": "EN",
   "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
     "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.",
   "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
@@ -15811,19 +15879,39 @@ Object.assign(literalResources["pt-BR"] as Record<string, string>, {
 });
 
 Object.assign(literalResources["es-ES"] as Record<string, string>, {
+  "Modelo de embedding": "Modelo de embeddings",
+  "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.":
+    "El modelo usado para indexar memorias, knowledge base y caché semántica. Ningún modelo viene instalado: descárgalo bajo demanda solo si lo necesitas.",
   "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
     "Elige el modelo usado para memoria, knowledge base y caché semántica. Ninguno viene preinstalado: descárgalo bajo demanda cuando lo necesites.",
   "Memória ativada sem modelo de embedding instalado":
     "Memoria activada sin un modelo de embeddings instalado",
   "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
     "Se recomienda encarecidamente elegir y descargar un modelo abajo. Sin él, la recuperación semántica cae a coincidencia por palabras clave (calidad degradada).",
+  "Não foi possível carregar o catálogo": "No se pudo cargar el catálogo",
   "Resposta inesperada do catálogo": "Respuesta inesperada del catálogo",
   "Falha ao carregar catálogo": "Error al cargar el catálogo",
+  "Tentar novamente": "Intentar de nuevo",
+  "Carregando catálogo de modelos...": "Cargando catálogo de modelos...",
   "Baixando": "Descargando",
+  "Baixando...": "Descargando...",
+  "Modelo baixado e pronto para uso": "Modelo descargado y listo para usar",
+  "Falha ao selecionar modelo": "Error al seleccionar el modelo",
+  "Modelo ativo": "Modelo activo",
+  "Falha ao apagar modelo": "Error al borrar el modelo",
+  "Modelo apagado": "Modelo borrado",
+  "Ativo": "Activo",
+  "Em uso": "En uso",
+  "Usar este": "Usar este",
+  "Confirmar — clique novamente para apagar": "Confirmar — haz clic de nuevo para borrar",
+  "Apagar modelo": "Borrar modelo",
+  "Confirmar": "Confirmar",
   "CPU": "CPU",
   "CPU / Apple Silicon": "CPU / Apple Silicon",
   "Apple Silicon recomendado": "Apple Silicon recomendado",
   "GPU dedicada recomendada": "GPU dedicada recomendada",
+  "multi": "multi",
+  "EN": "EN",
   "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
     "Modelo ligero y equilibrado. Buen punto de partida para memoria y caché en PT-BR + EN. nDCG@5 ≈ 0.91 en el benchmark interno.",
   "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
@@ -15841,19 +15929,39 @@ Object.assign(literalResources["es-ES"] as Record<string, string>, {
 });
 
 Object.assign(literalResources["fr-FR"] as Record<string, string>, {
+  "Modelo de embedding": "Modèle d'embedding",
+  "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.":
+    "Le modèle utilisé pour indexer les mémoires, la base de connaissances et le cache sémantique. Aucun modèle n'est installé : téléchargez-en un à la demande seulement si nécessaire.",
   "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
     "Choisissez le modèle utilisé pour la mémoire, la base de connaissances et le cache sémantique. Aucun n'est préinstallé : téléchargez-en un à la demande si nécessaire.",
   "Memória ativada sem modelo de embedding instalado":
     "Mémoire activée sans modèle d'embedding installé",
   "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
     "Il est fortement recommandé de choisir et télécharger un modèle ci-dessous. Sans lui, la récupération sémantique bascule vers une correspondance par mots-clés (qualité dégradée).",
+  "Não foi possível carregar o catálogo": "Impossible de charger le catalogue",
   "Resposta inesperada do catálogo": "Réponse inattendue du catalogue",
   "Falha ao carregar catálogo": "Échec du chargement du catalogue",
+  "Tentar novamente": "Réessayer",
+  "Carregando catálogo de modelos...": "Chargement du catalogue de modèles...",
   "Baixando": "Téléchargement de",
+  "Baixando...": "Téléchargement...",
+  "Modelo baixado e pronto para uso": "Modèle téléchargé et prêt à l'emploi",
+  "Falha ao selecionar modelo": "Échec de la sélection du modèle",
+  "Modelo ativo": "Modèle actif",
+  "Falha ao apagar modelo": "Échec de la suppression du modèle",
+  "Modelo apagado": "Modèle supprimé",
+  "Ativo": "Actif",
+  "Em uso": "En cours d'utilisation",
+  "Usar este": "Utiliser celui-ci",
+  "Confirmar — clique novamente para apagar": "Confirmer — cliquez à nouveau pour supprimer",
+  "Apagar modelo": "Supprimer le modèle",
+  "Confirmar": "Confirmer",
   "CPU": "CPU",
   "CPU / Apple Silicon": "CPU / Apple Silicon",
   "Apple Silicon recomendado": "Apple Silicon recommandé",
   "GPU dedicada recomendada": "GPU dédiée recommandée",
+  "multi": "multi",
+  "EN": "EN",
   "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
     "Modèle léger et équilibré. Bon point de départ pour la mémoire et le cache en PT-BR + EN. nDCG@5 ≈ 0.91 dans le benchmark interne.",
   "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
@@ -15871,19 +15979,39 @@ Object.assign(literalResources["fr-FR"] as Record<string, string>, {
 });
 
 Object.assign(literalResources["de-DE"] as Record<string, string>, {
+  "Modelo de embedding": "Embedding-Modell",
+  "O modelo usado para indexar memórias, knowledge base e cache semântico. Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.":
+    "Das Modell zum Indexieren von Erinnerungen, Knowledge Base und semantischem Cache. Kein Modell ist installiert: lade nur bei Bedarf eines herunter.",
   "Escolha o modelo usado para memória, knowledge base e cache semântico. Nenhum vem pré-instalado: baixe sob demanda quando precisar.":
     "Wähle das Modell für Speicher, Knowledge Base und semantischen Cache. Keines ist vorinstalliert: lade bei Bedarf eines herunter.",
   "Memória ativada sem modelo de embedding instalado":
     "Speicher aktiviert, aber kein Embedding-Modell installiert",
   "Extremamente recomendado escolher e baixar um modelo abaixo. Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).":
     "Es wird dringend empfohlen, unten ein Modell auszuwählen und herunterzuladen. Ohne Modell fällt die semantische Suche auf Keyword-Matching zurück (geringere Qualität).",
+  "Não foi possível carregar o catálogo": "Katalog konnte nicht geladen werden",
   "Resposta inesperada do catálogo": "Unerwartete Katalogantwort",
   "Falha ao carregar catálogo": "Katalog konnte nicht geladen werden",
+  "Tentar novamente": "Erneut versuchen",
+  "Carregando catálogo de modelos...": "Modellkatalog wird geladen...",
   "Baixando": "Download von",
+  "Baixando...": "Wird heruntergeladen...",
+  "Modelo baixado e pronto para uso": "Modell heruntergeladen und einsatzbereit",
+  "Falha ao selecionar modelo": "Modell konnte nicht ausgewählt werden",
+  "Modelo ativo": "Aktives Modell",
+  "Falha ao apagar modelo": "Modell konnte nicht gelöscht werden",
+  "Modelo apagado": "Modell gelöscht",
+  "Ativo": "Aktiv",
+  "Em uso": "In Verwendung",
+  "Usar este": "Dieses verwenden",
+  "Confirmar — clique novamente para apagar": "Bestätigen — zum Löschen erneut klicken",
+  "Apagar modelo": "Modell löschen",
+  "Confirmar": "Bestätigen",
   "CPU": "CPU",
   "CPU / Apple Silicon": "CPU / Apple Silicon",
   "Apple Silicon recomendado": "Apple Silicon empfohlen",
   "GPU dedicada recomendada": "Dedizierte GPU empfohlen",
+  "multi": "multi",
+  "EN": "EN",
   "Modelo balanceado e leve. Boa escolha como ponto de partida para memória e cache em PT-BR + EN. nDCG@5 ≈ 0.91 no bench interno.":
     "Leichtes, ausgewogenes Modell. Guter Einstieg für Speicher und Cache in PT-BR + EN. nDCG@5 ≈ 0,91 im internen Benchmark.",
   "Pequeno e instruct-tuned. +1.2 pp nDCG@5 vs default em queries técnicas. Use prefixo 'query: ' / 'passage: ' para melhor qualidade.":
@@ -15898,6 +16026,181 @@ Object.assign(literalResources["de-DE"] as Record<string, string>, {
     "Ende 2025 veröffentlicht, führend im Retrieval mit gutem Größen-/Qualitätsverhältnis. Stark in EN; ordentliche mehrsprachige Unterstützung.",
   "Apenas inglês mas extremamente rápido e leve (~130 MB). Use só se sua memória/conhecimento for puramente EN.":
     "Nur Englisch, aber extrem schnell und leicht (~130 MB). Nur verwenden, wenn Speicher/Wissen ausschließlich EN ist.",
+});
+
+Object.assign(literalResources["en-US"] as Record<string, string>, {
+  "Fechar aviso": "Dismiss notification",
+  "Cancelando download…": "Cancelling download...",
+  "Cancelando": "Cancelling",
+  "Cancelando download": "Cancelling download",
+  "Download concluído antes do cancelamento.": "Download completed before cancellation.",
+  "Falha no download": "Download failed",
+  "Download cancelado.": "Download canceled.",
+  "Falha ao cancelar o download": "Failed to cancel the download",
+  "Cancelar": "Cancel",
+  "Cancelar download": "Cancel download",
+  "Sem resposta do servidor — verifique a conexão": "No response from the server — check the connection",
+  "Conexão instável — tentando reconectar": "Unstable connection — trying to reconnect",
+  "Falha ao iniciar o download": "Failed to start the download",
+  "Retomando download…": "Resuming download...",
+  "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.":
+    "OpenAI needs a configured API key to use the {{functionId}} default.",
+  "Transcrições": "Transcriptions",
+  "Transcrição local via whisper.cpp, com modelos baixados sob demanda.":
+    "Local transcription with whisper.cpp, using models downloaded on demand.",
+  "Carregando modelos Whisper.cpp...": "Loading Whisper.cpp models...",
+  "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.":
+    "Local models for offline transcription. Download only the ones you want to use.",
+  "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.":
+    "Configure AI providers for language, voice, transcription, and media models.",
+  "No module named 'huggingface_hub'":
+    "Required package huggingface_hub is missing. Reinstall the project dependencies and try again.",
+  "Baixando modelo Kokoro": "Downloading Kokoro model",
+  "Modelo Kokoro pronto.": "Kokoro model ready.",
+  "Baixando voz Kokoro · {{voice}}": "Downloading Kokoro voice · {{voice}}",
+  'Voz "{{voice}}" disponível.': 'Voice "{{voice}}" available.',
+  "Baixando {{label}}": "Downloading {{label}}",
+  "{{label}} pronto.": "{{label}} ready.",
+});
+
+Object.assign(literalResources["pt-BR"] as Record<string, string>, {
+  "Fechar aviso": "Fechar aviso",
+  "Cancelando download…": "Cancelando download...",
+  "Cancelando": "Cancelando",
+  "Cancelando download": "Cancelando download",
+  "Download concluído antes do cancelamento.": "Download concluído antes do cancelamento.",
+  "Falha no download": "Falha no download",
+  "Download cancelado.": "Download cancelado.",
+  "Falha ao cancelar o download": "Falha ao cancelar o download",
+  "Cancelar": "Cancelar",
+  "Cancelar download": "Cancelar download",
+  "Sem resposta do servidor — verifique a conexão": "Sem resposta do servidor — verifique a conexão",
+  "Conexão instável — tentando reconectar": "Conexão instável — tentando reconectar",
+  "Falha ao iniciar o download": "Falha ao iniciar o download",
+  "Retomando download…": "Retomando download...",
+  "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.":
+    "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.",
+  "Transcrições": "Transcrições",
+  "Transcrição local via whisper.cpp, com modelos baixados sob demanda.":
+    "Transcrição local via whisper.cpp, com modelos baixados sob demanda.",
+  "Carregando modelos Whisper.cpp...": "Carregando modelos Whisper.cpp...",
+  "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.":
+    "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.",
+  "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.":
+    "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.",
+  "No module named 'huggingface_hub'":
+    "Dependência huggingface_hub ausente. Reinstale as dependências do projeto e tente novamente.",
+  "Baixando modelo Kokoro": "Baixando modelo Kokoro",
+  "Modelo Kokoro pronto.": "Modelo Kokoro pronto.",
+  "Baixando voz Kokoro · {{voice}}": "Baixando voz Kokoro · {{voice}}",
+  'Voz "{{voice}}" disponível.': 'Voz "{{voice}}" disponível.',
+  "Baixando {{label}}": "Baixando {{label}}",
+  "{{label}} pronto.": "{{label}} pronto.",
+});
+
+Object.assign(literalResources["es-ES"] as Record<string, string>, {
+  "Fechar aviso": "Cerrar aviso",
+  "Cancelando download…": "Cancelando descarga...",
+  "Cancelando": "Cancelando",
+  "Cancelando download": "Cancelando descarga",
+  "Download concluído antes do cancelamento.": "La descarga se completó antes de la cancelación.",
+  "Falha no download": "Error en la descarga",
+  "Download cancelado.": "Descarga cancelada.",
+  "Falha ao cancelar o download": "No se pudo cancelar la descarga",
+  "Cancelar": "Cancelar",
+  "Cancelar download": "Cancelar descarga",
+  "Sem resposta do servidor — verifique a conexão": "Sin respuesta del servidor — verifica la conexión",
+  "Conexão instável — tentando reconectar": "Conexión inestable — intentando reconectar",
+  "Falha ao iniciar o download": "No se pudo iniciar la descarga",
+  "Retomando download…": "Reanudando descarga...",
+  "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.":
+    "OpenAI necesita una API key configurada para usar el valor predeterminado de {{functionId}}.",
+  "Transcrições": "Transcripciones",
+  "Transcrição local via whisper.cpp, com modelos baixados sob demanda.":
+    "Transcripción local con whisper.cpp, usando modelos descargados bajo demanda.",
+  "Carregando modelos Whisper.cpp...": "Cargando modelos Whisper.cpp...",
+  "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.":
+    "Modelos locales para transcripción offline. Descarga solo los que quieras usar.",
+  "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.":
+    "Configura proveedores de IA para modelos de lenguaje, voz, transcripción y medios.",
+  "No module named 'huggingface_hub'":
+    "Falta el paquete requerido huggingface_hub. Reinstala las dependencias del proyecto e inténtalo de nuevo.",
+  "Baixando modelo Kokoro": "Descargando modelo Kokoro",
+  "Modelo Kokoro pronto.": "Modelo Kokoro listo.",
+  "Baixando voz Kokoro · {{voice}}": "Descargando voz Kokoro · {{voice}}",
+  'Voz "{{voice}}" disponível.': 'Voz "{{voice}}" disponible.',
+  "Baixando {{label}}": "Descargando {{label}}",
+  "{{label}} pronto.": "{{label}} listo.",
+});
+
+Object.assign(literalResources["fr-FR"] as Record<string, string>, {
+  "Fechar aviso": "Fermer l'avis",
+  "Cancelando download…": "Annulation du téléchargement...",
+  "Cancelando": "Annulation",
+  "Cancelando download": "Annulation du téléchargement",
+  "Download concluído antes do cancelamento.": "Téléchargement terminé avant l'annulation.",
+  "Falha no download": "Échec du téléchargement",
+  "Download cancelado.": "Téléchargement annulé.",
+  "Falha ao cancelar o download": "Échec de l'annulation du téléchargement",
+  "Cancelar": "Annuler",
+  "Cancelar download": "Annuler le téléchargement",
+  "Sem resposta do servidor — verifique a conexão": "Pas de réponse du serveur — vérifiez la connexion",
+  "Conexão instável — tentando reconectar": "Connexion instable — tentative de reconnexion",
+  "Falha ao iniciar o download": "Échec du démarrage du téléchargement",
+  "Retomando download…": "Reprise du téléchargement...",
+  "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.":
+    "OpenAI nécessite une clé API configurée pour utiliser la valeur par défaut de {{functionId}}.",
+  "Transcrições": "Transcriptions",
+  "Transcrição local via whisper.cpp, com modelos baixados sob demanda.":
+    "Transcription locale avec whisper.cpp, avec des modèles téléchargés à la demande.",
+  "Carregando modelos Whisper.cpp...": "Chargement des modèles Whisper.cpp...",
+  "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.":
+    "Modèles locaux pour la transcription hors ligne. Téléchargez seulement ceux que vous voulez utiliser.",
+  "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.":
+    "Configurez les fournisseurs d'IA pour les modèles de langage, voix, transcription et média.",
+  "No module named 'huggingface_hub'":
+    "Le paquet requis huggingface_hub est absent. Réinstallez les dépendances du projet puis réessayez.",
+  "Baixando modelo Kokoro": "Téléchargement du modèle Kokoro",
+  "Modelo Kokoro pronto.": "Modèle Kokoro prêt.",
+  "Baixando voz Kokoro · {{voice}}": "Téléchargement de la voix Kokoro · {{voice}}",
+  'Voz "{{voice}}" disponível.': 'Voix "{{voice}}" disponible.',
+  "Baixando {{label}}": "Téléchargement de {{label}}",
+  "{{label}} pronto.": "{{label}} prêt.",
+});
+
+Object.assign(literalResources["de-DE"] as Record<string, string>, {
+  "Fechar aviso": "Hinweis schließen",
+  "Cancelando download…": "Download wird abgebrochen...",
+  "Cancelando": "Abbrechen läuft",
+  "Cancelando download": "Download abbrechen",
+  "Download concluído antes do cancelamento.": "Download wurde vor dem Abbruch abgeschlossen.",
+  "Falha no download": "Download fehlgeschlagen",
+  "Download cancelado.": "Download abgebrochen.",
+  "Falha ao cancelar o download": "Download konnte nicht abgebrochen werden",
+  "Cancelar": "Abbrechen",
+  "Cancelar download": "Download abbrechen",
+  "Sem resposta do servidor — verifique a conexão": "Keine Antwort vom Server — Verbindung prüfen",
+  "Conexão instável — tentando reconectar": "Instabile Verbindung — erneuter Verbindungsversuch",
+  "Falha ao iniciar o download": "Download konnte nicht gestartet werden",
+  "Retomando download…": "Download wird fortgesetzt...",
+  "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.":
+    "OpenAI benötigt einen konfigurierten API-Schlüssel, um den Standard für {{functionId}} zu verwenden.",
+  "Transcrições": "Transkriptionen",
+  "Transcrição local via whisper.cpp, com modelos baixados sob demanda.":
+    "Lokale Transkription mit whisper.cpp und bei Bedarf heruntergeladenen Modellen.",
+  "Carregando modelos Whisper.cpp...": "Whisper.cpp-Modelle werden geladen...",
+  "Modelos locais para transcrição offline. Baixe apenas os que deseja usar.":
+    "Lokale Modelle für Offline-Transkription. Lade nur die Modelle herunter, die du verwenden möchtest.",
+  "Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.":
+    "Konfiguriere KI-Anbieter für Sprach-, Voice-, Transkriptions- und Medienmodelle.",
+  "No module named 'huggingface_hub'":
+    "Das erforderliche Paket huggingface_hub fehlt. Installiere die Projektabhängigkeiten erneut und versuche es noch einmal.",
+  "Baixando modelo Kokoro": "Kokoro-Modell wird heruntergeladen",
+  "Modelo Kokoro pronto.": "Kokoro-Modell bereit.",
+  "Baixando voz Kokoro · {{voice}}": "Kokoro-Stimme wird heruntergeladen · {{voice}}",
+  'Voz "{{voice}}" disponível.': 'Stimme "{{voice}}" verfügbar.',
+  "Baixando {{label}}": "{{label}} wird heruntergeladen",
+  "{{label}} pronto.": "{{label}} bereit.",
 });
 
 export type ResourceLanguages = keyof typeof resources;

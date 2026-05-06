@@ -3,6 +3,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, useCallback, useMemo } from "react";
+import { keepPreviousData } from "@tanstack/react-query";
 import { Workflow } from "lucide-react";
 import { ExecutionTable } from "@/components/executions/execution-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
@@ -18,6 +19,7 @@ import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import {
@@ -76,6 +78,8 @@ export default function ExecutionsPage() {
       );
       return hasActive ? 10_000 : 45_000;
     },
+    placeholderData: keepPreviousData,
+    notifyOnChangeProps: ["data", "error"],
     queryFn: async ({ signal }) => {
       const response = await fetchControlPlaneDashboardJsonAllowError<ExecutionSummary[]>(
         "/executions",
@@ -104,12 +108,19 @@ export default function ExecutionsPage() {
     },
   });
 
+  const stableExecutionsQuery = useStableQueryData({
+    data: executionsQuery.data,
+    resetKey: "dashboard:executions",
+    isPending: executionsQuery.isPending,
+    isFetching: executionsQuery.isFetching,
+    error: executionsQuery.error,
+  });
   const executions = useMemo(
-    () => executionsQuery.data?.items ?? [],
-    [executionsQuery.data]
+    () => stableExecutionsQuery.data?.items ?? [],
+    [stableExecutionsQuery.data]
   );
-  const unavailable = executionsQuery.data?.unavailable ?? false;
-  const loading = executionsQuery.isLoading;
+  const unavailable = stableExecutionsQuery.data?.unavailable ?? false;
+  const loading = stableExecutionsQuery.initialLoading;
 
   const detailQuery = useControlPlaneQuery<ExecutionDetail>({
     tier: "live",
@@ -191,7 +202,7 @@ export default function ExecutionsPage() {
     void executionsQuery.refetch();
   }, [executionsQuery]);
   const tourVariant =
-    executionsQuery.error || unavailable
+    stableExecutionsQuery.showBlockingError || (unavailable && executions.length === 0)
       ? "unavailable"
       : showInitialSkeleton
         ? "loading"
@@ -265,11 +276,11 @@ export default function ExecutionsPage() {
           <div {...tourAnchor("executions.table")}>
             <ExecutionTable executions={[]} showAgent loading />
           </div>
-        ) : executionsQuery.error ? (
+        ) : stableExecutionsQuery.showBlockingError ? (
           <div {...tourAnchor("executions.unavailable")}>
             <ErrorState
               title={t("executions.unavailable")}
-              description={executionsQuery.error.message ?? t("executions.loadError")}
+              description={executionsQuery.error?.message ?? t("executions.loadError")}
               onRetry={refreshExecutions}
             />
           </div>
