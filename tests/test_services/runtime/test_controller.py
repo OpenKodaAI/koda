@@ -587,6 +587,28 @@ def _workspace_controller(
     return controller, workspace_path
 
 
+@pytest.mark.asyncio
+async def test_start_records_application_when_runtime_environments_are_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = _StoreStub()
+    kernel = _KernelStub()
+    monkeypatch.setattr(controller_module, "RuntimeStore", lambda: store)
+    monkeypatch.setattr(controller_module, "build_runtime_kernel_client", lambda runtime_root, store: kernel)
+    monkeypatch.setattr(controller_module, "RecoveryManager", lambda store: SimpleNamespace())
+    monkeypatch.setattr(controller_module, "PortAllocator", _PortAllocatorStub)
+    monkeypatch.setattr(controller_module, "RUNTIME_ENVIRONMENTS_ENABLED", False)
+
+    controller = controller_module.RuntimeController(runtime_root=tmp_path / "runtime")
+    app = object()
+
+    await controller.start(app)
+
+    assert controller._application is app
+    assert controller._started is False
+
+
 def test_runtime_kernel_operation_required_uses_reported_operation_set(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -866,6 +888,49 @@ async def test_add_artifact_merges_engine_metadata_and_evidence(
     assert metadata["content_hash"] == "metadata-hash"
     assert metadata["metadata_json"] == '{"phase":"metadata","size_bytes":16}'
     assert metadata["evidence_json"] == '{"excerpt":"artifact payload"}'
+
+
+@pytest.mark.asyncio
+async def test_persist_generated_artifact_file_copies_into_runtime_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "tmp-voice.ogg"
+    source.write_bytes(b"OggS voice bytes")
+    store = _StoreStub(
+        env={
+            "id": 7,
+            "task_id": 5,
+            "status": "active",
+            "current_phase": "executing",
+            "workspace_path": str(tmp_path),
+            "runtime_dir": str(tmp_path / "runtime" / "tasks" / "5"),
+        }
+    )
+    controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=_KernelStub())
+
+    async def _artifact_engine_disabled() -> bool:
+        return False
+
+    monkeypatch.setattr(controller, "_ensure_artifact_engine_started", _artifact_engine_disabled)
+
+    artifact = await controller.persist_generated_artifact_file(
+        task_id=5,
+        source_path=str(source),
+        artifact_kind="audio",
+        label="voice-response-5.ogg",
+        metadata={"source_type": "voice_response", "mime_type": "audio/ogg"},
+    )
+
+    persisted_path = Path(str(artifact["path"]))
+    assert persisted_path.parent == tmp_path / "runtime" / "tasks" / "5" / "artifacts"
+    assert persisted_path.read_bytes() == b"OggS voice bytes"
+    assert source.exists()
+    assert store.artifacts[0]["path"] == str(persisted_path)
+    assert store.artifacts[0]["artifact_kind"] == "audio"
+    assert store.artifacts[0]["metadata"]["source_type"] == "voice_response"
+    assert store.artifacts[0]["metadata"]["mime_type"] == "audio/ogg"
+    assert store.artifacts[0]["metadata"]["size_bytes"] == len(b"OggS voice bytes")
 
 
 @pytest.mark.asyncio

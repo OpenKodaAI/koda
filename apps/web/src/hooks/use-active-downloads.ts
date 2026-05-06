@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDownloadJob, type ProviderDownloadJob, type ProviderId } from "@/hooks/use-download-job";
 
 type ActiveDownloadsResponse = {
@@ -14,13 +15,16 @@ type ActiveDownloadsResponse = {
  */
 const ASSET_LABEL_RESOLVERS: Record<
   ProviderId,
-  (job: ProviderDownloadJob) => { toastTitle: string; successMessage: string }
+  (
+    job: ProviderDownloadJob,
+    tl: (value: string, options?: Record<string, unknown>) => string,
+  ) => { toastTitle: string; successMessage: string }
 > = {
-  kokoro: (job) => {
+  kokoro: (job, tl) => {
     if (job.asset_id === "model") {
       return {
-        toastTitle: "Baixando modelo Kokoro",
-        successMessage: "Modelo Kokoro pronto.",
+        toastTitle: tl("Baixando modelo Kokoro"),
+        successMessage: tl("Modelo Kokoro pronto."),
       };
     }
     const details = {
@@ -29,30 +33,30 @@ const ASSET_LABEL_RESOLVERS: Record<
     };
     const voiceName = String(details.voice_name ?? job.asset_id);
     return {
-      toastTitle: `Baixando voz Kokoro · ${voiceName}`,
-      successMessage: `Voz "${voiceName}" disponível.`,
+      toastTitle: tl("Baixando voz Kokoro · {{voice}}", { voice: voiceName }),
+      successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
     };
   },
-  whispercpp: (job) => {
+  whispercpp: (job, tl) => {
     const details = {
       ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
       ...(job as ProviderDownloadJob & Record<string, unknown>),
     };
     const label = String(details.label ?? `Whisper ${job.asset_id}`);
     return {
-      toastTitle: `Baixando ${label}`,
-      successMessage: `${label} pronto.`,
+      toastTitle: tl("Baixando {{label}}", { label }),
+      successMessage: tl("{{label}} pronto.", { label }),
     };
   },
-  embedding: (job) => {
+  embedding: (job, tl) => {
     const details = {
       ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
       ...(job as ProviderDownloadJob & Record<string, unknown>),
     };
     const label = String(details.title ?? details.label ?? `Embedding ${job.asset_id}`);
     return {
-      toastTitle: `Baixando ${label}`,
-      successMessage: `${label} pronto.`,
+      toastTitle: tl("Baixando {{label}}", { label }),
+      successMessage: tl("{{label}} pronto.", { label }),
     };
   },
 };
@@ -63,6 +67,7 @@ const ASSET_LABEL_RESOLVERS: Record<
  * (e.g. after a hard refresh of the page during a long Whisper download).
  */
 export function useActiveDownloads() {
+  const { tl } = useAppI18n();
   const { attach, isActive } = useDownloadJob();
   // Track which jobs we've already attached this session to avoid double
   // toasts when a poll returns the same job twice.
@@ -85,7 +90,7 @@ export function useActiveDownloads() {
           if (!resolver) continue;
           if (attachedRef.current.has(job.id)) continue;
           if (isActive(providerId, job.asset_id)) continue;
-          const labels = resolver(job);
+          const labels = resolver(job, tl);
           attach({
             providerId,
             jobId: job.id,
@@ -106,5 +111,5 @@ export function useActiveDownloads() {
       cancelled = true;
       window.clearInterval(handle);
     };
-  }, [attach, isActive]);
+  }, [attach, isActive, tl]);
 }

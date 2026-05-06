@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useRuntimeQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { parseResponseError } from "@/lib/http-client";
 import { queryKeys } from "@/lib/query/keys";
 import type {
@@ -93,7 +94,14 @@ export function useRuntimeTask(
     queryFn: async ({ signal }) => fetchBundle(signal),
   });
 
-  const bundle = taskQuery.data ?? null;
+  const stableBundleQuery = useStableQueryData({
+    data: taskQuery.data,
+    resetKey: taskQueryKey,
+    isPending: taskQuery.isPending,
+    isFetching: taskQuery.isFetching,
+    error: taskQuery.error,
+  });
+  const bundle = stableBundleQuery.data ?? null;
 
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: taskQueryKey });
@@ -225,9 +233,9 @@ export function useRuntimeTask(
 
   return {
     bundle,
-    loading: taskQuery.isLoading && !bundle,
-    refreshing: taskQuery.isFetching && !taskQuery.isLoading,
-    error: taskQuery.error?.message ?? null,
+    loading: stableBundleQuery.initialLoading,
+    refreshing: stableBundleQuery.refreshing,
+    error: stableBundleQuery.showBlockingError ? taskQuery.error?.message ?? null : null,
     connected,
     refresh,
     mutate,

@@ -263,7 +263,7 @@ class GrpcArtifactEngineClient:
 def build_artifact_engine_client(*, agent_id: str | None = None) -> ArtifactEngineClient:
     """Build the Rust artifact-engine client."""
 
-    normalized_agent_id = str(agent_id or "").strip().lower() or None
+    normalized_agent_id = str(agent_id or config.AGENT_ID or "default").strip().lower() or "default"
     selection = EngineSelection(
         backend="grpc",
         reason="rust-default",

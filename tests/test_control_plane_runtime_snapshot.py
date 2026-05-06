@@ -137,6 +137,45 @@ def test_runtime_snapshot_propagates_health_port_to_process_env(monkeypatch):
     )
 
 
+def test_runtime_snapshot_injects_runtime_ui_token_for_worker(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+    import koda.control_plane.runtime_access as runtime_access_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+
+    monkeypatch.delenv("AGENT_ID", raising=False)
+    monkeypatch.setenv("RUNTIME_LOCAL_UI_TOKEN", "runtime-secret")
+    monkeypatch.delenv("ATLAS_RUNTIME_LOCAL_UI_TOKEN", raising=False)
+    monkeypatch.setattr(runtime_access_mod, "fetch_one", lambda *_args, **_kwargs: None)
+
+    manager.get_published_snapshot = lambda agent_id, version=None: {  # type: ignore[attr-defined]
+        "env": {},
+        "agent": {"runtime_endpoint": {"health_port": 8223}},
+        "sections": {},
+        "skills": [],
+        "templates": [],
+        "secrets": {},
+    }
+    manager.publish_agent = lambda agent_id: {"version": 1}  # type: ignore[attr-defined]
+    manager._snapshot_version = lambda agent_id, snapshot: 1  # type: ignore[attr-defined]
+    manager._merged_global_env = lambda: {}  # type: ignore[attr-defined]
+    manager._provider_connection_env = lambda: {}  # type: ignore[attr-defined]
+    manager.get_agent_spec = lambda agent_id, snapshot=None: {"documents": {}}  # type: ignore[attr-defined]
+    manager._general_ui_meta = lambda sections=None: {}  # type: ignore[attr-defined]
+    manager._system_settings_sections = lambda: {}  # type: ignore[attr-defined]
+    manager._bool_from_env = lambda env, key, default=False: default  # type: ignore[attr-defined]
+    manager._scoped_env = lambda agent_id, env: dict(env)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        manager_mod,
+        "kokoro_managed_voices_storage_path",
+        lambda: Path("/tmp/kokoro-managed.bin"),
+    )
+
+    snapshot = manager._resolve_runtime_snapshot("atlas")
+
+    assert snapshot.process_env["RUNTIME_LOCAL_UI_TOKEN"] == "runtime-secret"
+
+
 def test_runtime_snapshot_overwrites_stale_model_policy_env(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
@@ -407,9 +446,51 @@ def test_runtime_access_issues_request_token_from_bootstrap_env(monkeypatch):
         agent_scope="ATLAS",
         capability="mutate",
     )
+    read_envelope = RuntimeAccessService("env-runtime-secret").authorize(
+        token,
+        agent_scope="ATLAS",
+        capability="read",
+    )
     assert payload["runtime_token"] is None
     assert payload["runtime_token_present"] is True
     assert envelope is not None
+    assert read_envelope is not None
+
+
+def test_runtime_access_rewrites_loopback_runtime_url_for_remote_kernel(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+    import koda.control_plane.runtime_access as runtime_access_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._require_agent_row = lambda agent_id: (  # type: ignore[attr-defined]
+        "ATLAS",
+        {
+            "id": "ATLAS",
+            "applied_version": 0,
+            "desired_version": 0,
+            "workspace_id": "",
+        },
+    )
+    manager.build_draft_snapshot = lambda agent_id: {  # type: ignore[attr-defined]
+        "agent": {
+            "runtime_endpoint": {
+                "health_url": "http://127.0.0.1:9188/health",
+                "runtime_base_url": "http://127.0.0.1:9188",
+            }
+        },
+        "secrets": {},
+        "sections": {},
+    }
+
+    monkeypatch.setattr(runtime_access_mod, "fetch_one", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("RUNTIME_KERNEL_SOCKET", "runtime-kernel:50061")
+    monkeypatch.delenv("RUNTIME_LOCAL_UI_TOKEN", raising=False)
+    monkeypatch.delenv("ATLAS_RUNTIME_LOCAL_UI_TOKEN", raising=False)
+
+    payload = manager.get_runtime_access("atlas", capability="read")
+
+    assert payload["health_url"] == "http://runtime-kernel:9188/health"
+    assert payload["runtime_base_url"] == "http://runtime-kernel:9188"
 
 
 def test_runtime_access_prefers_agent_scoped_bootstrap_env(monkeypatch):

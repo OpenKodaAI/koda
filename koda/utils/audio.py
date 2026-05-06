@@ -44,6 +44,20 @@ def _runtime_transcription_defaults() -> tuple[str, str, str]:
     return provider, model, language
 
 
+def _resolve_whisper_cpp_model_path(model: str = "") -> Path:
+    normalized = str(model or "").strip()
+    if normalized and normalized != "whisper-cpp-local":
+        try:
+            from koda.services.whisper_manager import whisper_model_path
+
+            return whisper_model_path(normalized).expanduser()
+        except KeyError:
+            return Path(normalized).expanduser()
+        except Exception:
+            pass
+    return Path(WHISPER_MODEL).expanduser()
+
+
 def _normalize_elevenlabs_language_code(language: str) -> str:
     normalized = str(language or "").strip().lower()
     if not normalized:
@@ -248,10 +262,12 @@ async def transcribe_audio(
         log.info("whisper_disabled")
         return None
 
+    if resolved_provider == "whispercpp":
+        return await _transcribe_with_whisper_cpp(audio_path, language=resolved_language, model=resolved_model)
     return await _transcribe_with_whisper_cpp(audio_path, language=resolved_language)
 
 
-async def _transcribe_with_whisper_cpp(audio_path: str, *, language: str = "") -> str | None:
+async def _transcribe_with_whisper_cpp(audio_path: str, *, language: str = "", model: str = "") -> str | None:
     """Transcribe an audio file using whisper-cli.
 
     Returns the transcribed text, or None on failure.
@@ -260,8 +276,9 @@ async def _transcribe_with_whisper_cpp(audio_path: str, *, language: str = "") -
         log.error("whisper_bin_not_found", bin=WHISPER_BIN)
         return None
 
-    if not Path(WHISPER_MODEL).exists():
-        log.error("whisper_model_not_found", model=WHISPER_MODEL)
+    whisper_model = _resolve_whisper_cpp_model_path(model)
+    if not whisper_model.exists():
+        log.error("whisper_model_not_found", model=str(whisper_model))
         return None
 
     # Convert to WAV if needed
@@ -274,7 +291,7 @@ async def _transcribe_with_whisper_cpp(audio_path: str, *, language: str = "") -
         proc = await asyncio.create_subprocess_exec(
             WHISPER_BIN,
             "-m",
-            WHISPER_MODEL,
+            str(whisper_model),
             "-l",
             language or WHISPER_LANGUAGE,
             "-f",

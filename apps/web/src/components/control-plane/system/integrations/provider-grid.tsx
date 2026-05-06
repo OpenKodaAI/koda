@@ -29,6 +29,7 @@ import {
 const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   general: "LLM",
   voice: "Voz",
+  transcription: "Transcrições",
   media: "Mídia",
 };
 
@@ -57,7 +58,7 @@ function ProviderCard({
   connection,
   onClick,
 }: {
-  provider: { id: string; title: string; category: string };
+  provider: { id: string; title: string; category: string; commandPresent?: boolean; connectionManaged?: boolean };
   connection: { connection_status: string; verified: boolean; configured: boolean } | undefined;
   onClick: () => void;
 }) {
@@ -69,7 +70,7 @@ function ProviderCard({
   const isConfigured = connection?.configured ?? false;
 
   let status: "connected" | "pending" | "disconnected" = "disconnected";
-  if (isVerified) status = "connected";
+  if (isVerified || (provider.connectionManaged === false && provider.commandPresent)) status = "connected";
   else if (isConfigured) status = "pending";
 
   return (
@@ -96,6 +97,7 @@ function ProviderCard({
 const PROVIDER_CATEGORY_DISPLAY: Record<string, string> = {
   general: "LLM",
   voice: "Voz",
+  transcription: "Transcrições",
   media: "Mídia",
 };
 
@@ -304,7 +306,7 @@ function ProviderListView({
           {tl("Conecte seus provedores")}
         </h1>
         <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
-          {tl("Configure os provedores de IA para modelos de linguagem, voz e mídia.")}
+          {tl("Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.")}
         </p>
         <div className="mt-4">
           <div className="relative w-full max-w-sm">

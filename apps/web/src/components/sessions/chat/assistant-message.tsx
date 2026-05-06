@@ -5,8 +5,9 @@ import { ReasoningBlock } from "@/components/sessions/chat/reasoning-block";
 import { ToolCallCard } from "@/components/sessions/chat/tool-call-card";
 import { ApprovalPrompt } from "@/components/sessions/chat/approval-prompt";
 import { BlockRenderer } from "@/components/sessions/chat/generative/block-renderer";
+import { InlineArtifactList } from "@/components/sessions/artifacts/inline-artifact-list";
 import { formatDuration } from "@/lib/utils";
-import type { ExecutionSummary } from "@/lib/types";
+import type { ExecutionArtifact, ExecutionSummary } from "@/lib/types";
 
 interface AssistantMessageProps {
   text: string;
@@ -15,6 +16,7 @@ interface AssistantMessageProps {
   onOpenExecution?: (taskId: number) => void;
   agentId?: string | null;
   sessionId?: string | null;
+  artifacts?: ExecutionArtifact[];
   blocks?: unknown[];
   /** Forwarded by interactive blocks (M6). */
   onBlockAction?: (blockId: string, actionId: string) => void;
@@ -41,6 +43,7 @@ export function AssistantMessage({
   onOpenExecution,
   agentId,
   sessionId,
+  artifacts = [],
   blocks,
   onBlockAction,
 }: AssistantMessageProps) {
@@ -97,6 +100,12 @@ export function AssistantMessage({
           })}
         </div>
       ) : null}
+
+      <InlineArtifactList
+        artifacts={artifacts}
+        agentId={agentId}
+        activityAt={linkedExecution?.completed_at || linkedExecution?.started_at || null}
+      />
 
       {linkedExecution ? (
         <ToolCallCard execution={linkedExecution} onOpenDetails={onOpenExecution} />

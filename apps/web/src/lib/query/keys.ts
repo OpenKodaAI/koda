@@ -86,6 +86,8 @@ export const queryKeys = {
       ["dashboard", "sessions", agentId, sessionId] as const,
     agentSchedules: (agentId: string) =>
       ["dashboard", "agents", agentId, "schedules"] as const,
+    routineSchedules: () =>
+      ["dashboard", "routines", "schedules"] as const,
   },
   runtime: {
     overview: (agentId: string, language?: string) =>

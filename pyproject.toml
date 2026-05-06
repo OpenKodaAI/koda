@@ -34,6 +34,7 @@ dependencies = [
     "pybreaker>=1.0,<2.0",
     "cryptography>=46.0.7,<47.0",
     "grpcio>=1.74,<2.0",
+    "huggingface-hub>=0.36.0,<1.0",
     # lxml is pulled in transitively; pin a floor here so Snyk/pip-audit stop
     # flagging CVE-2026-41066 on older wheels.
     "lxml>=6.1.0,<7.0",

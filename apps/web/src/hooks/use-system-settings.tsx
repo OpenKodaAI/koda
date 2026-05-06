@@ -69,6 +69,31 @@ type ProviderConnectionDraft = {
   login_session: ProviderLoginSession | null;
 };
 
+const CLIENT_RECOMPUTED_WARNING_PATTERNS = [
+  /precisa estar dispon[ií]vel\s+para usar o default de/i,
+  /precisa estar verificado\s+para ser usado como default de/i,
+  /precisa estar verificado\s+antes de ser habilitado globalmente/i,
+  /precisa estar conectado e verificado\s+para ficar habilitado/i,
+  /default provider must be connected and verified/i,
+  /fallback order includes providers that have not yet been verified/i,
+  /connect and verify elevenlabs before setting the default voice/i,
+  /o default de .* referencia um provider\/modelo desconhecido/i,
+  /o default de .* aponta para um modelo que não existe mais no catálogo/i,
+];
+
+function isClientRecomputedWarning(warning: string) {
+  const text = String(warning || "").trim();
+  return CLIENT_RECOMPUTED_WARNING_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function requiresOpenAiApiKeyDefault(functionId: string, providerId: string) {
+  return providerId === "codex" && ["image", "transcription"].includes(functionId);
+}
+
+function hasOpenAiApiKeyDefaultConnection(connection?: GeneralSystemSettingsProviderConnection) {
+  return Boolean(connection?.api_key_present && (!connection.auth_mode || connection.auth_mode === "api_key"));
+}
+
 type VoiceCatalogCacheEntry = {
   expiresAt: number;
   data: ElevenLabsVoiceCatalog;
@@ -934,8 +959,9 @@ export function SystemSettingsProvider({
       const cacheIdentity = [
         authMode,
         selectedBaseUrl,
-        ollamaConnection?.api_key_preview || "",
+        providerConnectionDrafts.ollama?.api_key ? "draft-key" : ollamaConnection?.api_key_present ? "stored-key" : "",
         ollamaConnection?.connection_status || "",
+        ollamaConnection?.last_verified_at || "",
       ].join(":");
       const cached = ollamaModelCacheRef.current[cacheIdentity];
       const now = Date.now();
@@ -1067,6 +1093,7 @@ export function SystemSettingsProvider({
       const currentLoginSession = providerConnectionDraftsRef.current[providerId]?.login_session || null;
       replaceProviderConnection(payload.connection);
       setProviderConnectionDraft(providerId, {
+        auth_mode: payload.connection.auth_mode,
         project_id: payload.connection.project_id || "",
         base_url: payload.connection.base_url || "",
         login_session: verified ? null : currentLoginSession,
@@ -1169,7 +1196,7 @@ export function SystemSettingsProvider({
   ]);
 
   const localWarnings = useMemo(() => {
-    const warnings = [...draft.review.warnings];
+    const warnings = draft.review.warnings.filter((warning) => !isClientRecomputedWarning(warning));
     const functionalDefaults = draft.values.models.functional_defaults || {};
     const functionalCatalog = draft.catalogs.functional_model_catalog || {};
     const autonomyPolicy = (draft.values.memory_and_knowledge.autonomy_policy || {}) as Record<string, unknown>;
@@ -1239,6 +1266,16 @@ export function SystemSettingsProvider({
       }
       const connection = providerConnections[selection.provider_id];
       const managedProvider = providerOptionMap[selection.provider_id]?.connectionManaged;
+      if (requiresOpenAiApiKeyDefault(functionId, selection.provider_id)) {
+        if (!hasOpenAiApiKeyDefaultConnection(connection)) {
+          warnings.push(
+            tl("OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.", {
+              functionId,
+            }),
+          );
+        }
+        continue;
+      }
       if (managedProvider && connection && !connection.verified) {
         warnings.push(
           tl("{{provider}} precisa estar verificado para ser usado como default de {{functionId}}.", {
@@ -1246,13 +1283,6 @@ export function SystemSettingsProvider({
             functionId,
           }),
         );
-      }
-      if (
-        functionId === "transcription" &&
-        selection.provider_id === "codex" &&
-        (!connection?.api_key_present || connection?.auth_mode !== "api_key")
-      ) {
-        warnings.push(tl("OpenAI Whisper via API exige conexão do provider OpenAI em modo API Key."));
       }
     }
     if (["t1", "t2"].includes(defaultAutonomyTier) && !draft.values.memory_and_knowledge.knowledge_enabled) {

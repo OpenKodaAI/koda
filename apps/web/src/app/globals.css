@@ -2211,7 +2211,7 @@ button[aria-label="Open Next Dev Tools"] {
   position: relative;
   min-height: inherit;
   overflow-x: clip;
-  animation: route-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: none;
 }
 
 .route-stage::before {

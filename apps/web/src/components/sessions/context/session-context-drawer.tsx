@@ -5,14 +5,12 @@ import { ChevronLeft } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { ArtifactViewer } from "@/components/sessions/artifacts/artifact-viewer";
+import { executionArtifactToArtifactDetail } from "@/components/sessions/artifacts/artifact-detail";
 import { SessionContextPanel } from "./session-context-panel";
 import type { SessionArtifactItem } from "./context-artifacts";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { truncateText } from "@/lib/utils";
-import {
-  artifactDetailSchema,
-  type ArtifactDetail,
-} from "@/lib/contracts/artifacts";
+import type { ArtifactDetail } from "@/lib/contracts/artifacts";
 import type { SessionDetail, SessionSummary } from "@/lib/types";
 
 interface SessionContextDrawerProps {
@@ -21,28 +19,6 @@ interface SessionContextDrawerProps {
   detail: SessionDetail | null;
   summary: SessionSummary | null;
   onOpenExecution?: (taskId: number, agentId: string | null) => void;
-}
-
-function toArtifactDetail(item: SessionArtifactItem, agentId: string | null): ArtifactDetail | null {
-  // Build the smallest valid ArtifactDetail from the existing summary item.
-  // The dedicated download endpoint takes the artifact id and the agent id.
-  const candidate = {
-    id: item.dedupeKey,
-    kind: item.kind,
-    label: item.label ?? null,
-    mime_type: item.mime_type ?? null,
-    size_bytes: item.size_bytes ?? null,
-    created_at: item.activityAt,
-    download_url: agentId
-      ? `/api/runtime/artifacts/${encodeURIComponent(item.dedupeKey)}/download?agent=${encodeURIComponent(agentId)}`
-      : `/api/runtime/artifacts/${encodeURIComponent(item.dedupeKey)}/download`,
-    preview_state: "available" as const,
-    domain: item.domain ?? null,
-    url: item.url ?? null,
-    path: item.path ?? null,
-  };
-  const parsed = artifactDetailSchema.safeParse(candidate);
-  return parsed.success ? parsed.data : null;
 }
 
 export function SessionContextDrawer({
@@ -70,7 +46,7 @@ export function SessionContextDrawer({
 
   const handleOpenArtifact = useCallback(
     (item: SessionArtifactItem) => {
-      const artifact = toArtifactDetail(item, sessionAgentId);
+      const artifact = executionArtifactToArtifactDetail(item, sessionAgentId, item.activityAt);
       if (artifact) setActiveArtifact(artifact);
     },
     [sessionAgentId],

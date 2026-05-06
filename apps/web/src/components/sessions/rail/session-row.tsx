@@ -10,7 +10,6 @@ interface SessionRowProps {
   session: SessionSummary;
   active: boolean;
   onSelect: () => void;
-  index?: number;
 }
 
 function relativeShort(value: string | null): string {
@@ -49,23 +48,20 @@ function resolveTitle(session: SessionSummary): string {
   return `Conversation ${session.session_id.slice(0, 8)}`;
 }
 
-function SessionRowImpl({ session, active, onSelect, index }: SessionRowProps) {
+function SessionRowImpl({ session, active, onSelect }: SessionRowProps) {
   const { t } = useAppI18n();
   const { tone, pulse, visible } = resolveTone(session);
   const title = resolveTitle(session);
   const timeLabel = relativeShort(session.last_activity_at);
-  const staggerDelay = typeof index === "number" ? Math.min(index, 8) * 18 : 0;
 
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={active ? "true" : undefined}
-      style={staggerDelay > 0 ? { animationDelay: `${staggerDelay}ms` } : undefined}
       className={cn(
         "group relative flex h-9 w-full items-center gap-2 rounded-[var(--radius-panel-sm)] px-2.5 text-left",
-        "animate-in fade-in-0 slide-in-from-left-1 duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "transition-colors",
+        "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
         active
           ? "bg-[var(--hover-tint)] font-medium text-[var(--text-primary)]"

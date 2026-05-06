@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from koda.services.runtime.api import (
+    _runtime_artifact_download,
     _runtime_readiness,
     _runtime_task_browser,
     _runtime_task_browser_screenshot,
@@ -181,6 +182,12 @@ class _StoreStub:
 
     def list_artifacts(self, task_id: int) -> list[dict[str, object]]:
         return list(self._artifacts)
+
+    def get_artifact(self, artifact_id: int) -> dict[str, object] | None:
+        for artifact in self._artifacts:
+            if int(artifact.get("id") or 0) == artifact_id:
+                return dict(artifact)
+        return None
 
     def list_browser_sessions(self, task_id: int) -> list[dict[str, object]]:
         return []
@@ -627,6 +634,37 @@ async def test_runtime_task_browser_screenshot_returns_preview_png(tmp_path):
 
     assert response.status == 200
     assert Path(str(response._path)) == preview_path
+
+
+@pytest.mark.asyncio
+async def test_runtime_artifact_download_returns_audio_content_type(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    audio_path = runtime_root / "tasks" / "12" / "artifacts" / "voice-response-12.ogg"
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(b"OggS voice bytes")
+    controller = _ControllerStub(
+        runtime_root=runtime_root,
+        artifacts=[
+            {
+                "id": 88,
+                "path": str(audio_path),
+                "label": "voice-response-12.ogg",
+                "metadata": {"mime_type": "audio/ogg", "size_bytes": audio_path.stat().st_size},
+            }
+        ],
+    )
+    request = _request(headers={"X-Runtime-Token": "secret"})
+    request.match_info = {"artifact_id": "88"}
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_artifact_download(request)
+
+    assert response.status == 200
+    assert response.headers["Content-Type"] == "audio/ogg"
+    assert Path(str(response._path)) == audio_path
 
 
 @pytest.mark.asyncio

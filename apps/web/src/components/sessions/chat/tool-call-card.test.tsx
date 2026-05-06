@@ -42,6 +42,8 @@ describe("ToolCallCard", () => {
     const toggle = screen.getByRole("button");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(toggle).toHaveTextContent(/Completed/i);
+    expect(toggle).toHaveTextContent(/Metadata/i);
+    expect(screen.queryByText("List files in /tmp")).not.toBeInTheDocument();
   });
 
   it("expands on click and calls onOpenDetails with task id", async () => {
@@ -53,7 +55,11 @@ describe("ToolCallCard", () => {
       </I18nProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: /#1042/i }));
+    await user.click(screen.getByRole("button", { name: /Metadata/i }));
+    expect(screen.getByText(/task:/i)).toBeInTheDocument();
+    expect(screen.getByText(/#1042/i)).toBeInTheDocument();
+    expect(screen.getByText(/model:/i)).toBeInTheDocument();
+    expect(screen.queryByText("List files in /tmp")).not.toBeInTheDocument();
     const viewExecution = screen.getByRole("button", { name: /View execution/i });
     await user.click(viewExecution);
 
@@ -69,7 +75,8 @@ describe("ToolCallCard", () => {
         />
       </I18nProvider>,
     );
-    await user.click(screen.getByRole("button", { name: /#1042/i }));
+    await user.click(screen.getByRole("button", { name: /Metadata/i }));
     expect(screen.getByText("Permission denied")).toBeInTheDocument();
+    expect(screen.queryByText("List files in /tmp")).not.toBeInTheDocument();
   });
 });

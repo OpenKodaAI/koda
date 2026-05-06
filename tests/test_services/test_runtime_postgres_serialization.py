@@ -68,6 +68,65 @@ def test_runtime_event_postgres_store_serializes_artifact_refs(monkeypatch):
     assert event["artifact_refs"] == ["file:a.txt"]
 
 
+def test_runtime_artifact_reads_parse_text_metadata(monkeypatch):
+    from koda.services.runtime.postgres_store import PostgresRuntimeStore
+
+    store = PostgresRuntimeStore.__new__(PostgresRuntimeStore)
+    store._agent_scope = "koda"  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(
+        store,
+        "_fetch_all",
+        lambda _query, _params: [
+            {
+                "id": 7,
+                "task_id": 1,
+                "env_id": None,
+                "artifact_kind": "image",
+                "label": "render.png",
+                "path": "/tmp/render.png",
+                "metadata_json": '{"artifact_engine_ready": true, "object_key": "koda/render.png"}',
+                "created_at": "2026-05-05T00:00:00Z",
+                "expires_at": None,
+            }
+        ],
+    )
+
+    artifacts = store.list_artifacts(1)
+
+    assert artifacts[0]["metadata"]["artifact_engine_ready"] is True
+    assert artifacts[0]["metadata"]["object_key"] == "koda/render.png"
+
+
+def test_runtime_artifact_reads_are_case_insensitive_for_agent_scope(monkeypatch):
+    from koda.services.runtime.postgres_store import PostgresRuntimeStore
+
+    store = PostgresRuntimeStore.__new__(PostgresRuntimeStore)
+    store._agent_scope = "KODA"  # type: ignore[attr-defined]
+    captured: dict[str, tuple[str, tuple[Any, ...]]] = {}
+
+    def fake_fetch_all(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+        captured["all"] = (query, params)
+        return []
+
+    def fake_fetch_one(query: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        captured["one"] = (query, params)
+        return None
+
+    monkeypatch.setattr(store, "_fetch_all", fake_fetch_all)
+    monkeypatch.setattr(store, "_fetch_one", fake_fetch_one)
+
+    assert store.list_artifacts(453) == []
+    assert store.get_artifact(428) is None
+
+    list_query, list_params = captured["all"]
+    get_query, get_params = captured["one"]
+    assert "lower(agent_id) = lower(?)" in list_query
+    assert "lower(agent_id) = lower(?)" in get_query
+    assert list_params == ("KODA", 453)
+    assert get_params == ("KODA", 428)
+
+
 def test_runtime_queue_list_reconciles_uppercase_task_agent_scope() -> None:
     from koda.services.runtime.postgres_store import PostgresRuntimeStore
 

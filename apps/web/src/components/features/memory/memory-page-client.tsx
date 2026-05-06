@@ -660,7 +660,7 @@ function MemoryPageContent() {
 
   const showMap = activeView === "map";
   const showEmpty = showMap && !error && data && data.stats.total_memories === 0 && !loading;
-  const showError = showMap && !!error;
+  const showError = showMap && !!error && !data;
   const showInitialLoading = showMap && loading && !data;
   const showCanvas = showMap && data && data.stats.total_memories > 0;
 

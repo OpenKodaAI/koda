@@ -218,6 +218,16 @@ export function TabRecursos() {
     () => core.providers.functional_model_catalog ?? {},
     [core.providers],
   );
+  const functionalProviderIds = useMemo(() => {
+    const ids = new Set(generalProviders);
+    for (const items of Object.values(functionalModelCatalog)) {
+      for (const item of items || []) {
+        const providerId = String(item.provider_id || "").trim();
+        if (providerId) ids.add(providerId);
+      }
+    }
+    return Array.from(ids);
+  }, [functionalModelCatalog, generalProviders]);
   const generalModelLabelMap = useMemo(() => {
     const generalItems = functionalModelCatalog.general || [];
     return generalItems.reduce<Record<string, string>>((accumulator, item) => {
@@ -593,7 +603,7 @@ export function TabRecursos() {
                       updateModelPolicy({ functional_defaults: nextDefaults });
                     }}
                     providers={providerEntries}
-                    enabledProviders={generalProviders}
+                    enabledProviders={functionalProviderIds}
                     functionalCatalog={functionalModelCatalog}
                     functionId={fnId}
                     emptyLabel={tl("Herdar do modelo principal")}

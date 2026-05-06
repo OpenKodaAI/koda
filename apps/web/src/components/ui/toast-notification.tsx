@@ -101,7 +101,7 @@ function formatBytes(bytes: number): string {
 }
 
 function ToastItem({ toast }: { toast: Toast }) {
-  const { t } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const { removeToast } = useToast();
   const meta = TOAST_META[toast.type];
   const Icon = meta.icon;
@@ -112,6 +112,12 @@ function ToastItem({ toast }: { toast: Toast }) {
   // persistent, which silently swallowed warning/info messages — e.g. a
   // non-OAuth connect failure landed as a bare "Warning" with no detail.
   const showMessage = Boolean(toast.message);
+  const title = toast.title ? tl(toast.title) : t(meta.titleKey);
+  const message = showMessage ? tl(toast.message) : "";
+  const actionLabel = toast.action ? tl(toast.action.label) : "";
+  const actionAriaLabel = toast.action
+    ? tl(toast.action.ariaLabel ?? toast.action.label)
+    : "";
 
   return (
     <motion.div
@@ -145,11 +151,11 @@ function ToastItem({ toast }: { toast: Toast }) {
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">
-            {toast.title ?? t(meta.titleKey)}
+            {title}
           </span>
           {showMessage ? (
             <span className="mt-0.5 text-[0.75rem] opacity-85">
-              {toast.message}
+              {message}
             </span>
           ) : null}
           {hasProgress ? <ToastProgressBar toast={toast} /> : null}
@@ -159,7 +165,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             type="button"
             onClick={toast.action.onClick}
             disabled={toast.action.disabled}
-            aria-label={toast.action.ariaLabel ?? toast.action.label}
+            aria-label={actionAriaLabel}
             className={cn(
               "ml-2 inline-flex h-6 shrink-0 items-center justify-center rounded-full px-2.5",
               "border border-current/20 text-[0.6875rem] font-medium leading-none opacity-85",
@@ -167,14 +173,14 @@ function ToastItem({ toast }: { toast: Toast }) {
               "disabled:pointer-events-none disabled:opacity-45",
             )}
           >
-            {toast.action.label}
+            {actionLabel}
           </button>
         ) : null}
         {isDismissible ? (
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
-            aria-label="Close"
+            aria-label={tl("Fechar aviso")}
             className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
           >
             <X className="icon-xs" strokeWidth={1.75} />

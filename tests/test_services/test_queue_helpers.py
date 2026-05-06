@@ -32,6 +32,7 @@ from koda.services.queue_manager import (
     _select_policy_runbook,
     _should_switch_provider,
     enqueue,
+    enqueue_dashboard_chat_task,
 )
 from koda.utils.progress import _format_elapsed
 
@@ -480,6 +481,51 @@ class TestParseQueueItem:
         )
 
         assert item.force_audio_response is True
+
+    def test_parse_dashboard_chat_preserves_forced_audio_flag(self):
+        item = _parse_queue_item(
+            {
+                "_dashboard_chat": True,
+                "chat_id": -123,
+                "query_text": "me envie um audio",
+                "force_audio_response": True,
+            }
+        )
+
+        assert item.is_dashboard_chat is True
+        assert item.force_audio_response is True
+
+    @pytest.mark.asyncio
+    async def test_enqueue_dashboard_chat_task_detects_explicit_audio_request(self):
+        queued_items: list[dict[str, object]] = []
+
+        class _Queue:
+            async def put(self, item: dict[str, object]) -> None:
+                queued_items.append(item)
+
+        with (
+            patch("koda.services.queue_manager.create_task", return_value=321),
+            patch("koda.services.queue_manager.build_runtime_context", return_value=MagicMock()),
+            patch("koda.services.queue_manager.get_queue", return_value=_Queue()),
+            patch("koda.services.queue_manager._persist_runtime_queue_item", new_callable=AsyncMock),
+            patch("koda.services.queue_manager._ensure_queue_worker", new_callable=AsyncMock),
+            patch("koda.services.queue_manager._track_queued_task_id"),
+            patch("koda.services.queue_manager._sync_user_queue_observability"),
+            patch("koda.services.audit.emit_task_lifecycle"),
+        ):
+            task_id = await enqueue_dashboard_chat_task(
+                application=MagicMock(),
+                user_id=123,
+                chat_id=-123,
+                query_text="Pode me enviar um audio?",
+                provider="claude",
+                model="claude-sonnet-4-6",
+                work_dir="/tmp",
+                session_id="session-ui",
+            )
+
+        assert task_id == 321
+        assert queued_items[0]["force_audio_response"] is True
 
 
 class TestVideoFramePathDetection:
@@ -1035,7 +1081,10 @@ class TestPolicySelection:
         mock_save_mapping.assert_called_once_with("canon-1", "codex", "thread-1", "gpt-5.4")
         mock_save_session.assert_called_once()
         assert mock_save_session.call_args.kwargs["model"] == "gpt-5.4"
+        assert mock_save_session.call_args.args[1] == "canon-1"
         assert mock_log_query.call_args.kwargs["model"] == "gpt-5.4"
+        assert mock_log_query.call_args.kwargs["session_id"] == "canon-1"
+        assert mock_log_query.call_args.kwargs["provider_session_id"] == "thread-1"
 
     @pytest.mark.asyncio
     async def test_post_process_uses_final_response_and_skips_memory_when_needs_review(self):

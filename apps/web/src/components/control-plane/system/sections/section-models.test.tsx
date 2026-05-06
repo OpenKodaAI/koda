@@ -3,7 +3,7 @@
 import type { ImgHTMLAttributes } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ProviderAccordionItem, ProviderLogo } from "@/components/control-plane/system/sections/section-models";
+import { ProviderAccordionItem, ProviderLogo, isSelectableProvider } from "@/components/control-plane/system/sections/section-models";
 
 vi.mock("next/image", () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ""} />,
@@ -70,6 +70,9 @@ function makeBaseSystemSettingsMock() {
     downloadKokoroVoice: vi.fn(),
     downloadKokoroModel: vi.fn(),
     downloadWhisperModel: vi.fn(),
+    deleteKokoroModelAsset: vi.fn(),
+    deleteKokoroVoiceAsset: vi.fn(),
+    deleteWhisperVariantAsset: vi.fn(),
     ollamaModelCatalog: { items: [], cached: false, provider_connected: false, base_url: "", auth_mode: "local" },
     ollamaModelsLoading: false,
     loadOllamaModels: vi.fn(),
@@ -78,6 +81,45 @@ function makeBaseSystemSettingsMock() {
     enabledProviders: [],
   };
 }
+
+describe("isSelectableProvider", () => {
+  it("allows OpenAI image defaults when an API key is configured even before verification", () => {
+    const provider = {
+      id: "codex",
+      category: "general",
+      commandPresent: true,
+      supportsApiKey: true,
+      supportsSubscriptionLogin: true,
+      supportsLocalConnection: false,
+      connectionManaged: true,
+    };
+    const connection = {
+      provider_id: "codex",
+      title: "OpenAI",
+      auth_mode: "api_key" as const,
+      configured: true,
+      verified: false,
+      account_label: "",
+      plan_label: "",
+      last_verified_at: "",
+      last_error: "",
+      project_id: "",
+      command_present: true,
+      supports_api_key: true,
+      supports_subscription_login: true,
+      supported_auth_modes: ["api_key", "subscription_login"],
+      login_flow_kind: "device_auth",
+      requires_project_id: false,
+      api_key_present: true,
+      api_key_preview: "",
+      base_url: "",
+      connection_status: "configured",
+    };
+
+    expect(isSelectableProvider(provider, connection, "image")).toBe(true);
+    expect(isSelectableProvider(provider, connection, "general")).toBe(false);
+  });
+});
 
 describe("ProviderAccordionItem", () => {
   beforeEach(() => {
@@ -320,6 +362,119 @@ describe("ProviderAccordionItem", () => {
     expect(screen.getByTestId("provider-logo-ollama")).toHaveStyle({
       backgroundColor: "var(--text-primary)",
     });
+  });
+
+  it("renders Whisper downloads in the transcription provider panel", async () => {
+    const loadWhisperCatalog = vi.fn();
+    const downloadWhisperModel = vi.fn();
+    useSystemSettingsMock.mockReturnValue({
+      ...makeBaseSystemSettingsMock(),
+      loadWhisperCatalog,
+      downloadWhisperModel,
+      whisperCatalog: {
+        items: [
+          {
+            variant_id: "large-v3-turbo-q5_0",
+            label: "Whisper large-v3 turbo (q5_0)",
+            description: "Modelo local baixado.",
+            downloaded: true,
+            bytes: 574000000,
+            approx_size_bytes: 574000000,
+          },
+          {
+            variant_id: "medium-q5_0",
+            label: "Whisper medium (q5_0)",
+            description: "Modelo médio.",
+            downloaded: false,
+            bytes: 0,
+            approx_size_bytes: 539000000,
+          },
+        ],
+        default_variant: "large-v3-turbo-q5_0",
+        models_dir: "/tmp/whisper",
+      },
+    });
+
+    render(
+      <ProviderAccordionItem
+        provider={{
+          id: "whispercpp",
+          title: "Whisper CPP",
+          vendor: "Open Source",
+          category: "transcription",
+          commandPresent: true,
+          supportsApiKey: false,
+          supportsSubscriptionLogin: false,
+          supportsLocalConnection: false,
+          supportedAuthModes: ["none"],
+          loginFlowKind: "",
+          requiresProjectId: false,
+          connectionManaged: false,
+          showInSettings: true,
+        }}
+        isOpen
+        onToggle={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(loadWhisperCatalog).toHaveBeenCalled();
+    });
+    expect(screen.getByText("Modelos Whisper.cpp")).toBeInTheDocument();
+    expect(screen.getByText("Whisper large-v3 turbo (q5_0)")).toBeInTheDocument();
+    expect(screen.getByText("Whisper medium (q5_0)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Baixar" }));
+    expect(downloadWhisperModel).toHaveBeenCalledWith("medium-q5_0");
+  });
+
+  it("keeps Whisper downloads out of the Kokoro provider panel", () => {
+    const loadWhisperCatalog = vi.fn();
+    useSystemSettingsMock.mockReturnValue({
+      ...makeBaseSystemSettingsMock(),
+      loadWhisperCatalog,
+      kokoroModelStatus: { downloaded: true, bytes: 325500000 },
+      whisperCatalog: {
+        items: [
+          {
+            variant_id: "large-v3-turbo-q5_0",
+            label: "Whisper large-v3 turbo (q5_0)",
+            description: "Modelo local baixado.",
+            downloaded: true,
+            bytes: 574000000,
+            approx_size_bytes: 574000000,
+          },
+        ],
+        default_variant: "large-v3-turbo-q5_0",
+        models_dir: "/tmp/whisper",
+      },
+    });
+
+    render(
+      <ProviderAccordionItem
+        provider={{
+          id: "kokoro",
+          title: "Kokoro",
+          vendor: "Open Source",
+          category: "voice",
+          commandPresent: true,
+          supportsApiKey: false,
+          supportsSubscriptionLogin: false,
+          supportsLocalConnection: false,
+          supportedAuthModes: ["none"],
+          loginFlowKind: "",
+          requiresProjectId: false,
+          connectionManaged: false,
+          showInSettings: true,
+        }}
+        isOpen
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Modelo base do Kokoro")).toBeInTheDocument();
+    expect(screen.queryByText("Modelos Whisper.cpp")).not.toBeInTheDocument();
+    expect(loadWhisperCatalog).not.toHaveBeenCalled();
   });
 
   it("highlights the device code and lets the user copy it during official login", async () => {

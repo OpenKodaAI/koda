@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import difflib
 import json
+import mimetypes
 import os
 import platform
 import re
@@ -127,12 +128,13 @@ class RuntimeController:
 
     async def start(self, app: Any | None = None) -> None:
         """Start background sweeps."""
+        if app is not None:
+            self._application = app
         if self._started or not RUNTIME_ENVIRONMENTS_ENABLED:
             return
         await self.runtime_kernel.start()
         await self._ensure_artifact_engine_started()
         self._started = True
-        self._application = app
         if RUNTIME_RECOVERY_ENABLED:
             await self.run_recovery_sweep()
         await self.rehydrate_live_environments()
@@ -2141,13 +2143,13 @@ class RuntimeController:
         label: str,
         path: str,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> int:
         env = self.store.get_environment_by_task(task_id)
         env_id = int(env["id"]) if env else None
         resolved_metadata = dict(metadata or {})
         artifact_path = Path(path)
         if artifact_path.is_file() and await self._ensure_artifact_engine_started():
-            with contextlib.suppress(Exception):
+            try:
                 descriptor = await self.artifact_engine.put_artifact(
                     path=str(artifact_path),
                     logical_filename=artifact_path.name,
@@ -2187,7 +2189,12 @@ class RuntimeController:
                     resolved_metadata["metadata_json"] = metadata_json
                 resolved_metadata["artifact_engine"] = "rust_grpc"
                 resolved_metadata["artifact_engine_ready"] = True
-        self.store.add_artifact(
+            except Exception as exc:
+                resolved_metadata["artifact_engine"] = "rust_grpc"
+                resolved_metadata["artifact_engine_ready"] = False
+                resolved_metadata["artifact_engine_error"] = type(exc).__name__
+                log.exception("runtime_artifact_engine_put_failed", task_id=task_id, path=str(artifact_path))
+        stored_artifact = self.store.add_artifact(
             task_id=task_id,
             env_id=env_id,
             artifact_kind=artifact_kind,
@@ -2195,6 +2202,63 @@ class RuntimeController:
             path=path,
             metadata=resolved_metadata,
         )
+        if isinstance(stored_artifact, dict):
+            raw_id = stored_artifact.get("id")
+            return int(raw_id) if raw_id is not None else 0
+        return int(stored_artifact)
+
+    async def persist_generated_artifact_file(
+        self,
+        *,
+        task_id: int,
+        source_path: str,
+        artifact_kind: str,
+        label: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        source = Path(source_path).expanduser()
+        if not source.is_file():
+            raise FileNotFoundError(str(source))
+
+        artifact_dir = self._task_runtime_dir(task_id) / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        filename = Path(str(label or source.name)).name.strip() or source.name
+        filename = filename.replace("\x00", "").replace("/", "-").replace("\\", "-")
+        if not filename:
+            filename = f"artifact-{task_id}"
+        destination = artifact_dir / filename
+        if destination.exists():
+            suffix = destination.suffix
+            stem = destination.stem or "artifact"
+            destination = artifact_dir / f"{stem}-{secrets.token_hex(4)}{suffix}"
+
+        await asyncio.to_thread(shutil.copy2, source, destination)
+        size_bytes = destination.stat().st_size
+        mime_type = str((metadata or {}).get("mime_type") or "").strip() or (
+            mimetypes.guess_type(str(destination))[0] or ""
+        )
+        resolved_metadata = dict(metadata or {})
+        if mime_type:
+            resolved_metadata["mime_type"] = mime_type
+        resolved_metadata["size_bytes"] = size_bytes
+
+        artifact_id = await self.add_artifact(
+            task_id=task_id,
+            artifact_kind=artifact_kind,
+            label=filename,
+            path=str(destination),
+            metadata=resolved_metadata,
+        )
+        return {
+            "id": artifact_id,
+            "task_id": task_id,
+            "artifact_kind": artifact_kind,
+            "label": filename,
+            "path": str(destination),
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "metadata": resolved_metadata,
+        }
 
     async def _record_runtime_task_files(self, *, task_id: int) -> None:
         task_root = self._task_runtime_dir(task_id)

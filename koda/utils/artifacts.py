@@ -300,6 +300,26 @@ async def _send_media(
         await method(chat_id=chat_id, **{method_name: file_obj}, caption=caption)
 
 
+async def _send_media_with_document_fallback(
+    method_name: str,
+    file_obj: BinaryIO,
+    chat_id: int,
+    context: BotContext,
+    update: Update | None,
+    caption: str,
+    *,
+    path: str,
+) -> None:
+    try:
+        await _send_media(method_name, file_obj, chat_id, context, update, caption)
+    except Exception:
+        if method_name == "document":
+            raise
+        log.warning(f"{method_name}_send_failed_fallback_document", path=path)
+        file_obj.seek(0)
+        await _send_media("document", file_obj, chat_id, context, update, caption)
+
+
 async def send_created_files(
     paths: list[str],
     chat_id: int,
@@ -327,25 +347,55 @@ async def send_created_files(
                     if file_size > MAX_PHOTO_SIZE or not _is_valid_image(path):
                         await _send_media("document", f, chat_id, context, update, caption)
                     else:
-                        try:
-                            await _send_media("photo", f, chat_id, context, update, caption)
-                        except Exception:
-                            log.warning("photo_send_failed_fallback_document", path=path)
-                            f.seek(0)
-                            await _send_media("document", f, chat_id, context, update, caption)
+                        await _send_media_with_document_fallback(
+                            "photo",
+                            f,
+                            chat_id,
+                            context,
+                            update,
+                            caption,
+                            path=path,
+                        )
                 elif ext in GIF_EXTS:
-                    try:
-                        await _send_media("animation", f, chat_id, context, update, caption)
-                    except Exception:
-                        log.warning("animation_send_failed_fallback_document", path=path)
-                        f.seek(0)
-                        await _send_media("document", f, chat_id, context, update, caption)
+                    await _send_media_with_document_fallback(
+                        "animation",
+                        f,
+                        chat_id,
+                        context,
+                        update,
+                        caption,
+                        path=path,
+                    )
                 elif ext in VIDEO_EXTS:
-                    await _send_media("video", f, chat_id, context, update, caption)
+                    await _send_media_with_document_fallback(
+                        "video",
+                        f,
+                        chat_id,
+                        context,
+                        update,
+                        caption,
+                        path=path,
+                    )
                 elif ext in AUDIO_EXTS:
-                    await _send_media("audio", f, chat_id, context, update, caption)
+                    await _send_media_with_document_fallback(
+                        "audio",
+                        f,
+                        chat_id,
+                        context,
+                        update,
+                        caption,
+                        path=path,
+                    )
                 elif ext in VOICE_EXTS:
-                    await _send_media("voice", f, chat_id, context, update, caption)
+                    await _send_media_with_document_fallback(
+                        "voice",
+                        f,
+                        chat_id,
+                        context,
+                        update,
+                        caption,
+                        path=path,
+                    )
                 else:
                     await _send_media("document", f, chat_id, context, update, caption)
             sent += 1

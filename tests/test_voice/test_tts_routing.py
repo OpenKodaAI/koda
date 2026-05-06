@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from koda.utils.tts import AVAILABLE_VOICES, VoiceConfig, synthesize_speech
+from koda.utils.tts import AVAILABLE_VOICES, VoiceConfig, _resolve_elevenlabs_api_key, synthesize_speech
 
 # AVAILABLE_VOICES — contract surface
 
@@ -178,3 +178,23 @@ async def test_model_passthrough_to_elevenlabs(mock_synthesizers) -> None:
     eleven, _kokoro = mock_synthesizers
     await synthesize_speech("texto", voice="alice", model="eleven_v3_alpha")
     assert eleven.call_args.kwargs.get("model_id") == "eleven_v3_alpha"
+
+
+def test_elevenlabs_key_uses_runtime_env_before_control_plane_secret(monkeypatch) -> None:
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "xi-from-runtime-env")
+
+    with patch("koda.utils.tts.ELEVENLABS_API_KEY", None):
+        assert _resolve_elevenlabs_api_key() == "xi-from-runtime-env"
+
+
+def test_elevenlabs_key_falls_back_to_control_plane_secret(monkeypatch) -> None:
+    class FakeManager:
+        def _resolve_elevenlabs_api_key(self) -> str:
+            return "xi-from-control-plane"
+
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    with (
+        patch("koda.utils.tts.ELEVENLABS_API_KEY", None),
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=FakeManager()),
+    ):
+        assert _resolve_elevenlabs_api_key() == "xi-from-control-plane"

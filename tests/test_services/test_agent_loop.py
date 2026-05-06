@@ -14,6 +14,7 @@ from koda.services.queue_manager import (
     _build_voice_active_prompt,
     _compose_response_text,
     _extract_spoken_response_block,
+    _prepare_delivery_outcome,
     _prepare_spoken_response_for_tts,
     _run_agent_loop,
     _send_response,
@@ -140,6 +141,25 @@ def test_compose_response_does_not_prefix_native_shell_trace():
     assert "etapa" in tool_summary
 
 
+def test_compose_response_replaces_empty_task_fallback_with_native_artifact_summary():
+    run_result = _make_result(
+        result="Task completed (no text output).",
+        native_items=[
+            {
+                "type": "file_change",
+                "kind": "add",
+                "path": "/tmp/render.png",
+            }
+        ],
+    )
+
+    response, tool_summary = _compose_response_text(run_result, elapsed=18.0)
+
+    assert response == tool_summary
+    assert "Task completed" not in response
+    assert "Arquivos: render.png" in response
+
+
 def test_compose_response_strips_leading_provider_tool_transcript():
     run_result = _make_result(
         result=(
@@ -202,9 +222,45 @@ def test_prepare_spoken_response_summarizes_code_and_mentions_artifact(tmp_path)
     )
 
     assert "codigo ou detalhes tecnicos" in spoken
-    assert "relatorio.docx" in spoken
+    assert "relatorio.docx" not in spoken
+    assert "documento" in spoken
     assert "print" not in spoken
     assert send_text is True
+
+
+def test_prepare_spoken_response_humanizes_artifact_only_image_voice(tmp_path):
+    image = tmp_path / "ig_voice.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+    spoken, send_text = _prepare_spoken_response_for_tts(
+        "Pronto, gerei e anexei: ig_voice.png.",
+        created_artifacts=[str(image)],
+        artifact_summary_response=True,
+        query_text="Gere uma imagem no estilo anime antigo.",
+        user_data={"tts_voice_language": "pt-br"},
+    )
+
+    assert "ig_voice.png" not in spoken
+    assert "imagem" in spoken
+    assert "anime antigo" in spoken
+    assert "Telegram" in spoken
+    assert send_text is False
+
+
+def test_prepare_spoken_response_replaces_filename_with_natural_artifact_reference(tmp_path):
+    image = tmp_path / "render_final.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+    spoken, send_text = _prepare_spoken_response_for_tts(
+        "Criei o arquivo render_final.png e anexei aqui.",
+        created_artifacts=[str(image)],
+        user_data={"tts_voice_language": "pt-br"},
+    )
+
+    assert "render_final.png" not in spoken
+    assert "arquivo a imagem" not in spoken
+    assert "Criei a imagem" in spoken
+    assert send_text is False
 
 
 def test_build_voice_prompt_uses_agent_policy_without_forcing_english():
@@ -267,16 +323,17 @@ async def test_send_response_warns_when_claimed_artifact_is_missing(tmp_path):
         ],
     )
 
-    await _send_response(
-        111,
-        None,
-        context,
-        run_result,
-        str(tmp_path),
-        "autonomous",
-        elapsed=6.0,
-        model="gpt-5.4-mini",
-    )
+    with patch("koda.services.queue_manager._ARTIFACT_DISCOVERY_POLL_SECONDS", 0.0):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+        )
 
     sent_text = context.bot.send_message.call_args.kwargs["text"]
     assert "Nao encontrei esse arquivo" in sent_text
@@ -313,6 +370,401 @@ async def test_send_response_attaches_artifact_from_agent_tool_trace(tmp_path):
 
     context.bot.send_document.assert_awaited_once()
     assert "artifact not found" not in run_result.warnings
+
+
+@pytest.mark.asyncio
+async def test_send_response_attaches_recent_work_dir_artifacts_by_supported_type(tmp_path):
+    context = _make_context()
+    payloads = {
+        "relatorio.pdf": b"%PDF-1.4\n",
+        "pacote.zip": b"PK\x03\x04",
+        "animacao.gif": b"GIF89a" + b"\x00" * 100,
+        "clip.mp4": b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100,
+        "track.mp3": b"\xff\xfb\x90" + b"\x00" * 100,
+        "memo.ogg": b"OggS" + b"\x00" * 100,
+    }
+    for filename, payload in payloads.items():
+        (tmp_path / filename).write_bytes(payload)
+    run_result = _make_result(result="Pronto, gerei os anexos.")
+
+    await _send_response(
+        111,
+        None,
+        context,
+        run_result,
+        str(tmp_path),
+        "autonomous",
+        elapsed=6.0,
+        model="gpt-5.4-mini",
+    )
+
+    assert context.bot.send_document.await_count == 2
+    context.bot.send_animation.assert_awaited_once()
+    context.bot.send_video.assert_awaited_once()
+    context.bot.send_audio.assert_awaited_once()
+    context.bot.send_voice.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_response_persists_and_sends_provider_native_artifact_in_voice_mode(tmp_path):
+    context = _make_context()
+    context.user_data.update(
+        {
+            "voice_policy_active": True,
+            "tts_enabled": True,
+            "tts_voice_language": "pt-br",
+        }
+    )
+    image = tmp_path / "render.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Task completed (no text output).",
+        native_items=[
+            {
+                "type": "file_change",
+                "kind": "add",
+                "path": str(image),
+                "source_type": "provider_event",
+                "metadata": {"provider_event_type": "image_generation_end"},
+            }
+        ],
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=77)
+    runtime.events.publish = AsyncMock()
+
+    with (
+        patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+        patch("koda.services.queue_manager.tts_enabled_for_session", return_value=True),
+        patch("koda.utils.tts.synthesize_speech", new=AsyncMock(return_value=None)),
+    ):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+            task_id=42,
+            query_text="Gere uma imagem no estilo anime antigo.",
+        )
+
+    runtime.add_artifact.assert_awaited_once()
+    artifact_kwargs = runtime.add_artifact.await_args.kwargs
+    assert artifact_kwargs["task_id"] == 42
+    assert artifact_kwargs["artifact_kind"] == "image"
+    assert artifact_kwargs["label"] == "render.png"
+    assert artifact_kwargs["path"] == str(image)
+    assert artifact_kwargs["metadata"]["provider"] == "codex"
+    runtime.events.publish.assert_awaited_once()
+    event_kwargs = runtime.events.publish.await_args.kwargs
+    assert event_kwargs["event_type"] == "artifact_ready"
+    assert event_kwargs["payload"]["artifact"]["download_url"] == "/api/runtime/artifacts/77/download"
+    context.bot.send_photo.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_voice_mode_speaks_artifact_summary_and_sends_artifact(tmp_path):
+    context = _make_context()
+    context.user_data.update(
+        {
+            "voice_policy_active": True,
+            "tts_enabled": True,
+            "tts_voice_language": "pt-br",
+        }
+    )
+    image = tmp_path / "ig_voice.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    voice = tmp_path.parent / f"{tmp_path.name}-voice.ogg"
+    voice.write_bytes(b"OggS" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Text completed (no text output).",
+        native_items=[
+            {
+                "type": "file_change",
+                "kind": "add",
+                "path": str(image),
+                "source_type": "provider_event",
+            }
+        ],
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=78)
+    runtime.events.publish = AsyncMock()
+    synthesize = AsyncMock(return_value=str(voice))
+
+    with (
+        patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+        patch("koda.services.queue_manager.tts_enabled_for_session", return_value=True),
+        patch("koda.utils.tts.synthesize_speech", new=synthesize),
+    ):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+            task_id=42,
+            query_text="Gere uma imagem no estilo anime antigo.",
+        )
+
+    context.bot.send_photo.assert_awaited_once()
+    context.bot.send_voice.assert_awaited_once()
+    spoken_text = synthesize.await_args.args[0]
+    assert "Task completed" not in spoken_text
+    assert "Text completed" not in spoken_text
+    assert "ig_voice.png" not in spoken_text
+    assert "imagem" in spoken_text
+    assert "anime antigo" in spoken_text
+    assert not voice.exists()
+
+
+@pytest.mark.asyncio
+async def test_voice_mode_without_text_or_artifact_never_speaks_raw_fallback(tmp_path):
+    context = _make_context()
+    context.user_data.update(
+        {
+            "voice_policy_active": True,
+            "tts_enabled": True,
+            "tts_voice_language": "pt-br",
+        }
+    )
+    voice = tmp_path.parent / f"{tmp_path.name}-voice.ogg"
+    voice.write_bytes(b"OggS" + b"\x00" * 100)
+    run_result = _make_result(result="Text completed (no text output).")
+    synthesize = AsyncMock(return_value=str(voice))
+
+    with (
+        patch("koda.services.queue_manager.tts_enabled_for_session", return_value=True),
+        patch("koda.utils.tts.synthesize_speech", new=synthesize),
+    ):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+        )
+
+    context.bot.send_voice.assert_awaited_once()
+    spoken_text = synthesize.await_args.args[0]
+    assert "Task completed" not in spoken_text
+    assert "Text completed" not in spoken_text
+    assert "sem texto" in spoken_text
+
+
+@pytest.mark.asyncio
+async def test_send_response_reports_discovered_artifact_delivery_failure(tmp_path):
+    context = _make_context()
+    image = tmp_path / "render.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    context.bot.send_photo.side_effect = Exception("photo failed")
+    context.bot.send_document.side_effect = Exception("document failed")
+    run_result = _make_result(
+        result="Task completed (no text output).",
+        native_items=[{"type": "file_change", "kind": "add", "path": str(image)}],
+    )
+
+    await _send_response(
+        111,
+        None,
+        context,
+        run_result,
+        str(tmp_path),
+        "autonomous",
+        elapsed=6.0,
+        model="gpt-5.4-mini",
+    )
+
+    sent_text = context.bot.send_message.await_args.kwargs["text"]
+    assert "nao consegui anexa-los" in sent_text
+    assert "Task completed" not in sent_text
+    assert "artifact delivery failed" in run_result.warnings
+
+
+@pytest.mark.asyncio
+async def test_send_response_finds_codex_generated_image_when_native_event_is_missing(tmp_path):
+    context = _make_context()
+    provider_session_id = "thread-123"
+    image_dir = tmp_path / ".codex" / "generated_images" / provider_session_id
+    image_dir.mkdir(parents=True)
+    image = image_dir / "ig_missing_event.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Task completed (no text output).",
+        provider_session_id=provider_session_id,
+        native_items=[],
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=88)
+    runtime.events.publish = AsyncMock()
+
+    with patch("koda.services.runtime.get_runtime_controller", return_value=runtime):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+            task_id=43,
+        )
+
+    runtime.add_artifact.assert_awaited_once()
+    assert runtime.add_artifact.await_args.kwargs["path"] == str(image.resolve())
+    context.bot.send_photo.assert_awaited_once()
+    sent_text = context.bot.send_message.await_args.kwargs["text"]
+    assert "Task completed" not in sent_text
+    assert "ig_missing_event.png" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_prepare_delivery_outcome_summarizes_and_persists_no_text_artifact(tmp_path):
+    provider_session_id = "thread-delivery"
+    image_dir = tmp_path / ".codex" / "generated_images" / provider_session_id
+    image_dir.mkdir(parents=True)
+    image = image_dir / "ig_delivery.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Task completed (no text output).",
+        provider_session_id=provider_session_id,
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=91)
+    runtime.events.publish = AsyncMock()
+
+    with (
+        patch("koda.services.queue_manager._ARTIFACT_DISCOVERY_POLL_SECONDS", 0.0),
+        patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+    ):
+        outcome = await _prepare_delivery_outcome(
+            run_result,
+            str(tmp_path),
+            elapsed=6.0,
+            task_id=46,
+        )
+
+    assert outcome.response == "Pronto, gerei e anexei: ig_delivery.png."
+    assert outcome.artifact_summary_applied is True
+    assert outcome.created_artifacts == [str(image.resolve())]
+    runtime.add_artifact.assert_awaited_once()
+    assert runtime.add_artifact.await_args.kwargs["path"] == str(image.resolve())
+
+
+@pytest.mark.asyncio
+async def test_prepare_delivery_outcome_keeps_clear_fallback_without_text_or_artifacts(tmp_path):
+    run_result = _make_result(result="Task completed (no text output).")
+
+    with patch("koda.services.queue_manager._discover_created_artifacts", new=AsyncMock(return_value=[])):
+        outcome = await _prepare_delivery_outcome(
+            run_result,
+            str(tmp_path),
+            elapsed=6.0,
+            task_id=47,
+        )
+
+    assert outcome.response == "A execucao terminou sem texto e sem artefatos localizaveis."
+    assert outcome.created_artifacts == []
+    assert outcome.artifact_summary_applied is False
+
+
+@pytest.mark.asyncio
+async def test_send_response_finds_codex_generated_video_when_native_event_is_missing(tmp_path):
+    context = _make_context()
+    provider_session_id = "thread-456"
+    video_dir = tmp_path / ".codex" / "generated_videos" / provider_session_id
+    video_dir.mkdir(parents=True)
+    video = video_dir / "movie_missing_event.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Task completed (no text output).",
+        provider_session_id=provider_session_id,
+        native_items=[],
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=89)
+    runtime.events.publish = AsyncMock()
+
+    with patch("koda.services.runtime.get_runtime_controller", return_value=runtime):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+            task_id=44,
+        )
+
+    runtime.add_artifact.assert_awaited_once()
+    assert runtime.add_artifact.await_args.kwargs["artifact_kind"] == "video"
+    assert runtime.add_artifact.await_args.kwargs["path"] == str(video.resolve())
+    context.bot.send_video.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_response_finds_codex_generated_image_in_hyphenated_nested_dir(tmp_path):
+    context = _make_context()
+    provider_session_id = "thread-nested"
+    image_dir = tmp_path / ".codex" / "generated-images" / provider_session_id / "outputs"
+    image_dir.mkdir(parents=True)
+    image = image_dir / "ig_nested.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    run_result = _make_result(
+        provider="codex",
+        model="gpt-5.4-mini",
+        result="Task completed (no text output).",
+        provider_session_id=provider_session_id,
+        native_items=[],
+    )
+    runtime = MagicMock()
+    runtime.store.list_artifacts.return_value = []
+    runtime.add_artifact = AsyncMock(return_value=90)
+    runtime.events.publish = AsyncMock()
+
+    with patch("koda.services.runtime.get_runtime_controller", return_value=runtime):
+        await _send_response(
+            111,
+            None,
+            context,
+            run_result,
+            str(tmp_path),
+            "autonomous",
+            elapsed=6.0,
+            model="gpt-5.4-mini",
+            task_id=45,
+        )
+
+    runtime.add_artifact.assert_awaited_once()
+    assert runtime.add_artifact.await_args.kwargs["path"] == str(image.resolve())
+    context.bot.send_photo.assert_awaited_once()
 
 
 SCHEDULER_WRITE_POLICY = {
@@ -1198,7 +1650,7 @@ class TestAgentLoop:
                 "tts_enabled": True,
             }
         )
-        ogg = tmp_path / "voice.ogg"
+        ogg = tmp_path.parent / f"{tmp_path.name}-voice.ogg"
         ogg.write_bytes(b"OggS" + b"\x00" * 16)
         run_result = _make_result(
             result=(
@@ -1229,6 +1681,74 @@ class TestAgentLoop:
         assert "spoken_response" not in sent_text
 
     @pytest.mark.asyncio
+    async def test_send_response_persists_tts_audio_as_runtime_artifact(self, tmp_path):
+        ctx = _make_ctx()
+        context = _make_context()
+        context.user_data.update(
+            {
+                "audio_response": True,
+                "tts_voice": "pm_alex",
+                "tts_voice_language": "pt-br",
+                "audio_provider": "kokoro",
+                "audio_model": "kokoro-v1",
+                "tts_enabled": True,
+            }
+        )
+        ogg = tmp_path / "temporary-voice.ogg"
+        ogg.write_bytes(b"OggS" + b"\x00" * 16)
+        runtime = MagicMock()
+        persisted_path = tmp_path / "runtime" / "tasks" / "77" / "artifacts" / "voice-response-77.ogg"
+        runtime.persist_generated_artifact_file = AsyncMock(
+            return_value={
+                "id": 88,
+                "label": "voice-response-77.ogg",
+                "path": str(persisted_path),
+                "mime_type": "audio/ogg",
+                "size_bytes": 20,
+            }
+        )
+        runtime.events.publish = AsyncMock()
+        run_result = _make_result(
+            result="Resposta curta.",
+            session_id="sess-voice",
+            provider_session_id="thread-voice",
+        )
+
+        with (
+            patch("koda.utils.tts.synthesize_speech", new_callable=AsyncMock, return_value=str(ogg)),
+            patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+        ):
+            await _send_response(
+                111,
+                None,
+                context,
+                run_result,
+                str(tmp_path),
+                "autonomous",
+                elapsed=1.0,
+                model="claude-sonnet-4-6",
+                task_id=77,
+                ctx=ctx,
+            )
+
+        runtime.persist_generated_artifact_file.assert_awaited_once()
+        persist_kwargs = runtime.persist_generated_artifact_file.await_args.kwargs
+        assert persist_kwargs["source_path"] == str(ogg)
+        assert persist_kwargs["artifact_kind"] == "audio"
+        assert persist_kwargs["metadata"]["source_type"] == "voice_response"
+        assert persist_kwargs["metadata"]["provider"] == "kokoro"
+        assert persist_kwargs["metadata"]["model"] == "kokoro-v1"
+        assert persist_kwargs["metadata"]["voice"] == "pm_alex"
+        assert persist_kwargs["metadata"]["session_id"] == "sess-voice"
+        assert persist_kwargs["metadata"]["provider_session_id"] == "thread-voice"
+        runtime.events.publish.assert_awaited_once()
+        event_payload = runtime.events.publish.await_args.kwargs["payload"]
+        assert event_payload["artifact"]["id"] == "88"
+        assert event_payload["artifact"]["kind"] == "audio"
+        assert event_payload["artifact"]["source_execution_id"] == "77"
+        assert not ogg.exists()
+
+    @pytest.mark.asyncio
     async def test_send_response_speaks_code_summary_and_keeps_code_as_text(self, tmp_path):
         ctx = _make_ctx()
         context = _make_context()
@@ -1242,7 +1762,7 @@ class TestAgentLoop:
                 "tts_enabled": True,
             }
         )
-        ogg = tmp_path / "voice.ogg"
+        ogg = tmp_path.parent / f"{tmp_path.name}-voice.ogg"
         ogg.write_bytes(b"OggS" + b"\x00" * 16)
         run_result = _make_result(result="Aqui esta:\n```\n" + "print('x')\n" * 200 + "```")
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { keepPreviousData } from "@tanstack/react-query";
 import { Clock3, DatabaseZap, History, Plus } from "lucide-react";
 import {
   CronTable,
@@ -28,8 +29,13 @@ import { ConfirmationDialog } from "@/components/control-plane/shared/confirmati
 import { Drawer } from "@/components/ui/drawer";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useToast } from "@/hooks/use-toast";
+import { useControlPlaneQuery } from "@/hooks/use-app-query";
+import { useContentStable } from "@/hooks/use-content-stable";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
+import { BackgroundRefreshIndicator } from "@/components/ui/async-feedback";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
+import { queryKeys } from "@/lib/query/keys";
 import type { CronJob, ScheduleDetail, ScheduleRun } from "@/lib/types";
 import {
   cn,
@@ -194,10 +200,6 @@ export default function SchedulesPage() {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
-  const [jobsByAgent, setJobsByAgent] = useState<Record<string, CronJob[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [unavailable, setUnavailable] = useState(false);
-  const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedJob, setSelectedJob] = useState<CronJob | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<ScheduleDetail | null>(null);
   const [busyJobId, setBusyJobId] = useState<number | null>(null);
@@ -288,42 +290,55 @@ export default function SchedulesPage() {
   );
   const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
 
-  useEffect(() => {
-    async function fetchSchedules() {
-      setLoading(true);
-      setUnavailable(false);
-      try {
-        const response = await fetchControlPlaneDashboardJsonAllowError<CronJob[]>("/schedules", {
-          params: { agent: visibleBotIds },
-          fallbackError: t("schedules.page.unavailableDescription", {
-            defaultValue: "Unable to load canonical schedules.",
-          }),
-        });
-
-        const results: Record<string, CronJob[]> = {};
-        for (const agent of agents) {
-          results[agent.id] = [];
-        }
-
-        for (const job of Array.isArray(response.data) ? response.data : []) {
-          if (!job.bot_id || !results[job.bot_id]) {
-            continue;
-          }
-          results[job.bot_id].push(job);
-        }
-
-        setJobsByAgent(results);
-        setUnavailable(!response.ok);
-      } catch {
-        setJobsByAgent({});
-        setUnavailable(true);
-      } finally {
-        setLoading(false);
-      }
+  const schedulesQuery = useControlPlaneQuery<{
+    items: CronJob[];
+    unavailable: boolean;
+  }>({
+    tier: "live",
+    queryKey: queryKeys.dashboard.routineSchedules(),
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    notifyOnChangeProps: ["data", "error"],
+    queryFn: async ({ signal }) => {
+      const response = await fetchControlPlaneDashboardJsonAllowError<CronJob[]>("/schedules", {
+        signal,
+        fallbackError: t("schedules.page.unavailableDescription", {
+          defaultValue: "Unable to load canonical schedules.",
+        }),
+      });
+      return {
+        items: Array.isArray(response.data) ? response.data : [],
+        unavailable: !response.ok,
+      };
+    },
+  });
+  const stableSchedulesQuery = useStableQueryData({
+    data: schedulesQuery.data,
+    resetKey: "dashboard:routines:schedules",
+    isPending: schedulesQuery.isPending,
+    isFetching: schedulesQuery.isFetching,
+    error: schedulesQuery.error,
+  });
+  const stableSchedulesPayload = useContentStable(stableSchedulesQuery.data ?? undefined);
+  const loading = stableSchedulesQuery.initialLoading;
+  const refreshing = stableSchedulesQuery.refreshing;
+  const unavailable =
+    stableSchedulesPayload?.unavailable ?? Boolean(schedulesQuery.error);
+  const jobsByAgent = useMemo(() => {
+    const results: Record<string, CronJob[]> = {};
+    for (const agent of agents) {
+      results[agent.id] = [];
     }
-
-    void fetchSchedules();
-  }, [agents, t, visibleBotIds, refreshNonce]);
+    for (const job of stableSchedulesPayload?.items ?? []) {
+      if (!job.bot_id || !results[job.bot_id]) {
+        continue;
+      }
+      results[job.bot_id].push(job);
+    }
+    return results;
+  }, [agents, stableSchedulesPayload]);
 
   async function loadDetail(job: CronJob, actionKey?: ScheduleTableActionKey) {
     if (!job.bot_id) return;
@@ -425,7 +440,7 @@ export default function SchedulesPage() {
       } else {
         await loadDetail(job);
       }
-      setRefreshNonce((value) => value + 1);
+      void schedulesQuery.refetch();
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : "Unable to operate on schedule");
       setTableActionState(job.id, actionKey, "error");
@@ -467,7 +482,7 @@ export default function SchedulesPage() {
         showToast(t("routines.editor.messages.created"), "success");
         setStatusMessage(t("routines.editor.messages.created"));
         setCreatingRoutine(false);
-        setRefreshNonce((value) => value + 1);
+        void schedulesQuery.refetch();
       } catch (error) {
         setEditorError(
           error instanceof Error ? error.message : t("routines.editor.messages.createFailed"),
@@ -522,7 +537,7 @@ export default function SchedulesPage() {
         setSelectedJob((responseBody as ScheduleDetail).job);
         setEditDraft(buildDraft(responseBody as ScheduleDetail));
       }
-      setRefreshNonce((value) => value + 1);
+      void schedulesQuery.refetch();
       setSelectedJob(null);
       setSelectedDetail(null);
       setEditDraft(null);
@@ -587,7 +602,11 @@ export default function SchedulesPage() {
             onSelectionChange={setSelectedBotIds}
           />
         </div>
-        <div className="md:ml-auto">
+        <div className="flex items-center gap-2 md:ml-auto">
+          <BackgroundRefreshIndicator
+            refreshing={refreshing}
+            className="hidden sm:inline-flex"
+          />
           <Button
             type="button"
             variant="accent"
@@ -615,7 +634,7 @@ export default function SchedulesPage() {
         <RoutinesDataLoading />
       ) : (
         <>
-          <PageMetricStrip className="animate-in stagger-1">
+          <PageMetricStrip>
             <PageMetricStripItem
               label={t("schedules.page.visibleAgents")}
               value={`${visibleAgents.length}`}
@@ -639,7 +658,7 @@ export default function SchedulesPage() {
           </PageMetricStrip>
 
           {unavailable ? (
-            <div className="animate-in stagger-2 py-6">
+            <div className="py-6">
               <PageEmptyState
                 icon={DatabaseZap}
                 title={t("schedules.page.unavailable", {
@@ -652,7 +671,7 @@ export default function SchedulesPage() {
               />
             </div>
           ) : botsWithJobs.length === 0 ? (
-            <div className="animate-in stagger-2 py-6">
+            <div className="py-6">
               <PageEmptyState
                 icon={Clock3}
                 title={t("schedules.page.noVisible")}
@@ -678,7 +697,7 @@ export default function SchedulesPage() {
               />
             </div>
           ) : (
-            <section className="animate-in stagger-2">
+            <section>
               <CronTable
                 rows={scheduleRows}
                 busyJobId={busyJobId}

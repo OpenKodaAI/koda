@@ -101,7 +101,17 @@ from koda.state.history_store import (
 from koda.state.knowledge_governance_store import get_execution_reliability_stats, list_approved_runbooks
 from koda.telegram_types import BotContext
 from koda.telegram_types import MessageUpdate as Update
-from koda.utils.artifacts import extract_created_files, send_created_files
+from koda.utils.artifacts import (
+    ARTIFACT_EXTS,
+    AUDIO_EXTS,
+    DOCUMENT_EXTS,
+    GIF_EXTS,
+    IMAGE_EXTS,
+    VIDEO_EXTS,
+    VOICE_EXTS,
+    extract_created_files,
+    send_created_files,
+)
 from koda.utils.command_helpers import (
     ensure_canonical_session_id,
     get_provider_model,
@@ -223,8 +233,8 @@ def _queue_manager_action_allowed(
 
 _AUDIO_RESPONSE_INTENT_RE = re.compile(
     r"\b("
-    r"(me\s+)?(envie|envia|mande|manda)\s+(um\s+|uma\s+)?(audio|voz)"
-    r"|(?:envie|envia|mande|manda|responda|responder)\s+(?:.*\s+)?(em|por)\s+(audio|voz)"
+    r"(me\s+)?(envie|envia|enviar|mande|manda|mandar)\s+(um\s+|uma\s+)?(audio|voz)"
+    r"|(?:envie|envia|enviar|mande|manda|mandar|responda|responder)\s+(?:.*\s+)?(em|por)\s+(audio|voz)"
     r"|send\s+(me\s+)?(a\s+)?(voice|audio)(\s+message)?"
     r"|(?:reply|answer|respond)\s+(by|with|in)\s+(voice|audio)"
     r"|(?:voice|audio)\s+reply"
@@ -321,16 +331,172 @@ def _voice_code_note(user_data: dict[str, Any] | None) -> str:
     return "The full response includes code or technical details."
 
 
-def _voice_artifact_note(paths: list[str], user_data: dict[str, Any] | None) -> str:
-    names = [os.path.basename(path) for path in paths if path]
-    if not names:
-        return ""
-    shown = ", ".join(names[:3])
-    if len(names) > 3:
-        shown += f", +{len(names) - 3}"
+def _artifact_voice_kind(path: str) -> str:
+    ext = Path(path).suffix.lower()
+    if ext in IMAGE_EXTS:
+        return "image"
+    if ext in GIF_EXTS:
+        return "animation"
+    if ext in VIDEO_EXTS:
+        return "video"
+    if ext in AUDIO_EXTS:
+        return "audio"
+    if ext in VOICE_EXTS:
+        return "voice"
+    if ext in DOCUMENT_EXTS:
+        return "document"
+    return "file"
+
+
+def _artifact_voice_counts(paths: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for path in paths:
+        kind = _artifact_voice_kind(path)
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _artifact_voice_phrase(paths: list[str], user_data: dict[str, Any] | None) -> str:
+    counts = _artifact_voice_counts(paths)
+    total = sum(counts.values())
+    if total <= 0:
+        return "os arquivos gerados" if _voice_language_is_portuguese(user_data) else "the generated files"
+    if len(counts) > 1:
+        return "os artefatos gerados" if _voice_language_is_portuguese(user_data) else "the generated artifacts"
+
+    kind = next(iter(counts))
+    singular = total == 1
     if _voice_language_is_portuguese(user_data):
-        return f"Anexei: {shown}."
-    return f"I attached: {shown}."
+        phrases = {
+            "image": ("a imagem", "as imagens"),
+            "animation": ("a animacao", "as animacoes"),
+            "video": ("o video", "os videos"),
+            "audio": ("o audio", "os audios"),
+            "voice": ("a nota de voz", "as notas de voz"),
+            "document": ("o documento", "os documentos"),
+            "file": ("o arquivo gerado", "os arquivos gerados"),
+        }
+    else:
+        phrases = {
+            "image": ("the image", "the images"),
+            "animation": ("the animation", "the animations"),
+            "video": ("the video", "the videos"),
+            "audio": ("the audio file", "the audio files"),
+            "voice": ("the voice note", "the voice notes"),
+            "document": ("the document", "the documents"),
+            "file": ("the generated file", "the generated files"),
+        }
+    one, many = phrases.get(kind, phrases["file"])
+    return one if singular else many
+
+
+def _artifact_style_hint(query_text: str | None) -> str:
+    text = " ".join(str(query_text or "").replace("\n", " ").split())
+    if not text:
+        return ""
+    match = re.search(r"\b(?:no|na|em)\s+estilo\s+([^.;,\n]+)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    style = match.group(1).strip(" .,:;")
+    if not style:
+        return ""
+    return _truncate_spoken_text(style, 80).rstrip(".")
+
+
+def _artifact_voice_completion_clause(
+    paths: list[str],
+    user_data: dict[str, Any] | None,
+    query_text: str | None,
+) -> str:
+    counts = _artifact_voice_counts(paths)
+    only_kind = next(iter(counts)) if len(counts) == 1 else ""
+    portuguese = _voice_language_is_portuguese(user_data)
+    if portuguese:
+        if only_kind == "image":
+            style = _artifact_style_hint(query_text)
+            return f"gerei a imagem no estilo {style}" if style else "gerei a imagem que voce pediu"
+        if only_kind == "animation":
+            return "gerei a animacao que voce pediu"
+        if only_kind == "video":
+            return "gerei o video que voce pediu"
+        if only_kind == "audio":
+            return "gerei o audio que voce pediu"
+        if only_kind == "voice":
+            return "gerei a nota de voz que voce pediu"
+        if only_kind == "document":
+            if sum(counts.values()) > 1:
+                return "preparei os documentos solicitados"
+            return "preparei o documento solicitado"
+        return "gerei os arquivos solicitados"
+    if only_kind == "image":
+        return "I generated the image you asked for"
+    if only_kind == "animation":
+        return "I generated the animation you asked for"
+    if only_kind == "video":
+        return "I generated the video you asked for"
+    if only_kind == "audio":
+        return "I generated the audio file you asked for"
+    if only_kind == "voice":
+        return "I generated the voice note you asked for"
+    if only_kind == "document":
+        return "I prepared the requested documents" if sum(counts.values()) > 1 else "I prepared the requested document"
+    return "I generated the requested files"
+
+
+def _artifact_voice_delivery_summary(
+    paths: list[str],
+    user_data: dict[str, Any] | None,
+    query_text: str | None,
+) -> str:
+    phrase = _artifact_voice_phrase(paths, user_data)
+    clause = _artifact_voice_completion_clause(paths, user_data, query_text)
+    if _voice_language_is_portuguese(user_data):
+        return f"Pronto, {clause} e anexei {phrase} aqui no Telegram."
+    return f"Done, {clause} and attached {phrase} here in Telegram."
+
+
+def _voice_artifact_note(paths: list[str], user_data: dict[str, Any] | None) -> str:
+    if not paths:
+        return ""
+    phrase = _artifact_voice_phrase(paths, user_data)
+    if _voice_language_is_portuguese(user_data):
+        return f"Tambem anexei {phrase} aqui no Telegram."
+    return f"I also attached {phrase} here in Telegram."
+
+
+def _sanitize_artifact_names_for_voice(
+    text: str,
+    created_artifacts: list[str] | None,
+    user_data: dict[str, Any] | None,
+) -> str:
+    if not text or not created_artifacts:
+        return text
+    replacement = _artifact_voice_phrase(created_artifacts, user_data)
+    names = sorted(
+        {os.path.basename(path.rstrip(os.sep)) for path in created_artifacts if os.path.basename(path.rstrip(os.sep))},
+        key=len,
+        reverse=True,
+    )
+    sanitized = text
+    for name in names:
+        if _voice_language_is_portuguese(user_data):
+            sanitized = re.sub(
+                rf"\b(?:o|a|os|as)?\s*(?:arquivo|ficheiro|anexo)\s+{re.escape(name)}",
+                replacement,
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+        else:
+            sanitized = re.sub(
+                rf"\b(?:the\s+)?(?:file|attachment)\s+{re.escape(name)}",
+                replacement,
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+        sanitized = re.sub(re.escape(name), replacement, sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\s+([.,;:])", r"\1", sanitized)
+    sanitized = re.sub(r"(?:,\s*)?(?:\+\d+)\b", "", sanitized)
+    return re.sub(r"\s+", " ", sanitized).strip()
 
 
 def _safe_voice_policy_text(value: Any, *, max_len: int = 120) -> str:
@@ -484,6 +650,17 @@ class RunResult:
     retryable: bool = False
     runtime_terminal_id: int | None = None
     runtime_terminal_path: str | None = None
+
+
+@dataclass
+class DeliveryOutcome:
+    """Prepared user-visible delivery state for history, trace, and channel send."""
+
+    response: str
+    tool_summary: str = ""
+    explicit_spoken_response: str | None = None
+    created_artifacts: list[str] = field(default_factory=list)
+    artifact_summary_applied: bool = False
 
 
 class BudgetExceeded(Exception):
@@ -1826,6 +2003,7 @@ async def enqueue_dashboard_chat_task(
         "model": model,
         "work_dir": work_dir,
         "session_id": session_id,
+        "force_audio_response": _detect_audio_response_request(query_text),
     }
     queue = get_queue(user_id)
     await queue.put(raw_item)
@@ -1898,6 +2076,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             scheduled_work_dir=item.get("work_dir"),
             is_dashboard_chat=True,
             override_session_id=item.get("session_id"),
+            force_audio_response=bool(item.get("force_audio_response")),
         )
     if isinstance(item, dict) and item.get("_runtime_retry"):
         return QueueItem(
@@ -2393,7 +2572,7 @@ async def _prepare_query_context(
         "image_paths": item.image_paths,
         "artifact_bundle": item.artifact_bundle,
     }
-    if not item.scheduled_dry_run and not item.is_dashboard_chat:
+    if not item.scheduled_dry_run:
         save_session(
             user_id,
             session_id,
@@ -4296,6 +4475,30 @@ _SPOKEN_RESPONSE_BLOCK_RE = re.compile(r"<spoken_response>(.*?)</spoken_response
 _MARKDOWN_TABLE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$", re.MULTILINE)
 _BULLET_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S+", re.MULTILINE)
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+_NO_TEXT_COMPLETION_RE = re.compile(
+    r"^\s*(?:task|text)\s+completed\s*\(\s*no\s+text\s+output\s*\)\.?\s*$",
+    re.IGNORECASE,
+)
+_ARTIFACT_DISCOVERY_POLL_SECONDS = 6.0
+_ARTIFACT_DISCOVERY_POLL_INTERVAL_SECONDS = 0.35
+_ARTIFACT_DISCOVERY_MTIME_SLOP_SECONDS = 2.0
+_ARTIFACT_WORKDIR_SCAN_MAX_FILES = 20_000
+_ARTIFACT_WORKDIR_SKIP_DIRS = {
+    ".codex",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+}
 
 
 def _strip_leading_tool_transcript(text: str) -> str:
@@ -4361,6 +4564,8 @@ def _prepare_spoken_response_for_tts(
     *,
     explicit_spoken_response: str | None = None,
     created_artifacts: list[str] | None = None,
+    artifact_summary_response: bool = False,
+    query_text: str | None = None,
     user_data: dict[str, Any] | None = None,
 ) -> tuple[str, bool]:
     """Return concise TTS text and whether full text should also be sent."""
@@ -4369,14 +4574,22 @@ def _prepare_spoken_response_for_tts(
     max_chars = _voice_spoken_max_chars(user_data)
     artifact_note = _voice_artifact_note(created_artifacts or [], user_data)
 
+    if artifact_summary_response and created_artifacts:
+        spoken = _artifact_voice_delivery_summary(created_artifacts, user_data, query_text)
+        return _truncate_spoken_text(spoken, max_chars), False
+
     if explicit_spoken_response:
-        spoken = strip_for_tts(explicit_spoken_response)
+        spoken = _sanitize_artifact_names_for_voice(
+            strip_for_tts(explicit_spoken_response),
+            created_artifacts,
+            user_data,
+        )
         if artifact_note and artifact_note not in spoken:
             spoken = f"{spoken} {artifact_note}".strip()
-        visible_plain = strip_for_tts(response)
+        visible_plain = _sanitize_artifact_names_for_voice(strip_for_tts(response), created_artifacts, user_data)
         return _truncate_spoken_text(spoken, max_chars), bool(visible_plain and visible_plain != spoken)
 
-    plain = strip_for_tts(response)
+    plain = _sanitize_artifact_names_for_voice(strip_for_tts(response), created_artifacts, user_data)
     mostly_code = is_mostly_code(response)
     needs_summary = mostly_code or _response_needs_spoken_summary(response, plain, max_chars)
     if not needs_summary:
@@ -4425,9 +4638,453 @@ def _compose_response_text(
 
     response = response_override if response_override is not None else strip_internal_blocks(run_result.result or "")
     response = _strip_leading_tool_transcript(response)
+    if response == "Task completed (no text output)." and tool_summary:
+        response = tool_summary
     if not response and tool_summary:
         response = tool_summary
     return response, tool_summary
+
+
+def _extract_created_artifacts(run_result: RunResult, work_dir: str | None) -> list[str]:
+    return extract_created_files(
+        run_result.tool_uses,
+        run_result.native_items,
+        run_result.tool_execution_trace,
+        work_dir=work_dir,
+    )
+
+
+def _is_no_text_completion_response(text: str | None) -> bool:
+    stripped = str(text or "").strip()
+    return not stripped or bool(_NO_TEXT_COMPLETION_RE.match(stripped))
+
+
+def _codex_generated_artifacts(run_result: RunResult, work_dir: str | None) -> list[str]:
+    """Find Codex-generated artifacts when the CLI omits the artifact event on stdout."""
+    if str(run_result.provider or "").strip().lower() != "codex":
+        return []
+    provider_session_id = str(run_result.provider_session_id or "").strip()
+    if not provider_session_id:
+        return []
+
+    roots: list[Path] = []
+    for raw_root in (os.environ.get("HOME"), work_dir):
+        if not raw_root:
+            continue
+        codex_root = Path(str(raw_root)).expanduser() / ".codex"
+        if not codex_root.is_dir():
+            continue
+        for generated_root in sorted(codex_root.glob("generated*")):
+            candidate = generated_root / provider_session_id
+            if candidate not in roots:
+                roots.append(candidate)
+
+    paths: list[str] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for item in sorted(root.rglob("*"), key=lambda value: value.stat().st_mtime if value.exists() else 0):
+            if item.is_file() and item.suffix.lower() in ARTIFACT_EXTS:
+                paths.append(str(item.resolve()))
+    return paths
+
+
+def _work_dir_created_artifacts(work_dir: str | None, *, modified_after: float | None) -> list[str]:
+    if not work_dir:
+        return []
+    try:
+        root = Path(work_dir).expanduser().resolve()
+    except OSError:
+        return []
+    if not root.is_dir():
+        return []
+
+    artifacts: list[tuple[float, str]] = []
+    scanned = 0
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _ARTIFACT_WORKDIR_SKIP_DIRS]
+        for filename in filenames:
+            scanned += 1
+            if scanned > _ARTIFACT_WORKDIR_SCAN_MAX_FILES:
+                truncated = True
+                break
+            if Path(filename).suffix.lower() not in ARTIFACT_EXTS:
+                continue
+            candidate = Path(dirpath) / filename
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if modified_after is not None and stat.st_mtime < modified_after:
+                continue
+            try:
+                resolved = str(candidate.resolve())
+            except OSError:
+                continue
+            artifacts.append((stat.st_mtime, resolved))
+        if truncated:
+            break
+    if truncated:
+        log.warning("artifact_workdir_scan_truncated", work_dir=str(root), scanned=scanned)
+    return [path for _, path in sorted(artifacts)]
+
+
+def _merge_artifact_paths(*path_groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for paths in path_groups:
+        for raw_path in paths:
+            path = os.path.abspath(os.path.expanduser(str(raw_path)))
+            if path and path not in seen:
+                seen.add(path)
+                merged.append(path)
+    return merged
+
+
+def _existing_supported_artifact_paths(paths: list[str]) -> list[str]:
+    existing: list[str] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if path in seen or Path(path).suffix.lower() not in ARTIFACT_EXTS:
+            continue
+        if os.path.isfile(path):
+            seen.add(path)
+            existing.append(path)
+    return existing
+
+
+def _artifact_size_snapshot(paths: list[str]) -> dict[str, int]:
+    snapshot: dict[str, int] = {}
+    for path in paths:
+        try:
+            snapshot[path] = os.path.getsize(path)
+        except OSError:
+            continue
+    return snapshot
+
+
+def _artifact_discovery_poll_seconds(run_result: RunResult, response: str) -> float:
+    configured = max(0.0, float(_ARTIFACT_DISCOVERY_POLL_SECONDS))
+    if configured <= 0:
+        return 0.0
+    provider = str(run_result.provider or "").strip().lower()
+    if provider == "codex" and str(run_result.provider_session_id or "").strip():
+        return configured
+    if _looks_like_artifact_completion(response):
+        return configured
+    if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace:
+        return min(configured, 1.5)
+    return 0.0
+
+
+async def _discover_created_artifacts(
+    run_result: RunResult,
+    work_dir: str | None,
+    *,
+    response: str,
+    elapsed: float,
+) -> list[str]:
+    """Collect provider and filesystem artifacts, waiting briefly for files to settle."""
+    modified_after = None
+    if elapsed > 0:
+        modified_after = max(0.0, time.time() - elapsed - _ARTIFACT_DISCOVERY_MTIME_SLOP_SECONDS)
+    poll_seconds = _artifact_discovery_poll_seconds(run_result, response)
+    deadline = time.monotonic() + poll_seconds
+    previous_snapshot: dict[str, int] | None = None
+
+    while True:
+        provider_signals = (
+            _extract_created_artifacts(run_result, work_dir)
+            if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace
+            else []
+        )
+        discovered = _existing_supported_artifact_paths(
+            _merge_artifact_paths(
+                provider_signals,
+                _codex_generated_artifacts(run_result, work_dir),
+                _work_dir_created_artifacts(work_dir, modified_after=modified_after),
+            )
+        )
+        snapshot = _artifact_size_snapshot(discovered)
+        if discovered and previous_snapshot is not None and snapshot == previous_snapshot:
+            return discovered
+        if poll_seconds <= 0 or time.monotonic() >= deadline:
+            return discovered
+        previous_snapshot = snapshot
+        sleep_for = min(_ARTIFACT_DISCOVERY_POLL_INTERVAL_SECONDS, max(0.05, deadline - time.monotonic()))
+        await asyncio.sleep(sleep_for)
+
+
+def _artifact_name_summary(created_artifacts: list[str], *, limit: int = 6) -> str:
+    names = [os.path.basename(path.rstrip(os.sep)) or path for path in created_artifacts]
+    unique_names = list(dict.fromkeys(name for name in names if name))
+    if not unique_names:
+        return "os arquivos gerados"
+    shown = ", ".join(unique_names[:limit])
+    if len(unique_names) > limit:
+        shown += f", +{len(unique_names) - limit}"
+    return shown
+
+
+def _created_artifacts_summary(created_artifacts: list[str]) -> str:
+    return f"Pronto, gerei e anexei: {_artifact_name_summary(created_artifacts)}."
+
+
+def _no_text_no_artifacts_summary() -> str:
+    return "A execucao terminou sem texto e sem artefatos localizaveis."
+
+
+def _artifact_delivery_failure_notice(created_artifacts: list[str]) -> str:
+    return (
+        "Encontrei os artefatos gerados, mas nao consegui anexa-los pelo Telegram: "
+        f"{_artifact_name_summary(created_artifacts)}."
+    )
+
+
+async def _persist_created_artifacts(
+    *,
+    task_id: int | None,
+    created_artifacts: list[str],
+    run_result: RunResult,
+) -> int:
+    if task_id is None or not created_artifacts:
+        return 0
+
+    import mimetypes
+
+    from koda.services.artifact_ingestion import detect_artifact_kind
+    from koda.services.runtime import get_runtime_controller
+
+    try:
+        runtime = get_runtime_controller()
+    except Exception:
+        log.exception("runtime_artifact_controller_unavailable", task_id=task_id)
+        return 0
+
+    existing_paths: set[str] = set()
+    try:
+        for item in runtime.store.list_artifacts(task_id):
+            existing_path = str(item.get("path") or "").strip()
+            existing_metadata = item.get("metadata") if isinstance(item, dict) else {}
+            if existing_path and not (
+                isinstance(existing_metadata, dict) and existing_metadata.get("artifact_engine_ready") is False
+            ):
+                existing_paths.add(os.path.abspath(os.path.expanduser(existing_path)))
+    except Exception:
+        log.exception("runtime_artifact_dedupe_failed", task_id=task_id)
+
+    persisted = 0
+    for raw_path in created_artifacts:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if path in existing_paths:
+            continue
+        if not os.path.isfile(path):
+            log.warning("runtime_artifact_missing", task_id=task_id, path=path)
+            continue
+
+        filename = os.path.basename(path)
+        mime_type = mimetypes.guess_type(path)[0] or ""
+        artifact_kind = detect_artifact_kind(path=path, mime_type=mime_type).value
+        try:
+            size_bytes = os.path.getsize(path)
+        except OSError:
+            size_bytes = None
+
+        metadata: dict[str, Any] = {
+            "source_type": "provider_output",
+            "provider": run_result.provider,
+            "model": run_result.model,
+            "session_id": run_result.session_id,
+            "provider_session_id": run_result.provider_session_id,
+            "stop_reason": run_result.stop_reason,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+        }
+        try:
+            artifact_row_id = await runtime.add_artifact(
+                task_id=task_id,
+                artifact_kind=artifact_kind,
+                label=filename,
+                path=path,
+                metadata=metadata,
+            )
+        except Exception:
+            log.exception("runtime_artifact_persist_failed", task_id=task_id, path=path)
+            continue
+
+        existing_paths.add(path)
+        persisted += 1
+        artifact_id = str(artifact_row_id or filename)
+        event_payload = {
+            "artifact": {
+                "id": artifact_id,
+                "kind": artifact_kind,
+                "label": filename,
+                "mime_type": mime_type or None,
+                "size_bytes": size_bytes,
+                "created_at": datetime.now(UTC).isoformat(),
+                "source_session_id": run_result.session_id,
+                "source_execution_id": str(task_id),
+                "download_url": f"/api/runtime/artifacts/{artifact_id}/download",
+                "preview_state": "available",
+                "path": path,
+            }
+        }
+        try:
+            await runtime.events.publish(
+                task_id=task_id,
+                env_id=None,
+                attempt=None,
+                phase="delivering",
+                event_type="artifact_ready",
+                severity="info",
+                payload=event_payload,
+                artifact_refs=[path],
+            )
+        except Exception:
+            log.exception("runtime_artifact_event_publish_failed", task_id=task_id, path=path)
+
+    if persisted:
+        log.info("runtime_artifacts_persisted", task_id=task_id, count=persisted)
+    return persisted
+
+
+async def _persist_voice_response_artifact(
+    *,
+    task_id: int | None,
+    ogg_path: str,
+    spoken_text: str,
+    run_result: RunResult,
+    tts_voice: str,
+    audio_provider: str,
+    audio_model: str,
+) -> dict[str, Any] | None:
+    if task_id is None:
+        return None
+
+    from koda.services.runtime import get_runtime_controller
+
+    try:
+        runtime = get_runtime_controller()
+    except Exception:
+        log.exception("runtime_voice_artifact_controller_unavailable", task_id=task_id)
+        return None
+
+    metadata: dict[str, Any] = {
+        "source_type": "voice_response",
+        "mime_type": "audio/ogg",
+        "provider": audio_provider or "default",
+        "model": audio_model,
+        "voice": str(tts_voice),
+        "session_id": run_result.session_id,
+        "provider_session_id": run_result.provider_session_id,
+        "response_provider": run_result.provider,
+        "response_model": run_result.model,
+        "spoken_text_preview": _truncate_spoken_text(spoken_text, 320),
+    }
+    try:
+        artifact = await runtime.persist_generated_artifact_file(
+            task_id=task_id,
+            source_path=ogg_path,
+            artifact_kind="audio",
+            label=f"voice-response-{task_id}.ogg",
+            metadata=metadata,
+        )
+    except Exception:
+        log.exception("runtime_voice_artifact_persist_failed", task_id=task_id, path=ogg_path)
+        return None
+
+    artifact_id = str(artifact.get("id") or "").strip()
+    if not artifact_id or artifact_id == "0":
+        artifact_id = str(artifact.get("label") or f"voice-response-{task_id}.ogg")
+    event_payload = {
+        "artifact": {
+            "id": artifact_id,
+            "kind": "audio",
+            "label": artifact.get("label") or f"voice-response-{task_id}.ogg",
+            "mime_type": artifact.get("mime_type") or "audio/ogg",
+            "size_bytes": artifact.get("size_bytes"),
+            "created_at": datetime.now(UTC).isoformat(),
+            "source_session_id": run_result.session_id,
+            "source_execution_id": str(task_id),
+            "download_url": f"/api/runtime/artifacts/{artifact_id}/download",
+            "preview_state": "available",
+            "path": artifact.get("path"),
+        }
+    }
+    try:
+        await runtime.events.publish(
+            task_id=task_id,
+            env_id=None,
+            attempt=None,
+            phase="delivering",
+            event_type="artifact_ready",
+            severity="info",
+            payload=event_payload,
+            artifact_refs=[str(artifact.get("path") or ogg_path)],
+        )
+    except Exception:
+        log.exception("runtime_voice_artifact_event_publish_failed", task_id=task_id, path=artifact.get("path"))
+    log.info("runtime_voice_artifact_persisted", task_id=task_id, artifact_id=artifact_id)
+    return artifact
+
+
+async def _prepare_delivery_outcome(
+    run_result: RunResult,
+    work_dir: str,
+    *,
+    elapsed: float = 0.0,
+    task_id: int | None = None,
+    response_override: str | None = None,
+    include_tool_summary: bool = True,
+) -> DeliveryOutcome:
+    """Resolve the final delivery text and persist runtime artifacts before history writes."""
+    response, tool_summary = _compose_response_text(
+        run_result,
+        response_override=response_override,
+        elapsed=elapsed,
+        include_tool_summary=include_tool_summary,
+    )
+    raw_completion_had_no_text = response_override is None and _is_no_text_completion_response(run_result.result)
+    response, explicit_spoken_response = _extract_spoken_response_block(response)
+    created_artifacts = await _discover_created_artifacts(
+        run_result,
+        work_dir,
+        response=response,
+        elapsed=elapsed,
+    )
+    artifact_summary_applied = False
+    if created_artifacts:
+        await _persist_created_artifacts(
+            task_id=task_id,
+            created_artifacts=created_artifacts,
+            run_result=run_result,
+        )
+        if raw_completion_had_no_text or _is_no_text_completion_response(response):
+            response = _created_artifacts_summary(created_artifacts)
+            artifact_summary_applied = True
+    elif raw_completion_had_no_text or _is_no_text_completion_response(response):
+        response = _no_text_no_artifacts_summary()
+    elif (run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace) and (
+        not run_result.error and _looks_like_artifact_completion(response)
+    ):
+        response = (
+            f"{response}\n\n"
+            "Nao encontrei esse arquivo no diretorio de trabalho, entao nao consegui anexa-lo. "
+            "Vou tratar isso como uma falha de geracao do artefato, nao como uma entrega concluida."
+        )
+        if "artifact not found" not in run_result.warnings:
+            run_result.warnings.append("artifact not found")
+
+    return DeliveryOutcome(
+        response=response,
+        tool_summary=tool_summary,
+        explicit_spoken_response=explicit_spoken_response,
+        created_artifacts=created_artifacts,
+        artifact_summary_applied=artifact_summary_applied,
+    )
 
 
 async def _send_response(
@@ -4442,34 +5099,49 @@ async def _send_response(
     task_id: int | None = None,
     ctx: QueryContext | None = None,
     response_override: str | None = None,
+    query_text: str | None = None,
     include_tool_summary: bool = True,
+    delivery_outcome: DeliveryOutcome | None = None,
 ) -> None:
     """Send the provider response: TTS, code blocks, HTML text, artifacts, supervised buttons."""
     cost = run_result.cost_usd
-    response, tool_summary = _compose_response_text(
-        run_result,
-        response_override=response_override,
-        elapsed=elapsed,
-        include_tool_summary=include_tool_summary,
-    )
-    response, explicit_spoken_response = _extract_spoken_response_block(response)
-    created_artifacts: list[str] = []
-    if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace:
-        created_artifacts = extract_created_files(
-            run_result.tool_uses,
-            run_result.native_items,
-            run_result.tool_execution_trace,
-            work_dir=work_dir,
+    delivery = delivery_outcome
+    if delivery is None:
+        delivery = await _prepare_delivery_outcome(
+            run_result,
+            work_dir,
+            elapsed=elapsed,
+            task_id=task_id,
+            response_override=response_override,
+            include_tool_summary=include_tool_summary,
         )
-        if not created_artifacts and not run_result.error and _looks_like_artifact_completion(response):
-            response = (
-                f"{response}\n\n"
-                "Nao encontrei esse arquivo no diretorio de trabalho, entao nao consegui anexa-lo. "
-                "Vou tratar isso como uma falha de geracao do artefato, nao como uma entrega concluida."
-            )
-            run_result.warnings.append("artifact not found")
+    response = delivery.response
+    tool_summary = delivery.tool_summary
+    explicit_spoken_response = delivery.explicit_spoken_response
+    created_artifacts = delivery.created_artifacts
+    artifact_summary_applied = delivery.artifact_summary_applied
 
     response_markup = build_response_markup(task_id)
+
+    artifacts_sent = 0
+    artifact_delivery_failed = False
+    if created_artifacts:
+        artifacts_sent = await send_created_files(created_artifacts, chat_id, context, update)
+        if artifacts_sent:
+            log.info("artifacts_sent", count=artifacts_sent, total=len(created_artifacts))
+            if artifacts_sent < len(created_artifacts):
+                log.warning(
+                    "artifacts_partially_sent",
+                    sent=artifacts_sent,
+                    total=len(created_artifacts),
+                    paths=created_artifacts,
+                )
+        else:
+            artifact_delivery_failed = True
+            failure_notice = _artifact_delivery_failure_notice(created_artifacts)
+            run_result.warnings.append("artifact delivery failed")
+            log.warning("artifacts_discovered_but_not_sent", total=len(created_artifacts), paths=created_artifacts)
+            response = failure_notice if artifact_summary_applied else f"{response}\n\n{failure_notice}".strip()
 
     # --- TTS voice response branch ---
     audio_sent = False
@@ -4484,7 +5156,9 @@ async def _send_response(
         plain, send_text_with_audio = _prepare_spoken_response_for_tts(
             response,
             explicit_spoken_response=explicit_spoken_response,
-            created_artifacts=created_artifacts,
+            created_artifacts=created_artifacts if artifacts_sent else [],
+            artifact_summary_response=artifact_summary_applied and bool(artifacts_sent),
+            query_text=query_text,
             user_data=context.user_data,
         )
         if plain.strip():
@@ -4543,6 +5217,16 @@ async def _send_response(
                 from pathlib import Path as _P
 
                 try:
+                    audio_model = str(context.user_data.get("audio_model") or "").strip()
+                    await _persist_voice_response_artifact(
+                        task_id=task_id,
+                        ogg_path=ogg_path,
+                        spoken_text=plain,
+                        run_result=run_result,
+                        tts_voice=str(tts_voice),
+                        audio_provider=audio_provider or "default",
+                        audio_model=audio_model,
+                    )
                     caption = (
                         f"Cost: ${cost:.4f} | "
                         f"Total: ${context.user_data['total_cost']:.4f} | "
@@ -4584,7 +5268,7 @@ async def _send_response(
         response = f"{response}\n\n{audio_failure_notice}"
 
     code_files: list[tuple[str, str]]
-    send_text_response = (not audio_sent) or send_text_with_audio
+    send_text_response = (not audio_sent) or send_text_with_audio or artifact_delivery_failed
     if run_result.error:
         modified_text, code_files = response, []
     elif send_text_response:
@@ -4684,12 +5368,6 @@ async def _send_response(
                         await update.message.reply_text(plain_text)
                     else:
                         await context.bot.send_message(chat_id=chat_id, text=plain_text)
-
-    # Send created artifacts
-    if created_artifacts:
-        sent = await send_created_files(created_artifacts, chat_id, context, update)
-        if sent:
-            log.info("artifacts_sent", count=sent, total=len(created_artifacts))
 
     # Supervised mode: Continue/Stop buttons
     if agent_mode == "supervised" and run_result.stop_reason == "max_turns" and run_result.session_id:
@@ -5095,12 +5773,7 @@ async def _finalize_scheduled_run(
         verification_status=verification_status,
         summary_text=_scheduled_summary(run_result.result if run_result else None),
         fallback_chain=run_result.fallback_chain if run_result else [],
-        artifacts=extract_created_files(
-            run_result.tool_uses if run_result else [],
-            run_result.native_items if run_result else [],
-            run_result.tool_execution_trace if run_result else [],
-            work_dir=ctx.work_dir if ctx else None,
-        ),
+        artifacts=_extract_created_artifacts(run_result, ctx.work_dir if ctx else None) if run_result else [],
         telegram_bot=context.bot,
         notification_chat_id=task_info.chat_id,
     )
@@ -5532,7 +6205,15 @@ async def _execute_single_task(
                     except Exception:
                         log.exception("knowledge_answer_evaluation_error")
 
-                    delivered_response_text = response_override or final_response_text
+                    delivery_outcome = await _prepare_delivery_outcome(
+                        run_result,
+                        ctx.work_dir,
+                        elapsed=query_elapsed,
+                        task_id=task_id,
+                        response_override=response_override,
+                        include_tool_summary=response_override is None,
+                    )
+                    delivered_response_text = delivery_outcome.response
 
                     # Skill compliance check (post-response)
                     if ctx.skill_matches:
@@ -5590,7 +6271,9 @@ async def _execute_single_task(
                         task_id=task_id,
                         ctx=ctx,
                         response_override=response_override,
+                        query_text=item.query_text,
                         include_tool_summary=response_override is None,
+                        delivery_outcome=delivery_outcome,
                     )
 
                     task_info.status = final_status

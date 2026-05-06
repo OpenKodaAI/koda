@@ -2,6 +2,7 @@
 
 
 import { useMemo, useState } from "react";
+import { keepPreviousData } from "@tanstack/react-query";
 import { DatabaseZap, ShieldCheck } from "lucide-react";
 import { DLQTable } from "@/components/dlq/dlq-table";
 import { ErrorDetail } from "@/components/dlq/error-detail";
@@ -11,6 +12,7 @@ import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import {
   PageEmptyState,
   PageMetricStrip,
@@ -45,6 +47,8 @@ export default function DLQPage() {
       retryFilter,
       limit: 100,
     }),
+    placeholderData: keepPreviousData,
+    notifyOnChangeProps: ["data", "error"],
     queryFn: async ({ signal }) => {
       const response = await fetchControlPlaneDashboardJsonAllowError<DLQEntry[]>(
         "/dlq",
@@ -76,9 +80,16 @@ export default function DLQPage() {
       };
     },
   });
-  const entries = entriesQuery.data?.items ?? [];
-  const loading = entriesQuery.isLoading;
-  const unavailable = entriesQuery.data?.unavailable ?? false;
+  const stableEntriesQuery = useStableQueryData({
+    data: entriesQuery.data,
+    resetKey: "dashboard:dlq",
+    isPending: entriesQuery.isPending,
+    isFetching: entriesQuery.isFetching,
+    error: entriesQuery.error,
+  });
+  const entries = stableEntriesQuery.data?.items ?? [];
+  const loading = stableEntriesQuery.initialLoading;
+  const unavailable = stableEntriesQuery.data?.unavailable ?? false;
   const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
   const retryEligibleCount = entries.filter(
     (entry) => entry.retry_eligible === 1 && !entry.retried_at
@@ -133,17 +144,17 @@ export default function DLQPage() {
 
         {loading && entries.length === 0 ? (
           <DLQDataLoading />
-        ) : entriesQuery.error ? (
-          <ErrorState
-            title={t("dlq.page.unavailable")}
-            description={entriesQuery.error.message ?? t("dlq.page.unavailableDescription")}
-            onRetry={() => {
+        ) : stableEntriesQuery.showBlockingError ? (
+            <ErrorState
+              title={t("dlq.page.unavailable")}
+              description={entriesQuery.error?.message ?? t("dlq.page.unavailableDescription")}
+              onRetry={() => {
               void entriesQuery.refetch();
             }}
           />
         ) : (
           <>
-            <PageMetricStrip className="animate-in stagger-1">
+            <PageMetricStrip>
               <PageMetricStripItem
                 label={t("dlq.page.visibleFailures")}
                 value={`${entries.length}`}
@@ -167,7 +178,7 @@ export default function DLQPage() {
             </PageMetricStrip>
 
             {unavailable ? (
-              <div className="animate-in stagger-2 px-6 py-10">
+              <div className="px-6 py-10">
                 <PageEmptyState
                   icon={DatabaseZap}
                   title={t("dlq.page.unavailable")}
@@ -175,7 +186,7 @@ export default function DLQPage() {
                 />
               </div>
             ) : entries.length === 0 ? (
-              <div className="animate-in stagger-2 px-6 py-10">
+              <div className="px-6 py-10">
                 <PageEmptyState
                   icon={ShieldCheck}
                   title={emptyTitle}
@@ -183,7 +194,7 @@ export default function DLQPage() {
                 />
               </div>
             ) : (
-              <div className="animate-in stagger-2">
+              <div>
                 <DLQTable
                   entries={entries}
                   onEntryClick={setSelectedEntry}

@@ -50,9 +50,7 @@ import {
   SELECT_ALL_VALUE,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -61,6 +59,7 @@ import { SettingsSectionShell } from "@/components/control-plane/system/settings
 import { AnimatedSwitch } from "@/components/control-plane/system/shared/animated-switch";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
+import { ModelSelector } from "@/components/control-plane/shared/model-selector";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { ProviderLoginSession } from "@/lib/control-plane";
@@ -122,8 +121,9 @@ export {
 export function providerOrder(category: string) {
   if (category === "general") return 0;
   if (category === "voice") return 1;
-  if (category === "media") return 2;
-  return 3;
+  if (category === "transcription") return 2;
+  if (category === "media") return 3;
+  return 4;
 }
 
 export type ProviderOption = ReturnType<typeof useSystemSettings>["providerOptions"][number];
@@ -134,6 +134,9 @@ export function providerDescription(providerId: string, category: string) {
   if (providerId === "gemini") return "Google via GEMINI_API_KEY ou login oficial do Gemini CLI.";
   if (providerId === "elevenlabs") return "Voz premium com API Key, idioma padrão e seleção de vozes.";
   if (providerId === "ollama") return "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.";
+  if (providerId === "whispercpp") {
+    return "Transcrição local via whisper.cpp, com modelos baixados sob demanda.";
+  }
   if (providerId === "perplexity") {
     return "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.";
   }
@@ -250,8 +253,8 @@ export function isSelectableProvider(
 ) {
   if (!provider) return false;
   if (provider.connectionManaged) {
-    if (provider.id === "codex" && functionId === "transcription") {
-      return Boolean(connection?.verified && connection?.auth_mode === "api_key" && connection?.api_key_present);
+    if (provider.id === "codex" && ["image", "transcription"].includes(functionId)) {
+      return Boolean(connection?.api_key_present && (!connection?.auth_mode || connection.auth_mode === "api_key"));
     }
     return Boolean(connection?.verified);
   }
@@ -499,16 +502,19 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   };
 
   useEffect(() => {
-    // Kokoro card hosts both Kokoro assets (model + voices) and the related
-    // Whisper.cpp transcription weights — they're all local on-device audio
-    // runtime files and share the same operator workflow.
     if (provider.id !== "kokoro" || !isOpen) {
       return;
     }
     void loadKokoroVoices(kokoroLanguage);
     void loadKokoroModelStatus();
+  }, [isOpen, kokoroLanguage, loadKokoroVoices, loadKokoroModelStatus, provider.id]);
+
+  useEffect(() => {
+    if (provider.id !== "whispercpp" || !isOpen) {
+      return;
+    }
     void loadWhisperCatalog();
-  }, [isOpen, kokoroLanguage, loadKokoroVoices, loadKokoroModelStatus, loadWhisperCatalog, provider.id]);
+  }, [isOpen, loadWhisperCatalog, provider.id]);
 
   useEffect(() => {
     if (provider.id !== "elevenlabs" || !isOpen || activeMode !== "api_key") {
@@ -701,6 +707,110 @@ function ClaudeCodeEntry({
   );
 }
 
+function WhisperCppModelList({
+  whisperCatalog,
+  isDownloadingWhisperVariant,
+  downloadWhisperModel,
+  deleteWhisperVariantAsset,
+}: {
+  whisperCatalog: ProviderConnectionUi["whisperCatalog"];
+  isDownloadingWhisperVariant: ProviderConnectionUi["isDownloadingWhisperVariant"];
+  downloadWhisperModel: ProviderConnectionUi["downloadWhisperModel"];
+  deleteWhisperVariantAsset: ProviderConnectionUi["deleteWhisperVariantAsset"];
+}) {
+  const { tl } = useAppI18n();
+
+  if (!whisperCatalog) {
+    return (
+      <div className="px-1 text-sm text-[var(--text-tertiary)]">
+        {tl("Carregando modelos Whisper.cpp...")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 px-1">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          {tl("Modelos Whisper.cpp")}
+        </div>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          {tl("Modelos locais para transcrição offline. Baixe apenas os que deseja usar.")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {whisperCatalog.items.map((variant) => {
+          const downloading = isDownloadingWhisperVariant(variant.variant_id);
+          const isDefault = whisperCatalog.default_variant === variant.variant_id;
+          return (
+            <div
+              key={variant.variant_id}
+              className="flex flex-wrap items-center gap-3 text-sm"
+            >
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="font-medium text-[var(--text-primary)]">
+                  {variant.label}
+                  {isDefault ? (
+                    <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                      {tl("Padrão")}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {variant.description}
+                  {variant.downloaded && Number(variant.bytes ?? 0) > 0
+                    ? ` · ${formatAssetBytes(variant.bytes)}`
+                    : variant.approx_size_bytes
+                      ? ` · ~${formatAssetBytes(variant.approx_size_bytes)}`
+                      : ""}
+                </span>
+              </div>
+              {variant.downloaded ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <Check className="h-3 w-3" strokeWidth={1.75} />
+                  {tl("Baixado")}
+                </span>
+              ) : null}
+              <AsyncActionButton
+                type="button"
+                variant={variant.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={downloading}
+                loadingLabel={tl("Baixando")}
+                icon={ArrowDown}
+                disabled={Boolean(variant.downloaded) || downloading}
+                onClick={() => {
+                  void downloadWhisperModel(variant.variant_id);
+                }}
+                className="rounded-full px-3.5"
+              >
+                {variant.downloaded ? tl("Disponível") : tl("Baixar")}
+              </AsyncActionButton>
+              {variant.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={downloading}
+                  onClick={() => {
+                    void deleteWhisperVariantAsset(variant.variant_id);
+                  }}
+                  loadingLabel={tl("Removendo")}
+                  className="rounded-full px-3.5"
+                >
+                  {tl("Remover")}
+                </AsyncActionButton>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 async function copyProviderLoginCode(value: string) {
   if (!value) return false;
   try {
@@ -797,7 +907,14 @@ export function ProviderAuthPanel({
         </InlineAlert>
       ) : null}
 
-      {provider.id === "kokoro" ? (
+      {provider.id === "whispercpp" ? (
+        <WhisperCppModelList
+          whisperCatalog={whisperCatalog}
+          isDownloadingWhisperVariant={isDownloadingWhisperVariant}
+          downloadWhisperModel={downloadWhisperModel}
+          deleteWhisperVariantAsset={deleteWhisperVariantAsset}
+        />
+      ) : provider.id === "kokoro" ? (
         <>
           {/* Modelo base: precisa estar baixado antes que qualquer voz funcione.
               O download é independente do download de vozes. Mostra tamanho
@@ -984,86 +1101,6 @@ export function ProviderAuthPanel({
           </div>
 
         </div>
-
-        {/* Whisper.cpp transcription model — same on-device runtime family
-            as Kokoro (audio in/out), so they share this card. The Koda
-            install ships without weights; the operator picks a variant
-            and the download starts in the background with a sticky toast. */}
-        {whisperCatalog ? (
-          <div className="space-y-2 border-t border-[color:var(--divider-hair)] px-1 pt-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-              {tl("Modelos Whisper.cpp")}
-            </div>
-            <div className="space-y-2">
-              {whisperCatalog.items.map((variant) => {
-                const downloading = isDownloadingWhisperVariant(variant.variant_id);
-                const isDefault = whisperCatalog.default_variant === variant.variant_id;
-                return (
-                  <div
-                    key={variant.variant_id}
-                    className="flex flex-wrap items-center gap-3 text-sm"
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="font-medium text-[var(--text-primary)]">
-                        {variant.label}
-                        {isDefault ? (
-                          <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-                            {tl("Padrão")}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="text-xs text-[var(--text-tertiary)]">
-                        {variant.description}
-                        {variant.downloaded && Number(variant.bytes ?? 0) > 0
-                          ? ` · ${formatAssetBytes(variant.bytes)}`
-                          : variant.approx_size_bytes
-                            ? ` · ~${formatAssetBytes(variant.approx_size_bytes)}`
-                            : ""}
-                      </span>
-                    </div>
-                    {variant.downloaded ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
-                        <Check className="h-3 w-3" strokeWidth={1.75} />
-                        {tl("Baixado")}
-                      </span>
-                    ) : null}
-                    <AsyncActionButton
-                      type="button"
-                      variant={variant.downloaded ? "secondary" : "quiet"}
-                      size="sm"
-                      loading={downloading}
-                      loadingLabel={tl("Baixando")}
-                      icon={ArrowDown}
-                      disabled={Boolean(variant.downloaded) || downloading}
-                      onClick={() => {
-                        void downloadWhisperModel(variant.variant_id);
-                      }}
-                      className="rounded-full px-3.5"
-                    >
-                      {variant.downloaded ? tl("Disponível") : tl("Baixar")}
-                    </AsyncActionButton>
-                    {variant.downloaded ? (
-                      <AsyncActionButton
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        icon={Trash2}
-                        disabled={downloading}
-                        onClick={() => {
-                          void deleteWhisperVariantAsset(variant.variant_id);
-                        }}
-                        loadingLabel={tl("Removendo")}
-                        className="rounded-full px-3.5"
-                      >
-                        {tl("Remover")}
-                      </AsyncActionButton>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
         </>
       ) : supportsAnyAuth ? (
         <>
@@ -1594,10 +1631,28 @@ export function SectionModels() {
   const enabledGeneralProviders = enabledProviders.filter((providerId) =>
     generalProviders.some((provider) => provider.id === providerId),
   );
+  const generalProviderIds = useMemo(
+    () => generalProviders.map((provider) => provider.id),
+    [generalProviders],
+  );
   const modelFunctions = draft.catalogs.model_functions || [];
   const functionalCatalog = useMemo(
     () => draft.catalogs.functional_model_catalog || {},
     [draft.catalogs.functional_model_catalog],
+  );
+  const functionalProviderIds = useMemo(() => {
+    const ids = new Set(generalProviderIds);
+    for (const items of Object.values(functionalCatalog)) {
+      for (const item of items || []) {
+        const providerId = String(item.provider_id || "").trim();
+        if (providerId) ids.add(providerId);
+      }
+    }
+    return Array.from(ids);
+  }, [functionalCatalog, generalProviderIds]);
+  const providerOptionById = useMemo(
+    () => new Map(providerOptions.map((provider) => [provider.id, provider])),
+    [providerOptions],
   );
 
   const selectedGeneralEffortModel = useMemo(() => {
@@ -1899,76 +1954,47 @@ export function SectionModels() {
       <SettingsFieldGroup title={tl("Functional Defaults")}>
         <div className="grid gap-4 xl:grid-cols-2">
           {modelFunctions.map((functionItem) => {
-            const options = functionalCatalog[functionItem.id] || [];
             const selected = draft.values.models.functional_defaults?.[functionItem.id];
             const selectedValue =
               selected?.provider_id && selected?.model_id
                 ? `${selected.provider_id}:${selected.model_id}`
                 : "";
-            const groupedOptions = providerOptions
-              .map((provider) => ({
-                provider,
-                items: options.filter((item) => item.provider_id === provider.id),
-              }))
-              .filter((group) => group.items.length > 0);
+            const error =
+              findFieldError(
+                modelsErrors,
+                `models.functional_defaults.${functionItem.id}.provider_id`,
+              )?.message ??
+              findFieldError(
+                modelsErrors,
+                `models.functional_defaults.${functionItem.id}`,
+              )?.message;
 
             return (
-              <FieldShell
+              <ModelSelector
                 key={functionItem.id}
                 label={tl(functionItem.title)}
                 description={tl(functionItem.description)}
-                error={
-                  findFieldError(
-                    modelsErrors,
-                    `models.functional_defaults.${functionItem.id}.provider_id`,
-                  )?.message ??
-                  findFieldError(
-                    modelsErrors,
-                    `models.functional_defaults.${functionItem.id}`,
-                  )?.message
-                }
-              >
-                <Select
-                  value={selectedValue === "" ? SELECT_ALL_VALUE : selectedValue}
-                  onValueChange={(value) =>
-                    updateFunctionalDefault(
+                error={error}
+                value={selectedValue}
+                onChange={(value) => updateFunctionalDefault(functionItem.id, value)}
+                providers={{}}
+                enabledProviders={functionalProviderIds}
+                functionalCatalog={functionalCatalog}
+                functionId={functionItem.id}
+                emptyLabel={tl("Selecione um modelo padrão")}
+                isOptionDisabled={({ providerId }) => {
+                  const provider = providerOptionById.get(providerId);
+                  return (
+                    !provider ||
+                    !isSelectableProvider(
+                      provider,
+                      providerConnections[provider.id],
                       functionItem.id,
-                      value === SELECT_ALL_VALUE ? "" : value,
                     )
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={tl("Selecione um modelo padrão")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SELECT_ALL_VALUE}>
-                      {tl("Selecione um modelo padrão")}
-                    </SelectItem>
-                    {groupedOptions.map(({ provider, items }) => {
-                      const selectable = isSelectableProvider(
-                        provider,
-                        providerConnections[provider.id],
-                        functionItem.id,
-                      );
-                      return (
-                        <SelectGroup key={provider.id}>
-                          <SelectLabel>{provider.title}</SelectLabel>
-                          {items.map((item) => (
-                            <SelectItem
-                              key={`${item.provider_id}:${item.model_id}`}
-                              value={`${item.provider_id}:${item.model_id}`}
-                              disabled={!selectable}
-                            >
-                              {item.title}
-                              {!selectable ? ` — ${tl("indisponível no momento")}` : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </FieldShell>
+                  );
+                }}
+                disabledOptionLabel={tl("indisponível no momento")}
+              />
             );
           })}
         </div>

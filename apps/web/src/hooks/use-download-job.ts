@@ -84,6 +84,24 @@ function jobText(job: ProviderDownloadJob, ...keys: string[]): string {
   return "";
 }
 
+async function responseErrorText(res: Response, fallback: string): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const key of ["error", "message", "detail"]) {
+        const value = record[key];
+        if (typeof value === "string" && value.trim()) return value;
+      }
+    }
+  } catch {
+    // Non-JSON upstream errors are still useful as-is.
+  }
+  return text;
+}
+
 /**
  * Orchestrates a single download lifecycle: kicks off the job via POST,
  * shows a sticky toast, polls progress, and morphs the toast into a
@@ -135,8 +153,9 @@ export function useDownloadJob() {
           },
         );
         if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `cancel request failed (${res.status})`);
+          throw new Error(
+            await responseErrorText(res, `cancel request failed (${res.status})`),
+          );
         }
         const job = (await res.json()) as ProviderDownloadJob;
         stopPoll(toastId);
@@ -327,8 +346,9 @@ export function useDownloadJob() {
           body: params.startBody === undefined ? undefined : JSON.stringify(params.startBody),
         });
         if (!res.ok && res.status !== 202) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `start request failed (${res.status})`);
+          throw new Error(
+            await responseErrorText(res, `start request failed (${res.status})`),
+          );
         }
         job = (await res.json()) as ProviderDownloadJob;
       } catch (err) {

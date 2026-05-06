@@ -3,6 +3,7 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import type { AgentStats } from "@/lib/types";
 import { useContentStable } from "@/hooks/use-content-stable";
+import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
@@ -19,7 +20,7 @@ export function useAgentStats(agentId?: string) {
     notifyOnChangeProps: ["data", "error"],
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
-    refetchOnMount: true,
+    refetchOnMount: false,
     refetchOnReconnect: false,
     refetchInterval: (query) => {
       const hasActive = (query.state.data ?? []).some((s) => s.activeTasks > 0);
@@ -46,12 +47,19 @@ export function useAgentStats(agentId?: string) {
 
   // Hold on to the last structurally-equal reference so downstream memos stay stable
   // even if the underlying query object churns identity on refetch.
-  const stableStats = useContentStable(query.data);
+  const stableQuery = useStableQueryData({
+    data: query.data,
+    resetKey: agentId ?? "summary",
+    isPending: query.isPending,
+    isFetching: query.isFetching,
+    error: query.error,
+  });
+  const stableStats = useContentStable(stableQuery.data ?? undefined);
 
   return {
     stats: stableStats,
-    loading: query.isLoading,
-    refreshing: false,
+    loading: stableQuery.initialLoading,
+    refreshing: stableQuery.refreshing,
     error: query.error?.message ?? null,
     refresh: query.refetch,
     lastUpdated: query.dataUpdatedAt || null,

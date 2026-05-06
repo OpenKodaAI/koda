@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +6,8 @@ import SessionsPage from "@/app/sessions/page";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { AppTourProvider } from "@/components/providers/app-tour-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
-import type { SessionDetail, SessionSummary } from "@/lib/types";
+import { setAgentCatalog } from "@/lib/agent-constants";
+import type { ExecutionSummary, SessionDetail, SessionSummary } from "@/lib/types";
 
 const replaceMock = vi.fn();
 
@@ -121,6 +122,33 @@ const sessionsByAgent: Record<string, SessionSummary[]> = {
 
 const allSessions: SessionSummary[] = [...sessionsByAgent.ATLAS, ...sessionsByAgent.NOVA];
 
+function executionSummary(overrides: Partial<ExecutionSummary> = {}): ExecutionSummary {
+  return {
+    task_id: 42,
+    bot_id: "ATLAS",
+    status: "completed",
+    query_text: "Need a quick update",
+    model: "claude-opus-4-6",
+    session_id: "session-alpha",
+    user_id: 101,
+    chat_id: 101,
+    created_at: "2026-03-28T10:02:00.000Z",
+    started_at: "2026-03-28T10:02:01.000Z",
+    completed_at: "2026-03-28T10:03:00.000Z",
+    cost_usd: 0.42,
+    duration_ms: 59_000,
+    attempt: 1,
+    max_attempts: 1,
+    has_rich_trace: true,
+    trace_source: "trace",
+    tool_count: 0,
+    warning_count: 0,
+    stop_reason: "completed",
+    error_message: null,
+    ...overrides,
+  };
+}
+
 const sessionDetails: Record<string, SessionDetail> = {
   "session-alpha": {
     summary: sessionsByAgent.ATLAS[0],
@@ -146,6 +174,7 @@ const sessionDetails: Record<string, SessionDetail> = {
         query_id: 2,
         session_id: "session-alpha",
         error: false,
+        linked_execution: executionSummary(),
       },
     ],
     orphan_executions: [],
@@ -197,12 +226,14 @@ const sessionDetails: Record<string, SessionDetail> = {
   },
 };
 
-function renderSessionsPage() {
+function renderSessionsPage(options?: { agents?: typeof agentCatalog }) {
+  const agents = options?.agents ?? agentCatalog;
+  setAgentCatalog(agents);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider initialLanguage="en-US">
         <AppTourProvider
@@ -210,13 +241,14 @@ function renderSessionsPage() {
           mobileNavOpen={false}
           onMobileNavOpenChange={() => undefined}
         >
-          <AgentCatalogProvider initialAgents={agentCatalog}>
+          <AgentCatalogProvider initialAgents={agents}>
             <SessionsPage />
           </AgentCatalogProvider>
         </AppTourProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
 }
 
 describe("SessionsPage chat redesign", () => {
@@ -234,8 +266,12 @@ describe("SessionsPage chat redesign", () => {
         method === "POST" &&
         url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/messages")
       ) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          session_id?: string | null;
+        };
+        const sessionId = payload.session_id ?? "session-new";
         return new Response(
-          JSON.stringify({ accepted: true, session_id: "session-new", task_id: 42 }),
+          JSON.stringify({ accepted: true, session_id: sessionId, task_id: 42 }),
           { status: 202, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -254,8 +290,18 @@ describe("SessionsPage chat redesign", () => {
         });
       }
 
-      if (url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-new")) {
-        return new Response(JSON.stringify(sessionDetails["session-new"]), {
+      const atlasSessionDetailMatch = url.match(
+        /\/api\/control-plane\/dashboard\/agents\/ATLAS\/sessions\/(session-[^/?]+)/,
+      );
+      if (atlasSessionDetailMatch) {
+        const sessionId = atlasSessionDetailMatch[1];
+        return new Response(JSON.stringify({
+          ...sessionDetails["session-new"],
+          summary: {
+            ...sessionDetails["session-new"].summary,
+            session_id: sessionId,
+          },
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -288,6 +334,7 @@ describe("SessionsPage chat redesign", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("shows sessions grouped by agent and loads the selected thread", async () => {
@@ -297,6 +344,24 @@ describe("SessionsPage chat redesign", () => {
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+  }, 10_000);
+
+  it("loads conversations even when the agent catalog is not hydrated yet", async () => {
+    renderSessionsPage({ agents: [] });
+
+    expect(
+      await screen.findByRole("button", { name: /Alpha conversation/i }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+  }, 10_000);
+
+  it("does not rewrite the URL on mount when the query is already normalized", async () => {
+    currentQueryString = "agent=ATLAS&session=session-alpha";
+    currentSearchParams = new URLSearchParams(currentQueryString);
+    renderSessionsPage();
+
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
   }, 10_000);
 
   it("switches conversations when clicking a rail row", async () => {
@@ -325,6 +390,7 @@ describe("SessionsPage chat redesign", () => {
 
     await user.click(screen.getByRole("button", { name: /^Send$/i }));
 
+    let firstSessionId = "";
     await waitFor(() => {
       const postCall = vi.mocked(global.fetch).mock.calls.find(([url, init]) => {
         if (
@@ -340,9 +406,36 @@ describe("SessionsPage chat redesign", () => {
           text?: string;
           session_id?: string | null;
         };
-        return payload.text === "Hello from web" && payload.session_id === null;
+        if (payload.text !== "Hello from web" || typeof payload.session_id !== "string") {
+          return false;
+        }
+        firstSessionId = payload.session_id;
+        return payload.session_id.startsWith("session-");
       });
       expect(postCall).toBeTruthy();
+    });
+
+    await user.type(composer, "Second from web");
+    await user.click(screen.getByRole("button", { name: /^Send$/i }));
+
+    await waitFor(() => {
+      const secondPostCall = vi.mocked(global.fetch).mock.calls.find(([url, init]) => {
+        if (
+          typeof url !== "string" ||
+          !url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/messages")
+        ) {
+          return false;
+        }
+        if (init?.method !== "POST" || typeof init.body !== "string") {
+          return false;
+        }
+        const payload = JSON.parse(init.body as string) as {
+          text?: string;
+          session_id?: string | null;
+        };
+        return payload.text === "Second from web" && payload.session_id === firstSessionId;
+      });
+      expect(secondPostCall).toBeTruthy();
     });
   }, 10_000);
 
@@ -365,6 +458,29 @@ describe("SessionsPage chat redesign", () => {
     expect(screen.getByRole("button", { name: /Beta sync/i })).toBeInTheDocument();
   }, 10_000);
 
+  it("debounces search URL updates to avoid remount flicker while typing", async () => {
+    const user = userEvent.setup();
+    renderSessionsPage();
+
+    expect(
+      await screen.findByRole("button", { name: /Alpha conversation/i }),
+    ).toBeInTheDocument();
+    replaceMock.mockClear();
+
+    const search = screen.getByPlaceholderText(/Search conversations/i);
+    await user.type(search, "Beta");
+
+    expect(
+      replaceMock.mock.calls.some(([url]) => String(url).includes("search=Beta")),
+    ).toBe(false);
+
+    await waitFor(() => {
+      expect(
+        replaceMock.mock.calls.some(([url]) => String(url).includes("search=Beta")),
+      ).toBe(true);
+    });
+  }, 10_000);
+
   it("renders the composer model and agent indicator once a session is loaded", async () => {
     renderSessionsPage();
 
@@ -379,5 +495,237 @@ describe("SessionsPage chat redesign", () => {
     if (composerForm) {
       expect(within(composerForm).getByText(/ATLAS/)).toBeInTheDocument();
     }
+  }, 10_000);
+
+  it("patches the active thread when an artifact_ready stream event arrives", async () => {
+    const sources: Array<{
+      url: string;
+      onopen: (() => void) | null;
+      onmessage: ((event: MessageEvent) => void) | null;
+      onerror: (() => void) | null;
+      close: ReturnType<typeof vi.fn>;
+      emit: (data: unknown) => void;
+    }> = [];
+
+    class MockEventSource {
+      public onopen: (() => void) | null = null;
+      public onmessage: ((event: MessageEvent) => void) | null = null;
+      public onerror: (() => void) | null = null;
+      public close = vi.fn();
+
+      constructor(public url: string) {
+        sources.push(this);
+      }
+
+      emit(data: unknown) {
+        this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+      }
+    }
+
+    vi.stubGlobal("EventSource", MockEventSource);
+    const { queryClient } = renderSessionsPage();
+
+    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        sources.some((source) => source.url.includes("/sessions/session-alpha/stream") && source.onmessage),
+      ).toBe(true);
+    });
+    const source = sources.find((item) => item.url.includes("/sessions/session-alpha/stream"));
+    expect(source).toBeTruthy();
+    if (!source) return;
+    const streamedArtifact = {
+      id: "88",
+      label: "voice-response-42.ogg",
+      kind: "audio" as const,
+      content: null,
+      url: null,
+      path: "/runtime/tasks/42/artifacts/voice-response-42.ogg",
+      mime_type: "audio/ogg",
+      size_bytes: 20,
+      source_type: "voice_response",
+      status: "complete",
+      text_content: null,
+      metadata: { runtime_artifact_id: "88", source_execution_id: "42" },
+    };
+    sessionDetails["session-alpha"] = {
+      ...sessionDetails["session-alpha"],
+      messages: sessionDetails["session-alpha"].messages.map((message) =>
+        message.id === "alpha-2"
+          ? { ...message, artifacts: [...(message.artifacts ?? []), streamedArtifact] }
+          : message,
+      ),
+    };
+
+    act(() => {
+      source.onopen?.();
+      source.emit({
+        seq: 1,
+        type: "artifact_ready",
+        task_id: 42,
+        payload: {
+          artifact: {
+            id: "88",
+            kind: "audio",
+            label: "voice-response-42.ogg",
+            mime_type: "audio/ogg",
+            size_bytes: 20,
+            created_at: "2026-03-28T10:03:01.000Z",
+            source_session_id: "session-alpha",
+            source_execution_id: "42",
+            download_url: "/api/runtime/artifacts/88/download",
+            preview_state: "available",
+            path: "/runtime/tasks/42/artifacts/voice-response-42.ogg",
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const entries = queryClient.getQueriesData<SessionDetail>({
+        queryKey: ["dashboard", "sessions", "ATLAS", "session-alpha"],
+      });
+      expect(
+        entries.some(([, detail]) =>
+          detail?.messages.some((message) =>
+            message.artifacts?.some((artifact) => artifact.metadata?.runtime_artifact_id === "88"),
+          ),
+        ),
+      ).toBe(true);
+    });
+    expect(await screen.findByRole("button", { name: /Play audio/i })).toBeInTheDocument();
+    expect(document.querySelector("audio")?.getAttribute("src")).toBe(
+      "/api/runtime/artifacts/88/download?agent=ATLAS",
+    );
+  }, 10_000);
+
+  it("keeps an artifact_ready event when it arrives before the assistant message is cached", async () => {
+    const sources: Array<{
+      url: string;
+      onopen: (() => void) | null;
+      onmessage: ((event: MessageEvent) => void) | null;
+      onerror: (() => void) | null;
+      close: ReturnType<typeof vi.fn>;
+      emit: (data: unknown) => void;
+    }> = [];
+
+    class MockEventSource {
+      public onopen: (() => void) | null = null;
+      public onmessage: ((event: MessageEvent) => void) | null = null;
+      public onerror: (() => void) | null = null;
+      public close = vi.fn();
+
+      constructor(public url: string) {
+        sources.push(this);
+      }
+
+      emit(data: unknown) {
+        this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+      }
+    }
+
+    vi.stubGlobal("EventSource", MockEventSource);
+    const execution = executionSummary({ task_id: 42 });
+    sessionDetails["session-alpha"] = {
+      ...sessionDetails["session-alpha"],
+      messages: [
+        {
+          id: "alpha-1",
+          role: "user",
+          text: "Need a quick update",
+          timestamp: "2026-03-28T10:02:00.000Z",
+          model: null,
+          cost_usd: null,
+          query_id: 1,
+          session_id: "session-alpha",
+          error: false,
+        },
+      ],
+      orphan_executions: [execution],
+    };
+
+    const { queryClient } = renderSessionsPage();
+
+    expect(await screen.findByText("Need a quick update")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        sources.some((source) => source.url.includes("/sessions/session-alpha/stream") && source.onmessage),
+      ).toBe(true);
+    });
+    const source = sources.find((item) => item.url.includes("/sessions/session-alpha/stream"));
+    expect(source).toBeTruthy();
+    if (!source) return;
+
+    const streamedArtifact = {
+      id: "99",
+      label: "generated-panel.png",
+      kind: "image" as const,
+      content: null,
+      url: null,
+      path: "/runtime/tasks/42/artifacts/generated-panel.png",
+      mime_type: "image/png",
+      size_bytes: 20,
+      source_type: "runtime_artifact",
+      status: "complete",
+      text_content: null,
+      metadata: { runtime_artifact_id: "99", source_execution_id: "42" },
+    };
+    sessionDetails["session-alpha"] = {
+      ...sessionDetails["session-alpha"],
+      messages: [
+        sessionDetails["session-alpha"].messages[0],
+        {
+          id: "alpha-2",
+          role: "assistant",
+          text: "",
+          timestamp: "2026-03-28T10:03:00.000Z",
+          model: "claude-opus-4-6",
+          cost_usd: 0.42,
+          query_id: 2,
+          session_id: "session-alpha",
+          error: false,
+          linked_execution: execution,
+          artifacts: [streamedArtifact],
+        },
+      ],
+      orphan_executions: [],
+    };
+
+    act(() => {
+      source.onopen?.();
+      source.emit({
+        seq: 2,
+        type: "artifact_ready",
+        task_id: 42,
+        payload: {
+          artifact: {
+            id: "99",
+            kind: "image",
+            label: "generated-panel.png",
+            mime_type: "image/png",
+            size_bytes: 20,
+            created_at: "2026-03-28T10:03:01.000Z",
+            source_session_id: "session-alpha",
+            source_execution_id: "42",
+            download_url: "/api/runtime/artifacts/99/download",
+            preview_state: "available",
+            path: "/runtime/tasks/42/artifacts/generated-panel.png",
+          },
+        },
+      });
+    });
+
+    const optimisticEntries = queryClient.getQueriesData<SessionDetail>({
+      queryKey: ["dashboard", "sessions", "ATLAS", "session-alpha"],
+    });
+    expect(
+      optimisticEntries.some(([, detail]) =>
+        detail?.messages.some((message) =>
+          message.artifacts?.some((artifact) => artifact.metadata?.runtime_artifact_id === "99"),
+        ),
+      ),
+    ).toBe(true);
+    const preview = await screen.findByRole("img", { name: /generated-panel/i });
+    expect(preview).toHaveAttribute("src", "/api/runtime/artifacts/99/download?agent=ATLAS");
   }, 10_000);
 });
