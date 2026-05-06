@@ -319,7 +319,12 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "scripts/sync_npm_readme.py" in workflow_text
     assert "docker/build-push-action" in workflow_text
-    assert "Verify pushed image tags" in workflow_text
+    assert "Verify public GHCR image tags" in workflow_text
+    assert "npm-public-install-smoke" in workflow_text
+    assert "docker logout ghcr.io >/dev/null 2>&1 || true" in workflow_text
+    assert 'npm install --global --prefix "${prefix}" "${NPM_PACKAGE_NAME}@${VERSION}"' in workflow_text
+    assert 'CI=true "${koda_bin}" install --dir "${install_dir}" --headless' in workflow_text
+    assert '"${koda_bin}" doctor --dir "${install_dir}" --json' in workflow_text
     assert "docker buildx imagetools inspect" in workflow_text
     assert "bash scripts/docker_smoke.sh" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
@@ -346,8 +351,9 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert "npm_ready" in workflow_text
     assert "ghcr_ready" in workflow_text
     assert "missing_image_tags" in workflow_text
-    assert "docker/login-action@v3" in workflow_text
     assert "docker/setup-buildx-action@v3" in workflow_text
+    assert "Check whether public GHCR publication is complete for the existing tag" in workflow_text
+    assert "docker logout ghcr.io >/dev/null 2>&1 || true" in workflow_text
     assert "docker buildx imagetools inspect" in workflow_text
     assert "dist-tags --json" in workflow_text
     assert "Fail when the version tag already exists on an older commit but publication is incomplete" in workflow_text
@@ -413,7 +419,8 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "createWorkflowDispatch" not in release_docs_text
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
     assert (
-        "GitHub release is draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing"
+        "GitHub release is draft, missing assets, the npm dist-tag is still wrong, "
+        "or GHCR image tags are missing or private"
     ) in release_docs_text
     assert "the workflow fails loudly and requires a new patch version" in release_docs_text
     assert "treat it as immutable" in release_docs_text
@@ -432,7 +439,7 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert legacy_trusted_publishing_guidance not in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
     assert "GitHub release is still draft, missing assets, the npm dist-tag is still wrong" in readme_text
-    assert "GHCR image tags are missing" in readme_text
+    assert "GHCR image tags are missing or not publicly pullable" in readme_text
     assert "fails loudly so the next merge must ship a new" in readme_text
     assert "patch version instead of trying to reuse an escaped semantic tag" in readme_text
 

@@ -216,6 +216,6 @@ Official product releases publish the same pinned bundle through:
 
 Release automation fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
 
-Use the release runbook when the GitHub release is still draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing.
+Use the release runbook when the GitHub release is still draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing or not publicly pullable.
 
 Koda is Apache-2.0 licensed.
