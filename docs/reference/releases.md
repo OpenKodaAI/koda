@@ -99,10 +99,10 @@ the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publis
 
 This keeps release publication idempotent:
 
-- if `v<version>` already exists on the current commit and the GitHub release is published, complete, and the npm dist-tag already points to that version, the tag-cut workflow exits without creating a duplicate release
-- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, or the npm dist-tag is still wrong, the tag-cut workflow dispatches `release.yml` again for recovery
+- if `v<version>` already exists on the current commit and the GitHub release, npm dist-tag, and GHCR image tags are complete, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing, the tag-cut workflow dispatches `release.yml` again for recovery
 - if `v<version>` already exists on an older commit and that publication is complete, the workflow exits without retagging or publishing a duplicate package
-- if `v<version>` already exists on an older commit but the GitHub release or npm publication is incomplete, the workflow fails loudly and requires a new patch version from the validated commit
+- if `v<version>` already exists on an older commit but the GitHub release, npm publication, or GHCR publication is incomplete, the workflow fails loudly and requires a new patch version from the validated commit
 - to ship a new public release, bump the repository version first, then merge to `main`
 
 This is intentional: once a semantic tag has escaped the repository, treat it as immutable. Recovery from a partially

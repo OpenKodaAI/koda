@@ -22,6 +22,7 @@ permissions:
   actions: write
   contents: write
   id-token: write
+  packages: read
 
 jobs:
   cut-release-tag:
@@ -248,8 +249,54 @@ jobs:
           print(f"current_dist_tag_version={current_dist_tag_version}")
           PY
 
+      - name: Log in to GHCR for existing image checks
+        if: steps.existing.outputs.exists == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Buildx for existing image checks
+        if: steps.existing.outputs.exists == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check whether GHCR publication is complete for the existing tag
+        if: steps.existing.outputs.exists == 'true'
+        id: ghcr_state
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          images=(koda-app koda-web koda-memory koda-security)
+          expected_refs=()
+          for image in "${images[@]}"; do
+            expected_refs+=("ghcr.io/openkodaai/${image}:${VERSION}")
+            if [[ "${VERSION}" != *-* ]]; then
+              expected_refs+=("ghcr.io/openkodaai/${image}:latest")
+            fi
+          done
+
+          missing=()
+          for ref in "${expected_refs[@]}"; do
+            if ! docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+              missing+=("${ref}")
+            fi
+          done
+
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "ghcr_ready=true" >> "${GITHUB_OUTPUT}"
+            echo "missing_image_tags=" >> "${GITHUB_OUTPUT}"
+          else
+            missing_csv="$(IFS=,; echo "${missing[*]}")"
+            echo "ghcr_ready=false" >> "${GITHUB_OUTPUT}"
+            echo "missing_image_tags=${missing_csv}" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Stop when the version tag already exists on an older commit and publication is complete
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true' && steps.ghcr_state.outputs.ghcr_ready == 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -259,7 +306,7 @@ jobs:
           echo "Tag ${TAG} already exists at ${TAG_SHA}; publication is complete, so the newer commit ${TARGET_SHA} will not reuse or retarget that version."
 
       - name: Fail when the version tag already exists on an older commit but publication is incomplete
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha != steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true' || steps.ghcr_state.outputs.ghcr_ready != 'true')
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -270,6 +317,7 @@ jobs:
           VERSION_PUBLISHED: ${{ steps.npm_state.outputs.version_published }}
           EXPECTED_DIST_TAG: ${{ steps.npm_state.outputs.expected_dist_tag }}
           CURRENT_DIST_TAG_VERSION: ${{ steps.npm_state.outputs.current_dist_tag_version }}
+          MISSING_IMAGE_TAGS: ${{ steps.ghcr_state.outputs.missing_image_tags }}
         run: |
           echo "Tag ${TAG} already exists at ${TAG_SHA}, but its publication is incomplete." >&2
           echo "release_draft=${RELEASE_DRAFT:-false}" >&2
@@ -277,18 +325,19 @@ jobs:
           echo "version_published=${VERSION_PUBLISHED:-false}" >&2
           echo "expected_dist_tag=${EXPECTED_DIST_TAG:-unknown}" >&2
           echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}" >&2
+          echo "missing_image_tags=${MISSING_IMAGE_TAGS:-none}" >&2
           echo "The validated commit is ${TARGET_SHA}. Do not retarget ${TAG}; ship a new patch version from this commit instead." >&2
           exit 1
 
       - name: Skip dispatch when the release and npm publication are complete for the current tag
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true'
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && steps.release_state.outputs.release_ready == 'true' && steps.npm_state.outputs.npm_ready == 'true' && steps.ghcr_state.outputs.ghcr_ready == 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
-        run: echo "Tag ${TAG} already exists and its GitHub release, assets, and npm dist-tag are complete; nothing to do."
+        run: echo "Tag ${TAG} already exists and its GitHub release, assets, npm dist-tag, and GHCR image tags are complete; nothing to do."
 
       - name: Recover publish when the tag exists but publication is incomplete
-        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true' || steps.ghcr_state.outputs.ghcr_ready != 'true')
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -297,6 +346,7 @@ jobs:
           EXPECTED_DIST_TAG: ${{ steps.npm_state.outputs.expected_dist_tag }}
           CURRENT_DIST_TAG_VERSION: ${{ steps.npm_state.outputs.current_dist_tag_version }}
           VERSION_PUBLISHED: ${{ steps.npm_state.outputs.version_published }}
+          MISSING_IMAGE_TAGS: ${{ steps.ghcr_state.outputs.missing_image_tags }}
         run: |
           echo "Tag ${TAG} already exists on the validated commit, but publication is incomplete; dispatching release.yml for recovery."
           echo "release_draft=${RELEASE_DRAFT:-false}"
@@ -304,6 +354,7 @@ jobs:
           echo "version_published=${VERSION_PUBLISHED:-false}"
           echo "expected_dist_tag=${EXPECTED_DIST_TAG:-unknown}"
           echo "current_dist_tag_version=${CURRENT_DIST_TAG_VERSION:-missing}"
+          echo "missing_image_tags=${MISSING_IMAGE_TAGS:-none}"
 
       - name: Create and push release tag
         if: steps.version.outcome == 'success' && steps.existing.outputs.exists != 'true'
@@ -319,7 +370,7 @@ jobs:
           git push origin "refs/tags/${TAG}"
 
       - name: Dispatch release workflow for the tag
-        if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))
+        if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || (steps.existing.outputs.tag_sha == steps.target.outputs.sha && (steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true' || steps.ghcr_state.outputs.ghcr_ready != 'true')))
         uses: actions/github-script@v8
         env:
           TAG: ${{ steps.version.outputs.tag }}

@@ -799,6 +799,31 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: ${{ env.IMAGE_TAGS }}
+      - name: Verify pushed image tags
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
+        run: |
+          set -euo pipefail
+
+          verify_image() {
+            local ref="$1"
+            for _attempt in $(seq 1 24); do
+              if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Expected published image tag ${ref}, but GHCR did not expose it." >&2
+            return 1
+          }
+
+          verify_image "${GHCR_NAMESPACE}/${IMAGE_NAME}:${VERSION}"
+          if [ "${PUBLISH_LATEST}" = "true" ]; then
+            verify_image "${GHCR_NAMESPACE}/${IMAGE_NAME}:latest"
+          fi
 
   publish-npm:
     name: publish-npm
