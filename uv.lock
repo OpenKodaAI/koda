@@ -1407,7 +1407,7 @@ wheels = [
 
 [[package]]
 name = "koda"
-version = "1.0.13"
+version = "1.0.14"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
