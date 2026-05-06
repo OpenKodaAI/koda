@@ -319,6 +319,8 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
     assert "scripts/sync_npm_readme.py" in workflow_text
     assert "docker/build-push-action" in workflow_text
+    assert "Verify pushed image tags" in workflow_text
+    assert "docker buildx imagetools inspect" in workflow_text
     assert "bash scripts/docker_smoke.sh" in workflow_text
     assert "rhysd/actionlint@v1.7.12" in workflow_text
     assert "pnpm/action-setup@v5.0.0" in workflow_text
@@ -337,10 +339,16 @@ def test_main_branch_uses_a_dedicated_release_tag_cut_workflow() -> None:
     assert payload["permissions"]["actions"] == "write"
     assert payload["permissions"]["contents"] == "write"
     assert payload["permissions"]["id-token"] == "write"
+    assert payload["permissions"]["packages"] == "read"
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert "--json isDraft,assets" in workflow_text
     assert "release_ready" in workflow_text
     assert "npm_ready" in workflow_text
+    assert "ghcr_ready" in workflow_text
+    assert "missing_image_tags" in workflow_text
+    assert "docker/login-action@v3" in workflow_text
+    assert "docker/setup-buildx-action@v3" in workflow_text
+    assert "docker buildx imagetools inspect" in workflow_text
     assert "dist-tags --json" in workflow_text
     assert "Fail when the version tag already exists on an older commit but publication is incomplete" in workflow_text
     assert "Do not retarget ${TAG}; ship a new patch version from this commit instead." in workflow_text
@@ -367,6 +375,8 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
         "Skip dispatch when the release and npm publication are complete for the current tag"
         in cut_release_workflow_text
     )
+    assert "ghcr_ready" in cut_release_workflow_text
+    assert "missing_image_tags" in cut_release_workflow_text
     assert "Recover publish when the tag exists but publication is incomplete" in cut_release_workflow_text
     assert (
         "Stop when the version tag already exists on an older commit and publication is complete"
@@ -384,8 +394,8 @@ def test_shared_docker_smoke_script_hardens_release_endpoint_checks() -> None:
     assert (
         "if: steps.version.outcome == 'success' && (steps.existing.outputs.exists != 'true' || "
         "(steps.existing.outputs.tag_sha == steps.target.outputs.sha && "
-        "(steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true')))"
-        in cut_release_workflow_text
+        "(steps.release_state.outputs.release_ready != 'true' || steps.npm_state.outputs.npm_ready != 'true' "
+        "|| steps.ghcr_state.outputs.ghcr_ready != 'true')))" in cut_release_workflow_text
     )
     assert 'workflow_id: "release.yml"' in cut_release_workflow_text
     assert "createWorkflowDispatch" in cut_release_workflow_text
@@ -402,7 +412,9 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "v<version>" in release_docs_text
     assert "createWorkflowDispatch" not in release_docs_text
     assert "GitHub does not start a new `push` workflow when a workflow pushes a tag" in release_docs_text
-    assert "GitHub release is draft, missing assets, or the npm dist-tag is still wrong" in release_docs_text
+    assert (
+        "GitHub release is draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing"
+    ) in release_docs_text
     assert "the workflow fails loudly and requires a new patch version" in release_docs_text
     assert "treat it as immutable" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
@@ -419,7 +431,8 @@ def test_release_docs_explain_main_release_automation() -> None:
     )
     assert legacy_trusted_publishing_guidance not in release_docs_text
     assert "Public releases are cut from `main` by version." in readme_text
-    assert "GitHub release is still draft, missing assets, or the npm dist-tag is still wrong" in readme_text
+    assert "GitHub release is still draft, missing assets, the npm dist-tag is still wrong" in readme_text
+    assert "GHCR image tags are missing" in readme_text
     assert "fails loudly so the next merge must ship a new" in readme_text
     assert "patch version instead of trying to reuse an escaped semantic tag" in readme_text
 
