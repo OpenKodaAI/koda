@@ -35,6 +35,7 @@ env:
   RELEASE_BUNDLE_DIR: dist/release
   NPM_PACKAGE_NAME: "@openkodaai/koda"
   GHCR_NAMESPACE: ghcr.io/openkodaai
+  GHCR_PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   prepare:
@@ -786,6 +787,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
       - name: Set up Buildx builder
         uses: docker/setup-buildx-action@v3
         with:
@@ -796,10 +799,11 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
+          platforms: ${{ env.GHCR_PLATFORMS }}
           provenance: mode=max
           sbom: true
           tags: ${{ env.IMAGE_TAGS }}
-      - name: Verify pushed image tags
+      - name: Verify public GHCR image tags
         shell: bash
         env:
           IMAGE_NAME: ${{ matrix.image }}
@@ -808,15 +812,25 @@ jobs:
         run: |
           set -euo pipefail
 
+          docker logout ghcr.io >/dev/null 2>&1 || true
+
           verify_image() {
             local ref="$1"
             for _attempt in $(seq 1 24); do
-              if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
-                return 0
+              if docker buildx imagetools inspect "${ref}" > inspect.txt 2>/dev/null; then
+                missing_platforms=()
+                for platform in ${GHCR_PLATFORMS//,/ }; do
+                  if ! grep -q "Platform:[[:space:]]*${platform}" inspect.txt; then
+                    missing_platforms+=("${platform}")
+                  fi
+                done
+                if [ "${#missing_platforms[@]}" -eq 0 ]; then
+                  return 0
+                fi
               fi
               sleep 5
             done
-            echo "Expected published image tag ${ref}, but GHCR did not expose it." >&2
+            echo "Expected published image tag ${ref} to expose ${GHCR_PLATFORMS}, but GHCR did not." >&2
             return 1
           }
 
@@ -834,6 +848,7 @@ jobs:
       - build-release-bundle
       - npm-pack-smoke
       - ensure-release-tag
+      - publish-ghcr
     if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
     environment: release
     permissions:
@@ -988,6 +1003,50 @@ jobs:
           cat "${verify_dir}/npm-pack.err" >&2 || true
           exit 1
 
+  npm-public-install-smoke:
+    name: npm-public-install-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - prepare
+      - publish-npm
+    if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
+    steps:
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+      - name: Install and exercise the published npm package
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          docker logout ghcr.io >/dev/null 2>&1 || true
+
+          prefix="${RUNNER_TEMP}/koda-public-npm-prefix"
+          install_dir="${RUNNER_TEMP}/koda-public-install"
+          mkdir -p "${prefix}" "${install_dir}"
+
+          npm install --global --prefix "${prefix}" "${NPM_PACKAGE_NAME}@${VERSION}"
+          koda_bin="${prefix}/bin/koda"
+
+          "${koda_bin}" version --dir "${install_dir}"
+          CI=true "${koda_bin}" install --dir "${install_dir}" --headless
+          "${koda_bin}" doctor --dir "${install_dir}" --json
+          "${koda_bin}" auth issue-code --dir "${install_dir}"
+      - name: Clean up public npm install smoke stack
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          koda_bin="${RUNNER_TEMP}/koda-public-npm-prefix/bin/koda"
+          install_dir="${RUNNER_TEMP}/koda-public-install"
+          if [ -x "${koda_bin}" ]; then
+            "${koda_bin}" uninstall --dir "${install_dir}" --purge || true
+          fi
+
   github-release:
     name: github-release
     runs-on: ubuntu-latest
@@ -999,6 +1058,7 @@ jobs:
       - ensure-release-tag
       - publish-ghcr
       - publish-npm
+      - npm-public-install-smoke
     if: always() && needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
     environment: release
     permissions:
@@ -1028,6 +1088,7 @@ jobs:
         env:
           GHCR_RESULT: ${{ needs.publish-ghcr.result }}
           NPM_RESULT: ${{ needs.publish-npm.result }}
+          PUBLIC_INSTALL_RESULT: ${{ needs.npm-public-install-smoke.result }}
         run: |
           set -euo pipefail
 
@@ -1037,6 +1098,9 @@ jobs:
           fi
           if [ "${NPM_RESULT}" != "success" ]; then
             failed_jobs+=("publish-npm")
+          fi
+          if [ "${PUBLIC_INSTALL_RESULT}" != "success" ]; then
+            failed_jobs+=("npm-public-install-smoke")
           fi
 
           if [ "${#failed_jobs[@]}" -eq 0 ]; then
