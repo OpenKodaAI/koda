@@ -264,7 +264,7 @@ jobs:
           set -euo pipefail
           docker logout ghcr.io >/dev/null 2>&1 || true
 
-          images=(koda-app koda-web koda-memory koda-security)
+          images=(koda-app koda-web koda-memory koda-security koda-artifact koda-retrieval koda-runtime-kernel)
           expected_refs=()
           for image in "${images[@]}"; do
             expected_refs+=("ghcr.io/openkodaai/${image}:${VERSION}")

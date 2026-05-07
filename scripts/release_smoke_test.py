@@ -49,6 +49,12 @@ def build_local_release_images(manifest: dict[str, object]) -> None:
     run(["docker", "build", "-f", "apps/web/Dockerfile", "-t", str(images["web"]), "."], cwd=ROOT)
     run(["docker", "build", "-f", "Dockerfile.memory", "-t", str(images["memory"]), "."], cwd=ROOT)
     run(["docker", "build", "-f", "Dockerfile.security", "-t", str(images["security"]), "."], cwd=ROOT)
+    run(["docker", "build", "-f", "Dockerfile.artifact", "-t", str(images["artifact"]), "."], cwd=ROOT)
+    run(["docker", "build", "-f", "Dockerfile.retrieval", "-t", str(images["retrieval"]), "."], cwd=ROOT)
+    run(
+        ["docker", "build", "-f", "Dockerfile.runtime-kernel", "-t", str(images["runtime_kernel"]), "."],
+        cwd=ROOT,
+    )
 
 
 def install_cli(cli_tarball: Path, prefix_dir: Path) -> Path:

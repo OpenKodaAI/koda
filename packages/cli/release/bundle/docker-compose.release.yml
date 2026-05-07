@@ -17,6 +17,12 @@ services:
         condition: service_started
       memory:
         condition: service_started
+      artifact:
+        condition: service_started
+      retrieval:
+        condition: service_started
+      runtime-kernel:
+        condition: service_started
     environment:
       HOME: "/var/lib/koda/runtime/home"
       CLAUDE_HOME: "/var/lib/koda/runtime/home"
@@ -28,6 +34,10 @@ services:
       RUNTIME_LOCAL_UI_TOKEN: "${RUNTIME_LOCAL_UI_TOKEN:?Set RUNTIME_LOCAL_UI_TOKEN in .env}"
       SECURITY_GRPC_TARGET: "security:50065"
       MEMORY_GRPC_TARGET: "memory:50063"
+      ARTIFACT_GRPC_TARGET: "artifact:50064"
+      RETRIEVAL_GRPC_TARGET: "retrieval:50062"
+      RUNTIME_KERNEL_GRPC_TARGET: "runtime-kernel:50061"
+      RUNTIME_KERNEL_SOCKET: "runtime-kernel:50061"
       HEALTHCHECK_URL: "http://localhost:${CONTROL_PLANE_PORT:-8090}/health"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
@@ -115,6 +125,62 @@ services:
       MEMORY_GRPC_TARGET: "0.0.0.0:50063"
       KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
       KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+    networks:
+      - backend
+
+  artifact:
+    image: "${KODA_ARTIFACT_IMAGE:?Set by the release manifest}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp/koda/artifact-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      ARTIFACT_GRPC_TARGET: "0.0.0.0:50064"
+      ARTIFACT_MAX_UPLOAD_BYTES: "${ARTIFACT_MAX_UPLOAD_BYTES:-268435456}"
+      ARTIFACT_RATE_LIMIT_PER_SECOND: "${ARTIFACT_RATE_LIMIT_PER_SECOND:-100}"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+      KNOWLEDGE_V2_S3_BUCKET: "${KNOWLEDGE_V2_S3_BUCKET:-koda-objects}"
+      KNOWLEDGE_V2_S3_PREFIX: "${KNOWLEDGE_V2_S3_PREFIX:-koda}"
+      KNOWLEDGE_V2_S3_ENDPOINT_URL: "${KNOWLEDGE_V2_S3_ENDPOINT_URL:-http://seaweedfs:8333}"
+      KNOWLEDGE_V2_S3_REGION: "${KNOWLEDGE_V2_S3_REGION:-us-east-1}"
+      KNOWLEDGE_V2_S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}"
+      KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}"
+    networks:
+      - backend
+
+  retrieval:
+    image: "${KODA_RETRIEVAL_IMAGE:?Set by the release manifest}"
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RETRIEVAL_GRPC_TARGET: "0.0.0.0:50062"
+      KNOWLEDGE_V2_POSTGRES_DSN: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+      KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
+    networks:
+      - backend
+
+  runtime-kernel:
+    image: "${KODA_RUNTIME_KERNEL_IMAGE:?Set by the release manifest}"
+    restart: unless-stopped
+    tmpfs:
+      - /tmp/koda-runtime
+    environment:
+      RUNTIME_KERNEL_GRPC_TARGET: "0.0.0.0:50061"
+      RUNTIME_KERNEL_SOCKET: "0.0.0.0:50061"
+      RUNTIME_KERNEL_ROOT: "${RUNTIME_KERNEL_ROOT:-/tmp/koda-runtime/default/kernel}"
+    volumes:
+      - koda-state:/var/lib/koda/state
+      - koda-runtime:/var/lib/koda/runtime
+      - koda-artifacts:/var/lib/koda/artifacts
     networks:
       - backend
 
