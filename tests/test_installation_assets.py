@@ -256,6 +256,51 @@ def test_npm_cli_serializes_compose_up_by_default() -> None:
     assert cli_text.count("env: composeUpEnv()") == 4
 
 
+def test_npm_cli_install_guards_against_orphan_postgres_volumes() -> None:
+    """Issue #89 regression guard.
+
+    A user reinstalling Koda inherits the previous compose project's volumes,
+    which still pin the old Postgres password. The CLI must detect that pairing
+    before it ever runs `up`, surface an actionable error, and offer a
+    `--reset-volumes` escape hatch instead of letting the app container die on
+    a healthcheck.
+    """
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    # Help advertises the new flag so it is discoverable by `koda` and `koda help`.
+    assert "[--reset-volumes]" in cli_text
+    assert "Destroy any pre-existing Docker volumes managed by the" in cli_text
+
+    # Preflight functions exist and are wired into the install path.
+    assert "function composeProjectName(installDir)" in cli_text
+    assert "function listManagedVolumes(projectName)" in cli_text
+    assert "function resetManagedVolumes(installDir)" in cli_text
+    assert "function describeReinstallConflict(installDir, volumes)" in cli_text
+    assert "label=com.docker.compose.project=" in cli_text
+
+    # Detection runs before any compose `up`, so a fresh install dir layered
+    # over previous volumes aborts deterministically instead of timing out.
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    assert 'consumeFlag(args, "--reset-volumes")' in install_block
+    assert "describeReinstallConflict" in install_block
+    detection = install_block.find("listManagedVolumes")
+    compose_up = install_block.find('[...composeArgs(installDir), "up", "-d"]')
+    assert detection != -1 and compose_up != -1 and detection < compose_up
+
+
+def test_npm_cli_install_probes_postgres_auth_on_failure() -> None:
+    """Issue #89: when `up` fails, surface auth errors instead of generic ones."""
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    assert "async function probePostgresAuth(installDir, env)" in cli_text
+    assert "function describePostgresAuthFailure(installDir, output)" in cli_text
+    # The probe is invoked from the install command's catch handler so the
+    # InvalidPasswordError surfaces before the user sees only "container is unhealthy".
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    assert "probePostgresAuth(installDir, env)" in install_block
+    assert "describePostgresAuthFailure" in install_block
+
+
 def test_systemd_example_operates_docker_compose() -> None:
     unit_text = (ROOT / "koda.service.example").read_text(encoding="utf-8")
 
