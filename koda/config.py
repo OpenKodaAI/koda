@@ -719,6 +719,8 @@ BLOCKED_NPM_PATTERN: re.Pattern | None = re.compile(_blocked_npm, re.I) if _bloc
 INTER_AGENT_ENABLED: bool = _env("INTER_AGENT_ENABLED", "false").lower() == "true"
 INTER_AGENT_MAX_DELEGATION_DEPTH: int = int(_env("INTER_AGENT_MAX_DELEGATION_DEPTH", "3"))
 INTER_AGENT_MESSAGE_TIMEOUT: int = int(_env("INTER_AGENT_MESSAGE_TIMEOUT", "60"))
+# "memory" keeps the legacy in-process bus; "postgres" persists + delivers cross-process via LISTEN/NOTIFY.
+INTER_AGENT_BUS_BACKEND: str = (_env("INTER_AGENT_BUS_BACKEND", "memory") or "memory").strip().lower()
 
 # --- MCP Bridge ---
 MCP_ENABLED: bool = _env("MCP_ENABLED", "false").lower() in ("1", "true", "yes")

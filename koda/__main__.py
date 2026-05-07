@@ -181,6 +181,14 @@ def main() -> None:
         handle_voice,
     )
     from koda.handlers.packages import cmd_npm, cmd_pip
+    from koda.handlers.squad_handlers import (
+        cmd_squad_bind,
+        cmd_squad_status,
+        cmd_squad_thread_close,
+        cmd_squad_thread_new,
+        cmd_squad_unbind,
+        route_squad_supergroup_message,
+    )
     from koda.services.health import start_health_server, stop_health_server
     from koda.services.queue_manager import active_processes
 
@@ -356,6 +364,23 @@ def main() -> None:
     app.add_handler(CommandHandler("type", _as_handler(cmd_type)))
     app.add_handler(CommandHandler("screenshot", _as_handler(cmd_screenshot)))
     app.add_handler(CommandHandler("js", _as_handler(cmd_js)))
+
+    # Squad commands (gated at runtime by INTER_AGENT_ENABLED in each handler)
+    app.add_handler(CommandHandler("squad_bind", _as_handler(cmd_squad_bind)))
+    app.add_handler(CommandHandler("squad_unbind", _as_handler(cmd_squad_unbind)))
+    app.add_handler(CommandHandler("squad_status", _as_handler(cmd_squad_status)))
+    app.add_handler(CommandHandler("squad_thread_new", _as_handler(cmd_squad_thread_new)))
+    app.add_handler(CommandHandler("squad_thread_close", _as_handler(cmd_squad_thread_close)))
+    # Inbound: forum-topic posts in bound supergroups -> persisted as user_input
+    # in the matching SquadThread. Filter narrows to text-only non-command
+    # messages in supergroups; the handler itself further requires the message
+    # to be a topic post and the chat to be bound.
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.SUPERGROUP & filters.TEXT & ~filters.COMMAND,
+            _as_handler(route_squad_supergroup_message),
+        )
+    )
 
     # Callback queries
     app.add_handler(CallbackQueryHandler(_as_handler(callback_approval), pattern=r"^approve:"))

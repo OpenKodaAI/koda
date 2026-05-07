@@ -566,6 +566,11 @@ class QueueItem:
     is_dashboard_chat: bool = False
     override_session_id: str | None = None
     force_audio_response: bool = False
+    executing_agent_id: str | None = None
+    squad_thread_id: str | None = None
+    squad_task_id: str | None = None
+    parent_message_id: str | None = None
+    delegation_chain: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -623,6 +628,11 @@ class QueryContext:
     skill_matches: list[Any] = field(default_factory=list)
     effort: str | int | None = None
     force_audio_response: bool = False
+    executing_agent_id: str | None = None
+    squad_thread_id: str | None = None
+    squad_task_id: str | None = None
+    parent_message_id: str | None = None
+    delegation_chain: list[str] = field(default_factory=list)
 
 
 @dataclass

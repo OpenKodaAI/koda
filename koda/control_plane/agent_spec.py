@@ -409,7 +409,17 @@ def render_markdown_documents_from_agent_spec(agent_spec: dict[str, Any]) -> dic
         "identity_md": _render_section(
             "Mission Profile",
             mission_profile,
-            order=("mission", "role", "audience", "primary_outcomes", "kpis", "responsibility_limits"),
+            order=(
+                "mission",
+                "role",
+                "audience",
+                "primary_outcomes",
+                "kpis",
+                "responsibility_limits",
+                "domains",
+                "delegate_when",
+                "do_not_delegate",
+            ),
         )
         if mission_profile
         else "",
@@ -848,6 +858,36 @@ def normalize_tool_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     return _compact_mapping(raw)
 
 
+_DELEGATION_MODES = {"auto", "always_self", "always_delegate"}
+
+
+def normalize_delegation_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
+    raw = dict(_safe_json_object(policy))
+    if not raw:
+        return {}
+    mode = _trimmed(raw.get("mode")).lower()
+    if mode in _DELEGATION_MODES:
+        raw["mode"] = mode
+    elif mode:
+        raw.pop("mode", None)
+    prefer_self = normalize_string_list(raw.get("prefer_self_for"))
+    if prefer_self:
+        raw["prefer_self_for"] = prefer_self
+    else:
+        raw.pop("prefer_self_for", None)
+    escalate_to = _trimmed(raw.get("escalate_to"))
+    if escalate_to:
+        raw["escalate_to"] = escalate_to
+    else:
+        raw.pop("escalate_to", None)
+    max_self = _as_float(raw.get("max_self_attempts"))
+    if max_self is not None and max_self >= 0:
+        raw["max_self_attempts"] = int(max_self)
+    else:
+        raw.pop("max_self_attempts", None)
+    return _compact_mapping(raw)
+
+
 def normalize_autonomy_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(_safe_json_object(policy))
     if not raw:
@@ -1016,6 +1056,7 @@ def normalize_agent_spec(agent_spec: dict[str, Any]) -> dict[str, Any]:
         "memory_policy": normalize_memory_policy(_safe_json_object(agent_spec.get("memory_policy"))),
         "knowledge_policy": normalize_knowledge_policy(_safe_json_object(agent_spec.get("knowledge_policy"))),
         "autonomy_policy": normalize_autonomy_policy(_safe_json_object(agent_spec.get("autonomy_policy"))),
+        "delegation_policy": normalize_delegation_policy(_safe_json_object(agent_spec.get("delegation_policy"))),
         "execution_policy": normalize_execution_policy(_safe_json_object(agent_spec.get("execution_policy"))),
         "resource_access_policy": normalize_resource_access_policy(
             _safe_json_object(agent_spec.get("resource_access_policy"))

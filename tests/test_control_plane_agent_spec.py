@@ -5,6 +5,8 @@ from __future__ import annotations
 from koda.control_plane.agent_spec import (
     build_agent_spec_from_snapshot,
     compose_agent_prompt,
+    normalize_agent_spec,
+    normalize_delegation_policy,
     normalize_effort_overrides,
     normalize_model_effort_selection,
     normalize_model_policy,
@@ -261,3 +263,77 @@ def test_validate_agent_spec_rejects_unknown_integration_grants() -> None:
 
     assert validation["ok"] is False
     assert "unknown integrations" in " ".join(validation["errors"])
+
+
+def test_mission_profile_renders_capability_fields() -> None:
+    docs = render_markdown_documents_from_agent_spec(
+        {
+            "mission_profile": {
+                "mission": "Build polished UI.",
+                "role": "Frontend Engineer",
+                "domains": ["frontend", "react", "tailwind"],
+                "delegate_when": "ui work, design polish, client-side state",
+                "do_not_delegate": "backend APIs, schema migrations",
+            }
+        }
+    )
+
+    identity = docs.get("identity_md", "")
+    assert "Frontend Engineer" in identity
+    assert "Domains" in identity
+    assert "react" in identity
+    assert "Delegate When" in identity
+    assert "ui work" in identity
+    assert "Do Not Delegate" in identity
+    assert "backend APIs" in identity
+
+
+def test_normalize_delegation_policy_drops_invalid_mode() -> None:
+    policy = normalize_delegation_policy({"mode": "WHATEVER"})
+    assert policy == {}
+
+
+def test_normalize_delegation_policy_keeps_valid_fields() -> None:
+    policy = normalize_delegation_policy(
+        {
+            "mode": "AUTO",
+            "prefer_self_for": ["ui", "design"],
+            "escalate_to": "PM",
+            "max_self_attempts": 2,
+        }
+    )
+    assert policy == {
+        "mode": "auto",
+        "prefer_self_for": ["ui", "design"],
+        "escalate_to": "PM",
+        "max_self_attempts": 2,
+    }
+
+
+def test_normalize_agent_spec_includes_delegation_policy() -> None:
+    spec = normalize_agent_spec(
+        {
+            "agent_id": "FE",
+            "delegation_policy": {"mode": "auto", "max_self_attempts": 1},
+        }
+    )
+    assert spec.get("delegation_policy") == {"mode": "auto", "max_self_attempts": 1}
+
+
+def test_normalize_agent_spec_preserves_mission_profile_capability_fields() -> None:
+    spec = normalize_agent_spec(
+        {
+            "agent_id": "FE",
+            "mission_profile": {
+                "mission": "Build UI.",
+                "role": "FE Eng",
+                "domains": ["react"],
+                "delegate_when": "ui work",
+                "do_not_delegate": "infra",
+            },
+        }
+    )
+    mission = spec.get("mission_profile") or {}
+    assert mission.get("domains") == ["react"]
+    assert mission.get("delegate_when") == "ui work"
+    assert mission.get("do_not_delegate") == "infra"

@@ -141,6 +141,28 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "agent_delegate",
             "agent_list_agents",
             "agent_broadcast",
+            "squad_thread_create",
+            "squad_post",
+            "squad_thread_history",
+            "squad_task_create",
+            "squad_task_claim",
+            "squad_task_update",
+            "squad_task_complete",
+            "squad_task_escalate",
+            "squad_task_list",
+            "squad_capabilities",
+            "squad_context",
+            "squad_coordinator_elect",
+            "squad_coordinator_demote",
+            "squad_coordinator_get",
+            "squad_router_tick",
+            "squad_telegram_bind",
+            "squad_telegram_unbind",
+            "squad_telegram_binding_get",
+            "squad_telegram_post",
+            "squad_inbox_drain",
+            "squad_dashboard_overview",
+            "squad_thread_overview",
         }
         if tool_id not in allowed_tool_ids
     }
@@ -616,7 +638,83 @@ Communicate with other agents, delegate tasks, and coordinate work.
 - `agent_delegate` — Delegate a task and wait for result.
   Params: `{"to": "agent-2", "task": "Analyze report", "timeout": 60}`
 - `agent_list_agents` — List known agents and inbox status. Params: `{}`
-- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`""")
+- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`
+
+### Squad Threads
+Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
+
+- `squad_thread_create` — Open a new thread.
+  Params: `{"workspace_id": "...", "squad_id": "...", "title": "...",
+            "participants": [{"agent_id": "FRONTEND", "role": "worker"}],
+            "coordinator_agent_id": "PM"}`
+- `squad_post` — Post a message in a thread. Params: `{"thread_id": "<uuid>", "content": "..."}`
+- `squad_thread_history` — Read recent messages. Params: `{"thread_id": "<uuid>", "limit": 30}`
+
+### Squad Tasks
+Decompose squad work into tracked tasks. Single-owner-per-task via optimistic locking on `version`.
+
+- `squad_task_create` — Create a task in a thread.
+  Params: `{"thread_id": "<uuid>", "title": "...", "description": "...",
+            "kind": "research|design|backend|frontend|copy|review",
+            "assigned_agent_id": "BACKEND", "depends_on": ["<uuid>"],
+            "acceptance_criteria": ["..."], "idempotency_key": "..."}`
+- `squad_task_claim` — Atomically claim a pending task. Params: `{"task_id": "<uuid>", "ttl_seconds": 300}`
+- `squad_task_update` — Transition status (e.g., to `in_progress`, `blocked`).
+  Params: `{"task_id": "<uuid>", "new_status": "in_progress", "expected_version": 2}`
+- `squad_task_complete` — Mark done with deliverables.
+  Params: `{"task_id": "<uuid>", "result_summary": "...", "deliverables": ["<artifact_id>"]}`
+- `squad_task_escalate` — Escalate to coordinator. Params: `{"task_id": "<uuid>", "reason": "..."}`
+- `squad_task_list` — List tasks. Params: `{"thread_id": "<uuid>"}` or `{"assigned_agent_id": "..."}`
+- `squad_capabilities` — Read squad members' capability summaries for routing.
+  Params: `{"squad_id": "<id>", "exclude_agent_id": "<self>"}`
+- `squad_context` — Snapshot of a thread (members, recent transcript, active tasks).
+  Params: `{"thread_id": "<uuid>", "transcript_limit": 8}`
+
+### Squad Coordinator
+A squad MAY have an elected coordinator that orchestrates the team. Without one,
+routing falls back to @mention + capability scoring.
+
+- `squad_coordinator_elect` — Promote an agent to coordinator.
+  Params: `{"squad_id": "<id>", "agent_id": "PM", "force_replace": false,
+            "reason": "...", "validate_tool_ids": ["agent_delegate", ...]}`
+  Validation (when ``validate_tool_ids`` is provided): the agent must allow
+  ``agent_delegate``, ``squad_thread_create``, ``squad_post``, ``squad_task_create``,
+  ``squad_task_claim``, ``squad_task_update``.
+- `squad_coordinator_demote` — Demote the current coordinator. Params: `{"squad_id": "<id>", "reason": "..."}`
+- `squad_coordinator_get` — Show current coordinator + recent history.
+  Params: `{"squad_id": "<id>", "history_limit": 5}`
+- `squad_router_tick` — Run one synchronous sweep that reverts expired claims to `pending`.
+  Admin tool — the router daemon does this periodically once started. Params: `{}`
+
+### Squad ↔ Telegram Binding
+Bind a squad to a Telegram supergroup so inbound messages (and forum-topic
+posts) route to the right squad thread.
+
+- `squad_telegram_bind` — Bind a squad to a chat.
+  Params: `{"squad_id": "<id>", "telegram_chat_id": -100123, "chat_title": "...",
+            "is_forum": true, "force": false}`
+- `squad_telegram_unbind` — Remove the binding. Params: `{"squad_id": "<id>"}`
+- `squad_telegram_binding_get` — Look up by squad or by chat.
+  Params: `{"squad_id": "<id>"}` or `{"telegram_chat_id": -100123}`
+- `squad_telegram_post` — Post your agent reply into the bound forum topic AND
+  persist it as ``agent_text`` in the thread audit log. Audit always succeeds;
+  Telegram failures are reported with the audit msg id.
+  Params: `{"thread_id": "<uuid>", "content": "...", "agent_label": "Frontend Dev"}`
+- `squad_inbox_drain` — Drain pending bus messages addressed to you. Squad-routed
+  user inputs arrive here as ``kind=squad_thread_input`` with ``thread_id`` /
+  ``telegram_chat_id`` in metadata. Decide per message whether to respond via
+  ``squad_telegram_post`` or ignore. Params: `{"limit": 20}`
+
+### Squad Dashboard
+Aggregated read views for operators and dashboard renderers.
+
+- `squad_dashboard_overview` — Per-squad summary (thread counts, task counts,
+  coordinator, member count, total cost). Optional ``workspace_id`` filter.
+  Params: `{"workspace_id": "<id>"}` or `{}`
+- `squad_thread_overview` — Single thread bundle (thread + participants +
+  recent messages + active tasks + coordinator). Reuses ``ctx.squad_thread_id``
+  when no explicit ``thread_id`` is given.
+  Params: `{"thread_id": "<uuid>", "message_limit": 30, "task_limit": 30}`""")
 
     if FILEOPS_ENABLED:
         sections.append("""

@@ -2711,6 +2711,273 @@ class KnowledgeV2PostgresBackend:
                            ON "{schema}"."sessions" (agent_id, session_id)""",
                 ),
             ),
+            _Migration(
+                "028_squad_messages_v0",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_messages" (
+                            id BIGSERIAL PRIMARY KEY,
+                            thread_id UUID NULL,
+                            from_agent TEXT NOT NULL,
+                            to_agent TEXT NOT NULL,
+                            content TEXT NOT NULL DEFAULT '',
+                            message_type TEXT NOT NULL DEFAULT 'text',
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            delivered_at TIMESTAMPTZ NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_to_agent_id
+                           ON "{schema}"."squad_messages" (to_agent, id)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_thread_created
+                           ON "{schema}"."squad_messages" (thread_id, created_at)
+                           WHERE thread_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_created_at
+                           ON "{schema}"."squad_messages" (created_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "029_squad_threads_v0",
+                (
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ALTER COLUMN to_agent DROP NOT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           DROP CONSTRAINT IF EXISTS squad_messages_recipient_required""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD CONSTRAINT squad_messages_recipient_required
+                           CHECK (to_agent IS NOT NULL OR thread_id IS NOT NULL)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_threads" (
+                            id UUID PRIMARY KEY,
+                            workspace_id TEXT NOT NULL,
+                            squad_id TEXT NOT NULL,
+                            owner_user_id BIGINT NULL,
+                            title TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'open',
+                            coordinator_agent_id TEXT NULL,
+                            current_owner_agent_id TEXT NULL,
+                            parent_thread_id UUID NULL,
+                            visibility TEXT NOT NULL DEFAULT 'squad',
+                            telegram_chat_id BIGINT NULL,
+                            telegram_message_thread_id BIGINT NULL,
+                            budget_usd_cap NUMERIC NULL,
+                            cost_usd_accum NUMERIC NOT NULL DEFAULT 0,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            completed_at TIMESTAMPTZ NULL,
+                            archived_at TIMESTAMPTZ NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_threads_workspace_squad_status
+                           ON "{schema}"."squad_threads" (workspace_id, squad_id, status, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_threads_owner_status
+                           ON "{schema}"."squad_threads" (owner_user_id, status, updated_at DESC)
+                           WHERE owner_user_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_threads_telegram_topic
+                           ON "{schema}"."squad_threads" (telegram_chat_id, telegram_message_thread_id)
+                           WHERE telegram_chat_id IS NOT NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_thread_participants" (
+                            thread_id UUID NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            role TEXT NOT NULL DEFAULT 'worker',
+                            joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            left_at TIMESTAMPTZ NULL,
+                            last_read_message_id BIGINT NULL,
+                            inbox_cursor BIGINT NULL,
+                            paused BOOLEAN NOT NULL DEFAULT FALSE,
+                            PRIMARY KEY (thread_id, agent_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_thread_participants_agent_active
+                           ON "{schema}"."squad_thread_participants" (agent_id, thread_id)
+                           WHERE left_at IS NULL""",
+                ),
+            ),
+            _Migration(
+                "030_squad_tasks_v0",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_tasks" (
+                            id UUID PRIMARY KEY,
+                            thread_id UUID NOT NULL,
+                            parent_task_id UUID NULL,
+                            depends_on JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            assigned_agent_id TEXT NULL,
+                            assigner_agent_id TEXT NOT NULL,
+                            kind TEXT NOT NULL DEFAULT '',
+                            title TEXT NOT NULL,
+                            description TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'pending',
+                            acceptance_criteria JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            deliverables_spec JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            delivered_artifact_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            claim_token UUID NULL,
+                            claim_expires_at TIMESTAMPTZ NULL,
+                            delegation_depth INTEGER NOT NULL DEFAULT 0,
+                            idempotency_key TEXT NULL,
+                            cost_usd_so_far NUMERIC NOT NULL DEFAULT 0,
+                            runtime_task_id BIGINT NULL,
+                            version INTEGER NOT NULL DEFAULT 1,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            started_at TIMESTAMPTZ NULL,
+                            completed_at TIMESTAMPTZ NULL,
+                            error_message TEXT NULL,
+                            result_summary TEXT NULL,
+                            CONSTRAINT squad_tasks_status_check
+                                CHECK (status IN (
+                                    'pending', 'claimed', 'in_progress', 'blocked',
+                                    'done', 'failed', 'cancelled', 'escalated'
+                                ))
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_tasks_thread_status
+                           ON "{schema}"."squad_tasks" (thread_id, status, created_at)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_tasks_assignee_active
+                           ON "{schema}"."squad_tasks" (assigned_agent_id, status)
+                           WHERE status IN ('claimed', 'in_progress', 'blocked')""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_tasks_parent
+                           ON "{schema}"."squad_tasks" (parent_task_id)
+                           WHERE parent_task_id IS NOT NULL""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_squad_tasks_idempotency_key
+                           ON "{schema}"."squad_tasks" (idempotency_key)
+                           WHERE idempotency_key IS NOT NULL""",
+                ),
+            ),
+            _Migration(
+                "031_squad_member_capabilities_v0",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_member_capabilities" (
+                            squad_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            display_name TEXT NOT NULL DEFAULT '',
+                            role_label TEXT NOT NULL DEFAULT '',
+                            domains JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            primary_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            tool_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            delegate_when TEXT NOT NULL DEFAULT '',
+                            do_not_delegate TEXT NOT NULL DEFAULT '',
+                            is_coordinator BOOLEAN NOT NULL DEFAULT FALSE,
+                            summary_text TEXT NOT NULL DEFAULT '',
+                            spec_version INTEGER NOT NULL DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            expires_at TIMESTAMPTZ NULL,
+                            PRIMARY KEY (squad_id, agent_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_member_capabilities_agent
+                           ON "{schema}"."squad_member_capabilities" (agent_id)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_member_capabilities_expires
+                           ON "{schema}"."squad_member_capabilities" (expires_at)
+                           WHERE expires_at IS NOT NULL""",
+                ),
+            ),
+            _Migration(
+                "032_squad_coordinator_v0",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_coordinator_state" (
+                            squad_id TEXT PRIMARY KEY,
+                            coordinator_agent_id TEXT NULL,
+                            election_policy TEXT NOT NULL DEFAULT 'manual',
+                            auto_demote_after_inactive_days INTEGER NULL,
+                            elected_at TIMESTAMPTZ NULL,
+                            elected_by_agent_id TEXT NULL,
+                            last_active_at TIMESTAMPTZ NULL,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            CONSTRAINT squad_coordinator_election_policy_check
+                                CHECK (election_policy IN ('manual', 'auto_first_active', 'weighted'))
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_coordinator_history" (
+                            id BIGSERIAL PRIMARY KEY,
+                            squad_id TEXT NOT NULL,
+                            event_type TEXT NOT NULL,
+                            coordinator_agent_id TEXT NULL,
+                            previous_coordinator_agent_id TEXT NULL,
+                            triggered_by_agent_id TEXT NULL,
+                            reason TEXT NULL,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            CONSTRAINT squad_coordinator_history_event_check
+                                CHECK (event_type IN (
+                                    'elected', 'demoted', 'auto_elected', 'auto_demoted',
+                                    'replaced', 'policy_changed'
+                                ))
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_coordinator_history_squad_time
+                           ON "{schema}"."squad_coordinator_history" (squad_id, created_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "033_squad_telegram_bindings_v0",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_telegram_bindings" (
+                            squad_id TEXT PRIMARY KEY,
+                            telegram_chat_id BIGINT NOT NULL,
+                            chat_title TEXT NOT NULL DEFAULT '',
+                            is_forum BOOLEAN NOT NULL DEFAULT FALSE,
+                            bound_by_user_id BIGINT NULL,
+                            bound_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                        )""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_squad_telegram_bindings_chat
+                           ON "{schema}"."squad_telegram_bindings" (telegram_chat_id)""",
+                ),
+            ),
+            _Migration(
+                "034_squad_thread_cost_rollup",
+                (
+                    f"""ALTER TABLE "{schema}"."query_history"
+                           ADD COLUMN IF NOT EXISTS squad_thread_id UUID NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_query_history_squad_thread
+                           ON "{schema}"."query_history" (squad_thread_id)
+                           WHERE squad_thread_id IS NOT NULL""",
+                    f"""CREATE OR REPLACE FUNCTION "{schema}".squad_thread_cost_rollup()
+                        RETURNS TRIGGER AS $$
+                        DECLARE
+                            v_delta NUMERIC := 0;
+                        BEGIN
+                            IF (TG_OP = 'INSERT') THEN
+                                IF NEW.squad_thread_id IS NULL THEN
+                                    RETURN NEW;
+                                END IF;
+                                v_delta := COALESCE(NEW.cost_usd, 0);
+                            ELSIF (TG_OP = 'UPDATE') THEN
+                                -- Apply delta only if cost changed; if the
+                                -- thread linkage moved, refund the old thread
+                                -- and charge the new one.
+                                IF NEW.squad_thread_id IS DISTINCT FROM OLD.squad_thread_id THEN
+                                    IF OLD.squad_thread_id IS NOT NULL AND COALESCE(OLD.cost_usd, 0) <> 0 THEN
+                                        UPDATE "{schema}"."squad_threads"
+                                           SET cost_usd_accum = GREATEST(cost_usd_accum - COALESCE(OLD.cost_usd, 0), 0),
+                                               updated_at = NOW()
+                                         WHERE id = OLD.squad_thread_id;
+                                    END IF;
+                                    IF NEW.squad_thread_id IS NULL THEN
+                                        RETURN NEW;
+                                    END IF;
+                                    v_delta := COALESCE(NEW.cost_usd, 0);
+                                ELSE
+                                    IF NEW.squad_thread_id IS NULL THEN
+                                        RETURN NEW;
+                                    END IF;
+                                    v_delta := COALESCE(NEW.cost_usd, 0) - COALESCE(OLD.cost_usd, 0);
+                                END IF;
+                            END IF;
+                            IF v_delta = 0 THEN
+                                RETURN NEW;
+                            END IF;
+                            UPDATE "{schema}"."squad_threads"
+                               SET cost_usd_accum = GREATEST(cost_usd_accum + v_delta, 0),
+                                   updated_at = NOW()
+                             WHERE id = NEW.squad_thread_id;
+                            RETURN NEW;
+                        END;
+                        $$ LANGUAGE plpgsql""",
+                    f"""DROP TRIGGER IF EXISTS query_history_squad_cost_rollup
+                        ON "{schema}"."query_history" """,
+                    f"""CREATE TRIGGER query_history_squad_cost_rollup
+                        AFTER INSERT OR UPDATE OF cost_usd, squad_thread_id
+                        ON "{schema}"."query_history"
+                        FOR EACH ROW
+                        EXECUTE FUNCTION "{schema}".squad_thread_cost_rollup()""",
+                ),
+            ),
         )
 
     async def upsert_documents(self, entries: list[KnowledgeEntry], *, object_key: str) -> None:

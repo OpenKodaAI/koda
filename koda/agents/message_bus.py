@@ -8,13 +8,14 @@ import os
 import uuid
 from typing import Any
 
+from koda.agents.message_bus_iface import MessageBus
 from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 
 
-class AgentMessageBus:
+class InMemoryMessageBus:
     """In-memory message bus with per-agent inbox queues."""
 
     def __init__(self) -> None:
@@ -244,12 +245,28 @@ class AgentMessageBus:
         ]
 
 
-_bus: AgentMessageBus | None = None
+_bus: MessageBus | None = None
 
 
-def get_message_bus() -> AgentMessageBus:
+def _build_bus() -> MessageBus:
+    from koda.config import INTER_AGENT_BUS_BACKEND, POSTGRES_URL
+
+    if INTER_AGENT_BUS_BACKEND == "postgres" and POSTGRES_URL:
+        from koda.agents.postgres_message_bus import PostgresMessageBus
+        from koda.knowledge.config import KNOWLEDGE_V2_POSTGRES_SCHEMA
+
+        return PostgresMessageBus(
+            dsn=POSTGRES_URL,
+            schema=(KNOWLEDGE_V2_POSTGRES_SCHEMA or "knowledge_v2").strip() or "knowledge_v2",
+        )
+    if INTER_AGENT_BUS_BACKEND == "postgres":
+        log.warning("inter_agent_bus_postgres_no_dsn", backend="postgres", fallback="memory")
+    return InMemoryMessageBus()
+
+
+def get_message_bus() -> MessageBus:
     """Return the singleton message bus instance."""
     global _bus  # noqa: PLW0603
     if _bus is None:
-        _bus = AgentMessageBus()
+        _bus = _build_bus()
     return _bus

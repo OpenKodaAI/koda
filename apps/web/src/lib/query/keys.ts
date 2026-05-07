@@ -88,6 +88,14 @@ export const queryKeys = {
       ["dashboard", "agents", agentId, "schedules"] as const,
     routineSchedules: () =>
       ["dashboard", "routines", "schedules"] as const,
+    squadsOverview: (workspaceId?: string | null) =>
+      ["dashboard", "squads", "overview", workspaceId ?? null] as const,
+    squadThreads: (squadId: string, status?: string | null) =>
+      ["dashboard", "squads", squadId, "threads", status ?? null] as const,
+    squadActivity: (squadId: string) =>
+      ["dashboard", "squads", squadId, "activity"] as const,
+    squadThread: (threadId: string) =>
+      ["dashboard", "squads", "threads", threadId] as const,
   },
   runtime: {
     overview: (agentId: string, language?: string) =>

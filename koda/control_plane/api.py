@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import mimetypes
@@ -565,6 +566,497 @@ async def delete_squad(request: web.Request) -> web.Response:
 async def delete_agent(request: web.Request) -> web.Response:
     removed = _manager().delete_agent(request.match_info["agent_id"])
     return web.json_response({"ok": True, "deleted": removed})
+
+
+async def list_dashboard_squads_overview_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    workspace_id = (request.query.get("workspace_id") or "").strip() or None
+    from koda.squads import list_squad_overviews_default
+
+    try:
+        overviews = await list_squad_overviews_default(workspace_id=workspace_id)
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
+    if overviews is None:
+        return web.json_response({"items": [], "count": 0, "available": False})
+    items = []
+    for ov in overviews:
+        items.append(
+            {
+                "squadId": ov.squad_id,
+                "workspaceId": ov.workspace_id,
+                "coordinatorAgentId": ov.coordinator_agent_id,
+                "threadCounts": ov.thread_counts,
+                "taskCounts": ov.task_counts,
+                "memberCount": ov.member_count,
+                "lastActiveAt": ov.last_active_at.isoformat() if ov.last_active_at else None,
+                "totalCostUsd": str(ov.total_cost_usd),
+            }
+        )
+    return web.json_response({"items": items, "count": len(items), "available": True})
+
+
+async def stream_dashboard_squad_thread_events_route(request: web.Request) -> web.StreamResponse:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    thread_id = request.match_info["thread_id"]
+
+    from koda.config import POSTGRES_URL
+    from koda.knowledge.config import KNOWLEDGE_V2_POSTGRES_SCHEMA  # noqa: F401  - parity with siblings
+
+    if not POSTGRES_URL:
+        return web.json_response(
+            {"error": "POSTGRES_URL is not configured"},
+            status=503,
+        )
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+    await response.prepare(request)
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
+    loop = asyncio.get_running_loop()
+
+    def _on_notify(_connection: Any, _pid: int, _channel: str, payload: str) -> None:
+        try:
+            data = json.loads(payload) if payload else {}
+        except (json.JSONDecodeError, ValueError):
+            return
+        if not isinstance(data, dict) or data.get("thread_id") != thread_id:
+            return
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, data)
+        except asyncio.QueueFull:
+            log.warning("sse_thread_queue_full", thread_id=thread_id)
+
+    import asyncpg  # type: ignore[import-not-found]
+
+    listen_conn = await asyncpg.connect(POSTGRES_URL)
+    await listen_conn.add_listener("squad_thread_events", _on_notify)
+    try:
+        # Initial hello so the client unblocks readyState=open quickly.
+        await response.write(b": connected\n\n")
+        last_heartbeat = loop.time()
+        while not request.transport or not request.transport.is_closing():
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=15.0)
+            except TimeoutError:
+                if loop.time() - last_heartbeat > 14:
+                    await response.write(b": ping\n\n")
+                    last_heartbeat = loop.time()
+                continue
+            event_type = str(event.get("event_type") or "update")
+            try:
+                payload_bytes = (f"event: {event_type}\ndata: {json.dumps(event)}\n\n").encode()
+                await response.write(payload_bytes)
+            except (ConnectionResetError, ConnectionAbortedError):
+                break
+    except asyncio.CancelledError:
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            await listen_conn.remove_listener("squad_thread_events", _on_notify)
+        with contextlib.suppress(Exception):
+            await listen_conn.close()
+        with contextlib.suppress(Exception):
+            await response.write_eof()
+    return response
+
+
+async def post_dashboard_squad_thread_message_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    thread_id = request.match_info["thread_id"]
+    try:
+        payload = await _json_payload(request)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    content = (payload.get("content") or "").strip() if isinstance(payload.get("content"), str) else ""
+    if not content:
+        return web.json_response({"error": "content is required"}, status=400)
+    raw_from = payload.get("from_agent")
+    from_agent = raw_from.strip() if isinstance(raw_from, str) and raw_from.strip() else None
+    if from_agent is None:
+        ctx = _request_auth_context(request)
+        from_agent = f"operator:{ctx.username}" if ctx is not None else "operator"
+    raw_meta = payload.get("metadata")
+    metadata: dict[str, Any] = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+    metadata["via"] = "web_dashboard"
+
+    from koda.squads import get_squad_thread_store
+
+    store = get_squad_thread_store()
+    if store is None:
+        return _service_unavailable(RuntimeError("squad thread store unavailable"))
+    try:
+        message_id = await store.post_thread_message(
+            thread_id=thread_id,
+            from_agent=from_agent,
+            content=content,
+            message_type="agent_text",
+            metadata=metadata,
+        )
+    except KeyError:
+        return web.json_response({"error": "thread not found"}, status=404)
+    except (ValueError, RuntimeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    await store.notify_event(
+        thread_id=thread_id,
+        event_type="message_added",
+        data={"message_id": message_id, "from_agent": from_agent},
+    )
+    return web.json_response({"messageId": message_id, "fromAgent": from_agent})
+
+
+def _serialize_task_for_dashboard(task: Any) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "threadId": task.thread_id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "kind": task.kind,
+        "assignedAgentId": task.assigned_agent_id,
+        "assignerAgentId": task.assigner_agent_id,
+        "version": task.version,
+        "claimToken": task.claim_token,
+        "claimExpiresAt": task.claim_expires_at.isoformat() if task.claim_expires_at else None,
+        "completedAt": task.completed_at.isoformat() if task.completed_at else None,
+        "errorMessage": task.error_message,
+        "resultSummary": task.result_summary,
+    }
+
+
+async def post_dashboard_squad_task_claim_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    task_id = request.match_info["task_id"]
+    try:
+        payload = await _json_payload(request)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    agent_id = (payload.get("agent_id") or "").strip() if isinstance(payload.get("agent_id"), str) else ""
+    if not agent_id:
+        return web.json_response({"error": "agent_id is required"}, status=400)
+    ttl_seconds = _parse_optional_int(payload.get("ttl_seconds"), name="ttl_seconds") or 300
+
+    from koda.squads import TaskClaimConflictError, TaskNotFoundError, get_squad_task_store
+
+    store = get_squad_task_store()
+    if store is None:
+        return _service_unavailable(RuntimeError("squad task store unavailable"))
+    try:
+        task = await store.claim_task(
+            task_id=task_id,
+            agent_id=agent_id,
+            ttl_seconds=max(1, min(ttl_seconds, 3600)),
+        )
+    except TaskNotFoundError:
+        return web.json_response({"error": "task not found"}, status=404)
+    except TaskClaimConflictError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    await _notify_task_update(task, event="claimed")
+    return web.json_response({"task": _serialize_task_for_dashboard(task)})
+
+
+async def post_dashboard_squad_task_complete_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    task_id = request.match_info["task_id"]
+    try:
+        payload = await _json_payload(request)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    agent_id = (payload.get("agent_id") or "").strip() if isinstance(payload.get("agent_id"), str) else ""
+    if not agent_id:
+        return web.json_response({"error": "agent_id is required"}, status=400)
+    raw_summary = payload.get("result_summary")
+    result_summary = raw_summary.strip() if isinstance(raw_summary, str) and raw_summary.strip() else None
+
+    from koda.squads import (
+        IllegalTransitionError,
+        TaskNotFoundError,
+        TaskOwnershipError,
+        get_squad_task_store,
+    )
+
+    store = get_squad_task_store()
+    if store is None:
+        return _service_unavailable(RuntimeError("squad task store unavailable"))
+    try:
+        task = await store.complete_task(
+            task_id=task_id,
+            agent_id=agent_id,
+            result_summary=result_summary,
+        )
+    except TaskNotFoundError:
+        return web.json_response({"error": "task not found"}, status=404)
+    except IllegalTransitionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except TaskOwnershipError as exc:
+        return web.json_response({"error": str(exc)}, status=403)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    await _notify_task_update(task, event="completed")
+    return web.json_response({"task": _serialize_task_for_dashboard(task)})
+
+
+async def post_dashboard_squad_task_escalate_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    task_id = request.match_info["task_id"]
+    try:
+        payload = await _json_payload(request)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    agent_id = (payload.get("agent_id") or "").strip() if isinstance(payload.get("agent_id"), str) else ""
+    reason = (payload.get("reason") or "").strip() if isinstance(payload.get("reason"), str) else ""
+    if not agent_id:
+        return web.json_response({"error": "agent_id is required"}, status=400)
+    if not reason:
+        return web.json_response({"error": "reason is required"}, status=400)
+
+    from koda.squads import (
+        IllegalTransitionError,
+        TaskNotFoundError,
+        TaskOwnershipError,
+        get_squad_task_store,
+    )
+
+    store = get_squad_task_store()
+    if store is None:
+        return _service_unavailable(RuntimeError("squad task store unavailable"))
+    try:
+        task = await store.escalate_task(
+            task_id=task_id,
+            agent_id=agent_id,
+            reason=reason,
+        )
+    except TaskNotFoundError:
+        return web.json_response({"error": "task not found"}, status=404)
+    except IllegalTransitionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except TaskOwnershipError as exc:
+        return web.json_response({"error": str(exc)}, status=403)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    await _notify_task_update(task, event="escalated")
+    return web.json_response({"task": _serialize_task_for_dashboard(task)})
+
+
+async def _notify_task_update(task: Any, *, event: str) -> None:
+    """Fire-and-forget pg_notify for a task mutation. Logs on failure."""
+    from koda.squads import get_squad_thread_store
+
+    store = get_squad_thread_store()
+    if store is None:
+        return
+    await store.notify_event(
+        thread_id=task.thread_id,
+        event_type="task_updated",
+        data={
+            "task_id": task.id,
+            "status": task.status,
+            "version": task.version,
+            "assigned_agent_id": task.assigned_agent_id,
+            "kind_event": event,
+        },
+    )
+
+
+async def get_dashboard_squad_metrics_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    squad_id = request.match_info["squad_id"]
+
+    from koda.squads import get_squad_metrics_default
+
+    try:
+        metrics = await get_squad_metrics_default(squad_id=squad_id)
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
+    if metrics is None:
+        return web.json_response({"available": False})
+    return web.json_response(
+        {
+            "available": True,
+            "squadId": metrics.squad_id,
+            "workspaceIds": metrics.workspace_ids,
+            "totalCostUsd": str(metrics.total_cost_usd),
+            "openThreadCount": metrics.open_thread_count,
+            "completedThreadCount": metrics.completed_thread_count,
+            "costByAgent": [
+                {
+                    "agentId": row.agent_id,
+                    "costUsd": str(row.cost_usd),
+                    "queryCount": row.query_count,
+                }
+                for row in metrics.cost_by_agent
+            ],
+            "taskCountByStatus": metrics.task_count_by_status,
+            "lastActiveAt": metrics.last_active_at.isoformat() if metrics.last_active_at else None,
+        }
+    )
+
+
+async def list_dashboard_squad_activity_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    squad_id = request.match_info["squad_id"]
+    limit = _parse_optional_int(request.query.get("limit"), name="limit") or 50
+
+    from koda.squads import list_squad_activity_default
+
+    try:
+        entries = await list_squad_activity_default(
+            squad_id=squad_id,
+            limit=max(1, min(limit, 500)),
+        )
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
+    if entries is None:
+        return web.json_response({"items": [], "count": 0, "available": False})
+    items = [
+        {
+            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+            "source": e.source,
+            "eventType": e.event_type,
+            "actor": e.actor,
+            "summary": e.summary,
+            "threadId": e.thread_id,
+            "payload": e.payload,
+        }
+        for e in entries
+    ]
+    return web.json_response({"items": items, "count": len(items), "available": True})
+
+
+async def list_dashboard_squad_threads_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    squad_id = request.match_info["squad_id"]
+    workspace_id = (request.query.get("workspace_id") or "").strip() or None
+    status = (request.query.get("status") or "").strip() or None
+    limit = _parse_optional_int(request.query.get("limit"), name="limit") or 50
+
+    from koda.squads import list_squad_threads_default
+
+    try:
+        threads = await list_squad_threads_default(
+            squad_id=squad_id,
+            workspace_id=workspace_id,
+            status=status,
+            limit=max(1, min(limit, 200)),
+        )
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
+    if threads is None:
+        return web.json_response({"items": [], "count": 0, "available": False})
+    items = [
+        {
+            "id": t.id,
+            "workspaceId": t.workspace_id,
+            "squadId": t.squad_id,
+            "title": t.title,
+            "status": t.status,
+            "coordinatorAgentId": t.coordinator_agent_id,
+            "currentOwnerAgentId": t.current_owner_agent_id,
+            "telegramChatId": t.telegram_chat_id,
+            "telegramMessageThreadId": t.telegram_message_thread_id,
+            "costUsdAccum": str(t.cost_usd_accum),
+            "createdAt": t.created_at.isoformat() if t.created_at else None,
+            "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
+            "completedAt": t.completed_at.isoformat() if t.completed_at else None,
+        }
+        for t in threads
+    ]
+    return web.json_response({"items": items, "count": len(items), "available": True})
+
+
+async def get_dashboard_squad_thread_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    thread_id = request.match_info["thread_id"]
+    message_limit = _parse_optional_int(request.query.get("message_limit"), name="message_limit") or 30
+    task_limit = _parse_optional_int(request.query.get("task_limit"), name="task_limit") or 30
+    from koda.squads import get_thread_overview_default
+
+    try:
+        overview = await get_thread_overview_default(
+            thread_id,
+            message_limit=max(1, min(message_limit, 200)),
+            task_limit=max(1, min(task_limit, 200)),
+        )
+    except Exception as exc:
+        return _service_unavailable(RuntimeError(str(exc)))
+    if overview is None:
+        return web.json_response({"error": "thread not found"}, status=404)
+    thread = overview.thread
+    return web.json_response(
+        {
+            "thread": {
+                "id": thread.id,
+                "workspaceId": thread.workspace_id,
+                "squadId": thread.squad_id,
+                "title": thread.title,
+                "status": thread.status,
+                "ownerUserId": thread.owner_user_id,
+                "coordinatorAgentId": thread.coordinator_agent_id,
+                "currentOwnerAgentId": thread.current_owner_agent_id,
+                "telegramChatId": thread.telegram_chat_id,
+                "telegramMessageThreadId": thread.telegram_message_thread_id,
+                "budgetUsdCap": str(thread.budget_usd_cap) if thread.budget_usd_cap is not None else None,
+                "costUsdAccum": str(thread.cost_usd_accum),
+                "createdAt": thread.created_at.isoformat() if thread.created_at else None,
+                "updatedAt": thread.updated_at.isoformat() if thread.updated_at else None,
+            },
+            "coordinatorAgentId": overview.coordinator_agent_id,
+            "participants": [
+                {
+                    "agentId": p.agent_id,
+                    "role": p.role,
+                    "joinedAt": p.joined_at.isoformat() if p.joined_at else None,
+                    "leftAt": p.left_at.isoformat() if p.left_at else None,
+                }
+                for p in overview.participants
+            ],
+            "recentMessages": [
+                {
+                    "id": m["id"],
+                    "from": m["from"],
+                    "to": m["to"],
+                    "content": m["content"],
+                    "type": m["type"],
+                    "metadata": m["metadata"],
+                    "createdAt": m["created_at"].isoformat() if m.get("created_at") else None,
+                }
+                for m in overview.recent_messages
+            ],
+            "activeTasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "assignedAgentId": t.assigned_agent_id,
+                    "assignerAgentId": t.assigner_agent_id,
+                    "kind": t.kind,
+                    "version": t.version,
+                }
+                for t in overview.active_tasks
+            ],
+            "openTaskCount": overview.open_task_count,
+            "doneTaskCount": overview.done_task_count,
+        }
+    )
 
 
 async def list_dashboard_agent_summaries_route(request: web.Request) -> web.Response:
@@ -2414,6 +2906,43 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get("/api/control-plane/integrations/{integration_id}/health", get_integration_health)
     app.router.add_get("/api/control-plane/core/policies", get_core_policies)
     app.router.add_get("/api/control-plane/core/capabilities", get_core_capabilities)
+    app.router.add_get("/api/control-plane/dashboard/squads/overview", list_dashboard_squads_overview_route)
+    app.router.add_get(
+        "/api/control-plane/dashboard/squads/{squad_id}/threads",
+        list_dashboard_squad_threads_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/squads/{squad_id}/activity",
+        list_dashboard_squad_activity_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/squads/{squad_id}/metrics",
+        get_dashboard_squad_metrics_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/squads/threads/{thread_id}",
+        get_dashboard_squad_thread_route,
+    )
+    app.router.add_get(
+        "/api/control-plane/dashboard/squads/threads/{thread_id}/events",
+        stream_dashboard_squad_thread_events_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/dashboard/squads/threads/{thread_id}/messages",
+        post_dashboard_squad_thread_message_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/dashboard/squads/tasks/{task_id}/claim",
+        post_dashboard_squad_task_claim_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/dashboard/squads/tasks/{task_id}/complete",
+        post_dashboard_squad_task_complete_route,
+    )
+    app.router.add_post(
+        "/api/control-plane/dashboard/squads/tasks/{task_id}/escalate",
+        post_dashboard_squad_task_escalate_route,
+    )
     app.router.add_get("/api/control-plane/dashboard/agents/summary", list_dashboard_agent_summaries_route)
     app.router.add_get("/api/control-plane/dashboard/agents/{agent_id}/summary", get_dashboard_agent_summary_route)
     app.router.add_get("/api/control-plane/dashboard/agents/{agent_id}/stats", get_dashboard_agent_stats_route)

@@ -1,0 +1,133 @@
+"""Squad collaboration system — threads, tasks, coordination."""
+
+from koda.squads.capabilities import (
+    CapabilitySummary,
+    SquadMemberCapabilityCache,
+    build_capability_summary,
+    format_capability_block,
+    get_capability_cache,
+)
+from koda.squads.coordinator import (
+    REQUIRED_COORDINATOR_TOOL_IDS,
+    CoordinatorConflictError,
+    CoordinatorEligibilityError,
+    CoordinatorHistoryEntry,
+    CoordinatorNotFoundError,
+    CoordinatorService,
+    CoordinatorState,
+    get_coordinator_service,
+    validate_eligibility,
+)
+from koda.squads.projections import (
+    SquadActivityEntry,
+    SquadAgentCostRow,
+    SquadMetrics,
+    SquadOverview,
+    ThreadOverview,
+    get_squad_metrics,
+    get_squad_metrics_default,
+    get_thread_overview,
+    get_thread_overview_default,
+    list_squad_activity,
+    list_squad_activity_default,
+    list_squad_overviews,
+    list_squad_overviews_default,
+)
+from koda.squads.prompt_block import (
+    build_squad_context_block,
+    build_squad_context_block_default,
+)
+from koda.squads.router import (
+    AutoElection,
+    SquadRouter,
+    SweepReport,
+    get_squad_router,
+)
+from koda.squads.routing import (
+    extract_mentions,
+    select_targets,
+)
+from koda.squads.tasks import (
+    ExpiredClaim,
+    IllegalTransitionError,
+    SquadTaskStore,
+    StaleVersionError,
+    TaskClaimConflictError,
+    TaskDescriptor,
+    TaskNotFoundError,
+    TaskOwnershipError,
+    get_squad_task_store,
+)
+from koda.squads.telegram_bridge import (
+    SquadTelegramBinding,
+    SquadTelegramBindingService,
+    TelegramBindingConflictError,
+    get_telegram_binding_service,
+)
+from koda.squads.telegram_outbound import get_outbound_bot
+from koda.squads.telegram_outbound import post_to_thread as post_to_telegram_thread
+from koda.squads.threads import (
+    ParticipantInfo,
+    SquadThreadStore,
+    ThreadDescriptor,
+    get_squad_thread_store,
+    list_squad_threads_default,
+)
+
+__all__ = [
+    "REQUIRED_COORDINATOR_TOOL_IDS",
+    "AutoElection",
+    "CapabilitySummary",
+    "CoordinatorConflictError",
+    "CoordinatorEligibilityError",
+    "CoordinatorHistoryEntry",
+    "CoordinatorNotFoundError",
+    "CoordinatorService",
+    "CoordinatorState",
+    "ExpiredClaim",
+    "IllegalTransitionError",
+    "ParticipantInfo",
+    "SquadActivityEntry",
+    "SquadAgentCostRow",
+    "SquadMemberCapabilityCache",
+    "SquadMetrics",
+    "SquadOverview",
+    "SquadRouter",
+    "SquadTaskStore",
+    "SquadTelegramBinding",
+    "SquadTelegramBindingService",
+    "SquadThreadStore",
+    "SweepReport",
+    "TelegramBindingConflictError",
+    "ThreadOverview",
+    "StaleVersionError",
+    "TaskClaimConflictError",
+    "TaskDescriptor",
+    "TaskNotFoundError",
+    "TaskOwnershipError",
+    "ThreadDescriptor",
+    "build_capability_summary",
+    "build_squad_context_block",
+    "build_squad_context_block_default",
+    "extract_mentions",
+    "format_capability_block",
+    "get_capability_cache",
+    "get_coordinator_service",
+    "get_outbound_bot",
+    "get_squad_metrics",
+    "get_squad_metrics_default",
+    "get_squad_router",
+    "get_squad_task_store",
+    "get_squad_thread_store",
+    "get_telegram_binding_service",
+    "get_thread_overview",
+    "get_thread_overview_default",
+    "list_squad_activity",
+    "list_squad_activity_default",
+    "list_squad_overviews",
+    "list_squad_overviews_default",
+    "list_squad_threads_default",
+    "post_to_telegram_thread",
+    "select_targets",
+    "validate_eligibility",
+]
