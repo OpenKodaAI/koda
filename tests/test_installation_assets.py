@@ -248,6 +248,14 @@ def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
     assert 'join(installDir, ".rollback")' not in cli_text
 
 
+def test_npm_cli_serializes_compose_up_by_default() -> None:
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    assert "function composeUpEnv()" in cli_text
+    assert 'COMPOSE_PARALLEL_LIMIT: limit && limit.trim() ? limit : "1"' in cli_text
+    assert cli_text.count("env: composeUpEnv()") == 4
+
+
 def test_systemd_example_operates_docker_compose() -> None:
     unit_text = (ROOT / "koda.service.example").read_text(encoding="utf-8")
 

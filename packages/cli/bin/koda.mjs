@@ -230,6 +230,13 @@ function composeArgs(installDir) {
   ];
 }
 
+function composeUpEnv() {
+  const limit = process.env.COMPOSE_PARALLEL_LIMIT;
+  return {
+    COMPOSE_PARALLEL_LIMIT: limit && limit.trim() ? limit : "1",
+  };
+}
+
 function runCommand(command, args, { cwd, stdio = "inherit", env } = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -489,7 +496,10 @@ async function installCommand(args) {
   await writeReleaseEnv(installDir, manifest);
   await verifyBundledChecksums(installDir, manifest);
 
-  runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
+  runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
+    cwd: installDir,
+    env: composeUpEnv(),
+  });
 
   const env = await readInstallEnv(installDir);
   await waitForHttp(loopbackUrl(env.CONTROL_PLANE_PORT || "8090", "/health"), "the control plane");
@@ -519,7 +529,10 @@ async function installCommand(args) {
 
 async function upCommand(args) {
   const installDir = resolveInstallDir(args);
-  runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
+  runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
+    cwd: installDir,
+    env: composeUpEnv(),
+  });
 }
 
 async function downCommand(args) {
@@ -579,7 +592,10 @@ async function updateCommand(args) {
     await copyReleaseBundle(releaseRoot, installDir);
     await writeReleaseEnv(installDir, manifest);
     await verifyBundledChecksums(installDir, manifest);
-    runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
+    runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
+      cwd: installDir,
+      env: composeUpEnv(),
+    });
     await doctorCommand(["--dir", installDir]);
     if (backupRoot !== null) {
       await rm(backupRoot, { recursive: true, force: true });
@@ -588,7 +604,10 @@ async function updateCommand(args) {
     if (backupDir !== null && existsSync(backupDir)) {
       await rm(installDir, { recursive: true, force: true });
       await cp(backupDir, installDir, { recursive: true, force: true });
-      runCommand("docker", [...composeArgs(installDir), "up", "-d"], { cwd: installDir });
+      runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
+        cwd: installDir,
+        env: composeUpEnv(),
+      });
       if (backupRoot !== null) {
         await rm(backupRoot, { recursive: true, force: true });
       }
