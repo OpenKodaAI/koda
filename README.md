@@ -1,0 +1,219 @@
+<p align="center">
+  <img src="docs/assets/brand/koda-banner.png" alt="Koda banner" width="100%" />
+</p>
+
+<p align="center">
+  <strong>Open-source control plane for running, supervising, and documenting multi-agent AI systems.</strong>
+</p>
+
+<p align="center">
+  <a href="docs/install/local.md">Quickstart</a>
+  ·
+  <a href="docs/README.md">Docs</a>
+  ·
+  <a href="docs/reference/api.md">API</a>
+  ·
+  <a href="docs/architecture/overview.md">Architecture</a>
+</p>
+
+Koda gives AI agents the operational layer they need: setup, provider connections, agent configuration, durable state, runtime inspection, memory, retrieval, artifacts, schedules, costs, and audit trails. Bring the providers and workflows that fit your domain; Koda supplies the local-first harness around them.
+
+Koda is control-plane-first: operators configure the system in the dashboard and the runtime follows that published contract.
+
+## Product Tour
+
+<p align="center">
+  <img src="docs/assets/screenshots/overview.png" alt="Koda dashboard overview" width="32%" />
+  <img src="docs/assets/screenshots/costs.png" alt="Koda costs dashboard" width="32%" />
+  <img src="docs/assets/screenshots/runtime.png" alt="Koda runtime dashboard" width="32%" />
+</p>
+
+- **Home:** activity, recent work, setup progress, and the command bar.
+- **Control Plane:** owners, providers, agents, workspaces, prompts, tools, and secrets.
+- **Runtime:** live queues, environments, task rooms, artifacts, terminals, and browser sessions.
+- **Operations:** costs, executions, sessions, memory review, routines, DLQ, and system health.
+
+## Core Capabilities
+
+- Agent catalog, prompt sections, provider connections, secrets, and rollout state.
+- Runtime queues, task rooms, browser/terminal access, artifacts, and recovery controls.
+- Cost, execution, session, activity, memory, schedule, and DLQ observability.
+- Local-first install path with Postgres, SeaweedFS, Rust sidecars, and a Next.js dashboard.
+
+## Installation Paths
+
+Use the npm installer for the quickest local start:
+
+```bash
+npm install -g @openkodaai/koda
+koda install
+```
+
+Or run without a global install:
+
+```bash
+npx @openkodaai/koda@latest install
+```
+
+When the installer finishes, open:
+
+- Setup: `http://127.0.0.1:3000/setup`
+- Dashboard: `http://127.0.0.1:3000`
+- Control Plane: `http://127.0.0.1:3000/control-plane`
+- API health: `http://127.0.0.1:8090/health`
+
+First boot is intentionally small:
+
+```text
+open /setup
+  -> paste the short-lived setup code
+  -> create the owner account
+  -> save recovery codes
+  -> sign in to the dashboard
+```
+
+Source contributors can use the repository wrapper on apt-based Linux hosts:
+
+```bash
+git clone https://github.com/OpenKodaAI/koda.git /opt/koda
+cd /opt/koda
+./scripts/install.sh
+```
+
+On macOS or other environments, install Docker and Node.js yourself and use the npm CLI path.
+
+## Architecture
+
+```text
+Operator browser
+      |
+      v
+Next.js dashboard :3000
+      |
+      v
+Python control plane :8090
+      |
+      +--> Postgres durable state
+      +--> S3-compatible object storage
+      +--> Rust sidecars: security, memory, artifact, retrieval, runtime-kernel
+                         |
+                         v
+                  agent workers + provider CLIs
+```
+
+The default compose stack starts:
+
+- `web` on `3000`
+- `app` on `8090`
+- `postgres`
+- `SeaweedFS` (`seaweedfs` and `seaweedfs-init`) for S3-compatible object storage
+- Rust sidecars for security, memory, artifacts, retrieval, and runtime supervision
+
+Koda keeps infrastructure bootstrap and product configuration separate. `.env` brings up the platform; the dashboard and `/api/control-plane/*` own providers, agents, secrets, prompts, integrations, and runtime policy.
+
+## Local Demo Data And Screenshots
+
+Use the docs demo seed when you want a full, professional-looking local UI for screenshots or walkthroughs:
+
+```bash
+docker compose exec app python scripts/seed_demo_data.py --apply
+python3 scripts/capture_docs_screenshots.py \
+  --base-url http://127.0.0.1:3000 \
+  --out docs/assets/screenshots
+```
+
+The seed is explicit and idempotent. It only touches rows tagged with `koda-docs-demo` or managed demo agents prefixed with `DEMO_`.
+
+To remove demo data:
+
+```bash
+docker compose exec app python scripts/seed_demo_data.py --clear
+```
+
+## Main Interfaces
+
+- `/` dashboard home
+- `/setup` first-run owner setup
+- `/control-plane` agent and system configuration
+- `/runtime` live operational rooms
+- `/costs`, `/executions`, `/sessions`, `/memory`, `/routines`
+- `/api/control-plane/agents/*` agent configuration API
+- `/api/control-plane/*` broader public control-plane API
+- `/api/runtime/*` runtime inspection and control
+- [`docs/openapi/control-plane.json`](docs/openapi/control-plane.json) maintained OpenAPI contract
+
+## Docs
+
+- [Documentation index](docs/README.md)
+- [Local install](docs/install/local.md)
+- [Architecture overview](docs/architecture/overview.md)
+- [Runtime architecture](docs/architecture/runtime.md)
+- [Configuration reference](docs/config/reference.md)
+- [Operations runbooks](docs/operations/README.md)
+- [Security readiness](docs/security/README.md)
+- [API reference](docs/reference/api.md)
+- [Release distribution](docs/reference/releases.md)
+
+## Development
+
+Backend:
+
+```bash
+pip install -e ".[dev]"
+ruff check .
+ruff format --check .
+mypy koda/ --ignore-missing-imports
+pytest --cov=koda --cov-report=term-missing
+```
+
+Web:
+
+```bash
+pnpm install
+cp apps/web/.env.example apps/web/.env.local
+pnpm dev:web
+```
+
+Containerized development:
+
+```bash
+pnpm dev:stack:build
+```
+
+## Validation
+
+Run these before considering a code change complete:
+
+```bash
+ruff check .
+ruff format --check .
+mypy koda/ --ignore-missing-imports
+pytest --cov=koda --cov-report=term-missing
+pnpm lint:web
+pnpm test:web
+pnpm build:web
+```
+
+If you touch the Rust workspace, also run:
+
+```bash
+cargo fmt --check --manifest-path rust/Cargo.toml
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml --workspace
+```
+
+## Release Channels
+
+Public releases are cut from `main` by version.
+
+Official product releases publish the same pinned bundle through:
+
+- npm: `@openkodaai/koda`
+- GHCR images
+- GitHub Releases with bundle archive, checksums, manifest, SBOM, and npm tarball
+
+Release automation fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
+
+Use the release runbook when the GitHub release is still draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing, not publicly pullable, or missing `linux/amd64` or `linux/arm64`.
+
+Koda is Apache-2.0 licensed.

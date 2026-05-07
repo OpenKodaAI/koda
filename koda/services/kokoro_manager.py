@@ -1,0 +1,650 @@
+"""Catalog and managed local storage for Kokoro voices."""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import pickle
+import threading
+import urllib.request
+import zipfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+KOKORO_MODEL_VERSION = "v1.0"
+KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+KOKORO_VOICE_BASE_URL = "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/voices"
+KOKORO_DEFAULT_LANGUAGE_ID = "pt-br"
+KOKORO_DEFAULT_VOICE_ID = "pf_dora"
+
+_STATE_ROOT_DIR = Path(os.environ.get("STATE_ROOT_DIR", str(Path.home() / ".koda-state"))).expanduser()
+_CONTROL_PLANE_RUNTIME_DIR = os.environ.get("CONTROL_PLANE_RUNTIME_DIR", "").strip()
+_KOKORO_ROOT = Path(
+    os.environ.get(
+        "KOKORO_ASSET_ROOT",
+        str(
+            (Path(_CONTROL_PLANE_RUNTIME_DIR).expanduser() / "providers" / "kokoro")
+            if _CONTROL_PLANE_RUNTIME_DIR
+            else (_STATE_ROOT_DIR / "providers" / "kokoro")
+        ),
+    )
+).expanduser()
+_KOKORO_MODEL_DIR = _KOKORO_ROOT / "model"
+_KOKORO_VOICES_DIR = _KOKORO_ROOT / "voices"
+_KOKORO_BANK_DIR = _KOKORO_ROOT / "voice_bank"
+_KOKORO_METADATA_PATH = _KOKORO_ROOT / "voices.json"
+_KOKORO_MODEL_PATH = _KOKORO_MODEL_DIR / "kokoro-v1.0.onnx"
+_KOKORO_VOICES_BANK_PATH = _KOKORO_BANK_DIR / "voices-managed-v1.0.bin"
+_KOKORO_DOWNLOAD_CHUNK_SIZE = 64 * 1024
+_KOKORO_REBUILD_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class _TorchStorageType:
+    name: str
+
+
+_KOKORO_LANGUAGES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "en-us",
+        "label": "American English",
+        "lang_code": "a",
+        "tts_lang": "en-us",
+        "voices": (
+            "af_heart",
+            "af_alloy",
+            "af_aoede",
+            "af_bella",
+            "af_jessica",
+            "af_kore",
+            "af_nicole",
+            "af_nova",
+            "af_river",
+            "af_sarah",
+            "af_sky",
+            "am_adam",
+            "am_echo",
+            "am_eric",
+            "am_fenrir",
+            "am_liam",
+            "am_michael",
+            "am_onyx",
+            "am_puck",
+            "am_santa",
+        ),
+    },
+    {
+        "id": "en-gb",
+        "label": "British English",
+        "lang_code": "b",
+        "tts_lang": "en-gb",
+        "voices": (
+            "bf_alice",
+            "bf_emma",
+            "bf_isabella",
+            "bf_lily",
+            "bm_daniel",
+            "bm_fable",
+            "bm_george",
+            "bm_lewis",
+        ),
+    },
+    {
+        "id": "ja-jp",
+        "label": "Japanese",
+        "lang_code": "j",
+        "tts_lang": "ja",
+        "voices": (
+            "jf_alpha",
+            "jf_gongitsune",
+            "jf_nezumi",
+            "jf_tebukuro",
+            "jm_kumo",
+        ),
+    },
+    {
+        "id": "zh-cn",
+        "label": "Mandarin Chinese",
+        "lang_code": "z",
+        "tts_lang": "zh",
+        "voices": (
+            "zf_xiaobei",
+            "zf_xiaoni",
+            "zf_xiaoxiao",
+            "zf_xiaoyi",
+            "zm_yunjian",
+            "zm_yunxi",
+            "zm_yunxia",
+            "zm_yunyang",
+        ),
+    },
+    {
+        "id": "es-es",
+        "label": "Spanish",
+        "lang_code": "e",
+        "tts_lang": "es",
+        "voices": (
+            "ef_dora",
+            "em_alex",
+            "em_santa",
+        ),
+    },
+    {
+        "id": "fr-fr",
+        "label": "French",
+        "lang_code": "f",
+        "tts_lang": "fr-fr",
+        "voices": ("ff_siwis",),
+    },
+    {
+        "id": "hi-in",
+        "label": "Hindi",
+        "lang_code": "h",
+        "tts_lang": "hi",
+        "voices": (
+            "hf_alpha",
+            "hf_beta",
+            "hm_omega",
+            "hm_psi",
+        ),
+    },
+    {
+        "id": "it-it",
+        "label": "Italian",
+        "lang_code": "i",
+        "tts_lang": "it",
+        "voices": (
+            "if_sara",
+            "im_nicola",
+        ),
+    },
+    {
+        "id": "pt-br",
+        "label": "Brazilian Portuguese",
+        "lang_code": "p",
+        "tts_lang": "pt-br",
+        "voices": (
+            "pf_dora",
+            "pm_alex",
+            "pm_santa",
+        ),
+    },
+)
+
+_KOKORO_SHA256_PREFIXES: dict[str, str] = {
+    "af_heart": "0ab5709b",
+    "af_alloy": "6d877149",
+    "af_aoede": "c03bd1a4",
+    "af_bella": "8cb64e02",
+    "af_jessica": "cdfdccb8",
+    "af_kore": "8bfbc512",
+    "af_nicole": "c5561808",
+    "af_nova": "e0233676",
+    "af_river": "e149459b",
+    "af_sarah": "49bd364e",
+    "af_sky": "c799548a",
+    "am_adam": "ced7e284",
+    "am_echo": "8bcfdc85",
+    "am_eric": "ada66f0e",
+    "am_fenrir": "98e507ec",
+    "am_liam": "c8255075",
+    "am_michael": "9a443b79",
+    "am_onyx": "e8452be1",
+    "am_puck": "dd1d8973",
+    "am_santa": "7f2f7582",
+    "bf_alice": "d292651b",
+    "bf_emma": "d0a423de",
+    "bf_isabella": "cdd4c370",
+    "bf_lily": "6e09c2e4",
+    "bm_daniel": "fc3fce4e",
+    "bm_fable": "d44935f3",
+    "bm_george": "f1bc8122",
+    "bm_lewis": "b5204750",
+    "jf_alpha": "1bf4c9dc",
+    "jf_gongitsune": "1b171917",
+    "jf_nezumi": "d83f007a",
+    "jf_tebukuro": "0d691790",
+    "jm_kumo": "98340afd",
+    "zf_xiaobei": "9b76be63",
+    "zf_xiaoni": "95b49f16",
+    "zf_xiaoxiao": "cfaf6f2d",
+    "zf_xiaoyi": "b5235dba",
+    "zm_yunjian": "76cbf8ba",
+    "zm_yunxi": "dbe6e1ce",
+    "zm_yunxia": "bb2b03b0",
+    "zm_yunyang": "5238ac22",
+    "ef_dora": "d9d69b0f",
+    "em_alex": "5eac53f7",
+    "em_santa": "aa8620cb",
+    "ff_siwis": "8073bf2d",
+    "hf_alpha": "06906fe0",
+    "hf_beta": "63c0a1a6",
+    "hm_omega": "b55f02a8",
+    "hm_psi": "2f0f055c",
+    "if_sara": "6c0b253b",
+    "im_nicola": "234ed066",
+    "pf_dora": "07e4ff98",
+    "pm_alex": "cf0ba8c5",
+    "pm_santa": "d4210316",
+}
+
+
+def _voice_name(voice_id: str) -> str:
+    return voice_id.split("_", 1)[1].replace("_", " ").title()
+
+
+def _voice_gender(voice_id: str) -> str:
+    return "female" if voice_id[1] == "f" else "male"
+
+
+def _ensure_storage() -> None:
+    _KOKORO_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    _KOKORO_VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    _KOKORO_BANK_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def kokoro_model_path() -> Path:
+    _ensure_storage()
+    return _KOKORO_MODEL_PATH
+
+
+def kokoro_managed_voices_storage_path() -> Path:
+    return _KOKORO_VOICES_BANK_PATH
+
+
+def kokoro_managed_voices_path() -> Path:
+    _ensure_storage()
+    return kokoro_managed_voices_storage_path()
+
+
+def kokoro_voice_languages() -> list[dict[str, str]]:
+    return [{"id": item["id"], "label": item["label"]} for item in _KOKORO_LANGUAGES]
+
+
+def kokoro_voice_metadata(voice_id: str) -> dict[str, Any] | None:
+    normalized = str(voice_id or "").strip().lower()
+    for language in _KOKORO_LANGUAGES:
+        if normalized in language["voices"]:
+            return {
+                "voice_id": normalized,
+                "name": _voice_name(normalized),
+                "gender": _voice_gender(normalized),
+                "language_id": language["id"],
+                "language_label": language["label"],
+                "lang_code": language["lang_code"],
+                "tts_lang": language["tts_lang"],
+                "download_url": f"{KOKORO_VOICE_BASE_URL}/{normalized}.pt",
+                "sha256_prefix": _KOKORO_SHA256_PREFIXES.get(normalized, ""),
+            }
+    return None
+
+
+def kokoro_voice_file_path(voice_id: str) -> Path:
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata is None:
+        raise KeyError(f"unknown kokoro voice: {voice_id}")
+    _ensure_storage()
+    language_dir = _KOKORO_VOICES_DIR / str(metadata["language_id"])
+    language_dir.mkdir(parents=True, exist_ok=True)
+    return language_dir / f"{metadata['voice_id']}.pt"
+
+
+def list_kokoro_voices(language_id: str = "") -> list[dict[str, Any]]:
+    requested_language = str(language_id or "").strip().lower()
+    downloaded = downloaded_kokoro_voice_ids()
+    items: list[dict[str, Any]] = []
+    for language in _KOKORO_LANGUAGES:
+        if requested_language and language["id"] != requested_language:
+            continue
+        for voice_id in language["voices"]:
+            metadata = kokoro_voice_metadata(voice_id)
+            if metadata is None:
+                continue
+            is_downloaded = voice_id in downloaded
+            voice_path = kokoro_voice_file_path(voice_id) if is_downloaded else None
+            bytes_on_disk = voice_path.stat().st_size if voice_path and voice_path.exists() else 0
+            items.append(
+                {
+                    **metadata,
+                    "downloaded": is_downloaded,
+                    "local_path": str(voice_path) if voice_path is not None else "",
+                    "bytes": int(bytes_on_disk),
+                }
+            )
+    return items
+
+
+def downloaded_kokoro_voice_ids() -> set[str]:
+    try:
+        _ensure_storage()
+    except OSError:
+        return set()
+    downloaded: set[str] = set()
+    for path in _KOKORO_VOICES_DIR.rglob("*.pt"):
+        voice_id = path.stem.strip().lower()
+        if kokoro_voice_metadata(voice_id) is None:
+            continue
+        if path.is_file() and path.stat().st_size > 0:
+            downloaded.add(voice_id)
+    return downloaded
+
+
+def kokoro_catalog_payload(language_id: str = "") -> dict[str, Any]:
+    requested_language = str(language_id or "").strip().lower()
+    items = list_kokoro_voices(requested_language)
+    return {
+        "items": items,
+        "available_languages": kokoro_voice_languages(),
+        "selected_language": requested_language,
+        "downloaded_voice_ids": sorted(downloaded_kokoro_voice_ids()),
+    }
+
+
+def delete_kokoro_model() -> dict[str, Any]:
+    """Remove the Kokoro base ONNX file from disk.
+
+    Idempotent: missing-file is treated as success so the UI can call this
+    even when the user clicks "remove" twice in quick succession.
+    """
+    _ensure_storage()
+    existed = _KOKORO_MODEL_PATH.exists()
+    bytes_freed = _KOKORO_MODEL_PATH.stat().st_size if existed else 0
+    if existed:
+        _KOKORO_MODEL_PATH.unlink(missing_ok=True)
+    return {
+        "removed": existed,
+        "bytes_freed": int(bytes_freed),
+        "local_path": str(_KOKORO_MODEL_PATH),
+    }
+
+
+def delete_kokoro_voice(voice_id: str) -> dict[str, Any]:
+    """Remove a single Kokoro voice ``.pt`` file.
+
+    Rebuilds the managed voice bank afterwards so the runtime never tries to
+    load a tensor for a voice the user just deleted.
+    """
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata is None:
+        raise KeyError(f"unknown kokoro voice: {voice_id}")
+
+    target_path = kokoro_voice_file_path(str(metadata["voice_id"]))
+    existed = target_path.exists()
+    bytes_freed = target_path.stat().st_size if existed else 0
+    if existed:
+        target_path.unlink(missing_ok=True)
+    # Rebuild the managed bank so the freshly-removed voice is no longer
+    # served. If no voices remain, drop the bank file too — there's nothing
+    # to bundle and the empty bank would crash on load.
+    with _KOKORO_REBUILD_LOCK:
+        remaining = downloaded_kokoro_voice_ids()
+        if remaining:
+            with contextlib.suppress(Exception):
+                rebuild_kokoro_voice_bank()
+        else:
+            _KOKORO_VOICES_BANK_PATH.unlink(missing_ok=True)
+            if _KOKORO_METADATA_PATH.exists():
+                _write_voice_metadata_file(set())
+    return {
+        "voice_id": str(metadata["voice_id"]),
+        "removed": existed,
+        "bytes_freed": int(bytes_freed),
+        "local_path": str(target_path),
+    }
+
+
+def kokoro_model_status() -> dict[str, Any]:
+    _ensure_storage()
+    bytes_on_disk = _KOKORO_MODEL_PATH.stat().st_size if _KOKORO_MODEL_PATH.exists() else 0
+    return {
+        "downloaded": bool(_KOKORO_MODEL_PATH.exists() and bytes_on_disk > 0),
+        "bytes": bytes_on_disk,
+        "local_path": str(_KOKORO_MODEL_PATH),
+        "url": KOKORO_MODEL_URL,
+        "version": KOKORO_MODEL_VERSION,
+    }
+
+
+def ensure_kokoro_model(
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> Path:
+    _ensure_storage()
+    if _KOKORO_MODEL_PATH.exists() and _KOKORO_MODEL_PATH.stat().st_size > 0:
+        if progress_callback is not None:
+            total = _KOKORO_MODEL_PATH.stat().st_size
+            progress_callback(total, total)
+        return _KOKORO_MODEL_PATH
+    request = urllib.request.Request(
+        KOKORO_MODEL_URL,
+        headers={"User-Agent": "koda/kokoro-manager"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        total_bytes = int(response.headers.get("Content-Length", "0") or "0")
+        downloaded_bytes = 0
+        tmp_path = _KOKORO_MODEL_PATH.with_suffix(".tmp")
+        try:
+            with open(tmp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(_KOKORO_DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(downloaded_bytes, total_bytes)
+            tmp_path.replace(_KOKORO_MODEL_PATH)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    return _KOKORO_MODEL_PATH
+
+
+def _write_voice_metadata_file(downloaded_voice_ids: set[str]) -> None:
+    payload = {
+        "downloaded_voice_ids": sorted(downloaded_voice_ids),
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    _KOKORO_METADATA_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_kokoro_voice_pt(path: Path) -> Any:
+    """Load official Kokoro PyTorch voice tensors without requiring torch."""
+    import numpy as np
+
+    storage_dtypes: dict[str, Any] = {
+        "DoubleStorage": np.dtype("<f8"),
+        "FloatStorage": np.dtype("<f4"),
+        "HalfStorage": np.dtype("<f2"),
+        "LongStorage": np.dtype("<i8"),
+        "IntStorage": np.dtype("<i4"),
+        "ShortStorage": np.dtype("<i2"),
+        "CharStorage": np.dtype("<i1"),
+        "ByteStorage": np.dtype("u1"),
+        "BoolStorage": np.dtype("?"),
+    }
+
+    def _storage_type_name(storage_type: object) -> str:
+        if isinstance(storage_type, _TorchStorageType):
+            return storage_type.name
+        return getattr(storage_type, "__name__", str(storage_type))
+
+    with zipfile.ZipFile(path) as archive:
+        pickle_member = next((name for name in archive.namelist() if name.endswith("/data.pkl")), "")
+        if not pickle_member:
+            raise ValueError(f"invalid kokoro voice file: {path}")
+        archive_prefix = pickle_member.rsplit("/", 1)[0]
+        byteorder_member = f"{archive_prefix}/byteorder"
+        byteorder = "little"
+        if byteorder_member in archive.namelist():
+            byteorder = archive.read(byteorder_member).decode("utf-8", errors="replace").strip() or "little"
+
+        def _dtype_for_storage(storage_type: object) -> Any:
+            storage_name = _storage_type_name(storage_type)
+            dtype = storage_dtypes.get(storage_name)
+            if dtype is None:
+                raise ValueError(f"unsupported kokoro voice storage type: {storage_name}")
+            if dtype.itemsize > 1 and byteorder == "big":
+                return dtype.newbyteorder(">")
+            return dtype
+
+        def _rebuild_tensor(
+            storage: Any,
+            storage_offset: int,
+            size: tuple[int, ...],
+            stride: tuple[int, ...],
+            _requires_grad: bool,
+            _backward_hooks: object,
+            *_args: object,
+        ) -> Any:
+            shape = tuple(int(item) for item in size)
+            strides = tuple(int(item) for item in stride)
+            offset = int(storage_offset)
+            if len(shape) != len(strides):
+                raise ValueError(f"invalid kokoro voice tensor metadata: {path}")
+            max_index = offset
+            if shape:
+                max_index += sum((dim - 1) * tensor_stride for dim, tensor_stride in zip(shape, strides, strict=True))
+            if offset < 0 or max_index >= len(storage):
+                raise ValueError(f"kokoro voice tensor points outside storage: {path}")
+            view = np.lib.stride_tricks.as_strided(
+                storage[offset:],
+                shape=shape,
+                strides=tuple(tensor_stride * storage.dtype.itemsize for tensor_stride in strides),
+            )
+            return np.asarray(view, dtype=np.float32).copy()
+
+        class _KokoroVoiceUnpickler(pickle.Unpickler):
+            def find_class(self, module: str, name: str) -> object:
+                if module == "torch._utils" and name == "_rebuild_tensor_v2":
+                    return _rebuild_tensor
+                if module == "torch" and name in storage_dtypes:
+                    return _TorchStorageType(name)
+                if module == "collections" and name == "OrderedDict":
+                    from collections import OrderedDict
+
+                    return OrderedDict
+                raise pickle.UnpicklingError(f"unsupported global in kokoro voice file: {module}.{name}")
+
+            def persistent_load(self, pid: object) -> Any:
+                if not isinstance(pid, tuple) or len(pid) < 5 or pid[0] != "storage":
+                    raise pickle.UnpicklingError(f"unsupported persistent id in kokoro voice file: {pid!r}")
+                _tag, storage_type, storage_key, _location, storage_size = pid[:5]
+                storage_member = f"{archive_prefix}/data/{storage_key}"
+                dtype = _dtype_for_storage(storage_type)
+                raw = archive.read(storage_member)
+                storage = np.frombuffer(raw, dtype=dtype)
+                expected_items = int(storage_size)
+                if storage.size < expected_items:
+                    raise ValueError(f"truncated kokoro voice storage: {path}")
+                return storage[:expected_items]
+
+        with archive.open(pickle_member) as pickle_file:
+            return _KokoroVoiceUnpickler(pickle_file).load()
+
+
+def rebuild_kokoro_voice_bank() -> Path:
+    _ensure_storage()
+    with _KOKORO_REBUILD_LOCK:
+        import numpy as np
+
+        downloaded = sorted(downloaded_kokoro_voice_ids())
+        if not downloaded:
+            raise RuntimeError("no kokoro voices downloaded")
+
+        payload: dict[str, Any] = {}
+        for voice_id in downloaded:
+            payload[voice_id] = _load_kokoro_voice_pt(kokoro_voice_file_path(voice_id))
+
+        tmp_path = _KOKORO_VOICES_BANK_PATH.with_suffix(".tmp")
+        with open(tmp_path, "wb") as handle:
+            np.savez(handle, **payload)
+        tmp_path.replace(_KOKORO_VOICES_BANK_PATH)
+        _write_voice_metadata_file(set(downloaded))
+        return _KOKORO_VOICES_BANK_PATH
+
+
+def ensure_kokoro_voice_downloaded(
+    voice_id: str,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata is None:
+        raise KeyError(f"unknown kokoro voice: {voice_id}")
+
+    target_path = kokoro_voice_file_path(str(metadata["voice_id"]))
+    if target_path.exists() and target_path.stat().st_size > 0:
+        rebuild_kokoro_voice_bank()
+        total_bytes = target_path.stat().st_size
+        if progress_callback is not None:
+            progress_callback(total_bytes, total_bytes)
+        return {
+            **metadata,
+            "downloaded": True,
+            "bytes": total_bytes,
+            "local_path": str(target_path),
+        }
+
+    request = urllib.request.Request(
+        str(metadata["download_url"]),
+        headers={"User-Agent": "koda/kokoro-manager"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        total_bytes = int(response.headers.get("Content-Length", "0") or "0")
+        downloaded_bytes = 0
+        hasher = hashlib.sha256()
+        tmp_path = target_path.with_suffix(".tmp")
+        try:
+            with open(tmp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(_KOKORO_DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    hasher.update(chunk)
+                    downloaded_bytes += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(downloaded_bytes, total_bytes)
+            expected_prefix = str(metadata.get("sha256_prefix") or "").lower()
+            actual_hash = hasher.hexdigest().lower()
+            if expected_prefix and not actual_hash.startswith(expected_prefix):
+                raise RuntimeError(f"hash mismatch for {metadata['voice_id']}")
+            tmp_path.replace(target_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    rebuild_kokoro_voice_bank()
+    return {
+        **metadata,
+        "downloaded": True,
+        "bytes": target_path.stat().st_size,
+        "local_path": str(target_path),
+    }
+
+
+def ensure_default_kokoro_assets() -> tuple[Path, Path]:
+    ensure_kokoro_model()
+    if not downloaded_kokoro_voice_ids():
+        ensure_kokoro_voice_downloaded(KOKORO_DEFAULT_VOICE_ID)
+    if not _KOKORO_VOICES_BANK_PATH.exists():
+        rebuild_kokoro_voice_bank()
+    return _KOKORO_MODEL_PATH, _KOKORO_VOICES_BANK_PATH
+
+
+def resolve_kokoro_language(voice_id: str, default_language: str = "") -> str:
+    metadata = kokoro_voice_metadata(voice_id)
+    if metadata is not None:
+        return str(metadata["tts_lang"])
+    normalized_default = str(default_language or "").strip().lower()
+    if normalized_default:
+        for language in _KOKORO_LANGUAGES:
+            if language["id"] == normalized_default:
+                return str(language["tts_lang"])
+    return "pt-br"

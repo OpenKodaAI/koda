@@ -1,0 +1,203 @@
+"""Tests for provider-neutral LLM runner helpers."""
+
+import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from koda.services.llm_runner import (
+    get_provider_fallback_chain,
+    get_provider_health_snapshot,
+    run_llm,
+    summarize_native_items,
+)
+from koda.services.provider_runtime import ProviderCapabilities
+
+
+def _capability(
+    provider: str,
+    turn_mode: str,
+    *,
+    status: str = "ready",
+    can_execute: bool = True,
+    supports_native_resume: bool = True,
+    warnings: list[str] | None = None,
+    errors: list[str] | None = None,
+) -> ProviderCapabilities:
+    return ProviderCapabilities(
+        provider=provider,
+        turn_mode=turn_mode,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
+        can_execute=can_execute,
+        supports_native_resume=supports_native_resume,
+        warnings=warnings or [],
+        errors=errors or [],
+    )
+
+
+class TestRunLLM:
+    @pytest.mark.asyncio
+    async def test_routes_ollama_to_ollama_runner(self):
+        with (
+            patch(
+                "koda.services.llm_runner.normalize_provider",
+                side_effect=lambda provider: str(provider or "claude"),
+            ),
+            patch(
+                "koda.services.llm_runner.get_provider_capabilities",
+                new=AsyncMock(return_value=_capability("ollama", "new_turn", supports_native_resume=False)),
+            ),
+            patch(
+                "koda.services.ollama_runner.run_ollama",
+                new=AsyncMock(return_value={"result": "ok", "session_id": None, "error": False}),
+            ) as mock_run_ollama,
+        ):
+            result = await run_llm(
+                provider="ollama",
+                query="hello",
+                work_dir="/tmp",
+                model="qwen3:latest",
+            )
+
+        assert result["provider"] == "ollama"
+        assert result["error"] is False
+        assert mock_run_ollama.await_args.kwargs["turn_mode"] == "new_turn"
+
+    @pytest.mark.asyncio
+    async def test_infers_resume_turn_from_provider_session_id(self):
+        with (
+            patch(
+                "koda.services.llm_runner.get_provider_capabilities",
+                new=AsyncMock(return_value=_capability("codex", "resume_turn")),
+            ),
+            patch(
+                "koda.services.codex_runner.run_codex",
+                new=AsyncMock(return_value={"result": "ok", "session_id": "thread-1", "error": False}),
+            ) as mock_run_codex,
+        ):
+            result = await run_llm(
+                provider="codex",
+                query="hello",
+                work_dir="/tmp",
+                model="gpt-5.4-mini",
+                provider_session_id="thread-1",
+            )
+
+        assert result["turn_mode"] == "resume_turn"
+        assert mock_run_codex.await_args.kwargs["turn_mode"] == "resume_turn"
+
+    @pytest.mark.asyncio
+    async def test_returns_contract_error_when_resume_capability_is_unavailable(self):
+        with patch(
+            "koda.services.llm_runner.get_provider_capabilities",
+            new=AsyncMock(
+                return_value=_capability(
+                    "codex",
+                    "resume_turn",
+                    status="degraded",
+                    can_execute=False,
+                    supports_native_resume=False,
+                    errors=["codex resume unavailable"],
+                )
+            ),
+        ):
+            result = await run_llm(
+                provider="codex",
+                query="hello",
+                work_dir="/tmp",
+                model="gpt-5.4-mini",
+                provider_session_id="thread-1",
+            )
+
+        assert result["error"] is True
+        assert result["error_kind"] == "adapter_contract"
+        assert result["retryable"] is False
+
+
+class TestProviderHealthSnapshot:
+    @pytest.mark.asyncio
+    async def test_snapshot_marks_provider_degraded_when_only_new_turn_is_available(self):
+        async def _mock_capabilities(provider: str, turn_mode: str) -> ProviderCapabilities:
+            if provider == "codex" and turn_mode == "resume_turn":
+                return _capability(
+                    provider,
+                    turn_mode,
+                    status="degraded",
+                    can_execute=False,
+                    supports_native_resume=False,
+                    warnings=["resume degraded"],
+                )
+            return _capability(provider, turn_mode)
+
+        with patch("koda.services.llm_runner.get_provider_capabilities", new=_mock_capabilities):
+            snapshot = await get_provider_health_snapshot()
+
+        assert snapshot["codex"]["status"] == "degraded"
+        assert snapshot["codex"]["can_execute"] is True
+        assert snapshot["codex"]["supports_native_resume"] is False
+
+
+class TestSummarizeNativeItems:
+    def test_command_summary_does_not_expose_shell_command(self):
+        summary = summarize_native_items(
+            [
+                {
+                    "type": "command_execution",
+                    "command": "python - <<'PY'\nsecret = 'value'\nPY",
+                }
+            ]
+        )
+
+        assert "Concluido:" in summary
+        assert "etapa" in summary
+        assert "python" not in summary
+        assert "secret" not in summary
+        assert "Tools:" not in summary
+
+    def test_file_change_summary_names_file_without_raw_event(self):
+        summary = summarize_native_items([{"type": "file_change", "kind": "add", "path": "/tmp/relatorio.docx"}])
+
+        assert "relatorio.docx" in summary
+        assert "file_change" not in summary
+
+
+class TestProviderFallbackChain:
+    def test_filters_out_ineligible_provider_from_snapshot_env(self, monkeypatch):
+        monkeypatch.setattr(
+            "koda.services.llm_runner.PROVIDER_FALLBACK_ORDER",
+            ["claude", "codex"],
+        )
+        monkeypatch.setenv(
+            "AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON",
+            json.dumps(
+                {
+                    "claude": {"eligible": False, "reason": "unverified"},
+                    "codex": {"eligible": True, "reason": ""},
+                }
+            ),
+        )
+
+        chain = get_provider_fallback_chain("claude")
+
+        assert "claude" not in chain
+        assert "codex" in chain
+
+    def test_chain_contains_only_primary_when_fallback_order_is_empty(self, monkeypatch):
+        monkeypatch.setattr("koda.services.llm_runner.PROVIDER_FALLBACK_ORDER", [])
+        monkeypatch.delenv("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", raising=False)
+
+        chain = get_provider_fallback_chain("claude")
+
+        assert chain == ["claude"]
+
+    def test_chain_respects_configured_fallback_order(self, monkeypatch):
+        monkeypatch.setattr(
+            "koda.services.llm_runner.PROVIDER_FALLBACK_ORDER",
+            ["codex"],
+        )
+        monkeypatch.delenv("AGENT_PROVIDER_RUNTIME_ELIGIBILITY_JSON", raising=False)
+
+        chain = get_provider_fallback_chain("claude")
+
+        assert chain[0] == "claude"
+        assert "codex" in chain

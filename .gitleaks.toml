@@ -1,0 +1,17 @@
+title = "Koda gitleaks allowlist"
+
+[[allowlists]]
+description = "Security redaction and SSH key fixtures in tests"
+paths = [
+  '''tests/test_services/test_audit_redaction\.py''',
+  '''tests/test_services/test_db_manager\.py''',
+]
+
+[[allowlists]]
+description = "Public Claude OAuth client identifier"
+paths = [
+  '''koda/services/provider_auth\.py''',
+]
+regexes = [
+  '''9d1c250a-e61b-44d9-88ed-5944d1962f5e''',
+]
