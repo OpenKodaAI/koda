@@ -113,17 +113,18 @@ published older tag should happen through a new patch release, not by retargetin
 For backfills, recovery, or operator-controlled releases, you can still:
 
 - run `cut-release-tag` with `workflow_dispatch`
-- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) with `mode=publish` from the ref you want to release
 - push a matching `v<version>` tag manually
+- run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) with `mode=publish` from `main` for an existing `v<version>` tag
 - run [`../../.github/workflows/release.yml`](../../.github/workflows/release.yml) in `dry-run` mode before publishing
 
-When `release.yml` runs in `publish` mode from `main` or another non-tag ref, it validates the ref, creates
-`v<version>` when needed, and then publishes from that same run after all gates pass.
+Manual `release.yml` publish runs are intentionally tag-only: the workflow must execute from `main`, and
+`release_ref` must be an existing `v<version>` tag. Branch refs remain valid for `dry-run`, but cannot publish or
+create a release tag. This keeps manual recovery from bypassing the `main` release gate.
 
-Example manual publish from `main` with GitHub CLI:
+Example manual publish for an existing tag with GitHub CLI:
 
 ```bash
-gh workflow run release.yml --ref main -f mode=publish -f release_ref=main
+gh workflow run release.yml --ref main -f mode=publish -f release_ref=v1.2.3
 ```
 
 Validation-only dry run from `main`:
