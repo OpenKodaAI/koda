@@ -24,6 +24,9 @@
     "web": "ghcr.io/openkodaai/koda-web:1.0.16",
     "memory": "ghcr.io/openkodaai/koda-memory:1.0.16",
     "security": "ghcr.io/openkodaai/koda-security:1.0.16",
+    "artifact": "ghcr.io/openkodaai/koda-artifact:1.0.16",
+    "retrieval": "ghcr.io/openkodaai/koda-retrieval:1.0.16",
+    "runtime_kernel": "ghcr.io/openkodaai/koda-runtime-kernel:1.0.16",
     "postgres": "pgvector/pgvector:pg16",
     "seaweedfs": "chrislusf/seaweedfs:4.05",
     "awscli": "amazon/aws-cli:2.27.41"

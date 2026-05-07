@@ -184,11 +184,23 @@ async function writeReleaseEnv(installDir, manifest) {
     KODA_WEB_IMAGE: manifest.images.web,
     KODA_MEMORY_IMAGE: manifest.images.memory,
     KODA_SECURITY_IMAGE: manifest.images.security,
+    KODA_ARTIFACT_IMAGE: manifest.images.artifact,
+    KODA_RETRIEVAL_IMAGE: manifest.images.retrieval,
+    KODA_RUNTIME_KERNEL_IMAGE: manifest.images.runtime_kernel,
     KODA_POSTGRES_IMAGE: manifest.images.postgres,
     KODA_SEAWEEDFS_IMAGE: manifest.images.seaweedfs,
     KODA_AWSCLI_IMAGE: manifest.images.awscli,
     KODA_RELEASE_VERSION: manifest.version,
   };
+  const missing = Object.entries(imageMap)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    throw new Error(
+      `Release manifest is missing required image refs: ${missing.join(", ")}. ` +
+        "Re-run `python scripts/release_metadata.py --write` and rebuild the bundle.",
+    );
+  }
   const body = Object.entries(imageMap)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
