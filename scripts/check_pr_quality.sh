@@ -16,6 +16,7 @@ run uv run mypy koda/ --ignore-missing-imports
 run uv run pytest --cov=koda --cov-report=term-missing
 
 run pnpm install --frozen-lockfile
+run pnpm audit --audit-level=moderate
 run pnpm lint:web
 run pnpm test:web
 run pnpm build:web

@@ -276,7 +276,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "publish-ghcr" in jobs
     assert "publish-npm" in jobs
     assert "github-release" in jobs
-    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "write"
+    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "read"
     assert jobs["publish-ghcr"]["environment"] == "release"
     assert jobs["publish-npm"]["environment"] == "release"
     assert jobs["github-release"]["environment"] == "release"
@@ -288,6 +288,9 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
 
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert "NPM_TOKEN" in workflow_text
+    assert "Manual publish runs must execute the workflow from main" in workflow_text
+    assert "Manual publish mode only accepts an existing v<version> release tag" in workflow_text
+    assert "Publish mode only accepts an existing v<version> release tag" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
     assert "Upgrade npm for trusted publishing support" not in workflow_text
@@ -327,7 +330,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "Create or update GitHub release" in workflow_text
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
     assert "Publish status:" in workflow_text
-    assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
+    assert 'git push origin "refs/tags/${RELEASE_TAG}"' not in workflow_text
     assert "scripts/sync_npm_readme.py" in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "Verify public GHCR image tags" in workflow_text
@@ -440,6 +443,9 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "treat it as immutable" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
     assert "release.yml" in release_docs_text
+    assert "Manual `release.yml` publish runs are intentionally tag-only" in release_docs_text
+    assert "`release_ref` must be an existing `v<version>` tag" in release_docs_text
+    assert "Branch refs remain valid for `dry-run`, but cannot publish" in release_docs_text
     assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
     assert "Grant `id-token: write` to both `release.yml` and `cut-release-tag.yml`" in release_docs_text
     assert "optional `release` environment" in release_docs_text

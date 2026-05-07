@@ -101,7 +101,7 @@ jobs:
             --require-hashes \
             --disable-pip
       - name: Node dependency audit
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=moderate
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit
