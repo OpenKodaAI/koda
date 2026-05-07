@@ -1,0 +1,6 @@
+{
+  "operation": "tracing.start_span no-op context manager when OTLP endpoint is unset",
+  "measured_ns_authoring": 452,
+  "max_ns": 3000,
+  "rationale": "Workers wrap every tool call in a span; the no-op cost must stay tiny so disabled tracing has near-zero impact. Measured 452ns; baseline 3000ns catches accidental import-time overhead."
+}

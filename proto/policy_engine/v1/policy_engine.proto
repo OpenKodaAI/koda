@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package koda.policy_engine.v1;
+
+import "common/v1/metadata.proto";
+
+// koda-policy-engine — quotas, rate limits, spend caps.
+//
+// Sits on the message-ingest hot path: every queued user message hits
+// CheckIngest before being enqueued; every LLM-billing event hits
+// RecordSpend; every concurrent agent slot is reserved/released here.
+// Decisions must be sub-millisecond — the implementation uses sharded
+// in-memory token buckets per workspace flushed periodically to
+// cp_quota_state in Postgres so a restart preserves accumulated spend
+// without losing cluster-wide fairness.
+
+service PolicyEngineService {
+  // Hot path: returns Allow/Deny + reason in <1ms p99 at 10k req/s.
+  rpc CheckIngest(CheckIngestRequest) returns (CheckIngestResponse);
+
+  // Called after the LLM call returns with billed cost. Updates the
+  // per-workspace running spend; emits a StripeOnSpendThreshold event
+  // (warn @ 80%, hard-stop @ 100%) which the supervisor hooks.
+  rpc RecordSpend(RecordSpendRequest) returns (RecordSpendResponse);
+
+  // Concurrency guards: workers acquire a slot before starting
+  // expensive work and release it after completion (or on crash via
+  // TTL). Slot count is policy-driven per workspace.
+  rpc AcquireSlot(AcquireSlotRequest) returns (AcquireSlotResponse);
+  rpc ReleaseSlot(ReleaseSlotRequest) returns (ReleaseSlotResponse);
+
+  // Operator hook for changing a workspace's quota policy at runtime.
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+}
+
+message Policy {
+  string workspace_id = 1;
+  int32 max_concurrent_agents = 2;
+  int32 max_messages_per_minute = 3;
+  double monthly_llm_spend_usd_cap = 4;
+  // Soft warning threshold (0.0..1.0). Default 0.8 — spend reports
+  // surface a warning to operators while still allowing traffic.
+  double spend_warning_fraction = 5;
+  bool enabled = 6;
+}
+
+message CheckIngestRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string workspace_id = 2;
+  string agent_id = 3;
+  int32 message_size_bytes = 4;
+}
+
+message CheckIngestResponse {
+  bool allowed = 1;
+  // When allowed is false, why: e.g. "rate_limit_exceeded",
+  // "monthly_spend_cap_reached", "concurrent_agent_limit".
+  string deny_reason = 2;
+  // Hint for the caller about how long to back off (server suggested).
+  int32 retry_after_ms = 3;
+}
+
+message RecordSpendRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string workspace_id = 2;
+  string agent_id = 3;
+  double cost_usd = 4;
+  string provider = 5;
+  string model = 6;
+}
+
+message RecordSpendResponse {
+  double remaining_budget_usd = 1;
+  bool warning_threshold_crossed = 2;
+  bool hard_stop_threshold_crossed = 3;
+}
+
+message AcquireSlotRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string workspace_id = 2;
+  string agent_id = 3;
+  // Slot lease TTL in seconds — auto-released if the holder crashes.
+  int32 lease_ttl_seconds = 4;
+}
+
+message AcquireSlotResponse {
+  bool acquired = 1;
+  string slot_token = 2;
+  int32 active_holders = 3;
+  int32 max_holders = 4;
+}
+
+message ReleaseSlotRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string workspace_id = 2;
+  string slot_token = 3;
+}
+
+message ReleaseSlotResponse {
+  bool released = 1;
+}
+
+message UpdatePolicyRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  Policy policy = 2;
+}
+
+message UpdatePolicyResponse {
+  Policy policy = 1;
+}
+
+message GetPolicyRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string workspace_id = 2;
+}
+
+message GetPolicyResponse {
+  Policy policy = 1;
+}

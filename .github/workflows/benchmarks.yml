@@ -1,0 +1,51 @@
+name: benchmarks
+
+# Phase G — bench regression gate.
+#
+# Runs every Python benchmark in ``tests/benchmarks/`` against the
+# JSON baselines committed under ``tests/benchmarks/baselines/``.
+# A regression beyond the baseline tolerance fails the workflow,
+# surfacing performance issues at PR time instead of in production.
+#
+# Triggers:
+# - On PR when bench files or hot-path code under test changes.
+# - Manual dispatch when refreshing baselines after a deliberate
+#   performance change.
+
+on:
+  pull_request:
+    paths:
+      - 'tests/benchmarks/**'
+      - 'koda/internal_rpc/circuit_breaker.py'
+      - 'koda/services/blocked_patterns.py'
+      - 'koda/services/command_guard.py'
+      - 'koda/observability/tracing.py'
+      - 'rust/koda-command-guard/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime + test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev] || pip install -e .
+      - name: Build koda-command-guard wheel
+        run: |
+          pip install 'maturin>=1.7,<2.0'
+          (cd rust/koda-command-guard && maturin build --release --interpreter "$(which python)")
+          pip install --force-reinstall rust/koda-command-guard/target/wheels/koda_command_guard-*.whl
+      - name: Run benchmarks
+        env:
+          KODA_RUN_BENCHMARKS: '1'
+        run: pytest tests/benchmarks/ -v --no-cov
