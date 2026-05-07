@@ -757,7 +757,12 @@ jobs:
   publish-ghcr:
     name: publish-ghcr
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Multi-arch builds for the heavier Rust sidecars (notably koda-artifact)
+    # exceed 45 minutes on standard runners. v1.0.17's release run hit this
+    # cap twice on koda-artifact while the other six images finished in
+    # 14-40 min. Bump the cap to 90 to leave headroom without letting a
+    # genuinely stuck build squat on a runner indefinitely.
+    timeout-minutes: 90
     needs:
       - prepare
       - build-release-bundle
