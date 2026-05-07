@@ -17,6 +17,7 @@ concurrency:
 env:
   NODE_VERSION: "22"
   NPM_PACKAGE_NAME: "@openkodaai/koda"
+  GHCR_PLATFORMS: linux/amd64,linux/arm64
 
 permissions:
   actions: write
@@ -274,7 +275,17 @@ jobs:
 
           missing=()
           for ref in "${expected_refs[@]}"; do
-            if ! docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+            if ! docker buildx imagetools inspect "${ref}" > inspect.txt 2>/dev/null; then
+              missing+=("${ref}")
+              continue
+            fi
+            missing_platform="false"
+            for platform in ${GHCR_PLATFORMS//,/ }; do
+              if ! grep -q "Platform:[[:space:]]*${platform}" inspect.txt; then
+                missing_platform="true"
+              fi
+            done
+            if [ "${missing_platform}" = "true" ]; then
               missing+=("${ref}")
             fi
           done

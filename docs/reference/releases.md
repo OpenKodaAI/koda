@@ -72,7 +72,7 @@ set at release time.
 
 Only after the pre-publish gates pass does the workflow:
 
-- push the versioned GHCR images and verify their public visibility
+- push the versioned GHCR images for `linux/amd64` and `linux/arm64`, then verify their public visibility and platforms
 - publish the scoped npm package with provenance after GHCR is publicly pullable
 - run the public npm install smoke
 - create a GitHub Release with the bundle archive, manifest, checksums, SBOM, and npm tarball
@@ -101,8 +101,8 @@ the repository `GITHUB_TOKEN`, so `cut-release-tag` explicitly starts the publis
 
 This keeps release publication idempotent:
 
-- if `v<version>` already exists on the current commit and the GitHub release, npm dist-tag, and publicly pullable GHCR image tags are complete, the tag-cut workflow exits without creating a duplicate release
-- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing or private, the tag-cut workflow dispatches `release.yml` again for recovery
+- if `v<version>` already exists on the current commit and the GitHub release, npm dist-tag, and publicly pullable multi-arch GHCR image tags are complete, the tag-cut workflow exits without creating a duplicate release
+- if `v<version>` already exists on the current commit but the GitHub release is draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing, private, or missing a required platform, the tag-cut workflow dispatches `release.yml` again for recovery
 - if `v<version>` already exists on an older commit and that publication is complete, the workflow exits without retagging or publishing a duplicate package
 - if `v<version>` already exists on an older commit but the GitHub release, npm publication, or public GHCR publication is incomplete, the workflow fails loudly and requires a new patch version from the validated commit
 - to ship a new public release, bump the repository version first, then merge to `main`
@@ -196,7 +196,7 @@ Recommended GitHub setup:
 - configure npm trusted publishing for `OpenKodaAI/koda`, [release.yml](../../.github/workflows/release.yml), and the
   optional `release` environment if you want npm to bind trust to the protected deploy stage
 - keep `NPM_TOKEN` only as a fallback or transition mechanism if trusted publishing is not enabled yet
-- make the four GHCR packages public (`koda-app`, `koda-web`, `koda-memory`, and `koda-security`); release validation checks anonymous pulls because the npm installer must work without a GitHub login
+- make the four GHCR packages public (`koda-app`, `koda-web`, `koda-memory`, and `koda-security`); release validation checks anonymous pulls for `linux/amd64` and `linux/arm64` because the npm installer must work without a GitHub login on common Linux and Apple Silicon hosts
 - use [release.yml](../../.github/workflows/release.yml) directly for dry runs or operator-controlled publish recovery, but
   expect trusted publishing to come from `release.yml` on both the automatic and manual recovery paths
 
