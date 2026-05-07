@@ -61,7 +61,7 @@ function printHelp() {
   console.log(`Koda CLI
 
 Usage:
-  koda install [--dir <path>] [--manifest <path>] [--headless]
+  koda install [--dir <path>] [--manifest <path>] [--headless] [--reset-volumes]
   koda up [--dir <path>]
   koda down [--dir <path>]
   koda doctor [--dir <path>] [--json]
@@ -70,6 +70,12 @@ Usage:
   koda logs [--dir <path>] [service...]
   koda version [--dir <path>]
   koda uninstall [--dir <path>] [--purge]
+
+Options:
+  --reset-volumes  Destroy any pre-existing Docker volumes managed by the
+                   target install before bringing the stack up. Use this when
+                   reinstalling and the previous Postgres password no longer
+                   matches the volume on disk.
 `);
 }
 
@@ -216,6 +222,15 @@ function loopbackUrl(port, path = "") {
   return `http://${LOOPBACK_HOST}:${port}${path}`;
 }
 
+function composeProjectName(installDir) {
+  // Mirrors the docker compose project-name normalization rules: lowercase the
+  // basename, drop characters outside [a-z0-9_-], and trim leading separators
+  // so we can ask `docker volume ls` for volumes labeled with this project.
+  const base = basename(installDir).toLowerCase();
+  const filtered = base.replace(/[^a-z0-9_-]/g, "");
+  return filtered.replace(/^[_-]+/, "");
+}
+
 function composeArgs(installDir) {
   return [
     "compose",
@@ -235,6 +250,127 @@ function composeUpEnv() {
   return {
     COMPOSE_PARALLEL_LIMIT: limit && limit.trim() ? limit : "1",
   };
+}
+
+function listManagedVolumes(projectName) {
+  if (!projectName) {
+    return [];
+  }
+  const result = spawnSync(
+    "docker",
+    [
+      "volume",
+      "ls",
+      "--quiet",
+      "--filter",
+      `label=com.docker.compose.project=${projectName}`,
+    ],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+  return String(result.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function resetManagedVolumes(installDir) {
+  // Prefer compose-aware teardown so we honor labels and dependencies. The
+  // command is a no-op when nothing exists, which matches the "fresh install"
+  // expectation users have when they pass --reset-volumes.
+  const composeFile = join(installDir, "bundle", "docker-compose.release.yml");
+  if (existsSync(composeFile) && existsSync(join(installDir, ".env"))) {
+    const result = spawnSync(
+      "docker",
+      [...composeArgs(installDir), "down", "-v", "--remove-orphans"],
+      { cwd: installDir, stdio: "inherit" },
+    );
+    if (result.status === 0) {
+      return;
+    }
+  }
+
+  const projectName = composeProjectName(installDir);
+  const volumes = listManagedVolumes(projectName);
+  if (volumes.length === 0) {
+    return;
+  }
+  const removal = spawnSync("docker", ["volume", "rm", "-f", ...volumes], {
+    stdio: "inherit",
+  });
+  if (removal.status !== 0) {
+    throw new Error(
+      `Failed to remove managed volumes for project '${projectName}'. ` +
+        `Try: docker volume rm ${volumes.join(" ")}`,
+    );
+  }
+}
+
+function describeReinstallConflict(installDir, volumes) {
+  const projectName = composeProjectName(installDir);
+  return [
+    `Detected pre-existing Docker volumes for compose project '${projectName}' but no .env in ${installDir}.`,
+    "These volumes were created by a previous install and still hold the old Postgres credentials. ",
+    "A fresh install would generate new random passwords that the existing volume will reject.",
+    "",
+    "Pick one:",
+    `  • Reuse the previous install: copy its .env back to ${installDir}/.env, then re-run koda install.`,
+    `  • Wipe and start clean:       koda install --dir ${installDir} --reset-volumes`,
+    `  • Inspect the volumes:        docker volume ls --filter label=com.docker.compose.project=${projectName}`,
+    "",
+    `Volumes detected: ${volumes.join(", ")}`,
+  ].join("\n");
+}
+
+async function probePostgresAuth(installDir, env) {
+  // Run a single auth-only query through the postgres container. We pass the
+  // password via -e so it never lands on the docker exec argv.
+  const args = [
+    ...composeArgs(installDir),
+    "exec",
+    "-T",
+    "-e",
+    `PGPASSWORD=${env.POSTGRES_PASSWORD || ""}`,
+    "postgres",
+    "psql",
+    "-h",
+    "localhost",
+    "-U",
+    String(env.POSTGRES_USER || ""),
+    "-d",
+    String(env.POSTGRES_DB || ""),
+    "-tAc",
+    "SELECT 1",
+  ];
+  const result = spawnSync("docker", args, {
+    cwd: installDir,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout = String(result.stdout || "").trim();
+  const stderr = String(result.stderr || "").trim();
+  return {
+    ok: result.status === 0 && stdout === "1",
+    output: stderr || stdout || `psql exited with code ${result.status ?? "?"}`,
+  };
+}
+
+function describePostgresAuthFailure(installDir, output) {
+  const projectName = composeProjectName(installDir);
+  return [
+    "Postgres rejected the credentials in .env.",
+    "This usually means a Docker volume from a previous install still holds the old password hash.",
+    "",
+    `psql output:`,
+    output,
+    "",
+    "Pick one:",
+    `  • Reuse the previous install: restore the matching .env into ${installDir}/.env, then re-run.`,
+    `  • Wipe and start clean:       koda install --dir ${installDir} --reset-volumes`,
+    `  • Inspect the volumes:        docker volume ls --filter label=com.docker.compose.project=${projectName}`,
+  ].join("\n");
 }
 
 function runCommand(command, args, { cwd, stdio = "inherit", env } = {}) {
@@ -487,19 +623,44 @@ function maybeOpenBrowser(url) {
 
 async function installCommand(args) {
   const headless = consumeFlag(args, "--headless");
+  const resetVolumes = consumeFlag(args, "--reset-volumes");
   const manifestArg = consumeOption(args, "--manifest", undefined);
   const installDir = resolveInstallDir(args);
   const { manifest, releaseRoot } = await loadManifest(manifestArg);
+
+  // The .env we are about to mint will only match a fresh Postgres data
+  // directory. If the user already has volumes from a prior install but no
+  // .env (typical after `koda uninstall` without --purge, or a manual rm of
+  // ~/.koda), abort with an actionable message instead of waiting for the app
+  // healthcheck to time out on auth failures.
+  const envExistedBefore = existsSync(join(installDir, ".env"));
+  if (resetVolumes) {
+    resetManagedVolumes(installDir);
+  } else if (!envExistedBefore) {
+    const volumes = listManagedVolumes(composeProjectName(installDir));
+    if (volumes.length > 0) {
+      throw new Error(describeReinstallConflict(installDir, volumes));
+    }
+  }
 
   await copyReleaseBundle(releaseRoot, installDir);
   await writeBootstrapEnvIfMissing(installDir);
   await writeReleaseEnv(installDir, manifest);
   await verifyBundledChecksums(installDir, manifest);
 
-  runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
-    cwd: installDir,
-    env: composeUpEnv(),
-  });
+  try {
+    runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
+      cwd: installDir,
+      env: composeUpEnv(),
+    });
+  } catch (error) {
+    const env = await readInstallEnv(installDir).catch(() => ({}));
+    const probe = await probePostgresAuth(installDir, env).catch(() => null);
+    if (probe && !probe.ok) {
+      throw new Error(describePostgresAuthFailure(installDir, probe.output));
+    }
+    throw error;
+  }
 
   const env = await readInstallEnv(installDir);
   await waitForHttp(loopbackUrl(env.CONTROL_PLANE_PORT || "8090", "/health"), "the control plane");

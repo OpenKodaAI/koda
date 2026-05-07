@@ -130,6 +130,15 @@ python3 scripts/doctor.py \
 - Object storage errors: check `seaweedfs` and `seaweedfs-init`.
 - Browser login loops: verify `WEB_OPERATOR_SESSION_SECRET` is stable in `.env`.
 - Runtime worker spawn failures: rebuild `runtime-kernel`; it must contain the Python runtime and shared Koda volumes.
+- `koda install` aborts with `Detected pre-existing Docker volumes ... but no .env`: a
+  previous install left its volumes behind (typical after `koda uninstall` without
+  `--purge`, or after deleting `~/.koda` by hand). The auto-generated random
+  Postgres password will not match the volume on disk. Either restore the matching
+  `.env` into the install dir, or run `koda install --reset-volumes` to wipe the
+  managed volumes and start clean.
+- `koda install` fails after `up -d` with `Postgres rejected the credentials`: same
+  root cause as above, surfaced after the stack started. Use the same recovery
+  steps.
 
 ## Local-Native PID Files
 
