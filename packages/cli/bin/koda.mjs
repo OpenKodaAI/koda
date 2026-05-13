@@ -416,6 +416,75 @@ function commandExists(command) {
   return result.status === 0;
 }
 
+function trimCommandOutput(text, limit = 1600) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed || trimmed.length <= limit) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, limit)}\n...`;
+}
+
+function dockerStartHint() {
+  if (process.platform === "darwin" || process.platform === "win32") {
+    return "Start Docker Desktop and wait until it says Docker is running, then run this command again.";
+  }
+  return "Start the Docker service, then run this command again.";
+}
+
+function isDockerDaemonUnavailableOutput(text) {
+  const normalized = String(text || "").toLowerCase();
+  return [
+    "cannot connect to the docker daemon",
+    "cannot connect to docker daemon",
+    "is the docker daemon running",
+    "docker daemon is not running",
+    "docker desktop is not running",
+    "error during connect",
+  ].some((snippet) => normalized.includes(snippet));
+}
+
+function dockerDaemonUnavailableError(output = "") {
+  const dockerOutput = trimCommandOutput(output);
+  const message = [
+    "Koda needs Docker to start its local services, but the Docker daemon is not reachable.",
+    dockerStartHint(),
+    "Check with: docker info",
+  ];
+  if (dockerOutput) {
+    message.push("", "Docker said:", dockerOutput);
+  }
+  return new Error(message.join("\n"));
+}
+
+function ensureDockerReady() {
+  const result = runCommandCapture("docker", ["info", "--format", "{{json .ServerVersion}}"]);
+  if (result.error) {
+    if (result.error.code === "ENOENT") {
+      throw new Error(
+        [
+          "Koda needs Docker to start its local services, but the Docker CLI was not found.",
+          "Install Docker Desktop or Docker Engine, then run this command again.",
+          "Check with: docker --version",
+        ].join("\n"),
+      );
+    }
+    throw result.error;
+  }
+  if (result.status === 0) {
+    return;
+  }
+
+  throw dockerDaemonUnavailableError(`${result.stderr || ""}\n${result.stdout || ""}`);
+}
+
+function runDockerCompose(installDir, args, options = {}) {
+  ensureDockerReady();
+  return runCommand("docker", [...composeArgs(installDir), ...args], {
+    cwd: installDir,
+    ...options,
+  });
+}
+
 async function waitForHttp(url, label) {
   const timeoutAt = Date.now() + 120_000;
   while (Date.now() < timeoutAt) {
@@ -640,6 +709,8 @@ async function installCommand(args) {
   const installDir = resolveInstallDir(args);
   const { manifest, releaseRoot } = await loadManifest(manifestArg);
 
+  ensureDockerReady();
+
   // The .env we are about to mint will only match a fresh Postgres data
   // directory. If the user already has volumes from a prior install but no
   // .env (typical after `koda uninstall` without --purge, or a manual rm of
@@ -661,14 +732,16 @@ async function installCommand(args) {
   await verifyBundledChecksums(installDir, manifest);
 
   try {
-    runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
-      cwd: installDir,
+    runDockerCompose(installDir, ["up", "-d"], {
       env: composeUpEnv(),
     });
   } catch (error) {
     const env = await readInstallEnv(installDir).catch(() => ({}));
     const probe = await probePostgresAuth(installDir, env).catch(() => null);
     if (probe && !probe.ok) {
+      if (isDockerDaemonUnavailableOutput(probe.output)) {
+        throw dockerDaemonUnavailableError(probe.output);
+      }
       throw new Error(describePostgresAuthFailure(installDir, probe.output));
     }
     throw error;
@@ -702,20 +775,19 @@ async function installCommand(args) {
 
 async function upCommand(args) {
   const installDir = resolveInstallDir(args);
-  runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
-    cwd: installDir,
+  runDockerCompose(installDir, ["up", "-d"], {
     env: composeUpEnv(),
   });
 }
 
 async function downCommand(args) {
   const installDir = resolveInstallDir(args);
-  runCommand("docker", [...composeArgs(installDir), "down"], { cwd: installDir });
+  runDockerCompose(installDir, ["down"]);
 }
 
 async function logsCommand(args) {
   const installDir = resolveInstallDir(args);
-  runCommand("docker", [...composeArgs(installDir), "logs", "-f", ...args], { cwd: installDir });
+  runDockerCompose(installDir, ["logs", "-f", ...args]);
 }
 
 async function versionCommand(args) {
@@ -755,6 +827,8 @@ async function updateCommand(args) {
   let backupRoot = null;
   let backupDir = null;
 
+  ensureDockerReady();
+
   if (existsSync(installDir)) {
     backupRoot = await mkdtemp(join(tmpdir(), "koda-rollback-"));
     backupDir = join(backupRoot, basename(installDir));
@@ -765,8 +839,7 @@ async function updateCommand(args) {
     await copyReleaseBundle(releaseRoot, installDir);
     await writeReleaseEnv(installDir, manifest);
     await verifyBundledChecksums(installDir, manifest);
-    runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
-      cwd: installDir,
+    runDockerCompose(installDir, ["up", "-d"], {
       env: composeUpEnv(),
     });
     await doctorCommand(["--dir", installDir]);
@@ -777,8 +850,7 @@ async function updateCommand(args) {
     if (backupDir !== null && existsSync(backupDir)) {
       await rm(installDir, { recursive: true, force: true });
       await cp(backupDir, installDir, { recursive: true, force: true });
-      runCommand("docker", [...composeArgs(installDir), "up", "-d"], {
-        cwd: installDir,
+      runDockerCompose(installDir, ["up", "-d"], {
         env: composeUpEnv(),
       });
       if (backupRoot !== null) {
@@ -793,7 +865,7 @@ async function uninstallCommand(args) {
   const purge = consumeFlag(args, "--purge");
   const installDir = resolveInstallDir(args);
   if (existsSync(join(installDir, "bundle", "docker-compose.release.yml"))) {
-    runCommand("docker", [...composeArgs(installDir), "down", "-v"], { cwd: installDir });
+    runDockerCompose(installDir, ["down", "-v"]);
   }
   if (purge) {
     await rm(installDir, { recursive: true, force: true });
