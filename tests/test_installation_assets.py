@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -399,7 +400,7 @@ def test_npm_cli_install_guards_against_orphan_postgres_volumes() -> None:
     assert 'consumeFlag(args, "--reset-volumes")' in install_block
     assert "describeReinstallConflict" in install_block
     detection = install_block.find("listManagedVolumes")
-    compose_up = install_block.find('[...composeArgs(installDir), "up", "-d"]')
+    compose_up = install_block.find('runDockerCompose(installDir, ["up", "-d"]')
     assert detection != -1 and compose_up != -1 and detection < compose_up
 
 
@@ -414,6 +415,71 @@ def test_npm_cli_install_probes_postgres_auth_on_failure() -> None:
     install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
     assert "probePostgresAuth(installDir, env)" in install_block
     assert "describePostgresAuthFailure" in install_block
+
+
+def test_npm_cli_reports_docker_daemon_unavailable_before_staging_install(tmp_path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'if [ "$1" = "info" ]; then',
+                '  echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2',
+                '  echo "Is the docker daemon running?" >&2',
+                "  exit 1",
+                "fi",
+                'echo "unexpected docker command: $*" >&2',
+                "exit 99",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+
+    install_dir = tmp_path / "install"
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "packages" / "cli" / "bin" / "koda.mjs"),
+            "install",
+            "--dir",
+            str(install_dir),
+            "--headless",
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "CI": "true",
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 1
+    assert "Koda needs Docker to start its local services" in combined_output
+    assert "Docker daemon is not reachable" in combined_output
+    assert "Docker said:" in combined_output
+    assert "docker info" in combined_output
+    assert "Postgres" not in combined_output
+    assert "unexpected docker command" not in combined_output
+    assert not (install_dir / ".env").exists()
+
+
+def test_npm_cli_does_not_report_postgres_auth_when_docker_daemon_drops() -> None:
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    daemon_check = install_block.find("isDockerDaemonUnavailableOutput(probe.output)")
+    postgres_message = install_block.find("describePostgresAuthFailure")
+
+    assert "function isDockerDaemonUnavailableOutput(text)" in cli_text
+    assert 'function dockerDaemonUnavailableError(output = "")' in cli_text
+    assert daemon_check != -1 and postgres_message != -1 and daemon_check < postgres_message
 
 
 def test_systemd_example_operates_docker_compose() -> None:
