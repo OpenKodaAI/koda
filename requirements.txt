@@ -26,3 +26,4 @@ cryptography>=46.0.7,<47.0
 grpcio>=1.74,<2.0
 huggingface-hub>=0.36.0,<1.0
 lxml>=6.1.0,<7.0
+urllib3>=2.7.0,<3.0
