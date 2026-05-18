@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { useId, useMemo, useState } from "react";
 import { SessionRichText } from "@/components/sessions/session-rich-text";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
@@ -30,6 +29,7 @@ export function PromptEditor({
 }: PromptEditorProps) {
   const { t } = useAppI18n();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const editorId = useId();
   const textareaRef = useAutoGrowTextarea(value, { minHeight, maxHeight });
   const charCount = value.length;
 
@@ -48,15 +48,61 @@ export function PromptEditor({
     <div className={cn("flex flex-col gap-2", className)}>
       <div
         className={cn(
-          "flex flex-col rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]",
+          "relative flex flex-col rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]",
           "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           "focus-within:border-[var(--accent)] focus-within:bg-[var(--panel)]",
           disabled && "opacity-70",
         )}
       >
+        <div
+          className="absolute right-2 top-2 z-10 inline-flex items-center gap-0.5 rounded-[6px] bg-[var(--panel-soft)] p-0.5 shadow-[0_1px_8px_rgba(0,0,0,0.16)]"
+          role="tablist"
+          aria-label={t("controlPlane.prompt.modeTabs", {
+            defaultValue: "Markdown editor mode",
+          })}
+        >
+          <button
+            type="button"
+            id={`${editorId}-preview-tab`}
+            role="tab"
+            onClick={() => setPreviewOpen(true)}
+            disabled={disabled}
+            aria-label={t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
+            aria-selected={previewOpen}
+            aria-controls={`${editorId}-preview-panel`}
+            className={cn(
+              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:pointer-events-none",
+              previewOpen &&
+                "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
+            )}
+          >
+            {t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
+          </button>
+          <button
+            type="button"
+            id={`${editorId}-markdown-tab`}
+            role="tab"
+            onClick={() => setPreviewOpen(false)}
+            disabled={disabled}
+            aria-label={t("controlPlane.prompt.markdown", { defaultValue: "Markdown" })}
+            aria-selected={!previewOpen}
+            aria-controls={`${editorId}-markdown-panel`}
+            className={cn(
+              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:pointer-events-none",
+              !previewOpen &&
+                "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
+            )}
+          >
+            {t("controlPlane.prompt.markdown", { defaultValue: "Markdown" })}
+          </button>
+        </div>
+
         {previewOpen ? (
           <div
-            className="min-h-[120px] max-h-[480px] overflow-y-auto px-4 py-3 text-[0.875rem] leading-[1.6] text-[var(--text-primary)]"
+            id={`${editorId}-preview-panel`}
+            role="tabpanel"
+            aria-labelledby={`${editorId}-preview-tab`}
+            className="min-h-[120px] max-h-[480px] overflow-y-auto px-4 pb-3 pt-11 text-[0.875rem] leading-[1.6] text-[var(--text-primary)]"
             aria-label={t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
           >
             {value.trim() ? (
@@ -67,6 +113,7 @@ export function PromptEditor({
           </div>
         ) : (
           <textarea
+            id={`${editorId}-markdown-panel`}
             ref={textareaRef}
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -75,7 +122,7 @@ export function PromptEditor({
             spellCheck
             autoComplete="off"
             className={cn(
-              "resize-none bg-transparent px-4 py-3 font-mono text-[0.8125rem] leading-[1.55]",
+              "resize-none bg-transparent px-4 pb-3 pt-11 font-mono text-[0.8125rem] leading-[1.55]",
               "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none",
             )}
             style={{ minHeight, maxHeight }}
@@ -84,25 +131,7 @@ export function PromptEditor({
       </div>
 
       <div className="flex items-center justify-between gap-3 px-1 text-[0.6875rem] text-[var(--text-tertiary)]">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPreviewOpen((value) => !value)}
-            className="inline-flex items-center gap-1 rounded-[var(--radius-panel-sm)] px-1.5 py-0.5 transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
-          >
-            {previewOpen ? (
-              <EyeOff className="icon-xs" strokeWidth={1.75} aria-hidden />
-            ) : (
-              <Eye className="icon-xs" strokeWidth={1.75} aria-hidden />
-            )}
-            <span>
-              {previewOpen
-                ? t("controlPlane.prompt.edit", { defaultValue: "Edit" })
-                : t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
-            </span>
-          </button>
-          {hint ? <span className="hidden sm:inline">· {hint}</span> : null}
-        </div>
+        <div className="min-w-0">{hint ? <span className="hidden sm:inline">{hint}</span> : null}</div>
         <span className="font-mono text-[var(--text-quaternary)]">
           {wordCount} · {charCount} chars
         </span>

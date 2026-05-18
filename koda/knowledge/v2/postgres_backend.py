@@ -86,6 +86,24 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, default=str)
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _iso_or_empty(value: Any) -> str:
+    if isinstance(value, datetime):
+        return _safe_datetime(value).isoformat()
+    return str(value or "")
+
+
 def _tokenize_query(query: str) -> list[str]:
     tokens = []
     for token in "".join(char if char.isalnum() else " " for char in query.lower()).split():
@@ -716,6 +734,7 @@ class KnowledgeV2PostgresBackend:
                             validated_by TEXT NOT NULL DEFAULT '',
                             validated_at TEXT NOT NULL DEFAULT '',
                             metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                             UNIQUE (agent_id, case_key)
                         )""",
@@ -2978,7 +2997,885 @@ class KnowledgeV2PostgresBackend:
                         EXECUTE FUNCTION "{schema}".squad_thread_cost_rollup()""",
                 ),
             ),
+            _Migration(
+                "035_squad_runtime_envelope_and_artifacts",
+                (
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS message_uuid TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS to_agent_ids JSONB NOT NULL DEFAULT '[]'::jsonb""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'agent_text'""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS causation_id TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS correlation_id TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS in_reply_to TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS requires_response_by TIMESTAMPTZ NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_messages"
+                           ADD COLUMN IF NOT EXISTS idempotency_key TEXT NULL""",
+                    f"""UPDATE "{schema}"."squad_messages"
+                           SET message_uuid = COALESCE(message_uuid, id::text),
+                               to_agent_ids = CASE
+                                   WHEN jsonb_array_length(to_agent_ids) = 0 AND to_agent IS NOT NULL
+                                   THEN jsonb_build_array(to_agent)
+                                   ELSE to_agent_ids
+                               END,
+                               kind = CASE
+                                   WHEN COALESCE(message_type, 'text') = 'text' THEN 'agent_text'
+                                   ELSE COALESCE(message_type, 'agent_text')
+                               END,
+                               payload_json = CASE
+                                   WHEN payload_json = '{{}}'::jsonb AND COALESCE(content, '') <> ''
+                                   THEN jsonb_build_object('text', content)
+                                   ELSE payload_json
+                               END
+                         WHERE message_uuid IS NULL
+                            OR jsonb_array_length(to_agent_ids) = 0
+                            OR payload_json = '{{}}'::jsonb""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_squad_messages_message_uuid
+                           ON "{schema}"."squad_messages" (message_uuid)
+                           WHERE message_uuid IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_idempotency
+                           ON "{schema}"."squad_messages" (idempotency_key, created_at DESC)
+                           WHERE idempotency_key IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_correlation
+                           ON "{schema}"."squad_messages" (correlation_id)
+                           WHERE correlation_id IS NOT NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_message_recipients" (
+                            message_id BIGINT NOT NULL REFERENCES "{schema}"."squad_messages"(id) ON DELETE CASCADE,
+                            to_agent_id TEXT NOT NULL,
+                            delivered_at TIMESTAMPTZ NULL,
+                            acked_at TIMESTAMPTZ NULL,
+                            delivery_status TEXT NOT NULL DEFAULT 'pending',
+                            delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                            lease_expires_at TIMESTAMPTZ NULL,
+                            last_error TEXT NULL,
+                            enqueued_task_id BIGINT NULL,
+                            dead_reported_at TIMESTAMPTZ NULL,
+                            PRIMARY KEY (message_id, to_agent_id)
+                        )""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'pending'""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS delivery_attempts INTEGER NOT NULL DEFAULT 0""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS last_error TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS enqueued_task_id BIGINT NULL""",
+                    f"""ALTER TABLE "{schema}"."squad_message_recipients"
+                           ADD COLUMN IF NOT EXISTS dead_reported_at TIMESTAMPTZ NULL""",
+                    f"""UPDATE "{schema}"."squad_message_recipients"
+                           SET delivery_status = CASE
+                               WHEN acked_at IS NOT NULL THEN 'acked'
+                               WHEN delivery_status IS NULL THEN 'pending'
+                               ELSE delivery_status
+                           END""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_message_recipients_agent_message
+                           ON "{schema}"."squad_message_recipients" (to_agent_id, message_id)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_message_recipients_delivery
+                           ON "{schema}"."squad_message_recipients" (to_agent_id, delivery_status, message_id)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_message_recipients_lease
+                           ON "{schema}"."squad_message_recipients" (delivery_status, lease_expires_at)
+                           WHERE delivery_status = 'leased'""",
+                    f"""INSERT INTO "{schema}"."squad_message_recipients" (message_id, to_agent_id)
+                           SELECT id, to_agent
+                             FROM "{schema}"."squad_messages"
+                            WHERE to_agent IS NOT NULL
+                              ON CONFLICT DO NOTHING""",
+                    f"""ALTER TABLE "{schema}"."query_history"
+                           ADD COLUMN IF NOT EXISTS squad_message_id TEXT NULL""",
+                    f"""ALTER TABLE "{schema}"."query_history"
+                           ADD COLUMN IF NOT EXISTS squad_task_id UUID NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_query_history_squad_task
+                           ON "{schema}"."query_history" (squad_task_id)
+                           WHERE squad_task_id IS NOT NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_artifacts" (
+                            artifact_id TEXT PRIMARY KEY,
+                            thread_id UUID NOT NULL,
+                            task_id UUID NULL,
+                            owner_agent_id TEXT NOT NULL,
+                            version INTEGER NOT NULL DEFAULT 1,
+                            kind TEXT NOT NULL DEFAULT '',
+                            path_or_uri TEXT NOT NULL DEFAULT '',
+                            visible_to_squad BOOLEAN NOT NULL DEFAULT TRUE,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_artifacts_thread_created
+                           ON "{schema}"."squad_artifacts" (thread_id, created_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_artifacts_task
+                           ON "{schema}"."squad_artifacts" (task_id)
+                           WHERE task_id IS NOT NULL""",
+                ),
+            ),
+            _Migration(
+                "036_run_graph_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."run_graph_nodes" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            task_id BIGINT NOT NULL,
+                            graph_id TEXT NOT NULL,
+                            node_id TEXT NOT NULL,
+                            attempt INTEGER NOT NULL DEFAULT 1,
+                            parent_node_id TEXT NULL,
+                            ordinal INTEGER NOT NULL DEFAULT 0,
+                            node_type TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            summary TEXT NOT NULL DEFAULT '',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            redactions_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            refs_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            trace_id TEXT NULL,
+                            audit_event_id BIGINT NULL,
+                            runtime_event_seq BIGINT NULL,
+                            source TEXT NOT NULL DEFAULT '',
+                            started_at TIMESTAMPTZ NULL,
+                            completed_at TIMESTAMPTZ NULL,
+                            duration_ms DOUBLE PRECISION NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, task_id, node_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_graph_nodes_task
+                           ON "{schema}"."run_graph_nodes" (agent_id, task_id, ordinal)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_graph_nodes_parent
+                           ON "{schema}"."run_graph_nodes" (agent_id, task_id, parent_node_id)
+                           WHERE parent_node_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_graph_nodes_type
+                           ON "{schema}"."run_graph_nodes" (agent_id, node_type, created_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."run_graph_edges" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            task_id BIGINT NOT NULL,
+                            graph_id TEXT NOT NULL,
+                            edge_id TEXT NOT NULL,
+                            from_node_id TEXT NOT NULL,
+                            to_node_id TEXT NOT NULL,
+                            edge_type TEXT NOT NULL,
+                            ordinal INTEGER NOT NULL DEFAULT 0,
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, task_id, edge_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_graph_edges_task
+                           ON "{schema}"."run_graph_edges" (agent_id, task_id, ordinal)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_graph_edges_nodes
+                           ON "{schema}"."run_graph_edges" (agent_id, task_id, from_node_id, to_node_id)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."run_replay_snapshots" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            task_id BIGINT NOT NULL,
+                            graph_id TEXT NOT NULL,
+                            attempt INTEGER NOT NULL DEFAULT 1,
+                            replay_mode TEXT NOT NULL DEFAULT 'offline',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, task_id, graph_id, attempt)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_run_replay_snapshots_task
+                           ON "{schema}"."run_replay_snapshots" (agent_id, task_id, created_at DESC)""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_discovered_tools"
+                           ADD COLUMN IF NOT EXISTS risk_class TEXT NOT NULL DEFAULT 'unknown'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_discovered_tools"
+                           ADD COLUMN IF NOT EXISTS approval_default TEXT NOT NULL DEFAULT 'require_approval'""",
+                    f"""ALTER TABLE "{schema}"."cp_mcp_discovered_tools"
+                           ADD COLUMN IF NOT EXISTS risk_metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb""",
+                ),
+            ),
+            _Migration(
+                "037_child_runs_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."child_runs" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            child_run_id TEXT NOT NULL,
+                            parent_task_id BIGINT NOT NULL,
+                            child_task_id BIGINT NULL,
+                            status TEXT NOT NULL DEFAULT 'queued',
+                            idempotency_key TEXT NOT NULL,
+                            target_agent_id TEXT NULL,
+                            toolset TEXT NOT NULL DEFAULT 'read_only',
+                            request_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            context_policy_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            context_summary_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            result_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            error_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            deadline_at TIMESTAMPTZ NULL,
+                            started_at TIMESTAMPTZ NULL,
+                            completed_at TIMESTAMPTZ NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, child_run_id)
+                        )""",
+                    f"""CREATE UNIQUE INDEX IF NOT EXISTS idx_child_runs_idempotency
+                           ON "{schema}"."child_runs" (agent_id, parent_task_id, idempotency_key)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_child_runs_parent
+                           ON "{schema}"."child_runs" (agent_id, parent_task_id, created_at ASC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_child_runs_child_task
+                           ON "{schema}"."child_runs" (agent_id, child_task_id)
+                           WHERE child_task_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_child_runs_status
+                           ON "{schema}"."child_runs" (agent_id, status, updated_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "038_skill_packages_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."skill_packages" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            package_id TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'installed',
+                            package_hash TEXT NOT NULL DEFAULT '',
+                            manifest_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            scan_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            lock_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            installed_skills_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            installed_tools_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            previous_lock_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            installed_at TIMESTAMPTZ NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, package_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_skill_packages_agent_status
+                           ON "{schema}"."skill_packages" (agent_id, status, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_skill_packages_hash
+                           ON "{schema}"."skill_packages" (agent_id, package_hash)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."skill_package_events" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            package_id TEXT NOT NULL,
+                            event_type TEXT NOT NULL,
+                            event_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_skill_package_events_agent_package
+                           ON "{schema}"."skill_package_events" (agent_id, package_id, created_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_skill_package_events_type
+                           ON "{schema}"."skill_package_events" (event_type, created_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "039_evals_release_quality_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."eval_suites" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            suite_id TEXT NOT NULL,
+                            title TEXT NOT NULL DEFAULT '',
+                            description TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'active',
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, suite_id)
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."eval_suite_cases" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            suite_id TEXT NOT NULL,
+                            case_key TEXT NOT NULL,
+                            position INTEGER NOT NULL DEFAULT 0,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, suite_id, case_key)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_eval_suite_cases_suite
+                           ON "{schema}"."eval_suite_cases" (agent_id, suite_id, position)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."eval_run_batches" (
+                            id BIGSERIAL PRIMARY KEY,
+                            run_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            suite_id TEXT NOT NULL DEFAULT 'default',
+                            strategy TEXT NOT NULL DEFAULT 'offline_replay',
+                            status TEXT NOT NULL DEFAULT 'failed',
+                            score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                            summary_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            case_results_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            requested_by TEXT NOT NULL DEFAULT '',
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, run_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_eval_run_batches_agent_created
+                           ON "{schema}"."eval_run_batches" (agent_id, created_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_eval_run_batches_status
+                           ON "{schema}"."eval_run_batches" (agent_id, status, created_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."trajectory_exports" (
+                            id BIGSERIAL PRIMARY KEY,
+                            export_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            task_id BIGINT NULL,
+                            status TEXT NOT NULL DEFAULT 'created',
+                            package_hash TEXT NOT NULL DEFAULT '',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            jsonl_text TEXT NOT NULL DEFAULT '',
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, export_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_trajectory_exports_agent_created
+                           ON "{schema}"."trajectory_exports" (agent_id, created_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_trajectory_exports_task
+                           ON "{schema}"."trajectory_exports" (agent_id, task_id, created_at DESC)
+                           WHERE task_id IS NOT NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."release_quality_runs" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'failed',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_release_quality_runs_agent_created
+                           ON "{schema}"."release_quality_runs" (agent_id, created_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "040_channel_gateway_onboarding_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."channel_gateway_identities" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            identity_id TEXT NOT NULL,
+                            channel_type TEXT NOT NULL,
+                            channel_id TEXT NOT NULL DEFAULT '',
+                            user_id TEXT NOT NULL DEFAULT '',
+                            display_name TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'pending',
+                            is_group BOOLEAN NOT NULL DEFAULT FALSE,
+                            record_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            last_seen_at TIMESTAMPTZ NULL,
+                            UNIQUE (agent_id, identity_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_gateway_identities_agent_status
+                           ON "{schema}"."channel_gateway_identities" (agent_id, status, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_gateway_identities_sender
+                           ON "{schema}"."channel_gateway_identities" (agent_id, channel_type, channel_id, user_id)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."channel_unknown_senders" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            identity_id TEXT NOT NULL,
+                            channel_type TEXT NOT NULL,
+                            channel_id TEXT NOT NULL DEFAULT '',
+                            user_id TEXT NOT NULL DEFAULT '',
+                            display_name TEXT NOT NULL DEFAULT '',
+                            status TEXT NOT NULL DEFAULT 'pending',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (agent_id, identity_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_unknown_senders_agent_status
+                           ON "{schema}"."channel_unknown_senders" (agent_id, status, last_seen_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."channel_pairing_codes" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            pairing_code_id TEXT NOT NULL,
+                            channel_type TEXT NOT NULL,
+                            code TEXT NOT NULL,
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            expires_at TIMESTAMPTZ NOT NULL,
+                            used_at TIMESTAMPTZ NULL,
+                            UNIQUE (agent_id, pairing_code_id)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_pairing_codes_active
+                           ON "{schema}"."channel_pairing_codes" (agent_id, channel_type, expires_at DESC)
+                           WHERE used_at IS NULL""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."channel_gateway_events" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            event_type TEXT NOT NULL,
+                            event_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_gateway_events_agent_created
+                           ON "{schema}"."channel_gateway_events" (agent_id, created_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_channel_gateway_events_type
+                           ON "{schema}"."channel_gateway_events" (event_type, created_at DESC)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."onboarding_readiness_runs" (
+                            id BIGSERIAL PRIMARY KEY,
+                            agent_id TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'pending',
+                            payload_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_onboarding_readiness_runs_agent_created
+                           ON "{schema}"."onboarding_readiness_runs" (agent_id, created_at DESC)""",
+                ),
+            ),
+            _Migration(
+                "041_evaluation_cases_created_at",
+                (
+                    f"""ALTER TABLE "{schema}"."evaluation_cases"
+                           ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()""",
+                ),
+            ),
+            _Migration(
+                "042_thread_replies_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."squad_reply_obligations" (
+                            id BIGSERIAL PRIMARY KEY,
+                            obligation_key TEXT NOT NULL,
+                            thread_id UUID NOT NULL REFERENCES "{schema}"."squad_threads"(id) ON DELETE CASCADE,
+                            source_message_id BIGINT NOT NULL REFERENCES "{schema}"."squad_messages"(id) ON DELETE CASCADE,
+                            target_agent_id TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'open',
+                            requires_response_by TIMESTAMPTZ NULL,
+                            resolved_by_message_id BIGINT NULL REFERENCES "{schema}"."squad_messages"(id) ON DELETE SET NULL,
+                            followup_count INTEGER NOT NULL DEFAULT 0,
+                            last_followup_at TIMESTAMPTZ NULL,
+                            metadata_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (obligation_key)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_reply_obligations_thread_status
+                           ON "{schema}"."squad_reply_obligations" (thread_id, status, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_reply_obligations_source
+                           ON "{schema}"."squad_reply_obligations" (thread_id, source_message_id, target_agent_id)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_reply_obligations_target_open
+                           ON "{schema}"."squad_reply_obligations" (target_agent_id, requires_response_by, created_at)
+                           WHERE status = 'open'""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_reply_obligations_resolved
+                           ON "{schema}"."squad_reply_obligations" (resolved_by_message_id)
+                           WHERE resolved_by_message_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_thread_reply_parent
+                           ON "{schema}"."squad_messages" (thread_id, in_reply_to, id)
+                           WHERE in_reply_to IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_thread_correlation
+                           ON "{schema}"."squad_messages" (thread_id, correlation_id, id)
+                           WHERE correlation_id IS NOT NULL""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_squad_messages_thread_response_deadline
+                           ON "{schema}"."squad_messages" (thread_id, requires_response_by)
+                           WHERE requires_response_by IS NOT NULL""",
+                ),
+            ),
+            _Migration(
+                "043_operator_profile",
+                (
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS profile_photo_hash TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_operator_users"
+                           ADD COLUMN IF NOT EXISTS profile_photo_updated_at TEXT NOT NULL DEFAULT ''""",
+                ),
+            ),
         )
+
+    async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        package_id = str(lock.get("package_id") or "").strip()
+        if not package_id:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."skill_packages" (
+                    agent_id, package_id, status, package_hash, manifest_json, scan_json,
+                    lock_json, installed_skills_json, installed_tools_json, previous_lock_json,
+                    installed_at, updated_at
+                )
+                VALUES ($1, $2, 'installed', $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb,
+                        $8::jsonb, $9::jsonb, NOW(), NOW())
+                ON CONFLICT (agent_id, package_id) DO UPDATE SET
+                    status = 'installed',
+                    package_hash = EXCLUDED.package_hash,
+                    manifest_json = EXCLUDED.manifest_json,
+                    scan_json = EXCLUDED.scan_json,
+                    lock_json = EXCLUDED.lock_json,
+                    installed_skills_json = EXCLUDED.installed_skills_json,
+                    installed_tools_json = EXCLUDED.installed_tools_json,
+                    previous_lock_json = EXCLUDED.previous_lock_json,
+                    installed_at = EXCLUDED.installed_at,
+                    updated_at = NOW()
+                """,
+                normalized_agent,
+                package_id,
+                str(lock.get("package_hash") or ""),
+                _json_dumps(lock.get("manifest") or {}),
+                _json_dumps(lock.get("scan_summary") or {}),
+                _json_dumps(lock),
+                _json_dumps(lock.get("installed_skills") or []),
+                _json_dumps(lock.get("installed_tools") or []),
+                _json_dumps(lock.get("previous_revision") or {}),
+            )
+
+    async def list_skill_package_locks(self, agent_id: str) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT lock_json
+                FROM "{self._schema}"."skill_packages"
+                WHERE agent_id = $1 AND status = 'installed'
+                ORDER BY updated_at DESC, package_id ASC
+                """,
+                normalized_agent,
+            )
+        return [_json_object(row["lock_json"]) for row in rows]
+
+    async def get_skill_package_lock(self, agent_id: str, package_id: str) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT lock_json
+                FROM "{self._schema}"."skill_packages"
+                WHERE agent_id = $1 AND package_id = $2 AND status = 'installed'
+                """,
+                normalized_agent,
+                str(package_id),
+            )
+        return _json_object(row["lock_json"]) if row else None
+
+    async def delete_skill_package_lock(self, agent_id: str, package_id: str) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                UPDATE "{self._schema}"."skill_packages"
+                SET status = 'uninstalled', updated_at = NOW()
+                WHERE agent_id = $1 AND package_id = $2
+                """,
+                normalized_agent,
+                str(package_id),
+            )
+
+    async def append_skill_package_event(
+        self,
+        agent_id: str,
+        package_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."skill_package_events" (
+                    agent_id, package_id, event_type, event_json
+                ) VALUES ($1, $2, $3, $4::jsonb)
+                """,
+                normalized_agent,
+                str(package_id or ""),
+                str(event_type or "skill_package.event"),
+                _json_dumps(payload or {}),
+            )
+
+    async def upsert_channel_gateway_identity(self, agent_id: str, record: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        identity_id = str(record.get("identity_id") or "").strip()
+        if not identity_id:
+            return
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."channel_gateway_identities" (
+                    agent_id, identity_id, channel_type, channel_id, user_id,
+                    display_name, status, is_group, record_json, last_seen_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW(), NOW())
+                ON CONFLICT (agent_id, identity_id) DO UPDATE SET
+                    channel_type = EXCLUDED.channel_type,
+                    channel_id = EXCLUDED.channel_id,
+                    user_id = EXCLUDED.user_id,
+                    display_name = EXCLUDED.display_name,
+                    status = EXCLUDED.status,
+                    is_group = EXCLUDED.is_group,
+                    record_json = EXCLUDED.record_json,
+                    last_seen_at = NOW(),
+                    updated_at = NOW()
+                """,
+                normalized_agent,
+                identity_id,
+                str(record.get("channel_type") or ""),
+                str(record.get("channel_id") or ""),
+                str(record.get("user_id") or ""),
+                str(record.get("display_name") or ""),
+                str(record.get("status") or "pending"),
+                bool(record.get("is_group")),
+                _json_dumps(record),
+            )
+
+    async def list_channel_gateway_identities(self, agent_id: str) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT agent_id, identity_id, channel_type, channel_id, user_id,
+                       display_name, status, is_group, record_json,
+                       created_at, updated_at, last_seen_at
+                FROM "{self._schema}"."channel_gateway_identities"
+                WHERE agent_id = $1
+                ORDER BY updated_at DESC, identity_id ASC
+                """,
+                normalized_agent,
+            )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            base = {
+                "schema_version": "channel_gateway.v1",
+                "agent_id": str(row["agent_id"] or normalized_agent),
+                "identity_id": str(row["identity_id"] or ""),
+                "channel_type": str(row["channel_type"] or ""),
+                "channel_id": str(row["channel_id"] or ""),
+                "user_id": str(row["user_id"] or ""),
+                "display_name": str(row["display_name"] or row["user_id"] or ""),
+                "status": str(row["status"] or "pending"),
+                "is_group": bool(row["is_group"]),
+                "scopes": ["message"],
+                "source": "channel_gateway",
+                "created_at": _iso_or_empty(row["created_at"]),
+                "updated_at": _iso_or_empty(row["updated_at"]),
+                "last_seen_at": _iso_or_empty(row["last_seen_at"]),
+            }
+            payload = _json_object(row["record_json"])
+            base.update(payload)
+            for key in (
+                "agent_id",
+                "identity_id",
+                "channel_type",
+                "channel_id",
+                "user_id",
+                "display_name",
+                "status",
+            ):
+                if not str(base.get(key) or ""):
+                    base[key] = str(row[key] or "")
+            base["is_group"] = bool(base.get("is_group"))
+            items.append(base)
+        return items
+
+    async def upsert_channel_unknown_sender(self, agent_id: str, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        identity_id = str(payload.get("identity_id") or "").strip()
+        if not identity_id:
+            return
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."channel_unknown_senders" (
+                    agent_id, identity_id, channel_type, channel_id, user_id,
+                    display_name, status, payload_json, last_seen_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+                ON CONFLICT (agent_id, identity_id) DO UPDATE SET
+                    channel_type = EXCLUDED.channel_type,
+                    channel_id = EXCLUDED.channel_id,
+                    user_id = EXCLUDED.user_id,
+                    display_name = EXCLUDED.display_name,
+                    status = EXCLUDED.status,
+                    payload_json = EXCLUDED.payload_json,
+                    last_seen_at = NOW()
+                """,
+                normalized_agent,
+                identity_id,
+                str(payload.get("channel_type") or ""),
+                str(payload.get("channel_id") or ""),
+                str(payload.get("user_id") or ""),
+                str(payload.get("display_name") or ""),
+                str(payload.get("status") or "pending"),
+                _json_dumps(payload),
+            )
+
+    async def list_channel_unknown_senders(self, agent_id: str) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT agent_id, identity_id, channel_type, channel_id, user_id,
+                       display_name, status, payload_json, first_seen_at, last_seen_at
+                FROM "{self._schema}"."channel_unknown_senders"
+                WHERE agent_id = $1 AND status = 'pending'
+                ORDER BY last_seen_at DESC, identity_id ASC
+                """,
+                normalized_agent,
+            )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            base = {
+                "schema_version": "channel_gateway.v1",
+                "agent_id": str(row["agent_id"] or normalized_agent),
+                "identity_id": str(row["identity_id"] or ""),
+                "channel_type": str(row["channel_type"] or ""),
+                "channel_id": str(row["channel_id"] or ""),
+                "user_id": str(row["user_id"] or ""),
+                "display_name": str(row["display_name"] or row["user_id"] or ""),
+                "is_group": False,
+                "message_id": "",
+                "message_preview": "",
+                "status": str(row["status"] or "pending"),
+                "first_seen_at": _iso_or_empty(row["first_seen_at"]),
+                "last_seen_at": _iso_or_empty(row["last_seen_at"]),
+            }
+            payload = _json_object(row["payload_json"])
+            base.update(payload)
+            for key in (
+                "agent_id",
+                "identity_id",
+                "channel_type",
+                "channel_id",
+                "user_id",
+                "display_name",
+                "status",
+            ):
+                if not str(base.get(key) or ""):
+                    base[key] = str(row[key] or "")
+            base["is_group"] = bool(base.get("is_group"))
+            items.append(base)
+        return items
+
+    async def delete_channel_unknown_sender(self, agent_id: str, identity_id: str) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                UPDATE "{self._schema}"."channel_unknown_senders"
+                SET status = 'resolved', last_seen_at = NOW()
+                WHERE agent_id = $1 AND identity_id = $2
+                """,
+                normalized_agent,
+                str(identity_id),
+            )
+
+    async def upsert_channel_pairing_code(self, agent_id: str, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        pairing_code_id = str(payload.get("pairing_code_id") or "").strip()
+        if not pairing_code_id:
+            return
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."channel_pairing_codes" (
+                    agent_id, pairing_code_id, channel_type, code, payload_json, expires_at
+                )
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)
+                ON CONFLICT (agent_id, pairing_code_id) DO UPDATE SET
+                    channel_type = EXCLUDED.channel_type,
+                    code = EXCLUDED.code,
+                    payload_json = EXCLUDED.payload_json,
+                    expires_at = EXCLUDED.expires_at
+                """,
+                normalized_agent,
+                pairing_code_id,
+                str(payload.get("channel_type") or "telegram"),
+                str(payload.get("code") or ""),
+                _json_dumps(payload),
+                str(payload.get("expires_at") or ""),
+            )
+
+    async def list_channel_pairing_codes(self, agent_id: str) -> list[dict[str, Any]]:
+        if not self.enabled:
+            return []
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT agent_id, pairing_code_id, channel_type, code,
+                       payload_json, created_at, expires_at, used_at
+                FROM "{self._schema}"."channel_pairing_codes"
+                WHERE agent_id = $1 AND used_at IS NULL AND expires_at > NOW()
+                ORDER BY expires_at DESC, pairing_code_id ASC
+                """,
+                normalized_agent,
+            )
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            payload = {
+                "schema_version": "channel_gateway.v1",
+                "agent_id": str(row["agent_id"] or normalized_agent),
+                "pairing_code_id": str(row["pairing_code_id"] or ""),
+                "channel_type": str(row["channel_type"] or "telegram"),
+                "code": str(row["code"] or ""),
+                "status": "active",
+                "created_at": _iso_or_empty(row["created_at"]),
+                "expires_at": _iso_or_empty(row["expires_at"]),
+                **_json_object(row["payload_json"]),
+            }
+            if row["used_at"] is not None:
+                payload["used_at"] = _iso_or_empty(row["used_at"])
+            payloads.append(payload)
+        return payloads
+
+    async def consume_channel_pairing_code(self, agent_id: str, pairing_code_id: str) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                UPDATE "{self._schema}"."channel_pairing_codes"
+                SET used_at = NOW()
+                WHERE agent_id = $1 AND pairing_code_id = $2 AND used_at IS NULL
+                """,
+                normalized_agent,
+                str(pairing_code_id),
+            )
+
+    async def append_channel_gateway_event(self, agent_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."channel_gateway_events" (
+                    agent_id, event_type, event_json
+                ) VALUES ($1, $2, $3::jsonb)
+                """,
+                normalized_agent,
+                str(event_type or "channel_gateway.event"),
+                _json_dumps(payload or {}),
+            )
+
+    async def persist_onboarding_readiness_run(self, agent_id: str, payload: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        normalized_agent = (agent_id or self._agent_id or "default").upper()
+        async with self._connection() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO "{self._schema}"."onboarding_readiness_runs" (
+                    agent_id, status, payload_json
+                ) VALUES ($1, $2, $3::jsonb)
+                """,
+                normalized_agent,
+                str(payload.get("status") or "pending"),
+                _json_dumps(payload or {}),
+            )
 
     async def upsert_documents(self, entries: list[KnowledgeEntry], *, object_key: str) -> None:
         if not entries or not self.bootstrapped:
@@ -3395,6 +4292,9 @@ class KnowledgeV2PostgresBackend:
         usage: dict[str, Any] | None,
         work_dir: str,
         error: bool,
+        squad_thread_id: str | None = None,
+        squad_message_id: str | None = None,
+        squad_task_id: str | None = None,
     ) -> int | None:
         if not self.bootstrapped:
             return None
@@ -3402,8 +4302,10 @@ class KnowledgeV2PostgresBackend:
             row_id = await conn.fetchval(
                 f"""INSERT INTO "{self._schema}"."query_history"
                        (agent_id, user_id, timestamp, query_text, response_text, cost_usd, provider, model,
-                        session_id, provider_session_id, usage_json, work_dir, error)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
+                        session_id, provider_session_id, usage_json, work_dir, error,
+                        squad_thread_id, squad_message_id, squad_task_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13,
+                               $14::uuid, $15, $16::uuid)
                        RETURNING id""",
                 self._agent_id,
                 user_id,
@@ -3418,6 +4320,9 @@ class KnowledgeV2PostgresBackend:
                 _json_dumps(usage or {}),
                 str(work_dir or ""),
                 bool(error),
+                str(squad_thread_id) if squad_thread_id else None,
+                str(squad_message_id) if squad_message_id else None,
+                str(squad_task_id) if squad_task_id else None,
             )
             return int(row_id) if row_id is not None else None
 

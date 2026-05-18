@@ -4,7 +4,12 @@ import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { mutateControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
-import type { ApprovalDecision, PendingApproval } from "@/lib/contracts/sessions";
+import type {
+  ApprovalDecision,
+  ApprovalParams,
+  PendingApproval,
+  PostApprovalBody,
+} from "@/lib/contracts/sessions";
 
 interface UseApprovalActionArgs {
   agentId: string | null | undefined;
@@ -14,6 +19,8 @@ interface UseApprovalActionArgs {
 interface SubmitArgs {
   approvalId: string;
   decision: ApprovalDecision;
+  editedParams?: ApprovalParams | null;
+  responseText?: string | null;
   rationale?: string | null;
 }
 
@@ -35,6 +42,8 @@ export function useApprovalAction({
     async ({
       approvalId,
       decision,
+      editedParams,
+      responseText,
       rationale,
     }: SubmitArgs): Promise<PendingApproval | null> => {
       if (!agentId) {
@@ -45,10 +54,16 @@ export function useApprovalAction({
       setIsPending(true);
       setError(null);
       try {
+        const body: PostApprovalBody = {
+          decision,
+          edited_params: editedParams ?? null,
+          response_text: responseText ?? null,
+          rationale: rationale ?? null,
+        };
         const response = await mutateControlPlaneDashboardJson<{
           approval: PendingApproval;
         }>(`/agents/${encodeURIComponent(agentId)}/approvals/${encodeURIComponent(approvalId)}`, {
-          body: { decision, rationale: rationale ?? null },
+          body,
           method: "POST",
           fallbackError: "Unable to resolve approval",
         });

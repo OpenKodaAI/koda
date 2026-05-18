@@ -5,11 +5,11 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CostBreakdownCard, type CostBreakdownItem } from "@/components/costs/cost-breakdown-card";
 import { CostConversationTable } from "@/components/costs/cost-conversation-table";
-import { CostRouteLoading } from "@/components/layout/route-loading";
 import { CostDonutChart, type CostDonutMode } from "@/components/costs/cost-donut-chart";
 import { CostKpiRail } from "@/components/costs/cost-kpi-rail";
 import { CostTimeChart, type CostTimelineMode } from "@/components/costs/cost-time-chart";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { CostRouteLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import {
@@ -22,6 +22,7 @@ import {
 import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
@@ -104,10 +105,6 @@ function buildTaskItems(
       }),
     })) ?? []
   );
-}
-
-function PageSkeleton() {
-  return <CostRouteLoading />;
 }
 
 export default function CostsPage() {
@@ -208,7 +205,7 @@ export default function CostsPage() {
     };
   }, [insights]);
 
-  if (loading && !insights) return <PageSkeleton />;
+  const showInitialSkeleton = useMinDurationFlag(loading && !insights, 350);
 
   if (stableInsightsQuery.showBlockingError && error) {
     return (
@@ -222,7 +219,13 @@ export default function CostsPage() {
     );
   }
 
-  if (!insights || !overview) return null;
+  if (showInitialSkeleton) {
+    return <CostRouteLoading />;
+  }
+
+  if (!insights || !overview) {
+    return null;
+  }
 
   return (
     <div className="min-w-0 space-y-4">
@@ -254,7 +257,7 @@ export default function CostsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("common.allModels")}</SelectItem>
-              {(insights.available_models ?? []).map((model) => (
+              {(insights?.available_models ?? []).map((model) => (
                 <SelectItem key={model} value={model}>
                   {model}
                 </SelectItem>
@@ -273,7 +276,7 @@ export default function CostsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("common.allTypes")}</SelectItem>
-              {(insights.available_task_types ?? []).map((type) => (
+              {(insights?.available_task_types ?? []).map((type) => (
                 <SelectItem key={type.value} value={type.value}>
                   {type.label}
                 </SelectItem>

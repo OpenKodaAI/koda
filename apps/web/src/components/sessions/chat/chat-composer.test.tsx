@@ -40,7 +40,7 @@ function renderComposer(props: Partial<React.ComponentProps<typeof ChatComposer>
 }
 
 describe("ChatComposer", () => {
-  it("disables submit when textarea is empty", () => {
+  it("disables submit when the editable is empty", () => {
     renderComposer();
     const submit = screen.getByRole("button", { name: /^Send$/i });
     expect(submit).toBeDisabled();
@@ -51,8 +51,8 @@ describe("ChatComposer", () => {
     const user = userEvent.setup();
     renderComposer({ value: "Hello world", onSubmit });
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
 
     await user.keyboard("{Enter}");
     expect(onSubmit).not.toHaveBeenCalled();
@@ -61,14 +61,12 @@ describe("ChatComposer", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it("clamps textarea height at the configured maximum", () => {
+  it("clamps the editable height at the configured maximum", () => {
     const tallText = Array.from({ length: 40 }, () => "Lorem ipsum dolor sit amet.").join("\n");
     renderComposer({ value: tallText });
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i) as HTMLTextAreaElement;
-    expect(textarea.style.maxHeight).toBe("");
-    const computedMaxClass = textarea.className.includes("max-h-[160px]");
-    expect(computedMaxClass).toBe(true);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    expect(editable.className.includes("max-h-[200px]")).toBe(true);
   });
 
   it("calls onAgentChange when selecting a different agent via the popover", async () => {

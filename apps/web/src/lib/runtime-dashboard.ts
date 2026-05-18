@@ -9,6 +9,7 @@ import {
   getRuntimeTaskBundle,
   listRuntimeTaskSnapshots,
 } from "@/lib/runtime-api";
+import { parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
 import { buildRuntimeRoomRows, type RuntimeRoomRow } from "@/lib/runtime-overview-model";
 import type {
   CostComparison,
@@ -48,6 +49,8 @@ type AgentRuntimeCollection = {
   rows: RuntimeRoomRow[];
   snapshots: Map<number, RuntimeTaskSnapshotEnvelope>;
 };
+
+const ACTIVE_TASK_STATUSES = ["queued", "running", "retrying", "stalled", "degraded"];
 
 function toIsoDay(value: string | null | undefined) {
   if (!value) return null;
@@ -244,9 +247,7 @@ export async function getOperationalAgentStats(agentId: string): Promise<AgentSt
       activeTasks: overview.snapshot?.active_environments ?? 0,
       completedTasks: tasks.filter((task) => task.runtime.status === "completed").length,
       failedTasks: tasks.filter((task) => task.runtime.status === "failed").length,
-      queuedTasks: tasks.filter((task) =>
-        ["queued", "retrying", "running"].includes(task.runtime.status),
-      ).length,
+      queuedTasks: tasks.filter((task) => ACTIVE_TASK_STATUSES.includes(task.runtime.status)).length,
       totalQueries: tasks.filter((task) => Boolean(task.runtime.query_text)).length,
       totalCost,
       todayCost,
@@ -456,6 +457,11 @@ export async function getOperationalExecutionDetail(
     source_ref_count: 0,
     winning_source_count: 0,
     provenance_source: "missing",
+    run_graph: bundle.run_graph ?? null,
+    run_replay: bundle.run_replay ?? null,
+    sandbox_doctor: bundle.sandbox_doctor ?? null,
+    child_runs: bundle.child_runs ?? [],
+    context_governance: parseContextGovernancePayload(bundle.context_governance ?? null),
   } satisfies ExecutionDetail;
 }
 
@@ -484,7 +490,7 @@ export async function getOperationalSessions(
         query_count: execution.query_text ? 1 : 0,
         execution_count: 1,
         total_cost_usd: execution.cost_usd,
-        running_count: ["queued", "running", "retrying"].includes(execution.status) ? 1 : 0,
+        running_count: ACTIVE_TASK_STATUSES.includes(execution.status) ? 1 : 0,
         failed_count: execution.status === "failed" ? 1 : 0,
         latest_status: execution.status,
         latest_query_preview: execution.query_text,
@@ -497,7 +503,7 @@ export async function getOperationalSessions(
     current.query_count += execution.query_text ? 1 : 0;
     current.execution_count += 1;
     current.total_cost_usd += execution.cost_usd;
-    current.running_count += ["queued", "running", "retrying"].includes(execution.status) ? 1 : 0;
+    current.running_count += ACTIVE_TASK_STATUSES.includes(execution.status) ? 1 : 0;
     current.failed_count += execution.status === "failed" ? 1 : 0;
     if (toTimestamp(createdAt) < toTimestamp(current.created_at)) {
       current.created_at = createdAt;
@@ -551,7 +557,7 @@ export function buildOperationalSessionDetail(
     query_count: executions.filter((execution) => Boolean(execution.query_text)).length,
     execution_count: executions.length,
     total_cost_usd: executions.reduce((sum, execution) => sum + execution.cost_usd, 0),
-    running_count: executions.filter((execution) => ["queued", "running", "retrying"].includes(execution.status)).length,
+    running_count: executions.filter((execution) => ACTIVE_TASK_STATUSES.includes(execution.status)).length,
     failed_count: executions.filter((execution) => execution.status === "failed").length,
     latest_status: executions[executions.length - 1]?.status ?? null,
     latest_query_preview: executions[executions.length - 1]?.query_text ?? null,

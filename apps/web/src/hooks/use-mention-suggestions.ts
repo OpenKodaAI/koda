@@ -16,7 +16,7 @@ export interface MentionCandidate {
   iconUrl: string | null;
 }
 
-const MAX_PER_GROUP = 8;
+const MAX_SKILLS = 8;
 
 function normalize(value: string): string {
   return value.toLowerCase().trim();
@@ -53,7 +53,7 @@ export function useMentionSuggestions(
           matchesQuery(entry.description ?? null, query)
         );
       })
-      .slice(0, MAX_PER_GROUP)
+      .slice(0, MAX_SKILLS)
       .map((entry) => ({
         kind: "skill" as const,
         slug: entry.id,
@@ -73,7 +73,6 @@ export function useMentionSuggestions(
           matchesQuery(server.tagline, query)
         );
       })
-      .slice(0, MAX_PER_GROUP)
       .map((server) => ({
         kind: "mcp" as const,
         slug: server.server_key,

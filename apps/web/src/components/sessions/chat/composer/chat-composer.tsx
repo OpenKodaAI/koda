@@ -4,28 +4,34 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { ComposerTextarea } from "./composer-textarea";
+import {
+  ComposerInput,
+  type ComposerInputHandle,
+} from "./composer-input";
+import {
+  ComposerMentionBadges,
+  type TrackedMention,
+} from "./composer-mention-badges";
 import { ComposerToolbar } from "./composer-toolbar";
 import { ComposerSlashMenuContent } from "./composer-slash-menu";
 import { ComposerMentionMenuContent } from "./composer-mention-menu";
 import {
-  ComposerMentionBadges,
-  type ComposerMentionBadge,
-} from "./composer-mention-badges";
-import {
   applyReplacement,
   clearTrigger,
 } from "./trigger-detection";
-import { useComposerTriggers } from "./use-composer-triggers";
+import {
+  useComposerTriggers,
+  type ComposerTriggerSource,
+} from "./use-composer-triggers";
 import type { ChatCommand } from "@/lib/contracts/chat-commands";
 import type { Mention } from "@/lib/contracts/sessions";
 import type { MentionCandidate } from "@/hooks/use-mention-suggestions";
@@ -51,7 +57,7 @@ export interface ChatComposerProps {
    */
   onCommandExecute?: (command: ChatCommand) => void;
   /**
-   * Notified whenever the active set of mention badges changes. Parent should
+   * Notified whenever the active set of mentions changes. Parent should
    * stash the latest array and include it in the send-message payload.
    */
   onMentionsChange?: (mentions: Mention[]) => void;
@@ -74,7 +80,7 @@ export function ChatComposer({
   onMentionsChange,
 }: ChatComposerProps) {
   const { t } = useAppI18n();
-  const textareaRef = useAutoGrowTextarea(value);
+  const inputRef = useRef<ComposerInputHandle | null>(null);
   const canSubmit = Boolean(value.trim()) && !disabled && !busy;
   const baseId = useId();
   const slashListboxId = `${baseId}-slash`;
@@ -82,27 +88,21 @@ export function ChatComposer({
   const mentionListboxId = `${baseId}-mention`;
   const mentionIdPrefix = `${baseId}-mention-opt`;
 
-  const triggers = useComposerTriggers(value, textareaRef);
+  const triggerSource = useMemo<ComposerTriggerSource>(
+    () => ({
+      getCaretIndex: () => inputRef.current?.selectionStart ?? null,
+      getDomNode: () => inputRef.current?.domNode ?? null,
+    }),
+    [],
+  );
+  const triggers = useComposerTriggers(value, triggerSource);
   const [activeIndex, setActiveIndex] = useState(0);
   const slashItemsRef = useRef<ChatCommand[]>([]);
   const mentionItemsRef = useRef<MentionCandidate[]>([]);
-  const [mentionBadges, setMentionBadges] = useState<ComposerMentionBadge[]>([]);
+  const [mentionBadges, setMentionBadges] = useState<TrackedMention[]>([]);
 
   const isSlashOpen = triggers.activeMenu === "slash";
   const isMentionOpen = triggers.activeMenu === "mention";
-
-  // Drop mentions whose `@<slug>` token has been deleted from the visible text.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMentionBadges((current) => {
-      if (current.length === 0) return current;
-      const next = current.filter((mention) => {
-        const token = `@${mention.slug}`;
-        return value.includes(token);
-      });
-      return next.length === current.length ? current : next;
-    });
-  }, [value]);
 
   // Notify parent every time the mentions array changes.
   useEffect(() => {
@@ -114,16 +114,15 @@ export function ChatComposer({
   const setCaretAndValue = useCallback(
     (next: { text: string; caret: number }) => {
       onChange(next.text);
-      // Restore caret on the next tick once the controlled value flushes.
       requestAnimationFrame(() => {
-        const node = textareaRef.current;
+        const node = inputRef.current;
         if (!node) return;
-        node.setSelectionRange(next.caret, next.caret);
         node.focus();
+        node.setSelectionRange(next.caret);
         triggers.syncFromTextarea();
       });
     },
-    [onChange, textareaRef, triggers],
+    [onChange, triggers],
   );
 
   const handleSlashSelect = useCallback(
@@ -135,7 +134,6 @@ export function ChatComposer({
         setCaretAndValue(next);
         return;
       }
-      // execute / remote: clear the trigger token and notify parent.
       const next = clearTrigger(value, triggers.slashTrigger);
       setCaretAndValue(next);
       triggers.closeActive();
@@ -147,9 +145,9 @@ export function ChatComposer({
   const handleMentionSelect = useCallback(
     (candidate: MentionCandidate) => {
       if (!triggers.mentionTrigger) return;
-      const replacement = `@${candidate.slug} `;
-      const next = applyReplacement(value, triggers.mentionTrigger, replacement);
-      setCaretAndValue(next);
+      // Strip the @-trigger token from the textarea — the badge row above is
+      // the only visible representation of the mention.
+      const next = clearTrigger(value, triggers.mentionTrigger);
       setMentionBadges((current) => {
         if (
           current.some(
@@ -167,32 +165,39 @@ export function ChatComposer({
           },
         ];
       });
+      triggers.closeActive();
+      setCaretAndValue(next);
     },
     [setCaretAndValue, triggers, value],
   );
 
-  const handleMentionRemove = useCallback(
-    (mention: ComposerMentionBadge) => {
-      const token = `@${mention.slug}`;
-      let nextValue = value;
-      const idx = nextValue.indexOf(token);
-      if (idx !== -1) {
-        // Trim a single trailing space the composer inserted alongside the
-        // slug so removal is symmetric with insertion.
-        const trailingSpace = nextValue.charAt(idx + token.length) === " " ? 1 : 0;
-        nextValue =
-          nextValue.slice(0, idx) +
-          nextValue.slice(idx + token.length + trailingSpace);
-        onChange(nextValue);
-      }
-      setMentionBadges((current) =>
-        current.filter(
-          (m) => !(m.kind === mention.kind && m.slug === mention.slug),
-        ),
-      );
+  const handleSlashQueryChange = useCallback(
+    (nextQuery: string) => {
+      if (!triggers.slashTrigger) return;
+      const replacement = `/${nextQuery}`;
+      const next = applyReplacement(value, triggers.slashTrigger, replacement);
+      setCaretAndValue(next);
     },
-    [onChange, value],
+    [setCaretAndValue, triggers, value],
   );
+
+  const handleMentionQueryChange = useCallback(
+    (nextQuery: string) => {
+      if (!triggers.mentionTrigger) return;
+      const replacement = `@${nextQuery}`;
+      const next = applyReplacement(value, triggers.mentionTrigger, replacement);
+      setCaretAndValue(next);
+    },
+    [setCaretAndValue, triggers, value],
+  );
+
+  const handleMentionRemove = useCallback((mention: TrackedMention) => {
+    setMentionBadges((current) =>
+      current.filter(
+        (m) => !(m.kind === mention.kind && m.slug === mention.slug),
+      ),
+    );
+  }, []);
 
   const handleSubmit = useCallback(
     (event?: FormEvent) => {
@@ -206,7 +211,6 @@ export function ChatComposer({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Menu navigation takes priority.
       if (isSlashOpen || isMentionOpen) {
         const items: Array<unknown> = isSlashOpen
           ? slashItemsRef.current
@@ -241,7 +245,6 @@ export function ChatComposer({
         }
       }
 
-      // Default: Cmd/Ctrl+Enter submits.
       if (event.key !== "Enter") return;
       if (event.shiftKey) return;
       const submitModifier = event.metaKey || event.ctrlKey;
@@ -260,7 +263,6 @@ export function ChatComposer({
     ],
   );
 
-  // Reset the active index every time the menu opens with a fresh trigger.
   const activeTriggerStart = isSlashOpen
     ? triggers.slashTrigger?.start ?? null
     : isMentionOpen
@@ -309,7 +311,7 @@ export function ChatComposer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="mx-auto w-full max-w-[720px] px-6 pb-6 pt-2"
+      className="mx-auto w-full max-w-[760px] px-6 pb-5 pt-2 lg:px-8"
       aria-label={t("chat.composer.placeholder", { defaultValue: "Send a message…" })}
     >
       <Popover
@@ -323,7 +325,7 @@ export function ChatComposer({
             className={cn(
               "flex flex-col rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]",
               "transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-              "focus-within:border-[var(--accent)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--accent-muted)]",
+              "focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--border-strong)]",
               disabled && "opacity-70",
             )}
             role="combobox"
@@ -335,8 +337,8 @@ export function ChatComposer({
               mentions={mentionBadges}
               onRemove={handleMentionRemove}
             />
-            <ComposerTextarea
-              ref={textareaRef}
+            <ComposerInput
+              ref={inputRef}
               value={value}
               onChange={onChange}
               onKeyDown={handleKeyDown}
@@ -360,12 +362,12 @@ export function ChatComposer({
           align="start"
           side="top"
           sideOffset={8}
-          className="w-[420px] max-w-[calc(100vw-3rem)] p-0"
+          className="composer-suggestions-panel w-[420px] max-w-[calc(100vw-3rem)] p-0"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onPointerDownOutside={(event) => {
             const target = event.target as HTMLElement | null;
-            if (target?.closest("textarea")) {
+            if (target?.closest('textarea')) {
               event.preventDefault();
             }
           }}
@@ -373,6 +375,7 @@ export function ChatComposer({
           {isSlashOpen ? (
             <ComposerSlashMenuContent
               query={triggers.slashTrigger?.query ?? ""}
+              onQueryChange={handleSlashQueryChange}
               agentId={agentId}
               activeIndex={activeIndex}
               onActiveIndex={setActiveIndex}
@@ -385,6 +388,7 @@ export function ChatComposer({
           {isMentionOpen ? (
             <ComposerMentionMenuContent
               query={triggers.mentionTrigger?.query ?? ""}
+              onQueryChange={handleMentionQueryChange}
               agentId={agentId}
               activeIndex={activeIndex}
               onActiveIndex={setActiveIndex}

@@ -35,7 +35,14 @@ def get_runtime_agent_spec() -> dict[str, Any]:
 def get_runtime_custom_skills(agent_spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     spec = agent_spec if agent_spec is not None else get_runtime_agent_spec()
     skills = spec.get("custom_skills") if isinstance(spec, dict) else []
-    return [skill for skill in skills if isinstance(skill, dict)] if isinstance(skills, list) else []
+    custom = [skill for skill in skills if isinstance(skill, dict)] if isinstance(skills, list) else []
+    try:
+        from koda.skills._package import get_installed_package_skills
+
+        installed = get_installed_package_skills(AGENT_ID or str(spec.get("id") or "default"))
+    except Exception:
+        installed = []
+    return [*custom, *installed]
 
 
 def get_runtime_skill_policy(agent_spec: dict[str, Any] | None = None) -> dict[str, Any]:

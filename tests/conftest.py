@@ -236,6 +236,8 @@ def unauthorized_update():
     update = MagicMock()
     update.effective_user = MagicMock()
     update.effective_user.id = 999999
+    update.effective_chat = None
+    update.effective_message = None
     update.message = AsyncMock()
     update.message.reply_text = AsyncMock()
     update.callback_query = None

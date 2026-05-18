@@ -35,7 +35,8 @@ async def clean_squad_messages(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_message_recipients"')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY CASCADE')
     finally:
         await conn.close()
     yield migrated_postgres
@@ -47,7 +48,7 @@ async def bus_factory(clean_squad_messages: str) -> AsyncIterator[list[PostgresM
     instances: list[PostgresMessageBus] = []
 
     def _make() -> PostgresMessageBus:
-        b = PostgresMessageBus(dsn=clean_squad_messages, schema=schema)
+        b = PostgresMessageBus(dsn=clean_squad_messages, schema=schema, lease_seconds=1)
         instances.append(b)
         return b
 
@@ -72,6 +73,7 @@ async def test_send_and_receive_roundtrip(bus_factory) -> None:  # type: ignore[
     assert msg.to_agent == "agent-b"
     assert msg.content == "hello squad"
     assert msg.message_type == "text"
+    await receiver.ack("agent-b", msg.message_id)
 
 
 @pytest.mark.postgres
@@ -82,9 +84,62 @@ async def test_durable_across_instances(bus_factory) -> None:  # type: ignore[no
     await sender.send("agent-a", "agent-b", "msg-2")
     later_receiver = bus_factory()
     first = await later_receiver.receive("agent-b", timeout=3)
-    second = await later_receiver.receive("agent-b", timeout=3)
     assert first is not None and first.content == "msg-1"
+    await later_receiver.ack("agent-b", first.message_id)
+    second = await later_receiver.receive("agent-b", timeout=3)
     assert second is not None and second.content == "msg-2"
+    await later_receiver.ack("agent-b", second.message_id)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_receive_replays_until_ack_then_skips(bus_factory) -> None:  # type: ignore[no-untyped-def]
+    sender = bus_factory()
+    await sender.send("agent-a", "agent-b", "replay")
+    receiver = bus_factory()
+    first = await receiver.receive("agent-b", timeout=3)
+    assert first is not None and first.content == "replay"
+    assert await receiver.receive("agent-b", timeout=0.2) is None
+    await asyncio.sleep(1.1)
+    replayed = await receiver.receive("agent-b", timeout=3)
+    assert replayed is not None and replayed.message_id == first.message_id
+    await receiver.ack("agent-b", first.message_id)
+    assert await receiver.receive("agent-b", timeout=0.5) is None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_nack_retries_then_dead(clean_squad_messages: str) -> None:
+    import asyncpg  # type: ignore[import-not-found]
+
+    bus = PostgresMessageBus(
+        dsn=clean_squad_messages,
+        schema=_schema(),
+        lease_seconds=1,
+        max_delivery_attempts=2,
+    )
+    try:
+        await bus.send("agent-a", "agent-b", "flaky")
+        first = await bus.receive("agent-b", timeout=3)
+        assert first is not None
+        await bus.nack("agent-b", first.message_id, error="boom", retry_after=0.1)
+        await asyncio.sleep(0.2)
+        second = await bus.receive("agent-b", timeout=3)
+        assert second is not None and second.message_id == first.message_id
+        await bus.nack("agent-b", second.message_id, error="boom again")
+        assert await bus.receive("agent-b", timeout=0.5) is None
+        conn = await asyncpg.connect(clean_squad_messages)
+        try:
+            status = await conn.fetchval(
+                f"""SELECT delivery_status
+                      FROM "{_schema()}"."squad_message_recipients"
+                     WHERE to_agent_id = 'agent-b'"""
+            )
+        finally:
+            await conn.close()
+        assert status == "dead"
+    finally:
+        await bus.close()
 
 
 @pytest.mark.postgres
@@ -138,6 +193,7 @@ async def test_resolve_delegation_in_process(bus_factory) -> None:  # type: igno
         msg = await bus.receive("b", timeout=3)
         assert msg is not None
         rid = msg.metadata["request_id"]
+        await bus.ack("b", msg.message_id)
         bus.resolve_delegation(
             rid,
             DelegationResult(request_id=rid, from_agent="b", to_agent="a", success=True, result="local-ok"),
@@ -148,6 +204,49 @@ async def test_resolve_delegation_in_process(bus_factory) -> None:  # type: igno
     await task
     assert result.success
     assert result.result == "local-ok"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_resolve_delegation_across_processes(bus_factory) -> None:  # type: ignore[no-untyped-def]
+    caller = bus_factory()
+    worker = bus_factory()
+
+    async def resolver() -> None:
+        msg = await worker.receive("b", timeout=3)
+        assert msg is not None
+        rid = msg.metadata["request_id"]
+        await worker.ack("b", msg.message_id)
+        worker.resolve_delegation(
+            rid,
+            DelegationResult(request_id=rid, from_agent="b", to_agent="a", success=True, result="remote-ok"),
+        )
+
+    task = asyncio.create_task(resolver())
+    result = await caller.delegate(DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=5))
+    await task
+    assert result.success
+    assert result.result == "remote-ok"
+
+
+@pytest.mark.asyncio
+async def test_persist_delegation_result_addresses_original_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from koda.agents.postgres_message_bus import PostgresMessageBus
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    insert = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_insert", insert)
+
+    await bus._persist_delegation_result(
+        "req-1",
+        DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=True, result="done"),
+    )
+
+    args = insert.await_args.args
+    assert args[:4] == ("worker", "caller", "done", "delegation_result")
 
 
 @pytest.mark.postgres

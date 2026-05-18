@@ -163,6 +163,21 @@ def test_compose_agent_prompt_escapes_reserved_tags() -> None:
     assert prompt.count("</agent_configuration_contract>") == 1
 
 
+def test_compose_agent_prompt_injects_squad_context_before_hard_rules() -> None:
+    documents = {
+        "instructions_md": "Follow the runbook.",
+        "rules_md": "Never leak private context.",
+    }
+
+    prompt = compose_agent_prompt(documents, squad_context="<squad_context>\nThread: T\n</squad_context>")
+
+    assert "<agent_operating_instructions>" in prompt
+    assert "<squad_context>" in prompt
+    assert "<agent_hard_rules>" in prompt
+    assert prompt.index("<agent_operating_instructions>") < prompt.index("<squad_context>")
+    assert prompt.index("<squad_context>") < prompt.index("<agent_hard_rules>")
+
+
 def test_memory_extraction_prompt_is_projected_from_schema() -> None:
     spec = {
         "memory_extraction_schema": {

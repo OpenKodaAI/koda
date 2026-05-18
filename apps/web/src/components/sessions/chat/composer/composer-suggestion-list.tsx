@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface SuggestionItem {
@@ -30,6 +31,15 @@ export interface ComposerSuggestionListProps {
   /** Stable ID prefix used for item DOM ids — referenced by aria-activedescendant. */
   idPrefix: string;
   listboxId: string;
+  /** The current search query mirrored at the top of the dropdown. When
+   * `onSearchChange` is provided, the field is editable and bidirectionally
+   * synced with the parent (which keeps the textarea trigger in step). */
+  searchValue?: string;
+  onSearchChange?: (next: string) => void;
+  searchPlaceholder?: string;
+  /** Optional node rendered inside the scrollable list, after the items.
+   * Used for infinite-scroll loaders / sentinels. */
+  footer?: ReactNode;
 }
 
 export function flattenGroups(
@@ -59,40 +69,90 @@ export function ComposerSuggestionList({
   ariaLabel,
   idPrefix,
   listboxId,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder,
+  footer,
 }: ComposerSuggestionListProps) {
   const flat = flattenGroups(groups);
+  const hasSearch = searchValue !== undefined;
+
+  const searchHeader = hasSearch ? (
+    <div className="composer-suggestion-search" role="presentation">
+      <Search
+        className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
+        strokeWidth={1.75}
+        aria-hidden
+      />
+      <input
+        type="text"
+        value={searchValue ?? ""}
+        onChange={(event) => onSearchChange?.(event.target.value)}
+        placeholder={searchPlaceholder}
+        readOnly={!onSearchChange}
+        spellCheck={false}
+        autoComplete="off"
+        className={cn(
+          "composer-suggestion-search__input flex-1 min-w-0 bg-transparent border-0 outline-none",
+          "text-[0.8125rem] leading-[1] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]",
+        )}
+        // Stop list-navigation keys (handled at composer level on the
+        // textarea) from reaching the input as default text-caret events.
+        onKeyDown={(event) => {
+          if (
+            event.key === "ArrowDown" ||
+            event.key === "ArrowUp" ||
+            event.key === "Enter" ||
+            event.key === "Escape"
+          ) {
+            event.preventDefault();
+          }
+        }}
+      />
+    </div>
+  ) : null;
 
   if (flat.length === 0) {
     return (
-      <div
-        className="px-3 py-3 text-[0.75rem] text-[var(--text-tertiary)]"
-        role="status"
-      >
-        {emptyLabel}
+      <div className="flex flex-col">
+        {searchHeader}
+        <div
+          className="px-3 py-3 text-[0.75rem] text-[var(--text-tertiary)]"
+          role="status"
+        >
+          {emptyLabel}
+        </div>
+        {footer ? (
+          <div role="presentation" className="composer-suggestion-footer">
+            {footer}
+          </div>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <ul
-      id={listboxId}
-      role="listbox"
-      aria-label={ariaLabel}
-      className="flex flex-col gap-0.5 py-1 max-h-[280px] overflow-y-auto"
-    >
-      {groups.map((group) => {
-        if (group.items.length === 0) return null;
-        return (
-          <li key={group.id} role="presentation" className="contents">
-            {group.label ? (
-              <div
-                role="presentation"
-                className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
-              >
-                {group.label}
-              </div>
-            ) : null}
-            {group.items.map((item) => {
+    <div className="flex flex-col">
+      {searchHeader}
+      <ul
+        id={listboxId}
+        role="listbox"
+        aria-label={ariaLabel}
+        className="flex flex-col gap-0.5 py-1 max-h-[280px] overflow-y-auto"
+      >
+        {groups.map((group) => {
+          if (group.items.length === 0) return null;
+          return (
+            <Fragment key={group.id}>
+              {group.label ? (
+                <li
+                  role="presentation"
+                  className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
+                >
+                  {group.label}
+                </li>
+              ) : null}
+              {group.items.map((item) => {
               const entry = flat.find(
                 (f) => f.group.id === group.id && f.item.id === item.id,
               );
@@ -145,10 +205,16 @@ export function ComposerSuggestionList({
                   ) : null}
                 </li>
               );
-            })}
+              })}
+            </Fragment>
+          );
+        })}
+        {footer ? (
+          <li role="presentation" className="composer-suggestion-footer">
+            {footer}
           </li>
-        );
-      })}
-    </ul>
+        ) : null}
+      </ul>
+    </div>
   );
 }

@@ -46,6 +46,18 @@ def _register(
         "requests": [],
         "grants": [],
         "preview_text": "",
+        "tool_id": "file_write",
+        "original_params": {"path": "a.txt", "content": "old"},
+        "args_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        "risk_class": "write",
     }
 
 
@@ -57,6 +69,9 @@ def test_list_pending_filters_by_agent_and_session():
     pending = list_pending_for_session(agent_id="atlas", session_id="sess-1")
     ids = [item["approval_id"] for item in pending]
     assert ids == ["op-a"]
+    assert pending[0]["tool_id"] == "file_write"
+    assert pending[0]["original_params"] == {"path": "a.txt", "content": "old"}
+    assert pending[0]["args_schema"]["required"] == ["path", "content"]
 
 
 def test_find_pending_by_task_id():
@@ -101,3 +116,56 @@ async def test_resolve_approval_validates_decision(monkeypatch):
     monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
     with pytest.raises(ValueError):
         await resolve_approval(approval_id="op-y", decision="abstain")
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_accepts_schema_valid_edit(monkeypatch):
+    _register("op-edit")
+    event = approval_module._PENDING_AGENT_CMD_OPS["op-edit"]["event"]
+    monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
+
+    summary = await resolve_approval(
+        approval_id="op-edit",
+        decision="edit",
+        edited_params={"path": "a.txt", "content": "new"},
+        rationale="tightened content",
+    )
+
+    assert summary["decision"] == "edited"
+    assert summary["edited_params"] == {"path": "a.txt", "content": "new"}
+    assert summary["rationale"] == "tightened content"
+    assert event.is_set()
+    assert approval_module._PENDING_AGENT_CMD_OPS["op-edit"]["edited_params"] == {
+        "path": "a.txt",
+        "content": "new",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_rejects_schema_invalid_edit(monkeypatch):
+    _register("op-bad-edit")
+    monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
+
+    with pytest.raises(ValueError, match="missing required field: content"):
+        await resolve_approval(
+            approval_id="op-bad-edit",
+            decision="edit",
+            edited_params={"path": "a.txt"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_accepts_operator_response(monkeypatch):
+    _register("op-respond")
+    monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
+
+    summary = await resolve_approval(
+        approval_id="op-respond",
+        decision="respond",
+        response_text="Use a safer path instead.",
+        rationale="avoid overwrite",
+    )
+
+    assert summary["decision"] == "responded"
+    assert summary["response_text"] == "Use a safer path instead."
+    assert approval_module._PENDING_AGENT_CMD_OPS["op-respond"]["response_text"] == "Use a safer path instead."

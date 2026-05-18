@@ -115,6 +115,17 @@ Eight alerts that catch most incidents:
 | `sidecar_unhealthy` | `koda_sidecar_up == 0` for 60s | high |
 | `disk_space_low` | `node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1` | high |
 
+## Top-Tier Roadmap Gate
+
+The top-tier roadmap treats observability as a release gate, not an optional
+afterthought. See [Scaling and Resilience](scaling-resilience-runbook.md) for
+the KG-14 budgets and [Top-Tier Release Train](top-tier-release-train.md) for
+the KG-15 phase closeout checklist.
+
+Every roadmap phase must declare audit, metric, and future RunGraph coverage
+for queue wait, lease acquire/loss/reap, dependency calls, breaker open, retry,
+DLQ, cancellation, cleanup, and user-facing errors before the phase closes.
+
 ## Tracing (Phase 2D)
 
 Workers and supervisors emit OTel spans automatically when

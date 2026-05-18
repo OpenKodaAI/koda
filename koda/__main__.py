@@ -537,7 +537,7 @@ def main() -> None:
     async def _post_init(app: Application) -> None:
         from telegram import BotCommand
 
-        from koda.config import RUNBOOK_GOVERNANCE_ENABLED
+        from koda.config import RUNBOOK_GOVERNANCE_ENABLED, SQUADS_ENABLED
         from koda.knowledge.config import KNOWLEDGE_ENABLED
         from koda.memory.config import (
             MEMORY_DIGEST_ENABLED,
@@ -560,6 +560,9 @@ def main() -> None:
             expected_background_loops.add("runbook_governance")
         if CACHE_ENABLED or SCRIPT_LIBRARY_ENABLED:
             expected_background_loops.add("cache_maintenance")
+        if SQUADS_ENABLED:
+            expected_background_loops.add("squad_inbox_dispatcher")
+            expected_background_loops.add("squad_router")
         set_runtime_startup_state(
             "bootstrapping",
             expected_background_loops=expected_background_loops,
@@ -586,6 +589,7 @@ def main() -> None:
             from koda.services.queue_manager import (
                 _stale_task_lease_janitor,
                 recover_pending_tasks,
+                start_squad_inbox_dispatcher,
             )
             from koda.services.runtime import get_runtime_controller
             from koda.state.history_store import reap_expired_task_leases
@@ -624,6 +628,18 @@ def main() -> None:
                 _stale_task_lease_janitor,
                 critical=True,
             )
+            if SQUADS_ENABLED:
+                await loop_supervisor.start_loop(
+                    "squad_inbox_dispatcher",
+                    lambda: start_squad_inbox_dispatcher(app),
+                )
+                from koda.config import SQUAD_ROUTER_SWEEP_INTERVAL_S
+                from koda.squads import get_squad_router
+
+                router = get_squad_router()
+                if router is not None:
+                    router._sweep_interval_s = max(0.1, float(SQUAD_ROUTER_SWEEP_INTERVAL_S))  # noqa: SLF001
+                    await loop_supervisor.start_loop("squad_router", router.run_forever)
         except Exception:
             critical_startup_issues.append("runtime_start_error")
             log.exception("runtime_start_error")

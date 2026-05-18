@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { ArrowUpRight, CheckCircle2, Clock, ShieldCheck, XCircle } from "lucide-react";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -58,11 +59,7 @@ function SkeletonRow({ columns }: { columns: number }) {
       {Array.from({ length: columns }).map((_, i) => (
         <td
           key={i}
-          className={cn(
-            "py-3 pr-4",
-            i === columns - 1 &&
-              "sticky-table-last w-[176px] min-w-[176px] py-3 pl-4 pr-0 text-right",
-          )}
+          className={cn(i === columns - 1 && "text-right")}
         >
           <div
             className={cn(
@@ -84,37 +81,32 @@ export function DLQTable({
   selectedEntryId,
 }: DLQTableProps) {
   const { t } = useAppI18n();
-  const thClass =
-    "py-2.5 pr-4 text-left font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
-  const thRightClass = cn(
-    thClass,
-    "sticky-table-last sticky-table-last--header w-[176px] min-w-[176px] pl-4 pr-0 text-right",
-  );
+  const stickyLastStyle = { "--sticky-last-width": "192px" } as CSSProperties;
 
   return (
     <>
       <div className="hidden md:block">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1040px] border-separate border-spacing-0">
+        <div className="table-shell" style={stickyLastStyle}>
+          <table className="glass-table glass-table--sticky-last min-w-[1340px] table-fixed">
             <colgroup>
               <col className="w-[140px]" />
               <col className="w-[128px]" />
-              <col className="min-w-[260px]" />
-              <col className="min-w-[260px]" />
+              <col className="w-[360px]" />
+              <col className="w-[360px]" />
               <col className="w-[160px]" />
-              <col className="w-[176px]" />
+              <col className="w-[192px]" />
             </colgroup>
             <thead>
-              <tr className="border-b border-[color:var(--divider-hair)]">
-                <th className={thClass}>{t("dlq.table.entry")}</th>
-                <th className={thClass}>{t("dlq.table.origin")}</th>
-                <th className={thClass}>{t("common.query")}</th>
-                <th className={thClass}>{t("dlq.table.error")}</th>
-                <th className={thClass}>{t("dlq.table.lastFailure")}</th>
-                <th className={thRightClass}>{t("common.status")}</th>
+              <tr>
+                <th>{t("dlq.table.entry")}</th>
+                <th>{t("dlq.table.origin")}</th>
+                <th>{t("common.query")}</th>
+                <th>{t("dlq.table.error")}</th>
+                <th>{t("dlq.table.lastFailure")}</th>
+                <th className="text-right">{t("common.status")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[color:var(--divider-hair)]">
+            <tbody>
               {loading &&
                 Array.from({ length: 5 }).map((_, i) => (
                   <SkeletonRow key={i} columns={6} />
@@ -127,14 +119,14 @@ export function DLQTable({
                       key={entry.id}
                       onClick={() => onEntryClick?.(entry)}
                       className={cn(
-                        "sticky-table-row group transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                        "group transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                         onEntryClick && "cursor-pointer",
                         isSelected
-                          ? "sticky-table-row--selected bg-[var(--table-row-selected)]"
-                          : onEntryClick && "hover:bg-[var(--hover-tint)]",
+                          ? "bg-[var(--surface-tint)]"
+                          : "",
                       )}
                     >
-                      <td className="w-[140px] py-3 pr-4">
+                      <td>
                         <p className="m-0 font-mono text-[0.75rem] text-[var(--text-primary)]">
                           DLQ #{entry.id}
                         </p>
@@ -142,7 +134,7 @@ export function DLQTable({
                           {entry.bot_id ?? t("dlq.table.noAgent")}
                         </p>
                       </td>
-                      <td className="w-[128px] py-3 pr-4">
+                      <td>
                         <p className="m-0 font-mono text-[0.75rem] text-[var(--text-primary)]">
                           #{entry.task_id}
                         </p>
@@ -150,7 +142,7 @@ export function DLQTable({
                           {entry.model ?? t("dlq.table.modelUnknown")}
                         </p>
                       </td>
-                      <td className="min-w-[260px] py-3 pr-4">
+                      <td className="whitespace-normal">
                         <p
                           className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
                           title={entry.query_text}
@@ -158,7 +150,7 @@ export function DLQTable({
                           {truncateText(entry.query_text, 110)}
                         </p>
                       </td>
-                      <td className="min-w-[260px] py-3 pr-4">
+                      <td className="whitespace-normal">
                         <p
                           className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--tone-danger-text)]"
                           title={entry.error_message ?? undefined}
@@ -171,7 +163,7 @@ export function DLQTable({
                           </p>
                         ) : null}
                       </td>
-                      <td className="w-[160px] py-3 pr-4">
+                      <td>
                         <p
                           className="m-0 text-[0.75rem] text-[var(--text-secondary)]"
                           title={formatDateTime(entry.failed_at)}
@@ -184,7 +176,7 @@ export function DLQTable({
                             : t("dlq.table.waitingDecision")}
                         </p>
                       </td>
-                      <td className="sticky-table-last w-[176px] min-w-[176px] py-3 pl-4 pr-0 text-right">
+                      <td className="text-right">
                         <RetryIndicator entry={entry} />
                       </td>
                     </tr>

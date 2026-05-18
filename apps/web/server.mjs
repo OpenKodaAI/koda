@@ -128,6 +128,16 @@ relayWss.on("connection", (client, request) => {
 });
 
 const server = http.createServer((request, response) => {
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  if (url.pathname === "/api/health") {
+    response.writeHead(200, {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Content-Type": "application/json",
+    });
+    response.end(JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }));
+    return;
+  }
+
   void handle(request, response);
 });
 

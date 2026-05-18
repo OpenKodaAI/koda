@@ -40,7 +40,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
         label: "User IDs permitidos",
         type: "tags",
         required: false,
-        helpText: "IDs numericos do Telegram. Deixe vazio para permitir todos.",
+        helpText: "IDs numericos do Telegram. Deixe vazio para bloquear todos ate aprovar no Gateway.",
       },
     ],
   },

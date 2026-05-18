@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X, Plus, Trash2 } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -458,15 +459,12 @@ export function McpServerEditorModal({
                 type="button"
                 disabled={!canSave || saving}
                 onClick={handleSubmit}
+                aria-label={saving ? tl("Salvando...") : undefined}
+                aria-busy={saving || undefined}
                 className="button-shell button-shell--primary min-w-[10rem]"
               >
-                <span>
-                  {saving
-                    ? tl("Salvando...")
-                    : isEditing
-                      ? tl("Salvar alteracoes")
-                      : tl("Adicionar servidor")}
-                </span>
+                {saving ? <InlineSpinner className="h-4 w-4" /> : null}
+                <span>{isEditing ? tl("Salvar alteracoes") : tl("Adicionar servidor")}</span>
               </button>
             </div>
           </div>

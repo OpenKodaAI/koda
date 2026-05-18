@@ -70,6 +70,26 @@ describe("control-plane fetch tiers", () => {
     );
   });
 
+  it("treats null agent detail payloads as not found", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(null), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const { ControlPlaneRequestError, getControlPlaneAgent } = await import("@/lib/control-plane");
+
+    await expect(getControlPlaneAgent("MISSING")).rejects.toMatchObject({
+      name: "ControlPlaneRequestError",
+      status: 404,
+    });
+    await expect(getControlPlaneAgent("MISSING")).rejects.toBeInstanceOf(ControlPlaneRequestError);
+  });
+
   it("uses detail caching for compiled prompt previews", async () => {
     const { getControlPlaneCompiledPrompt } = await import("@/lib/control-plane");
 

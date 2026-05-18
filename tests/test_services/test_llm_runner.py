@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import koda.services.llm_runner as llm_runner_module
 from koda.services.llm_runner import (
     get_provider_fallback_chain,
     get_provider_health_snapshot,
@@ -112,6 +113,45 @@ class TestRunLLM:
         assert result["error"] is True
         assert result["error_kind"] == "adapter_contract"
         assert result["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_passes_native_tool_schemas_to_http_runner(self, monkeypatch):
+        captured: dict[str, object] = {}
+
+        async def fake_run(**kwargs):
+            captured.update(kwargs)
+            return {"result": "ok", "session_id": None, "error": False}
+
+        monkeypatch.setitem(
+            llm_runner_module._HTTP_PROVIDER_RUNNERS,
+            "mistral",
+            {"run": fake_run, "stream": None, "capabilities": None, "first_chunk_timeout": 1.0},
+        )
+        with (
+            patch("koda.services.llm_runner.normalize_provider", side_effect=lambda provider: provider),
+            patch(
+                "koda.services.llm_runner.get_provider_capabilities",
+                new=AsyncMock(
+                    return_value=_capability(
+                        "mistral",
+                        "new_turn",
+                        supports_native_resume=False,
+                    )
+                ),
+            ),
+        ):
+            result = await run_llm(
+                provider="mistral",
+                query="hello",
+                work_dir="/tmp",
+                model="mistral-large-latest",
+                native_tools=[{"type": "function", "function": {"name": "web_search"}}],
+                native_tool_choice="auto",
+            )
+
+        assert result["error"] is False
+        assert captured["native_tools"] == [{"type": "function", "function": {"name": "web_search"}}]
+        assert captured["native_tool_choice"] == "auto"
 
 
 class TestProviderHealthSnapshot:

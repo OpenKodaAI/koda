@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { McpDiscoveredTool, McpToolPolicy } from "@/lib/control-plane";
+import { McpRiskBadgeGroup, getMcpToolRisk } from "./mcp-risk-badges";
 
 const POLICY_OPTIONS: { value: McpToolPolicy; label: string; description: string }[] = [
   { value: "auto", label: "Automatico", description: "Classificacao automatica" },
@@ -40,6 +41,7 @@ export function McpToolPolicyRow({
   const readOnly = annotations?.read_only_hint === true;
   const destructive = annotations?.destructive_hint === true;
   const idempotent = annotations?.idempotent_hint === true;
+  const risk = getMcpToolRisk(tool);
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
@@ -63,6 +65,7 @@ export function McpToolPolicyRow({
               {tl("Idempotente")}
             </span>
           )}
+          <McpRiskBadgeGroup risk={risk} capabilityName={tool.name} />
         </div>
         {tool.description && (
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-tertiary)]">

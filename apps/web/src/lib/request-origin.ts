@@ -88,5 +88,14 @@ export function isTrustedDashboardRequest(
     }
   }
 
+  // Same-origin fetches can omit Origin and Referer when the dashboard serves
+  // `Referrer-Policy: no-referrer`. Browser Fetch Metadata still lets us
+  // distinguish first-party dashboard requests from cross-site form/fetch
+  // attempts. Non-browser clients do not get this fallback.
+  const fetchSite = getHeader(request, "sec-fetch-site")?.toLowerCase();
+  if (fetchSite === "same-origin") {
+    return true;
+  }
+
   return false;
 }

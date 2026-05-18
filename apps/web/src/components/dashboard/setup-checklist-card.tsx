@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useState, useSyncExternalStore } from "react";
-import { ArrowRight, Bot as AgentIcon, MessageSquare, Plug, X } from "lucide-react";
+import { ArrowRight, Bot as AgentIcon, MessageSquare, Play, Plug, Route, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { requestJson } from "@/lib/http-client";
 
 const DISMISS_KEY = "koda.dashboard.setupChecklistDismissedAt";
 
@@ -31,6 +32,12 @@ export interface SetupChecklistSnapshot {
   providerReady: boolean;
   agentReady: boolean;
   telegramReady: boolean;
+  channelReady: boolean;
+  firstTaskReady: boolean;
+  firstTraceReady: boolean;
+  readinessStatus: "passed" | "warning" | "failed" | "pending";
+  primaryAgentId: string;
+  readinessActions: Array<{ check: string; label: string; href: string }>;
 }
 
 export interface SetupChecklistCardProps {
@@ -41,6 +48,8 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
   const { t } = useAppI18n();
   const persistedDismissedAt = useSyncExternalStore(subscribeToStorage, readDismissedAt, getServerSnapshot);
   const [forcedDismiss, setForcedDismiss] = useState(false);
+  const [creatingFirstTask, setCreatingFirstTask] = useState(false);
+  const [firstTaskError, setFirstTaskError] = useState<string | null>(null);
   const dismissed = forcedDismiss || Boolean(persistedDismissedAt);
 
   const handleDismiss = useCallback(() => {
@@ -53,7 +62,13 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
   }, []);
 
   if (dismissed) return null;
-  const allDone = snapshot.providerReady && snapshot.agentReady && snapshot.telegramReady;
+  const allDone =
+    snapshot.providerReady &&
+    snapshot.agentReady &&
+    snapshot.telegramReady &&
+    snapshot.channelReady &&
+    snapshot.firstTaskReady &&
+    snapshot.firstTraceReady;
   if (allDone) return null;
 
   const items = [
@@ -81,7 +96,48 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
       iconTone:
         "border-[color:var(--tone-retry-border)] bg-[color:var(--tone-retry-bg)] text-[color:var(--tone-retry-text)]",
     },
+    {
+      key: "channel",
+      label: "Pair Telegram sender",
+      href: "/control-plane",
+      Icon: Route,
+      iconTone:
+        "border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
+    },
+    {
+      key: "firstTask",
+      label: "Run first task",
+      href: "/",
+      Icon: Play,
+      iconTone:
+        "border-[color:var(--tone-success-border)] bg-[color:var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
+    },
+    {
+      key: "firstTrace",
+      label: "Open first trace",
+      href: "/executions",
+      Icon: ArrowRight,
+      iconTone:
+        "border-[color:var(--tone-info-border)] bg-[color:var(--tone-info-bg)] text-[color:var(--tone-info-text)]",
+    },
   ];
+
+  async function createFirstTask() {
+    setCreatingFirstTask(true);
+    setFirstTaskError(null);
+    try {
+      await requestJson("/api/control-plane/onboarding/first-task", {
+        method: "POST",
+        body: JSON.stringify({
+          agent_id: snapshot.primaryAgentId || undefined,
+        }),
+      });
+    } catch (error) {
+      setFirstTaskError(error instanceof Error ? error.message : "Could not create first task.");
+    } finally {
+      setCreatingFirstTask(false);
+    }
+  }
 
   return (
     <section
@@ -126,6 +182,23 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
           </li>
         ))}
       </ul>
+      {!snapshot.firstTaskReady && snapshot.agentReady && (
+        <div className="flex items-center justify-between gap-3 border-t border-[color:var(--divider-hair)] pt-3">
+          <div className="min-w-0 text-[12px] text-[var(--text-tertiary)]">
+            {firstTaskError ?? "Create a safe dashboard task to verify the runtime path."}
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={createFirstTask}
+            disabled={creatingFirstTask}
+            className="shrink-0"
+          >
+            {creatingFirstTask ? "Creating" : "Run"}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

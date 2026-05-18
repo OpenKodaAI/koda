@@ -55,6 +55,10 @@ class TaskOwnershipError(PermissionError):
     """Caller is not the assignee for this transition."""
 
 
+class TaskDependencyError(ValueError):
+    """Task dependency graph is invalid."""
+
+
 @dataclass
 class ExpiredClaim:
     task_id: str
@@ -195,7 +199,7 @@ class SquadTaskStore:
             raise ValueError("thread_id, title, and assigner_agent_id are required")
         task_id = str(uuid.uuid4())
         pool = await self._ensure_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
             if idempotency_key:
                 existing = await conn.fetchrow(
                     f'SELECT * FROM "{self._schema}"."squad_tasks" WHERE idempotency_key = $1',
@@ -203,6 +207,36 @@ class SquadTaskStore:
                 )
                 if existing is not None:
                     return _row_to_task(existing)
+            thread_exists = await conn.fetchval(
+                f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1',
+                thread_id,
+            )
+            if not thread_exists:
+                raise TaskDependencyError(f"thread {thread_id!r} not found")
+            if parent_task_id:
+                parent_thread = await conn.fetchval(
+                    f'SELECT thread_id FROM "{self._schema}"."squad_tasks" WHERE id = $1',
+                    parent_task_id,
+                )
+                if parent_thread is None:
+                    raise TaskDependencyError(f"parent task {parent_task_id!r} not found")
+                if str(parent_thread) != str(thread_id):
+                    raise TaskDependencyError("parent task belongs to a different thread")
+            dependency_ids = [str(dep) for dep in depends_on or [] if dep]
+            if len(set(dependency_ids)) != len(dependency_ids):
+                raise TaskDependencyError("depends_on contains duplicate task ids")
+            if dependency_ids:
+                rows = await conn.fetch(
+                    f'SELECT id, thread_id FROM "{self._schema}"."squad_tasks" WHERE id = ANY($1::uuid[])',
+                    dependency_ids,
+                )
+                found = {str(row["id"]): str(row["thread_id"]) for row in rows}
+                missing = sorted(set(dependency_ids) - set(found))
+                if missing:
+                    raise TaskDependencyError(f"depends_on references missing tasks: {', '.join(missing)}")
+                foreign = [dep for dep, dep_thread in found.items() if dep_thread != str(thread_id)]
+                if foreign:
+                    raise TaskDependencyError("depends_on references tasks from a different thread")
             try:
                 row = await conn.fetchrow(
                     f"""INSERT INTO "{self._schema}"."squad_tasks"
@@ -216,7 +250,7 @@ class SquadTaskStore:
                     task_id,
                     thread_id,
                     parent_task_id,
-                    json.dumps(list(depends_on or [])),
+                    json.dumps(dependency_ids),
                     assigned_agent_id,
                     assigner_agent_id,
                     kind or "",
@@ -284,6 +318,7 @@ class SquadTaskStore:
         task_id: str,
         agent_id: str,
         ttl_seconds: int = 300,
+        coordinator_override: bool = False,
     ) -> TaskDescriptor:
         if not agent_id:
             raise ValueError("agent_id is required")
@@ -299,12 +334,19 @@ class SquadTaskStore:
                            claim_expires_at = NOW() + ($4 || ' seconds')::interval,
                            version = version + 1,
                            updated_at = NOW()
-                     WHERE id = $1 AND status = 'pending'
+                     WHERE id = $1
+                       AND status = 'pending'
+                       AND (
+                            $5::boolean
+                            OR assigned_agent_id IS NULL
+                            OR assigned_agent_id = $2
+                       )
                      RETURNING *""",
                 task_id,
                 agent_id,
                 token,
                 str(ttl),
+                bool(coordinator_override),
             )
         if row is None:
             current = await self.get_task(task_id)
@@ -326,6 +368,7 @@ class SquadTaskStore:
         result_summary: str | None = None,
         deliverables: list[str] | None = None,
         metadata_patch: dict[str, Any] | None = None,
+        coordinator_override: bool = False,
     ) -> TaskDescriptor:
         if new_status not in _VALID_STATUSES:
             raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
@@ -351,8 +394,25 @@ class SquadTaskStore:
                 current.status not in {"pending"}
                 and current.assigned_agent_id
                 and current.assigned_agent_id != agent_id
+                and not coordinator_override
             ):
                 raise TaskOwnershipError(f"agent {agent_id!r} is not the assignee of task {task_id!r}")
+            if new_status == "in_progress" and current.depends_on and not coordinator_override:
+                rows = await conn.fetch(
+                    f"""SELECT id, status
+                          FROM "{self._schema}"."squad_tasks"
+                         WHERE id = ANY($1::uuid[])""",
+                    current.depends_on,
+                )
+                status_by_id = {str(row["id"]): str(row["status"]) for row in rows}
+                missing = sorted(set(current.depends_on) - set(status_by_id))
+                if missing:
+                    raise TaskDependencyError(f"depends_on references missing tasks: {', '.join(missing)}")
+                blocked = [dep for dep in current.depends_on if status_by_id.get(dep) != "done"]
+                if blocked:
+                    raise TaskDependencyError(
+                        "task dependencies must be done before in_progress: " + ", ".join(blocked)
+                    )
             assignments = ["status = $2", "version = version + 1", "updated_at = NOW()"]
             params: list[Any] = [task_id, new_status]
             if new_status == "in_progress" and current.started_at is None:

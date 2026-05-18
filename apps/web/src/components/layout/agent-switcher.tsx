@@ -12,18 +12,17 @@ import {
 import { createPortal } from "react-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, Loader2, Plus, Search } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Plus, Search } from "lucide-react";
 import { AgentGlyph } from "@/components/ui/agent-glyph";
 import { AgentGlyphGroup } from "@/components/ui/agent-glyph-group";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useCreateAgent } from "@/hooks/use-create-agent";
-import { requestJson } from "@/lib/http-client";
 import {
   resolveAgentSelection,
   toggleAgentSelection,
 } from "@/lib/agent-selection";
-import type { AgentDisplay } from "@/lib/agent-constants";
+import { fetchAgentCatalogPage, mergeAgentLists } from "@/lib/agent-catalog-pages";
 import { cn } from "@/lib/utils";
 
 interface AgentSwitcherProps {
@@ -38,7 +37,7 @@ interface AgentSwitcherProps {
   /** No-op retained for API compatibility. The trigger is always compact. */
   singleRow?: boolean;
   placeholder?: string;
-  /** No-op retained for API compatibility; search visibility is auto-inferred. */
+  /** `field` keeps the standard field container even when the create action is hidden. */
   variant?: "field" | "action-button" | "session-chip";
   menuPlacement?: "bottom-start" | "bottom-end" | "top-start" | "top-end";
   showSearch?: boolean;
@@ -50,58 +49,12 @@ interface AgentSwitcherProps {
 const AGENT_SWITCHER_PAGE_SIZE = 5;
 const AGENT_SWITCHER_SCROLL_THRESHOLD = 28;
 
-type AgentSummaryLike = {
-  id: string;
-  display_name?: string | null;
-  appearance?: {
-    label?: string | null;
-    color?: string | null;
-    color_rgb?: string | null;
-  } | null;
-};
-
-type AgentCatalogPage = {
-  items: AgentSummaryLike[];
-  total: number;
-  limit: number;
-  offset: number;
-  has_more: boolean;
-};
-
-function toAgentDisplay(agent: AgentSummaryLike): AgentDisplay {
-  return {
-    id: agent.id,
-    label: String(agent.appearance?.label || agent.display_name || agent.id),
-    color: String(agent.appearance?.color || "#A7ADB4"),
-    colorRgb: String(agent.appearance?.color_rgb || "167, 173, 180"),
-  };
-}
-
-function mergeAgentLists(
-  primary: AgentDisplay[],
-  secondary: AgentDisplay[],
-): AgentDisplay[] {
-  if (secondary.length === 0) return primary;
-  const byId = new Map(primary.map((agent) => [agent.id, agent]));
-  for (const agent of secondary) {
-    byId.set(agent.id, agent);
-  }
-  return Array.from(byId.values());
-}
-
 async function fetchAgentSwitcherPage(search: string, offset: number) {
-  const params = new URLSearchParams({
-    limit: String(AGENT_SWITCHER_PAGE_SIZE),
-    offset: String(offset),
+  return fetchAgentCatalogPage({
+    search,
+    offset,
+    limit: AGENT_SWITCHER_PAGE_SIZE,
   });
-  if (search.trim()) params.set("q", search.trim());
-  const payload = await requestJson<AgentCatalogPage>(
-    `/api/control-plane/agents?${params.toString()}`,
-  );
-  return {
-    ...payload,
-    items: payload.items.map(toAgentDisplay),
-  };
 }
 
 export function AgentSwitcher({
@@ -114,6 +67,7 @@ export function AgentSwitcher({
   className,
   fullWidth = false,
   placeholder,
+  variant,
   menuPlacement = "bottom-start",
   showSearch,
   disabled = false,
@@ -221,6 +175,7 @@ export function AgentSwitcher({
   );
 
   const shouldShowSearch = showSearch ?? true;
+  const showFieldShell = showCreate || variant === "field";
 
   const allSelected =
     multiple &&
@@ -382,11 +337,11 @@ export function AgentSwitcher({
       <div
         className={cn(
           "flex items-center",
-          showCreate && "field-shell h-10 gap-1 py-1",
+          showFieldShell && "field-shell h-10 gap-1 py-1",
           fullWidth && "w-full",
         )}
         style={
-          showCreate
+          showFieldShell
             ? {
                 width: fullWidth ? "100%" : "fit-content",
                 borderRadius: "var(--radius-input)",
@@ -474,7 +429,7 @@ export function AgentSwitcher({
             aria-label={t("agentSwitcher.createAria")}
           >
             {creating ? (
-              <Loader2 className="icon-sm animate-spin" strokeWidth={1.75} />
+              <LoaderCircle className="icon-sm animate-spin" strokeWidth={1.75} />
             ) : (
               <Plus className="icon-sm" strokeWidth={1.75} />
             )}
@@ -595,8 +550,11 @@ export function AgentSwitcher({
                         );
                       })
                     ) : isFetching ? (
-                      <div className="px-3 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-                        {t("agentSwitcher.loadingAgents")}
+                      <div className="flex justify-center px-3 py-6" aria-label={t("agentSwitcher.loadingAgents")}>
+                        <LoaderCircle
+                          className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                          strokeWidth={1.75}
+                        />
                       </div>
                     ) : (
                       <div className="px-3 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
@@ -605,8 +563,14 @@ export function AgentSwitcher({
                     )}
                     {visibleAgents.length > 0 &&
                     isFetchingNextPage ? (
-                      <div className="border-t border-[color:var(--divider-hair)] px-3 py-2 text-center text-[0.75rem] text-[var(--text-quaternary)]">
-                        {t("agentSwitcher.loadingAgents")}
+                      <div
+                        className="flex justify-center border-t border-[color:var(--divider-hair)] px-3 py-2"
+                        aria-label={t("agentSwitcher.loadingAgents")}
+                      >
+                        <LoaderCircle
+                          className="h-3.5 w-3.5 animate-spin text-[var(--text-quaternary)]"
+                          strokeWidth={1.75}
+                        />
                       </div>
                     ) : null}
                   </div>

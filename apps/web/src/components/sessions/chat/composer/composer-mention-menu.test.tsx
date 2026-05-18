@@ -94,65 +94,66 @@ function renderHarness(props: HarnessProps = {}) {
 }
 
 describe("ChatComposer mention menu", () => {
-  it("opens with skills + mcp groups when '@' is typed", async () => {
+  it("opens a flat list of skills + mcp options when '@' is typed", async () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("@");
 
     await screen.findByRole("listbox");
     expect(screen.getByRole("option", { name: /Python dev/i })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Supabase/i })).toBeInTheDocument();
-    // Group labels appear too.
-    expect(screen.getByText(/Skills/i)).toBeInTheDocument();
-    expect(screen.getByText(/MCP servers/i)).toBeInTheDocument();
+    // Group eyebrows have been removed in favour of a minimal list.
+    expect(screen.queryByText(/^Skills$/i)).toBeNull();
+    expect(screen.queryByText(/^MCP servers$/i)).toBeNull();
   });
 
   it("does NOT trigger inside an email-like token", async () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("ryan@gmail");
 
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("inserts a slug and creates a badge on selection", async () => {
+  it("renders a top-of-textarea badge and reports the mention to the parent", async () => {
     const user = userEvent.setup();
     const onMentionsChange = vi.fn();
     renderHarness({ onMentionsChange });
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i) as HTMLTextAreaElement;
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i }) as HTMLTextAreaElement;
+    await user.click(editable);
     await user.keyboard("@py");
 
     await screen.findByRole("listbox");
     await user.keyboard("{Enter}");
 
     await waitFor(() => {
-      expect(textarea.value).toContain("@python_dev");
+      expect(document.querySelector('[data-mention-slug="python_dev"]')).not.toBeNull();
     });
+    // The @-trigger token has been stripped from the textarea; the badge above
+    // is the only representation of the mention.
+    expect(editable.value).not.toContain("@py");
 
     await waitFor(() => {
       expect(onMentionsChange).toHaveBeenCalledWith([
         { kind: "skill", slug: "python_dev" },
       ]);
     });
-
-    expect(screen.getByText(/Python dev/i)).toBeInTheDocument();
   });
 
   it("filters by query as the user types", async () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("@supa");
 
     await waitFor(() => {
@@ -162,23 +163,25 @@ describe("ChatComposer mention menu", () => {
     expect(screen.queryByRole("option", { name: /GitHub/i })).toBeNull();
   });
 
-  it("removes the mention badge AND the @slug substring on chip remove", async () => {
+  it("drops the tracked mention when the badge's remove button is clicked", async () => {
     const user = userEvent.setup();
     const onMentionsChange = vi.fn();
     renderHarness({ onMentionsChange });
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i) as HTMLTextAreaElement;
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("@py");
     await screen.findByRole("listbox");
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(textarea.value).toContain("@python_dev"));
+    await waitFor(() => {
+      expect(document.querySelector('[data-mention-slug="python_dev"]')).not.toBeNull();
+    });
 
     const removeBtn = screen.getByRole("button", { name: /Remove Python dev/i });
     await user.click(removeBtn);
 
     await waitFor(() => {
-      expect(textarea.value.includes("@python_dev")).toBe(false);
+      expect(document.querySelector('[data-mention-slug="python_dev"]')).toBeNull();
     });
     await waitFor(() => {
       expect(onMentionsChange).toHaveBeenLastCalledWith([]);

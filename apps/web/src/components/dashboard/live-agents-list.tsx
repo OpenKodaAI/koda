@@ -9,7 +9,7 @@ import type { AgentDisplay } from "@/lib/agent-constants";
 import type { AgentStats, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const LIVE_STATUSES: Task["status"][] = ["queued", "running", "retrying"];
+const LIVE_STATUSES: Task["status"][] = ["queued", "running", "retrying", "stalled", "degraded"];
 
 export interface LiveAgentsListEntry {
   agent: AgentDisplay;

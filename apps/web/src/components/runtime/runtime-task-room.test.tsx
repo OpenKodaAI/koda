@@ -187,6 +187,13 @@ describe("RuntimeTaskRoom", () => {
     expect(screen.getByRole("dialog", { name: "Detalhes" })).toHaveStyle({
       position: "fixed",
     });
+    expect(screen.getByRole("tab", { name: "RunGraph" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "RunGraph" }));
+    expect(screen.getByText("No RunGraph snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Replay unavailable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /Diagnóstico|Diagnostics/i }));
+    expect(screen.getByText("Sandbox doctor unavailable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Detalhes" }));
     expect(screen.getByRole("tab", { name: "Arquivos" })).toBeInTheDocument();
     expect(screen.getByText("/tmp/runtime-42")).toBeInTheDocument();
     expect(screen.getByText(/Git status|Status do Git/i)).toBeInTheDocument();

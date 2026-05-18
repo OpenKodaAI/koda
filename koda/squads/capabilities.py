@@ -244,7 +244,7 @@ class SquadMemberCapabilityCache:
             raise ValueError("squad_id is required")
         if not summary.agent_id:
             raise ValueError("summary.agent_id is required")
-        ttl_clause = "NOW() + ($11 || ' seconds')::interval" if ttl_seconds else "NULL"
+        ttl_clause = "NOW() + ($12 || ' seconds')::interval" if ttl_seconds else "NULL"
         params: list[Any] = [
             squad_id,
             summary.agent_id,

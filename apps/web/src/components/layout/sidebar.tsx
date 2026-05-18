@@ -12,23 +12,8 @@ import {
 } from "@/components/layout/sidebar-nav";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { usePrefetchRouteData } from "@/hooks/use-prefetch-route-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { cn } from "@/lib/utils";
-
-type IdleWindow = typeof window & {
-  requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
-};
-
-function scheduleIdle(fn: () => void) {
-  if (typeof window === "undefined") return;
-  const win = window as IdleWindow;
-  if (typeof win.requestIdleCallback === "function") {
-    win.requestIdleCallback(fn, { timeout: 2000 });
-  } else {
-    setTimeout(fn, 300);
-  }
-}
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -131,19 +116,8 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useAppI18n();
   const pathname = usePathname();
-  const prefetchRouteData = usePrefetchRouteData();
   const primaryItems = buildSidebarPrimarySections(t).flatMap((section) => section.items);
   const footerItems = buildSidebarFooterSections(t).flatMap((section) => section.items);
-
-  useEffect(() => {
-    scheduleIdle(() => {
-      for (const item of [...primaryItems, ...footerItems]) {
-        prefetchRouteData(item.href);
-      }
-    });
-    // primaryItems/footerItems are derived from a stable translator; prefetch runs once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Close the mobile menu on route navigation (but only when pathname actually
   // changes — not on initial mount). The previous version re-fired on every

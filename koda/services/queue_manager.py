@@ -243,9 +243,34 @@ _AUDIO_RESPONSE_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _ARTIFACT_COMPLETION_RE = re.compile(
-    r"\b(criei|gerei|salvei|arquivo|documento|created|generated|saved|attached)\b"
+    r"\b(criei|gerei|salvei|arquivo|documento|artefato|artifact|entreguei|entrega|created|generated|saved|attached)\b"
     r".*\.(docx|doc|pdf|pptx|ppt|xlsx|xls|csv|html|zip|png|jpg|jpeg|webp|mp3|wav|ogg)\b",
     re.IGNORECASE | re.DOTALL,
+)
+_ARTIFACT_FILENAME_RE = re.compile(
+    r"\b[\w.-]+\.(docx|doc|pdf|pptx|ppt|xlsx|xls|csv|html|zip|png|jpg|jpeg|webp|mp3|wav|ogg)\b",
+    re.IGNORECASE,
+)
+_COMPLETED_OUTPUT_MARKERS = (
+    "artefato",
+    "artifact",
+    "entreguei",
+    "entregou",
+    "entrega",
+    "fechei",
+    "ficou pronto",
+    "o que ficou pronto",
+    "pronto",
+    "created",
+    "generated",
+    "saved",
+    "delivered",
+    "done",
+    "completed",
+)
+_PROVIDER_ERROR_PREFIX_RE = re.compile(
+    r"^(provider unavailable|codex authentication failed|timeout after|failed to|error:|api error:|usage:)",
+    re.IGNORECASE,
 )
 
 
@@ -264,6 +289,23 @@ def _detect_audio_response_request(text: str) -> bool:
 
 def _looks_like_artifact_completion(text: str) -> bool:
     return bool(_ARTIFACT_COMPLETION_RE.search(str(text or "")))
+
+
+def _looks_like_completed_output_after_provider_error(provider: str, text: str) -> bool:
+    stripped = str(text or "").strip()
+    if len(stripped) < 80:
+        return False
+    normalized = stripped.casefold()
+    if "<agent_cmd" in normalized:
+        return False
+    if _PROVIDER_ERROR_PREFIX_RE.search(stripped):
+        return False
+    if is_retryable_provider_error(provider, stripped):
+        return False
+    if _looks_like_artifact_completion(stripped):
+        return True
+    marker_count = sum(1 for marker in _COMPLETED_OUTPUT_MARKERS if marker in normalized)
+    return marker_count >= 2 and bool(_ARTIFACT_FILENAME_RE.search(stripped))
 
 
 def _voice_policy_from_user_data(user_data: dict[str, Any] | None) -> dict[str, Any]:
@@ -571,6 +613,16 @@ class QueueItem:
     squad_task_id: str | None = None
     parent_message_id: str | None = None
     delegation_chain: list[str] = field(default_factory=list)
+    delegation_request_id: str | None = None
+    delegation_origin_agent_id: str | None = None
+    telegram_message_thread_id: int | None = None
+    is_child_run: bool = False
+    child_run_id: str | None = None
+    parent_task_id: int | None = None
+    child_context_prompt: str | None = None
+    child_context_policy: dict[str, Any] = field(default_factory=dict)
+    child_toolset: str | None = None
+    silent_response: bool = False
 
 
 @dataclass
@@ -633,6 +685,14 @@ class QueryContext:
     squad_task_id: str | None = None
     parent_message_id: str | None = None
     delegation_chain: list[str] = field(default_factory=list)
+    delegation_request_id: str | None = None
+    delegation_origin_agent_id: str | None = None
+    telegram_message_thread_id: int | None = None
+    is_child_run: bool = False
+    child_run_id: str | None = None
+    parent_task_id: int | None = None
+    child_toolset: str | None = None
+    context_governance: dict[str, Any] | None = None
 
 
 @dataclass
@@ -706,6 +766,29 @@ class _RetryableError(Exception):
 
 class _RuntimeGuardrailError(Exception):
     """Runtime guardrail triggered and execution must stop safely."""
+
+
+def _recover_provider_error_with_completed_output(run_result: RunResult) -> bool:
+    """Treat a provider-side error flag as successful only when the final text is clearly usable."""
+    if not run_result.error:
+        return False
+
+    error_kind = str(run_result.error_kind or "").strip()
+    if error_kind not in {"", "provider_runtime"}:
+        return False
+
+    if not _looks_like_completed_output_after_provider_error(run_result.provider, run_result.result):
+        return False
+
+    warning = "provider reported an error after producing a completed response; continuing with delivery"
+    if warning not in run_result.warnings:
+        run_result.warnings.append(warning)
+    run_result.error = False
+    run_result.retryable = False
+    run_result.error_kind = ""
+    if not run_result.stop_reason or run_result.stop_reason == "error":
+        run_result.stop_reason = "completed_with_provider_warning"
+    return True
 
 
 # Helper functions (compact tool labels, status line)
@@ -880,6 +963,7 @@ def _build_execution_trace_payload(
             ],
             "effective_policy": _policy_to_dict(ctx.effective_policy if ctx else None),
             "verified_before_finalize": bool(ctx.verified_before_finalize) if ctx else False,
+            "context_governance": ctx.context_governance if ctx and ctx.context_governance else None,
         },
         "confidence_reports": list(ctx.confidence_reports) if ctx else [],
         "raw_artifacts": {
@@ -887,6 +971,14 @@ def _build_execution_trace_payload(
             "native_items": run_result.native_items if run_result else [],
             "fallback_chain": run_result.fallback_chain if run_result else [],
             "artifact_dossiers": [dossier.to_trace_dict() for dossier in ctx.artifact_dossiers] if ctx else [],
+            "child_run": {
+                "is_child_run": bool(ctx.is_child_run) if ctx else False,
+                "child_run_id": ctx.child_run_id if ctx else None,
+                "parent_task_id": ctx.parent_task_id if ctx else None,
+                "toolset": ctx.child_toolset if ctx else None,
+            }
+            if ctx and ctx.is_child_run
+            else None,
         },
         "error_message": error_message,
     }
@@ -1464,6 +1556,8 @@ def _deserialize_artifact_bundle(payload: Any | None) -> Any | None:
 
 def _raw_item_source_kind(raw_item: Any) -> str:
     if isinstance(raw_item, dict):
+        if raw_item.get("_child_run"):
+            return "child_run"
         if raw_item.get("_scheduled_run"):
             return "scheduled_run"
         if raw_item.get("_dashboard_chat"):
@@ -2031,6 +2125,349 @@ async def enqueue_dashboard_chat_task(
     return task_id
 
 
+async def start_child_run_task(
+    *,
+    application: Any,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    parent_task_id: int,
+    child_run_id: str,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str | None,
+    child_context_prompt: str,
+    context_policy: dict[str, Any],
+    toolset: str,
+    target_agent_id: str | None = None,
+    bot_override: Any | None = None,
+    user_data_overlay: dict[str, Any] | None = None,
+) -> tuple[int, asyncio.Task[None]]:
+    """Create and start an ephemeral child-run task.
+
+    This uses normal task persistence and execution machinery, but does not
+    enqueue behind the parent user's FIFO worker. Parent tasks wait for child
+    results; putting children behind the same per-user FIFO would deadlock.
+    """
+
+    if _shutting_down:
+        raise RuntimeError("Agent runtime is shutting down.")
+    if application is None:
+        raise RuntimeError("subagent.runtime_unavailable")
+
+    from koda.services import audit
+
+    child_session_id = session_id or f"child:{child_run_id}"
+    task_id = create_task(
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        session_id=child_session_id,
+        work_dir=work_dir,
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+    )
+    audit.emit_task_lifecycle(
+        "task.created",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+        child_run_id=child_run_id,
+    )
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    context.user_data = dict(getattr(context, "user_data", {}) or {})
+    if provider:
+        context.user_data["provider"] = provider
+    if model:
+        context.user_data["model"] = model
+    if work_dir:
+        context.user_data["work_dir"] = work_dir
+    if child_session_id:
+        context.user_data["session_id"] = child_session_id
+    context.user_data.update(dict(user_data_overlay or {}))
+    raw_item = {
+        "_dashboard_chat": True,
+        "_child_run": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": child_session_id,
+        "executing_agent_id": target_agent_id or AGENT_ID or "default",
+        "force_audio_response": False,
+        "silent_response": True,
+        "child_run_id": child_run_id,
+        "parent_task_id": parent_task_id,
+        "child_context_prompt": child_context_prompt,
+        "child_context_policy": dict(context_policy or {}),
+        "child_toolset": toolset,
+    }
+    task_info = TaskInfo(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        model=model,
+    )
+    _register_task(task_info)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _update_runtime_queue_status(task_id, "queued")
+    audit.emit_task_lifecycle(
+        "task.queued",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+        child_run_id=child_run_id,
+    )
+    task = asyncio.create_task(_execute_single_task(raw_item, user_id, context, task_id, task_info))
+    task_info.asyncio_task = task
+    return task_id, task
+
+
+async def enqueue_squad_agent_task(
+    *,
+    application: Any,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    executing_agent_id: str,
+    squad_thread_id: str,
+    squad_task_id: str | None = None,
+    parent_message_id: str | None = None,
+    delegation_chain: list[str] | None = None,
+    delegation_request_id: str | None = None,
+    delegation_origin_agent_id: str | None = None,
+    telegram_message_thread_id: int | None = None,
+    bot_override: Any | None = None,
+) -> int:
+    """Enqueue a squad-scoped turn with runtime context already attached."""
+    if _shutting_down:
+        raise RuntimeError("Agent runtime is shutting down.")
+
+    from koda.services import audit
+
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    provider = context.user_data.get("provider")
+    model = get_provider_model(context.user_data, provider)
+    task_id = create_task(
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        session_id=context.user_data.get("session_id"),
+        work_dir=context.user_data.get("work_dir"),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_action="squad_thread_input",
+    )
+    audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
+    raw_item = {
+        "_dashboard_chat": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": context.user_data.get("work_dir"),
+        "session_id": context.user_data.get("session_id"),
+        "executing_agent_id": executing_agent_id,
+        "squad_thread_id": squad_thread_id,
+        "squad_task_id": squad_task_id,
+        "parent_message_id": parent_message_id,
+        "delegation_chain": list(delegation_chain or []),
+        "delegation_request_id": delegation_request_id,
+        "delegation_origin_agent_id": delegation_origin_agent_id,
+        "telegram_message_thread_id": telegram_message_thread_id,
+    }
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    await _ensure_queue_worker(user_id, context)
+    return task_id
+
+
+def _coerce_int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _control_plane_prompt_for_agent(agent_id: str) -> str | None:
+    """Best-effort prompt for a squad target running in this local process.
+
+    In production each agent usually runs in its own process with its prompt in
+    env. The Docker/dev gateway can execute another squad member in-process, so
+    load just the published prompt documents without compiling the full
+    AgentSpec; full spec validation can fail for unrelated provider settings.
+    """
+
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        from koda.control_plane.agent_spec import compose_agent_prompt
+        from koda.control_plane.manager import get_control_plane_manager
+        from koda.control_plane.settings import DOCUMENT_KINDS
+
+        manager = get_control_plane_manager()
+        documents: dict[str, str] = {}
+        for kind in DOCUMENT_KINDS:
+            row = manager.get_document(normalized, kind)
+            if isinstance(row, dict):
+                documents[kind] = str(row.get("content_md") or "")
+        prompt = compose_agent_prompt(documents)
+        return prompt or None
+    except Exception:
+        log.exception("control_plane_agent_prompt_lookup_failed", agent_id=normalized)
+        return None
+
+
+async def _squad_thread_runtime_defaults(thread_id: str) -> tuple[int, int]:
+    """Best-effort owner/chat defaults for bus-dispatched squad turns."""
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is None:
+            return 0, 0
+        thread = await store.get_thread(thread_id)
+        if thread is None:
+            return 0, 0
+        return int(thread.owner_user_id or 0), int(thread.telegram_chat_id or 0)
+    except Exception:
+        log.exception("squad_inbox_thread_defaults_failed", thread_id=thread_id)
+        return 0, 0
+
+
+async def start_squad_inbox_dispatcher(application: Any) -> None:
+    """Consume durable squad inbox messages and enqueue real agent turns.
+
+    This is the bridge that makes Postgres bus delivery active instead of
+    requiring an agent to call ``squad_inbox_drain`` manually.
+    """
+    from koda.agents import get_message_bus
+    from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
+
+    agent_id = AGENT_ID or "default"
+    if not SQUADS_ENABLED:
+        log.info("squad_inbox_dispatcher_disabled")
+        while not _shutting_down:
+            await asyncio.sleep(3600)
+        return
+
+    bus = get_message_bus()
+    dispatchable_kinds = {
+        "squad_thread_input",
+        "user_input",
+        "task_request",
+        "delegation_request",
+        "task_result",
+        "delegation_result",
+        "agent_text",
+    }
+    while not _shutting_down:
+        messages = await bus.receive_batch(
+            agent_id,
+            limit=50,
+            timeout=max(0.5, float(SQUAD_POLL_INTERVAL_S)),
+        )
+        if not messages:
+            continue
+        for msg in messages:
+            metadata = dict(msg.metadata or {})
+            kind = str(metadata.get("kind") or msg.kind or msg.message_type or "")
+            thread_id = msg.thread_id or metadata.get("thread_id") or metadata.get("squad_thread_id")
+            try:
+                if not thread_id or kind not in dispatchable_kinds:
+                    log.debug(
+                        "squad_inbox_message_skipped",
+                        agent_id=agent_id,
+                        message_id=msg.message_id,
+                        kind=kind,
+                        has_thread=bool(thread_id),
+                    )
+                    await bus.ack(agent_id, msg.message_id)
+                    continue
+
+                user_id = _coerce_int_or_zero(metadata.get("user_id"))
+                chat_id = _coerce_int_or_zero(metadata.get("telegram_chat_id") or metadata.get("chat_id"))
+                if not user_id or not chat_id:
+                    default_user_id, default_chat_id = await _squad_thread_runtime_defaults(str(thread_id))
+                    user_id = user_id or default_user_id
+                    chat_id = chat_id or default_chat_id
+                delegation_chain = metadata.get("delegation_chain")
+                chain = [str(value) for value in delegation_chain] if isinstance(delegation_chain, list) else []
+                if msg.from_agent and msg.from_agent not in chain:
+                    chain.append(msg.from_agent)
+                request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+
+                enqueued_task_id = await enqueue_squad_agent_task(
+                    application=application,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    query_text=msg.content,
+                    executing_agent_id=agent_id,
+                    squad_thread_id=str(thread_id),
+                    squad_task_id=metadata.get("squad_task_id") or metadata.get("task_id"),
+                    parent_message_id=metadata.get("parent_message_id") or msg.causation_id or msg.message_id,
+                    delegation_chain=chain,
+                    delegation_request_id=str(request_id) if request_id else None,
+                    delegation_origin_agent_id=msg.from_agent if request_id else None,
+                    telegram_message_thread_id=_coerce_int_or_zero(metadata.get("telegram_message_thread_id")) or None,
+                    bot_override=getattr(application, "bot", None),
+                )
+                await bus.ack(agent_id, msg.message_id, enqueued_task_id=enqueued_task_id)
+                log.info(
+                    "squad_inbox_message_enqueued",
+                    agent_id=agent_id,
+                    message_id=msg.message_id,
+                    kind=kind,
+                    thread_id=str(thread_id),
+                    enqueued_task_id=enqueued_task_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.exception(
+                    "squad_inbox_dispatch_failed",
+                    agent_id=agent_id,
+                    message_id=msg.message_id,
+                    kind=kind,
+                    thread_id=str(thread_id) if thread_id else None,
+                )
+                with contextlib.suppress(Exception):
+                    await bus.nack(
+                        agent_id,
+                        msg.message_id,
+                        error=str(exc),
+                        retry_after=max(0.5, float(SQUAD_POLL_INTERVAL_S)),
+                    )
+
+
 def get_queue_depth(user_id: int) -> int:
     """Get queue depth for a user."""
     queue = _user_queues.get(user_id)
@@ -2061,6 +2498,34 @@ def _validate_work_dir(work_dir: str | None, *, strict: bool = False) -> str:
 
 def _parse_queue_item(item: Any) -> QueueItem:
     """Parse a raw queue item into a structured QueueItem."""
+
+    def squad_fields(raw: dict[str, Any]) -> dict[str, Any]:
+        chain = raw.get("delegation_chain") or []
+        if not isinstance(chain, list):
+            chain = []
+        return {
+            "executing_agent_id": raw.get("executing_agent_id"),
+            "squad_thread_id": raw.get("squad_thread_id") or raw.get("thread_id"),
+            "squad_task_id": raw.get("squad_task_id"),
+            "parent_message_id": raw.get("parent_message_id"),
+            "delegation_chain": [str(value) for value in chain if value],
+            "delegation_request_id": raw.get("delegation_request_id") or raw.get("request_id"),
+            "delegation_origin_agent_id": raw.get("delegation_origin_agent_id"),
+            "telegram_message_thread_id": _coerce_int_or_zero(raw.get("telegram_message_thread_id")) or None,
+        }
+
+    def child_run_fields(raw: dict[str, Any]) -> dict[str, Any]:
+        policy = raw.get("child_context_policy")
+        return {
+            "is_child_run": bool(raw.get("_child_run")),
+            "child_run_id": raw.get("child_run_id"),
+            "parent_task_id": _coerce_int_or_zero(raw.get("parent_task_id")) or None,
+            "child_context_prompt": raw.get("child_context_prompt"),
+            "child_context_policy": dict(policy) if isinstance(policy, dict) else {},
+            "child_toolset": raw.get("child_toolset"),
+            "silent_response": bool(raw.get("silent_response")),
+        }
+
     if isinstance(item, dict) and (item.get("_user_message") or item.get("_recovered_task")):
         image_paths = cast(list[str] | None, item.get("image_paths"))
         if image_paths is not None:
@@ -2076,6 +2541,8 @@ def _parse_queue_item(item: Any) -> QueueItem:
             scheduled_work_dir=item.get("work_dir"),
             override_session_id=item.get("session_id"),
             force_audio_response=bool(item.get("force_audio_response")),
+            **squad_fields(item),
+            **child_run_fields(item),
         )
     if isinstance(item, dict) and item.get("_dashboard_chat"):
         return QueueItem(
@@ -2087,6 +2554,8 @@ def _parse_queue_item(item: Any) -> QueueItem:
             is_dashboard_chat=True,
             override_session_id=item.get("session_id"),
             force_audio_response=bool(item.get("force_audio_response")),
+            **squad_fields(item),
+            **child_run_fields(item),
         )
     if isinstance(item, dict) and item.get("_runtime_retry"):
         return QueueItem(
@@ -2096,6 +2565,8 @@ def _parse_queue_item(item: Any) -> QueueItem:
             scheduled_model=item.get("model"),
             scheduled_work_dir=item.get("work_dir"),
             scheduled_session_id=item.get("session_id"),
+            **squad_fields(item),
+            **child_run_fields(item),
         )
     if isinstance(item, dict) and item.get("_scheduled_run"):
         return QueueItem(
@@ -2110,6 +2581,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             scheduled_work_dir=item.get("work_dir"),
             scheduled_session_id=item.get("session_id"),
             scheduled_trigger_reason=item.get("trigger_reason"),
+            **squad_fields(item),
         )
     if isinstance(item, dict) and item.get("_continuation"):
         return QueueItem(
@@ -2118,12 +2590,14 @@ def _parse_queue_item(item: Any) -> QueueItem:
             is_continuation=True,
             continuation_session_id=item["session_id"],
             continuation_provider=item.get("provider"),
+            **squad_fields(item),
         )
     if isinstance(item, dict) and item.get("_link_analysis"):
         return QueueItem(
             chat_id=item["chat_id"],
             query_text=item["query_text"],
             is_link_analysis=True,
+            **squad_fields(item),
         )
     # Handle 5-tuple from enqueue (update, query_text, image_paths, artifact_bundle, task_id)
     if isinstance(item, tuple) and len(item) == 5:
@@ -2311,7 +2785,9 @@ async def _prepare_query_context(
     task_kind = classify_task_kind(item.query_text)
     project_key = Path(work_dir).name.lower()
     environment = ""
-    team = (AGENT_ID or "").lower()
+    runtime_agent_id = str(item.executing_agent_id or AGENT_ID or "default").strip() or "default"
+    current_process_agent_id = str(AGENT_ID or "default").strip() or "default"
+    team = runtime_agent_id.lower()
     preferred_provider = normalize_provider(context.user_data.get("provider"))
     provider = item.scheduled_provider or item.continuation_provider or preferred_provider or DEFAULT_PROVIDER
     session_id = ensure_canonical_session_id(context.user_data)
@@ -2325,16 +2801,23 @@ async def _prepare_query_context(
 
     # System prompt
     user_system_prompt = context.user_data.get("system_prompt")
-    system_prompt = DEFAULT_SYSTEM_PROMPT
+    agent_system_prompt = DEFAULT_SYSTEM_PROMPT
+    agent_prompt_source = "default_system_prompt"
+    if runtime_agent_id != current_process_agent_id:
+        local_agent_prompt = _control_plane_prompt_for_agent(runtime_agent_id)
+        if local_agent_prompt:
+            agent_system_prompt = local_agent_prompt
+            agent_prompt_source = "control_plane_agent_prompt"
+    system_prompt = agent_system_prompt
     _append_prompt_segment(
         prompt_segments,
         segment_id="immutable_base_policy",
-        text=DEFAULT_SYSTEM_PROMPT,
+        text=agent_system_prompt,
         category="base",
         priority=0,
         compression_strategy="truncate_tail",
         drop_policy="hard_floor",
-        metadata={"source": "default_system_prompt"},
+        metadata={"source": agent_prompt_source, "agent_id": runtime_agent_id},
     )
     if user_system_prompt:
         sanitized_prompt = sanitize_user_system_prompt(str(user_system_prompt))
@@ -2365,6 +2848,23 @@ async def _prepare_query_context(
             drop_policy="hard_floor",
         )
 
+    if item.is_child_run and item.child_context_prompt:
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="child_run_context",
+            text=item.child_context_prompt,
+            category="runtime_context",
+            priority=12,
+            compression_strategy="truncate_tail",
+            drop_policy="hard_floor",
+            metadata={
+                "source": "child_run",
+                "child_run_id": item.child_run_id,
+                "parent_task_id": item.parent_task_id,
+                "toolset": item.child_toolset or "read_only",
+            },
+        )
+
     # Voice instructions
     voice_requested = bool(item.force_audio_response or _voice_continuous_mode_active(context.user_data))
     voice_enabled = bool(item.force_audio_response or tts_enabled_for_session(context.user_data))
@@ -2391,7 +2891,7 @@ async def _prepare_query_context(
     knowledge_query_context = _get_query_context_service().build_knowledge_query_context(
         query=item.query_text,
         task_id=task_id,
-        agent_id=AGENT_ID,
+        agent_id=runtime_agent_id,
         user_id=user_id,
         workspace_dir=work_dir,
         workspace_fingerprint=_workspace_fingerprint(work_dir),
@@ -2636,7 +3136,7 @@ async def _prepare_query_context(
     scoped_runbooks: list[dict[str, Any]] = []
     try:
         scoped_runbooks = list_approved_runbooks(
-            agent_id=AGENT_ID,
+            agent_id=runtime_agent_id,
             task_kind=task_kind,
             project_key=project_key or None,
             environment=environment or None,
@@ -2656,7 +3156,7 @@ async def _prepare_query_context(
     }
     try:
         reliability_stats = get_execution_reliability_stats(
-            agent_id=AGENT_ID,
+            agent_id=runtime_agent_id,
             task_kind=task_kind,
             project_key=project_key,
             environment=environment,
@@ -2874,7 +3374,7 @@ async def _prepare_query_context(
         from koda.services.cache_config import SCRIPT_LOOKUP_TIMEOUT
 
         asset_refs = await asyncio.wait_for(
-            get_agent_asset_registry(AGENT_ID).search(
+            get_agent_asset_registry(runtime_agent_id).search(
                 query=item.query_text,
                 user_id=user_id,
                 work_dir=work_dir,
@@ -2988,8 +3488,54 @@ async def _prepare_query_context(
         effective_policy,
         reliability_stats,
     )
+    if item.is_child_run:
+        if item.child_toolset in {None, "read_only", "analysis", "research"}:
+            effective_policy = replace(effective_policy, approval_mode="read_only")
+            permission_mode = "plan"
+            _query_warnings.append("child_run_read_only_toolset")
+        else:
+            effective_policy = replace(effective_policy, approval_mode="supervised")
+            permission_mode = "plan"
+            _query_warnings.append("child_run_restricted_toolset")
     ungrounded_operationally = bool(getattr(knowledge_resolution, "ungrounded_operationally", False))
     stale_sources_present = bool(getattr(knowledge_resolution, "stale_sources_present", False))
+
+    if item.squad_thread_id:
+        executing_agent = runtime_agent_id
+        try:
+            from koda.squads import build_squad_context_block_default, get_squad_access_service
+
+            access_service = get_squad_access_service()
+            if access_service is None:
+                raise PermissionError("squad access service unavailable")
+            await access_service.require_thread_access(
+                thread_id=item.squad_thread_id,
+                agent_id=executing_agent,
+            )
+            squad_context_block = await build_squad_context_block_default(
+                thread_id=item.squad_thread_id,
+                executing_agent_id=executing_agent,
+                delegation_chain=item.delegation_chain or None,
+            )
+            if squad_context_block:
+                _append_prompt_segment(
+                    prompt_segments,
+                    segment_id="squad_context",
+                    text=squad_context_block,
+                    category="runtime_context",
+                    priority=55,
+                    compression_strategy="truncate_tail",
+                    drop_policy="drop",
+                    metadata={
+                        "thread_id": item.squad_thread_id,
+                        "squad_task_id": item.squad_task_id,
+                        "executing_agent_id": executing_agent,
+                    },
+                )
+        except Exception as exc:
+            raise PermissionError(
+                f"unable to prepare squad context for thread {item.squad_thread_id!r}: {exc}"
+            ) from exc
 
     from koda.knowledge.config import KNOWLEDGE_CONTEXT_MAX_TOKENS
     from koda.memory.config import MEMORY_MAX_CONTEXT_TOKENS
@@ -3004,6 +3550,36 @@ async def _prepare_query_context(
     if not bool(prompt_budget.get("within_budget", False)):
         raise BudgetExceeded(_prompt_budget_error_message(prompt_budget))
     system_prompt = str(prompt_budget.get("compiled_prompt") or DEFAULT_SYSTEM_PROMPT)
+    context_governance: dict[str, Any] | None = None
+    try:
+        from koda.services.context_governance import govern_prompt_budget
+
+        context_governance = govern_prompt_budget(
+            prompt_budget, item.child_context_policy if item.is_child_run else None
+        )
+        if task_id is not None:
+            try:
+                from koda.services.runtime import get_runtime_controller
+
+                runtime = get_runtime_controller()
+                env = runtime.store.get_environment_by_task(task_id)
+                await runtime.events.publish(
+                    task_id=task_id,
+                    env_id=int(env["id"]) if env else None,
+                    attempt=None,
+                    phase="planning",
+                    event_type="context_governance.evaluated",
+                    severity="info",
+                    payload={
+                        "schema_version": context_governance.get("schema_version"),
+                        "summary": context_governance.get("summary"),
+                        "child_run_id": item.child_run_id,
+                    },
+                )
+            except Exception:
+                log.debug("context_governance_runtime_event_skipped", task_id=task_id, exc_info=True)
+    except Exception:
+        log.debug("context_governance_unavailable", task_id=task_id, exc_info=True)
 
     from koda.services.agent_settings import get_agent_runtime_settings, resolve_effort
 
@@ -3052,6 +3628,19 @@ async def _prepare_query_context(
         asset_refs=asset_refs,
         skill_matches=_resolved_skill_matches,
         force_audio_response=item.force_audio_response,
+        executing_agent_id=item.executing_agent_id,
+        squad_thread_id=item.squad_thread_id,
+        squad_task_id=item.squad_task_id,
+        parent_message_id=item.parent_message_id,
+        delegation_chain=item.delegation_chain,
+        delegation_request_id=item.delegation_request_id,
+        delegation_origin_agent_id=item.delegation_origin_agent_id,
+        telegram_message_thread_id=item.telegram_message_thread_id,
+        is_child_run=item.is_child_run,
+        child_run_id=item.child_run_id,
+        parent_task_id=item.parent_task_id,
+        child_toolset=item.child_toolset,
+        context_governance=context_governance,
     )
 
 
@@ -3068,8 +3657,11 @@ async def _run_streaming(
 ) -> RunResult | None:
     """Run the selected provider with streaming. Returns RunResult or None if streaming fails."""
     streaming_msg = None
+    thread_kwargs: dict[str, int] = {}
+    if ctx.telegram_message_thread_id is not None and (item.update is None or item.update.message is None):
+        thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
     try:
-        streaming_msg = await context.bot.send_message(chat_id=chat_id, text="Processing…")
+        streaming_msg = await cast(Any, context.bot).send_message(chat_id=chat_id, text="Processing…", **thread_kwargs)
     except Exception:
         log.warning(
             "streaming_progress_message_failed",
@@ -3177,7 +3769,11 @@ async def _run_streaming(
                 milestone = tracker.check_milestone(elapsed, tool_uses)
                 if milestone:
                     with contextlib.suppress(Exception):
-                        ms_msg = await context.bot.send_message(chat_id=chat_id, text=milestone)
+                        ms_msg = await cast(Any, context.bot).send_message(
+                            chat_id=chat_id,
+                            text=milestone,
+                            **thread_kwargs,
+                        )
                         tracker.add_milestone_message(ms_msg.message_id)
 
         typing_task.cancel()
@@ -3231,6 +3827,66 @@ async def _run_streaming(
         active_processes.pop(proc_key, None)
 
 
+def _native_tool_schemas_for_runtime() -> list[dict[str, Any]]:
+    """Build provider-native schemas from the Phase 1 ToolRegistry contract."""
+
+    try:
+        from koda import config as _config
+        from koda.services.tool_registry import build_openai_tool_schemas_for_runtime
+
+        feature_flags = {
+            "browser": bool(getattr(_config, "BROWSER_FEATURES_ENABLED", False)),
+            "browser_network": bool(getattr(_config, "BROWSER_NETWORK_INTERCEPTION_ENABLED", False)),
+            "browser_session": bool(getattr(_config, "BROWSER_SESSION_PERSISTENCE_ENABLED", False)),
+            "fileops": bool(getattr(_config, "FILEOPS_ENABLED", False)),
+            "shell": bool(getattr(_config, "SHELL_ENABLED", False)),
+            "git": bool(getattr(_config, "GIT_ENABLED", False)),
+            "plugins": bool(getattr(_config, "PLUGIN_SYSTEM_ENABLED", False)),
+            "workflows": bool(getattr(_config, "WORKFLOW_ENABLED", False)),
+            "inter_agent": bool(getattr(_config, "INTER_AGENT_ENABLED", False)),
+            "snapshots": bool(getattr(_config, "SNAPSHOT_ENABLED", False)),
+            "webhooks": bool(getattr(_config, "WEBHOOK_ENABLED", False)),
+        }
+        return build_openai_tool_schemas_for_runtime(feature_flags=feature_flags)
+    except Exception:
+        return []
+
+
+def _agent_turn_input_audit_payload(ctx: QueryContext) -> dict[str, Any]:
+    try:
+        from koda.agent_turn import from_query_context
+
+        snapshot = from_query_context(ctx).to_dict()
+        compiled_prompt = str(snapshot.pop("compiled_prompt", "") or "")
+        snapshot["compiled_prompt_sha256"] = hashlib.sha256(compiled_prompt.encode("utf-8")).hexdigest()
+        snapshot["compiled_prompt_chars"] = len(compiled_prompt)
+        return snapshot
+    except Exception:
+        return {"contract_version": "agent_turn.v1", "provider": ctx.provider, "model": ctx.model}
+
+
+def _agent_turn_output_audit_payload(result: RunResult) -> dict[str, Any]:
+    try:
+        from koda.agent_turn import from_run_result
+
+        snapshot = from_run_result(result).to_dict()
+        result_text = str(snapshot.pop("result", "") or "")
+        raw_output = str(snapshot.pop("raw_output", "") or "")
+        snapshot["result_sha256"] = hashlib.sha256(result_text.encode("utf-8")).hexdigest()
+        snapshot["result_chars"] = len(result_text)
+        if raw_output:
+            snapshot["raw_output_sha256"] = hashlib.sha256(raw_output.encode("utf-8")).hexdigest()
+            snapshot["raw_output_chars"] = len(raw_output)
+        return snapshot
+    except Exception:
+        return {
+            "contract_version": "agent_turn.v1",
+            "provider": result.provider,
+            "model": result.model,
+            "error": result.error,
+        }
+
+
 async def _run_fallback(
     ctx: QueryContext,
     item: QueueItem,
@@ -3264,6 +3920,15 @@ async def _run_fallback(
 
     track_task = asyncio.create_task(_track_process())
     try:
+        with contextlib.suppress(Exception):
+            from koda.services import audit
+
+            audit.emit_task_lifecycle(
+                "agent_turn.started",
+                user_id=user_id,
+                task_id=task_id,
+                **_agent_turn_input_audit_payload(ctx),
+            )
         result = await run_llm(
             provider=ctx.provider,
             query=item.query_text,
@@ -3279,8 +3944,9 @@ async def _run_fallback(
             dry_run=ctx.dry_run,
             runtime_task_id=task_id if (RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None) else None,
             effort=ctx.effort,
+            native_tools=_native_tool_schemas_for_runtime(),
         )
-        return RunResult(
+        run_result = RunResult(
             provider=ctx.provider,
             model=ctx.model,
             result=result["result"],
@@ -3298,6 +3964,17 @@ async def _run_fallback(
             error_kind=str(result.get("error_kind", "")),
             retryable=bool(result.get("retryable", False)),
         )
+        with contextlib.suppress(Exception):
+            from koda.services import audit
+
+            audit.emit_task_lifecycle(
+                "agent_turn.completed",
+                user_id=user_id,
+                task_id=task_id,
+                cost_usd=run_result.cost_usd,
+                **_agent_turn_output_audit_payload(run_result),
+            )
+        return run_result
     finally:
         track_task.cancel()
         active_processes.pop(proc_key, None)
@@ -3653,6 +4330,18 @@ async def _run_with_provider_fallback(
 # Agent tool loop
 
 
+def _run_result_has_native_tool_calls(run_result: RunResult) -> bool:
+    for item in run_result.tool_uses:
+        if not isinstance(item, dict):
+            continue
+        if item.get("source") == "openai_compatible_tool_call":
+            return True
+        function = item.get("function")
+        if isinstance(function, dict) and function.get("name"):
+            return True
+    return False
+
+
 async def _run_agent_loop(
     ctx: QueryContext,
     item: QueueItem,
@@ -3709,6 +4398,57 @@ async def _run_agent_loop(
     last_diff_hash = ""
     last_failure_fingerprint = ""
     repeated_failure_streak = 0
+    consumed_native_call_keys: set[str] = set()
+
+    def _native_tool_calls_for_result(result: RunResult) -> list[AgentToolCall]:
+        calls: list[AgentToolCall] = []
+        for index, item in enumerate(result.tool_uses):
+            if not isinstance(item, dict):
+                continue
+            if item.get("source") != "openai_compatible_tool_call" and not isinstance(item.get("function"), dict):
+                continue
+            raw_function = item.get("function")
+            function: dict[str, Any] = raw_function if isinstance(raw_function, dict) else {}
+            tool_name = str(item.get("name") or function.get("name") or "").strip()
+            if not tool_name:
+                continue
+            raw_args = item.get("arguments", function.get("arguments", {}))
+            if isinstance(raw_args, str):
+                try:
+                    params = _json.loads(raw_args) if raw_args.strip() else {}
+                except (TypeError, ValueError):
+                    params = {}
+            elif isinstance(raw_args, dict):
+                params = dict(raw_args)
+            else:
+                params = {}
+            key = str(item.get("id") or f"{index}:{tool_name}:{_json.dumps(params, sort_keys=True)}")
+            if key in consumed_native_call_keys:
+                continue
+            consumed_native_call_keys.add(key)
+            calls.append(
+                AgentToolCall(
+                    tool=tool_name,
+                    params=params,
+                    raw_match=f"<native_tool_call id={key!r} tool={tool_name!r}>",
+                )
+            )
+        return calls
+
+    def _approval_contract_for_call(call: AgentToolCall, risk_class: str | None) -> dict[str, Any]:
+        args_schema: dict[str, Any] = {"type": "object", "additionalProperties": True}
+        with contextlib.suppress(Exception):
+            from koda.services.tool_registry import get_tool_definition
+
+            definition = get_tool_definition(call.tool)
+            if definition is not None and isinstance(definition.args_schema, dict):
+                args_schema = dict(definition.args_schema)
+        return {
+            "tool_id": call.tool,
+            "original_params": dict(call.params),
+            "args_schema": args_schema,
+            "risk_class": risk_class,
+        }
 
     loop_exhausted = False
     for _iteration in range(MAX_AGENT_TOOL_ITERATIONS):
@@ -3719,7 +4459,9 @@ async def _run_agent_loop(
             and ctx.runtime_env_id is not None
         ):
             await runtime.cooperate_pause(task_id=task_id, env_id=ctx.runtime_env_id, phase="executing")
-        tool_calls, clean_text = parse_agent_commands(current_result.result)
+        xml_tool_calls, clean_text = parse_agent_commands(current_result.result)
+        native_tool_calls = _native_tool_calls_for_result(current_result)
+        tool_calls = [*xml_tool_calls, *native_tool_calls]
         if not tool_calls:
             if (
                 _requires_post_write_verification(ctx)
@@ -3764,8 +4506,27 @@ async def _run_agent_loop(
                     visual_paths=ctx.visual_paths,
                     temp_paths=ctx.temp_paths,
                     runtime_env_id=ctx.runtime_env_id,
+                    executing_agent_id=ctx.executing_agent_id,
+                    squad_thread_id=ctx.squad_thread_id,
+                    squad_task_id=ctx.squad_task_id,
+                    parent_message_id=ctx.parent_message_id,
+                    delegation_chain=ctx.delegation_chain,
+                    delegation_request_id=ctx.delegation_request_id,
+                    delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+                    telegram_message_thread_id=ctx.telegram_message_thread_id,
                 )
-                resume_item = QueueItem(chat_id=chat_id, query_text=verification_prompt)
+                resume_item = QueueItem(
+                    chat_id=chat_id,
+                    query_text=verification_prompt,
+                    executing_agent_id=ctx.executing_agent_id,
+                    squad_thread_id=ctx.squad_thread_id,
+                    squad_task_id=ctx.squad_task_id,
+                    parent_message_id=ctx.parent_message_id,
+                    delegation_chain=ctx.delegation_chain,
+                    delegation_request_id=ctx.delegation_request_id,
+                    delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+                    telegram_message_thread_id=ctx.telegram_message_thread_id,
+                )
                 resume_result = await _run_with_provider_fallback(
                     resume_ctx,
                     resume_item,
@@ -3831,7 +4592,14 @@ async def _run_agent_loop(
         # Visual status for the user
         tool_names = ", ".join(c.tool for c in tool_calls)
         try:
-            msg = await context.bot.send_message(chat_id=chat_id, text=f"\U0001f527 {tool_names}...")
+            thread_kwargs: dict[str, int] = {}
+            if ctx.telegram_message_thread_id is not None:
+                thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
+            msg = await cast(Any, context.bot).send_message(
+                chat_id=chat_id,
+                text=f"\U0001f527 {tool_names}...",
+                **thread_kwargs,
+            )
             status_msg_ids.append(msg.message_id)
         except Exception:
             pass
@@ -3850,6 +4618,16 @@ async def _run_agent_loop(
             scheduled_run_id=ctx.scheduled_run_id,
             task_kind=ctx.task_kind,
             effective_policy=ctx.effective_policy,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            bot=context.bot,
+            application=getattr(context, "application", None),
+            context_governance=ctx.context_governance,
         )
 
         from koda.services import audit, metrics
@@ -3982,6 +4760,10 @@ async def _run_agent_loop(
                     )
 
             if policy_evaluation.requires_confirmation:
+                approval_contract = _approval_contract_for_call(
+                    call,
+                    getattr(policy_evaluation.envelope, "risk_class", None),
+                )
                 description = f"{call.tool}({_json.dumps(call.params, ensure_ascii=False)[:240]})"
                 op_id = await request_agent_cmd_approval(
                     context.bot,
@@ -3994,10 +4776,12 @@ async def _run_agent_loop(
                         {
                             "envelope": policy_evaluation.envelope,
                             "approval_scope": requested_scope,
+                            **approval_contract,
                         }
                     ],
                     preview_text=policy_evaluation.preview_text,
                     task_id=ctx.task_id,
+                    **approval_contract,
                 )
                 try:
                     from koda.utils.approval import _PENDING_AGENT_CMD_OPS
@@ -4010,6 +4794,77 @@ async def _run_agent_loop(
                             op["decision"] = "timeout"
                     approval_result = get_agent_cmd_decision(op_id) or {}
                     decision = approval_result.get("decision")
+                    approved_by_edit = False
+                    if decision == "responded":
+                        response_text = str(approval_result.get("response_text") or "").strip()
+                        executed_pairs.append(
+                            (
+                                call,
+                                AgentToolResult(
+                                    tool=call.tool,
+                                    success=True,
+                                    output=response_text or "Human operator supplied an empty response.",
+                                    metadata={
+                                        "category": _infer_tool_category(call.tool),
+                                        "approval": "responded",
+                                        "human_intervention": True,
+                                    },
+                                ),
+                            )
+                        )
+                        continue
+                    if decision == "edited":
+                        edited_params = approval_result.get("edited_params")
+                        if isinstance(edited_params, dict):
+                            call = AgentToolCall(call.tool, dict(edited_params), call.raw_match)
+                            policy_params = _policy_params_for_call(call, tool_ctx)
+                            policy_evaluation = evaluate_execution_policy(
+                                call.tool,
+                                policy_params,
+                                task_kind=ctx.task_kind,
+                                effective_policy=ctx.effective_policy,
+                                confidence_report=confidence_report.to_dict()
+                                if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                                else None,
+                                known_tool=is_known_tool(call.tool),
+                            )
+                            requested_scope = policy_evaluation.approval_scope
+                            if policy_evaluation.decision == "deny":
+                                executed_pairs.append(
+                                    (
+                                        call,
+                                        AgentToolResult(
+                                            tool=call.tool,
+                                            success=False,
+                                            output=f"Edited approval was blocked by policy: {policy_evaluation.reason}",
+                                            metadata={
+                                                "category": _infer_tool_category(call.tool),
+                                                "approval": "edited_policy_denied",
+                                                "policy_reason_code": policy_evaluation.reason_code,
+                                            },
+                                        ),
+                                    )
+                                )
+                                if _is_write_tool(call.tool, call.params):
+                                    skip_following_reads = True
+                                continue
+                            if policy_evaluation.requires_confirmation:
+                                policy_evaluation = evaluate_execution_policy(
+                                    call.tool,
+                                    policy_params,
+                                    task_kind=ctx.task_kind,
+                                    effective_policy=ctx.effective_policy,
+                                    confidence_report=confidence_report.to_dict()
+                                    if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                                    else None,
+                                    approval_grant={"grant_id": f"edited:{op_id}", "kind": "approve_once"},
+                                    known_tool=is_known_tool(call.tool),
+                                )
+                            ctx.human_approval_used = True
+                            approved_by_edit = True
+                            metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision="edited").inc()
+                        else:
+                            decision = "denied"
                     if decision in {"approved", "approved_scope"}:
                         ctx.human_approval_used = True
                         metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision=str(decision)).inc()
@@ -4040,7 +4895,7 @@ async def _run_agent_loop(
                             approval_grant=approval_grant,
                             known_tool=is_known_tool(call.tool),
                         )
-                    else:
+                    elif not approved_by_edit:
                         decision_label = "denied" if decision == "denied" else "timeout"
                         metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision=decision_label).inc()
                         executed_pairs.append(
@@ -4165,6 +5020,7 @@ async def _run_agent_loop(
                         "write": _is_write_tool(call.tool, call.params),
                         **result.metadata,
                     },
+                    "data": result.data if call.tool == "task" else None,
                     "duration_ms": result.duration_ms,
                     "started_at": result.started_at,
                     "completed_at": result.completed_at,
@@ -4315,11 +5171,27 @@ async def _run_agent_loop(
             visual_paths=visual_paths_this_iteration if visual_paths_this_iteration else ctx.visual_paths,
             temp_paths=list(dict.fromkeys([*ctx.temp_paths, *temp_frame_paths_this_iteration])),
             runtime_env_id=ctx.runtime_env_id,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            telegram_message_thread_id=ctx.telegram_message_thread_id,
         )
         resume_item = QueueItem(
             chat_id=chat_id,
             query_text=resume_prompt,
             image_paths=visual_paths_this_iteration if visual_paths_this_iteration else None,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            telegram_message_thread_id=ctx.telegram_message_thread_id,
         )
 
         resume_result = await _run_with_provider_fallback(resume_ctx, resume_item, user_id, chat_id, context, task_id)
@@ -4961,6 +5833,60 @@ async def _persist_created_artifacts(
     return persisted
 
 
+async def _register_squad_artifacts(
+    *,
+    ctx: QueryContext | None,
+    runtime_task_id: int | None,
+    created_artifacts: list[str],
+    run_result: RunResult,
+) -> list[str]:
+    if ctx is None or not ctx.squad_thread_id or not created_artifacts:
+        return []
+    try:
+        from koda.services.artifact_ingestion import detect_artifact_kind
+        from koda.squads import get_squad_artifact_store
+
+        store = get_squad_artifact_store()
+        if store is None:
+            return []
+    except Exception:
+        log.exception("squad_artifact_store_unavailable", thread_id=ctx.squad_thread_id)
+        return []
+
+    owner = ctx.executing_agent_id or AGENT_ID or "default"
+    artifact_ids: list[str] = []
+    for raw_path in created_artifacts:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if not os.path.isfile(path):
+            continue
+        try:
+            stat = os.stat(path)
+            digest = hashlib.sha256(
+                f"{ctx.squad_thread_id}:{path}:{stat.st_mtime_ns}:{stat.st_size}".encode()
+            ).hexdigest()[:32]
+            artifact_id = f"runtime:{runtime_task_id or 'unknown'}:{digest}"
+            kind = detect_artifact_kind(path=path, mime_type="").value
+            artifact = await store.upsert_artifact(
+                artifact_id=artifact_id,
+                thread_id=ctx.squad_thread_id,
+                task_id=ctx.squad_task_id,
+                owner_agent_id=owner,
+                kind=kind,
+                path_or_uri=path,
+                visible_to_squad=True,
+                metadata={
+                    "runtime_task_id": runtime_task_id,
+                    "provider": run_result.provider,
+                    "model": run_result.model,
+                    "size_bytes": stat.st_size,
+                },
+            )
+            artifact_ids.append(artifact.artifact_id)
+        except Exception:
+            log.exception("squad_artifact_register_failed", thread_id=ctx.squad_thread_id, path=path)
+    return artifact_ids
+
+
 async def _persist_voice_response_artifact(
     *,
     task_id: int | None,
@@ -5115,6 +6041,9 @@ async def _send_response(
 ) -> None:
     """Send the provider response: TTS, code blocks, HTML text, artifacts, supervised buttons."""
     cost = run_result.cost_usd
+    thread_kwargs: dict[str, int] = {}
+    if ctx is not None and ctx.telegram_message_thread_id is not None and (update is None or update.message is None):
+        thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
     delivery = delivery_outcome
     if delivery is None:
         delivery = await _prepare_delivery_outcome(
@@ -5136,7 +6065,13 @@ async def _send_response(
     artifacts_sent = 0
     artifact_delivery_failed = False
     if created_artifacts:
-        artifacts_sent = await send_created_files(created_artifacts, chat_id, context, update)
+        artifacts_sent = await send_created_files(
+            created_artifacts,
+            chat_id,
+            context,
+            update,
+            message_thread_id=ctx.telegram_message_thread_id if ctx is not None else None,
+        )
         if artifacts_sent:
             log.info("artifacts_sent", count=artifacts_sent, total=len(created_artifacts))
             if artifacts_sent < len(created_artifacts):
@@ -5250,11 +6185,12 @@ async def _send_response(
                                 reply_markup=response_markup,
                             )
                         else:
-                            await context.bot.send_voice(
+                            await cast(Any, context.bot).send_voice(
                                 chat_id=chat_id,
                                 voice=vf,
                                 caption=caption,
                                 reply_markup=response_markup,
+                                **thread_kwargs,
                             )
                     audio_sent = True
                     log.info("send_voice", task_id=task_id, chat_id=chat_id)
@@ -5301,11 +6237,12 @@ async def _send_response(
                             caption=f"Code block: {filename}",
                         )
                     else:
-                        await context.bot.send_document(
+                        await cast(Any, context.bot).send_document(
                             chat_id=chat_id,
                             document=fh,
                             filename=filename,
                             caption=f"Code block: {filename}",
+                            **thread_kwargs,
                         )
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
@@ -5351,12 +6288,26 @@ async def _send_response(
                         reply_markup=response_markup if is_last else None,
                     )
                 else:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=chunk,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=response_markup if is_last else None,
-                    )
+                    if ctx is not None and ctx.squad_thread_id and thread_kwargs.get("message_thread_id") is not None:
+                        from koda.squads.telegram_outbound import post_to_topic_buffered
+
+                        await post_to_topic_buffered(
+                            cast(Any, context.bot),
+                            chat_id=chat_id,
+                            message_thread_id=thread_kwargs.get("message_thread_id"),
+                            text=chunk,
+                            agent_label=ctx.executing_agent_id or AGENT_ID or "agent",
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=response_markup if is_last else None,
+                        )
+                    else:
+                        await cast(Any, context.bot).send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=response_markup if is_last else None,
+                            **thread_kwargs,
+                        )
             except Exception:
                 import re as _re
 
@@ -5368,16 +6319,33 @@ async def _send_response(
                             reply_markup=response_markup if is_last else None,
                         )
                     else:
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=plain_text,
-                            reply_markup=response_markup if is_last else None,
-                        )
+                        if (
+                            ctx is not None
+                            and ctx.squad_thread_id
+                            and thread_kwargs.get("message_thread_id") is not None
+                        ):
+                            from koda.squads.telegram_outbound import post_to_topic_buffered
+
+                            await post_to_topic_buffered(
+                                cast(Any, context.bot),
+                                chat_id=chat_id,
+                                message_thread_id=thread_kwargs.get("message_thread_id"),
+                                text=plain_text,
+                                agent_label=ctx.executing_agent_id or AGENT_ID or "agent",
+                                reply_markup=response_markup if is_last else None,
+                            )
+                        else:
+                            await cast(Any, context.bot).send_message(
+                                chat_id=chat_id,
+                                text=plain_text,
+                                reply_markup=response_markup if is_last else None,
+                                **thread_kwargs,
+                            )
                 except Exception:
                     if update and update.message:
                         await update.message.reply_text(plain_text)
                     else:
-                        await context.bot.send_message(chat_id=chat_id, text=plain_text)
+                        await cast(Any, context.bot).send_message(chat_id=chat_id, text=plain_text, **thread_kwargs)
 
     # Supervised mode: Continue/Stop buttons
     if agent_mode == "supervised" and run_result.stop_reason == "max_turns" and run_result.session_id:
@@ -5396,15 +6364,457 @@ async def _send_response(
         supervised_text = f"🔍 <b>Supervised mode</b> — {escape_html(run_result.provider)} paused after 1 turn."
         if tool_summary:
             supervised_text += f"\n{tool_summary}"
-        await context.bot.send_message(
+        await cast(Any, context.bot).send_message(
             chat_id=chat_id,
             text=supervised_text,
             reply_markup=supervised_buttons,
             parse_mode=ParseMode.HTML,
+            **thread_kwargs,
         )
 
 
 # Post-processing
+
+_SQUAD_DELEGATION_NARRATIVE_RE = re.compile(
+    r"\b("
+    r"chamei|acionei|deleguei|passei|repass(ei|o)|coordenei|"
+    r"o\s+planejador|a\s+planejadora|o\s+desenvolvedor|a\s+desenvolvedora|"
+    r"frontend\s+(entregou|fez)|backend\s+(entregou|fez)|"
+    r"planner\s+(entregou|fez)|especialista\s+(entregou|fez)|"
+    r"called|delegated|handed\s+off|the\s+planner|the\s+developer|specialist\s+delivered"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+async def _squad_coordination_integrity_override(ctx: QueryContext, response_text: str) -> str | None:
+    """Block coordinator responses that narrate delegation without durable evidence."""
+    if not ctx.squad_thread_id or not response_text or not _SQUAD_DELEGATION_NARRATIVE_RE.search(response_text):
+        return None
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is None:
+            return None
+        thread = await store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return None
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if executing_agent != thread.coordinator_agent_id:
+            return None
+        history = await store.thread_history(thread_id=ctx.squad_thread_id, limit=30)
+        parent = ctx.parent_message_id
+        has_evidence = False
+        for message in history:
+            msg_type = str(message.get("type") or "")
+            if msg_type not in {"task_request", "task_result", "delegation_request", "delegation_result"}:
+                continue
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            if parent and metadata.get("parent_message_id") not in {parent, parent.removeprefix("msg-")}:
+                continue
+            has_evidence = True
+            break
+        if has_evidence:
+            return None
+        await store.post_thread_message(
+            thread_id=ctx.squad_thread_id,
+            from_agent="system",
+            content="[coordination_integrity_violation] coordinator claimed delegation without persisted task evidence",
+            message_type="system_event",
+            metadata={
+                "event_type": "coordination_integrity_violation",
+                "parent_message_id": parent,
+                "executing_agent_id": executing_agent,
+            },
+        )
+        return (
+            "Eu não vou afirmar que acionei outros agentes sem um rastro real de task_request/task_result no thread. "
+            "Vou refazer a coordenação pelo fluxo auditável do squad para que os especialistas sejam chamados de fato."
+        )
+    except Exception:
+        log.exception("squad_coordination_integrity_guard_failed", thread_id=ctx.squad_thread_id)
+        return None
+
+
+async def _advance_squad_task_from_run(
+    *,
+    ctx: QueryContext,
+    run_result: RunResult,
+    response_text: str,
+    artifact_ids: list[str],
+) -> None:
+    if not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        store = get_squad_task_store()
+        if store is None:
+            return
+        agent_id = ctx.executing_agent_id or AGENT_ID or "default"
+        task = await store.get_task(ctx.squad_task_id)
+        if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
+            return
+        if task.status == "pending":
+            task = await store.claim_task(task_id=task.id, agent_id=agent_id)
+        if task.status == "claimed":
+            task = await store.update_task_status(
+                task_id=task.id,
+                new_status="in_progress",
+                agent_id=agent_id,
+                expected_version=task.version,
+            )
+        terminal_status = "failed" if run_result.error else "done"
+        await store.update_task_status(
+            task_id=task.id,
+            new_status=terminal_status,
+            agent_id=agent_id,
+            expected_version=task.version,
+            error_message=response_text[:1000] if run_result.error else None,
+            result_summary=response_text[:1000],
+            deliverables=artifact_ids,
+        )
+    except Exception:
+        log.exception(
+            "squad_task_auto_advance_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+
+
+def _render_existing_squad_task_request(task: Any) -> str:
+    lines = [
+        f"Task request [{task.kind}] {task.id}",
+        f"Assigned to: {task.assigned_agent_id or 'unassigned'}",
+        "",
+        "Objective:",
+        str(task.description or "").strip(),
+    ]
+    if getattr(task, "acceptance_criteria", None):
+        lines.extend(["", "Acceptance criteria:"])
+        lines.extend(f"- {item}" for item in task.acceptance_criteria)
+    if getattr(task, "deliverables_spec", None):
+        lines.extend(["", "Deliverables:"])
+        lines.extend(f"- {item}" for item in task.deliverables_spec)
+    lines.extend(
+        [
+            "",
+            "Return a concrete task_result in this thread using only visible squad context.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def _maybe_enqueue_unblocked_squad_tasks(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+) -> int:
+    """Dispatch pending squad tasks whose dependencies just became satisfied."""
+    if not ctx.squad_thread_id:
+        return 0
+    try:
+        from koda.config import SQUAD_CLAIM_TTL_S
+        from koda.squads import get_squad_task_store, get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        task_store = get_squad_task_store()
+        if thread_store is None or task_store is None:
+            return 0
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return 0
+        pending = await task_store.list_tasks(
+            thread_id=ctx.squad_thread_id,
+            status="pending",
+            limit=50,
+        )
+        dispatched = 0
+        for task in pending:
+            assignee = str(task.assigned_agent_id or "").strip()
+            if not assignee or assignee == thread.coordinator_agent_id:
+                continue
+            ready = True
+            for dependency_id in task.depends_on:
+                dependency = await task_store.get_task(dependency_id)
+                if dependency is None or dependency.status != "done":
+                    ready = False
+                    break
+            if not ready:
+                continue
+
+            try:
+                claimed = await task_store.claim_task(
+                    task_id=task.id,
+                    agent_id=assignee,
+                    ttl_seconds=SQUAD_CLAIM_TTL_S,
+                )
+            except Exception:
+                log.exception(
+                    "squad_unblocked_task_claim_failed",
+                    thread_id=ctx.squad_thread_id,
+                    squad_task_id=task.id,
+                    assignee=assignee,
+                )
+                continue
+            request_id = f"coord-{claimed.id}"
+            parent_message_id = (
+                str(claimed.metadata.get("coordination_parent_message_id") or "")
+                or ctx.parent_message_id
+                or f"task-{ctx.squad_task_id}"
+            )
+            request_content = _render_existing_squad_task_request(claimed)
+            with contextlib.suppress(Exception):
+                await thread_store.post_thread_message(
+                    thread_id=ctx.squad_thread_id,
+                    from_agent=thread.coordinator_agent_id,
+                    content=f"[task_unblocked] {claimed.title} -> {assignee}",
+                    message_type="status_update",
+                    metadata={
+                        "event_type": "task_unblocked",
+                        "squad_task_id": claimed.id,
+                        "parent_message_id": parent_message_id,
+                        "dependencies": list(claimed.depends_on),
+                    },
+                )
+            app = getattr(context, "application", None)
+            chat_id = int(thread.telegram_chat_id or 0)
+            try:
+                if app is not None and chat_id:
+                    await enqueue_squad_agent_task(
+                        application=app,
+                        user_id=user_id or int(thread.owner_user_id or 0),
+                        chat_id=chat_id,
+                        query_text=request_content,
+                        executing_agent_id=assignee,
+                        squad_thread_id=ctx.squad_thread_id,
+                        squad_task_id=claimed.id,
+                        parent_message_id=parent_message_id,
+                        delegation_chain=[thread.coordinator_agent_id],
+                        delegation_request_id=request_id,
+                        delegation_origin_agent_id=thread.coordinator_agent_id,
+                        telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                        bot_override=getattr(context, "bot", None),
+                    )
+                else:
+                    from koda.agents import get_message_bus
+
+                    await get_message_bus().send(
+                        from_agent=thread.coordinator_agent_id,
+                        to_agent=assignee,
+                        content=request_content,
+                        metadata={
+                            "kind": "task_request",
+                            "thread_id": ctx.squad_thread_id,
+                            "squad_id": thread.squad_id,
+                            "squad_task_id": claimed.id,
+                            "task_id": claimed.id,
+                            "request_id": request_id,
+                            "correlation_id": request_id,
+                            "parent_message_id": parent_message_id,
+                            "delegation_chain": [thread.coordinator_agent_id],
+                            "telegram_chat_id": thread.telegram_chat_id,
+                            "telegram_message_thread_id": ctx.telegram_message_thread_id
+                            or thread.telegram_message_thread_id,
+                            "user_id": user_id or thread.owner_user_id,
+                            "chat_id": thread.telegram_chat_id or 0,
+                            "payload": {
+                                "task_id": claimed.id,
+                                "description": claimed.description,
+                                "deliverables": list(claimed.deliverables_spec),
+                                "acceptance_criteria": list(claimed.acceptance_criteria),
+                                "context_refs": ["user_input", "squad_context", "dependency_task_results"],
+                            },
+                        },
+                    )
+            except Exception:
+                log.exception(
+                    "squad_unblocked_task_enqueue_failed",
+                    thread_id=ctx.squad_thread_id,
+                    squad_task_id=claimed.id,
+                    assignee=assignee,
+                )
+                continue
+            dispatched += 1
+        return dispatched
+    except Exception:
+        log.exception(
+            "squad_unblocked_task_dispatch_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+        return 0
+
+
+async def _maybe_enqueue_squad_coordinator_synthesis(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> None:
+    if not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store, get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        task_store = get_squad_task_store()
+        if thread_store is None or task_store is None:
+            return
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if thread.coordinator_agent_id == executing_agent:
+            return
+        open_tasks = await task_store.list_tasks(
+            thread_id=ctx.squad_thread_id,
+            status=["pending", "claimed", "in_progress", "blocked"],
+            limit=1,
+        )
+        if open_tasks:
+            return
+        synthesis_query = (
+            "Todos os task_result abertos deste ciclo já foram recebidos. "
+            "Sintetize a entrega final para o usuário usando apenas resultados visíveis no thread. "
+            f"Último resultado ({executing_agent}): {response_text[:1200]}"
+        )
+        app = getattr(context, "application", None)
+        chat_id = int(thread.telegram_chat_id or 0)
+        if app is not None and chat_id:
+            await enqueue_squad_agent_task(
+                application=app,
+                user_id=user_id or int(thread.owner_user_id or 0),
+                chat_id=chat_id,
+                query_text=synthesis_query,
+                executing_agent_id=thread.coordinator_agent_id,
+                squad_thread_id=ctx.squad_thread_id,
+                parent_message_id=squad_message_id or ctx.parent_message_id,
+                delegation_chain=[executing_agent],
+                telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                bot_override=getattr(context, "bot", None),
+            )
+            return
+        from koda.agents import get_message_bus
+
+        await get_message_bus().send(
+            from_agent=executing_agent,
+            to_agent=thread.coordinator_agent_id,
+            content=synthesis_query,
+            metadata={
+                "kind": "task_result",
+                "thread_id": ctx.squad_thread_id,
+                "squad_id": thread.squad_id,
+                "parent_message_id": squad_message_id or ctx.parent_message_id,
+                "telegram_chat_id": thread.telegram_chat_id,
+                "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                "user_id": user_id or thread.owner_user_id,
+                "chat_id": thread.telegram_chat_id or 0,
+                "payload": {
+                    "task_id": ctx.squad_task_id,
+                    "status": "ok",
+                    "output_md": response_text,
+                    "artifact_ids": artifact_ids,
+                },
+            },
+        )
+    except Exception:
+        log.exception(
+            "squad_coordinator_synthesis_enqueue_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+
+
+async def _maybe_enqueue_squad_reply_synthesis(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+) -> None:
+    if not ctx.squad_thread_id or not ctx.delegation_request_id or ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import (
+            dispatch_squad_turn,
+            get_squad_thread_store,
+            get_thread_reply_service,
+            message_ref_to_id,
+        )
+
+        thread_store = get_squad_thread_store()
+        if thread_store is None:
+            return
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            await thread_store.post_thread_message(
+                thread_id=ctx.squad_thread_id,
+                from_agent="system",
+                content="[synthesis_blocked] thread reply cycle has no coordinator",
+                message_type="system_event",
+                metadata={
+                    "event_type": "synthesis_blocked",
+                    "parent_message_id": ctx.parent_message_id,
+                    "correlation_id": ctx.delegation_request_id,
+                },
+            )
+            return
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if executing_agent == thread.coordinator_agent_id:
+            return
+        source_id = message_ref_to_id(ctx.parent_message_id)
+        reply_service = get_thread_reply_service(thread_store)
+        if reply_service is not None and source_id is not None:
+            open_items = await reply_service.list_obligations(
+                thread_id=ctx.squad_thread_id,
+                message_ids=[source_id],
+                status="open",
+            )
+            if open_items:
+                return
+        synthesis_query = (
+            "As obrigações de reply deste ciclo foram respondidas. "
+            "Sintetize a resposta final para o usuário usando apenas as mensagens visíveis da thread, "
+            "incluindo divergências, pendências canceladas ou falhas se existirem. "
+            f"Última contribuição ({executing_agent}): {response_text[:1200]}"
+        )
+        result = await dispatch_squad_turn(
+            target_agent_id=thread.coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=squad_message_id or ctx.parent_message_id,
+            metadata={
+                "from_agent": executing_agent,
+                "source": "reply_obligations_resolved",
+                "delivery_intent": "final_synthesis",
+                "reply_contract_version": "thread_reply.v1",
+                "reply_kind": "synthesis_request",
+                "correlation_id": ctx.delegation_request_id,
+            },
+            application=getattr(context, "application", None),
+            user_id=user_id or int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=[executing_agent],
+            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+            bot_override=getattr(context, "bot", None),
+        )
+        if result.dispatched:
+            await thread_store.notify_event(
+                thread_id=ctx.squad_thread_id,
+                event_type="synthesis_created",
+                data={"coordinator_agent_id": thread.coordinator_agent_id, "dispatch": result.to_dict()},
+            )
+    except Exception:
+        log.exception("squad_reply_synthesis_enqueue_failed", thread_id=ctx.squad_thread_id)
 
 
 async def _post_process(
@@ -5421,6 +6831,7 @@ async def _post_process(
     cacheable: bool = True,
     final_status: str = "completed",
     response_text_override: str | None = None,
+    delivery_outcome: DeliveryOutcome | None = None,
 ) -> None:
     """Update session, stats, log query, extract memories."""
     effective_model = run_result.model or model
@@ -5463,11 +6874,130 @@ async def _post_process(
     # Log canonically through the history store (use "cache" as model for cache-served responses)
     log_model = "cache" if run_result.stop_reason == "cache_hit" else effective_model
     query_id: int | None = None
+    squad_message_id: str | None = None
+    response_text = response_text_override if response_text_override is not None else run_result.result
+    squad_artifact_ids: list[str] = []
+    if not dry_run and ctx is not None and ctx.squad_thread_id:
+        try:
+            from koda.squads import get_squad_thread_store
+
+            store = get_squad_thread_store()
+            if store is not None:
+                squad_artifact_ids = await _register_squad_artifacts(
+                    ctx=ctx,
+                    runtime_task_id=task_id,
+                    created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
+                    run_result=run_result,
+                )
+                message_kind = "task_result" if ctx.squad_task_id else "agent_text"
+                correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
+                reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
+                posted_id = await store.post_thread_message(
+                    thread_id=ctx.squad_thread_id,
+                    from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                    content=response_text,
+                    message_type=message_kind,
+                    metadata={
+                        "query_cost_usd": cost,
+                        "provider": run_result.provider,
+                        "model": log_model,
+                        "squad_task_id": ctx.squad_task_id,
+                        "parent_message_id": ctx.parent_message_id,
+                        "reply_contract_version": "thread_reply.v1",
+                        "reply_kind": reply_kind,
+                        "in_reply_to": ctx.parent_message_id,
+                        "correlation_id": correlation_id,
+                        "payload": {
+                            "task_id": ctx.squad_task_id,
+                            "status": "failed" if run_result.error else "ok",
+                            "output_md": response_text,
+                            "artifact_ids": squad_artifact_ids,
+                            "cost_usd": cost,
+                        }
+                        if ctx.squad_task_id
+                        else {"markdown": response_text},
+                    },
+                    in_reply_to=ctx.parent_message_id,
+                    correlation_id=str(correlation_id) if correlation_id else None,
+                )
+                squad_message_id = f"msg-{posted_id}"
+                try:
+                    from koda.squads import get_thread_reply_service
+
+                    reply_service = get_thread_reply_service(store)
+                    if reply_service is not None:
+                        await reply_service.resolve_for_reply(
+                            thread_id=ctx.squad_thread_id,
+                            reply_message_id=posted_id,
+                            from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                            in_reply_to=ctx.parent_message_id,
+                            correlation_id=str(correlation_id) if correlation_id else None,
+                        )
+                except Exception:
+                    log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
+                await _advance_squad_task_from_run(
+                    ctx=ctx,
+                    run_result=run_result,
+                    response_text=response_text,
+                    artifact_ids=squad_artifact_ids,
+                )
+        except Exception:
+            log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
+        await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+        )
+        await _maybe_enqueue_squad_coordinator_synthesis(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            response_text=response_text,
+            squad_message_id=squad_message_id,
+            artifact_ids=squad_artifact_ids,
+        )
+        await _maybe_enqueue_squad_reply_synthesis(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            response_text=response_text,
+            squad_message_id=squad_message_id,
+        )
+        if ctx.delegation_request_id and ctx.delegation_origin_agent_id:
+            try:
+                from koda.agents import get_message_bus
+                from koda.agents.models import DelegationResult
+
+                get_message_bus().resolve_delegation(
+                    ctx.delegation_request_id,
+                    DelegationResult(
+                        request_id=ctx.delegation_request_id,
+                        from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                        to_agent=ctx.delegation_origin_agent_id,
+                        success=not run_result.error,
+                        result=response_text,
+                        error=response_text if run_result.error else None,
+                        duration_ms=None,
+                        metadata={
+                            "task_id": ctx.squad_task_id,
+                            "thread_id": ctx.squad_thread_id,
+                            "message_id": squad_message_id,
+                            "cost_usd": cost,
+                            "artifact_ids": squad_artifact_ids,
+                        },
+                    ),
+                )
+            except Exception:
+                log.exception(
+                    "squad_delegation_auto_resolve_failed",
+                    thread_id=ctx.squad_thread_id,
+                    request_id=ctx.delegation_request_id,
+                )
     if not dry_run:
         query_id = log_query(
             user_id=user_id,
             query_text=query_text,
-            response_text=response_text_override if response_text_override is not None else run_result.result,
+            response_text=response_text,
             cost_usd=cost,
             provider=run_result.provider,
             model=log_model,
@@ -5476,6 +7006,9 @@ async def _post_process(
             usage=run_result.usage,
             work_dir=work_dir,
             error=run_result.error,
+            squad_thread_id=getattr(ctx, "squad_thread_id", None) if ctx is not None else None,
+            squad_message_id=squad_message_id,
+            squad_task_id=getattr(ctx, "squad_task_id", None) if ctx is not None else None,
         )
         context.user_data["last_query_id"] = query_id
         if ctx and getattr(ctx, "execution_episode_id", None) is not None:
@@ -5486,7 +7019,6 @@ async def _post_process(
         # real-time consumption. Permissive on failure (spend-ledger
         # drift is preferable to losing a generated response).
         if cost > 0:
-            from koda.config import AGENT_ID
             from koda.internal_rpc.policy_engine import record_spend_safe
             from koda.services.policy_engine_runtime import get_policy_engine_client
 
@@ -5658,7 +7190,7 @@ async def _process_task_item(
         from koda.services.tool_dispatcher import parse_agent_commands as _parse_cmds
 
         _calls, _ = _parse_cmds(run_result.result)
-        if _calls:
+        if _calls or _run_result_has_native_tool_calls(run_result):
             run_result = await _run_agent_loop(
                 ctx,
                 item,
@@ -5680,6 +7212,8 @@ async def _send_task_error(
     item: QueueItem | None = None,
 ) -> None:
     """Notify the user of a task failure via Telegram."""
+    if item and item.silent_response:
+        return
     from koda.utils.formatting import format_error_message
 
     text = f"Task #{task_info.task_id} falhou:\n{format_error_message(error_msg)}"
@@ -5789,6 +7323,23 @@ async def _finalize_scheduled_run(
     )
 
 
+@contextlib.asynccontextmanager
+async def _task_capacity_scope(raw_item: Any, semaphore: asyncio.Semaphore) -> Any:
+    """Acquire normal task capacity unless this is a bounded child-run lane.
+
+    Parent turns hold the normal user/global task semaphores while waiting for
+    child results. Re-acquiring the same capacity in a child run can deadlock,
+    so child-runs rely on their dedicated fan-out semaphore and still pass
+    through leases, runtime status, policy, sandbox, and provider handling.
+    """
+
+    if isinstance(raw_item, dict) and raw_item.get("_child_run"):
+        yield
+        return
+    async with _global_semaphore, semaphore:
+        yield
+
+
 async def _execute_single_task(
     raw_item: Any,
     user_id: int,
@@ -5823,7 +7374,7 @@ async def _execute_single_task(
 
     try:
         metrics.ACTIVE_TASKS.labels(agent_id=_agent_id_label).inc()
-        async with _global_semaphore, semaphore:
+        async with _task_capacity_scope(raw_item, semaphore):
             ctx_user_id.set(user_id)
             query_id = str(uuid.uuid4())[:8]
             ctx_query_id.set(query_id)
@@ -5969,10 +7520,11 @@ async def _execute_single_task(
                     completed_at=datetime.now().isoformat(),
                 )
                 _update_runtime_queue_status(task_id, "failed", last_error=str(e))
-                if item.update and item.update.message:
-                    await item.update.message.reply_text(str(e))
-                else:
-                    await context.bot.send_message(chat_id=item.chat_id, text=str(e))
+                if not item.silent_response:
+                    if item.update and item.update.message:
+                        await item.update.message.reply_text(str(e))
+                    else:
+                        await context.bot.send_message(chat_id=item.chat_id, text=str(e))
                 if RUNTIME_ENVIRONMENTS_ENABLED:
                     await runtime.record_warning(
                         task_id=task_id,
@@ -6109,6 +7661,15 @@ async def _execute_single_task(
                                 path=str(stdout_path) if stdout_path is not None else runtime_terminal_path,
                             )
 
+                    if _recover_provider_error_with_completed_output(run_result):
+                        log.warning(
+                            "provider_error_recovered_with_completed_output",
+                            task_id=task_id,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                            stop_reason=run_result.stop_reason,
+                        )
+
                     # Check if the result itself indicates a retryable error
                     if run_result.error and (
                         run_result.retryable
@@ -6215,6 +7776,18 @@ async def _execute_single_task(
                     except Exception:
                         log.exception("knowledge_answer_evaluation_error")
 
+                    if ctx.squad_thread_id:
+                        integrity_override = await _squad_coordination_integrity_override(
+                            ctx,
+                            response_override or final_response_text,
+                        )
+                        if integrity_override:
+                            response_override = integrity_override
+                            final_response_text = integrity_override
+                            run_result.result = integrity_override
+                            if "squad_coordination_integrity_repair" not in run_result.warnings:
+                                run_result.warnings.append("squad_coordination_integrity_repair")
+
                     delivery_outcome = await _prepare_delivery_outcome(
                         run_result,
                         ctx.work_dir,
@@ -6267,24 +7840,26 @@ async def _execute_single_task(
                             cacheable=not ctx.artifact_dossiers,
                             final_status=final_status,
                             response_text_override=delivered_response_text,
+                            delivery_outcome=delivery_outcome,
                         )
 
-                    await _send_response(
-                        item.chat_id,
-                        item.update,
-                        context,
-                        run_result,
-                        ctx.work_dir,
-                        ctx.agent_mode,
-                        elapsed=query_elapsed,
-                        model=run_result.model,
-                        task_id=task_id,
-                        ctx=ctx,
-                        response_override=response_override,
-                        query_text=item.query_text,
-                        include_tool_summary=response_override is None,
-                        delivery_outcome=delivery_outcome,
-                    )
+                    if not item.silent_response:
+                        await _send_response(
+                            item.chat_id,
+                            item.update,
+                            context,
+                            run_result,
+                            ctx.work_dir,
+                            ctx.agent_mode,
+                            elapsed=query_elapsed,
+                            model=run_result.model,
+                            task_id=task_id,
+                            ctx=ctx,
+                            response_override=response_override,
+                            query_text=item.query_text,
+                            include_tool_summary=response_override is None,
+                            delivery_outcome=delivery_outcome,
+                        )
 
                     task_info.status = final_status
                     task_info.completed_at = time.time()

@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { SetupFrame } from "@/components/setup/setup-frame";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
@@ -124,13 +124,12 @@ export function LoginScreen() {
           variant="accent"
           size="lg"
           disabled={busy}
+          aria-label={busy ? t("auth.login.submitting") : undefined}
+          aria-busy={busy || undefined}
           className="auth-submit"
         >
           {busy ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t("auth.login.submitting")}</span>
-            </>
+            <InlineSpinner className="h-4 w-4" />
           ) : (
             t("auth.login.submit")
           )}

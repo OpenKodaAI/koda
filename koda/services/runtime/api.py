@@ -667,10 +667,80 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
         log.exception("runtime_task_detail_asset_registry_failed", task_id=task_id)
     from koda.knowledge.presentation import redact_runtime_knowledge_payload
 
+    environment = controller.store.get_environment_by_task(task_id)
+    list_events = getattr(controller.store, "list_events", None)
+    runtime_events = list_events(task_id=task_id, after_seq=0) if callable(list_events) else []
+    run_graph_payload: dict[str, object] | None = None
+    run_replay_payload: dict[str, object] | None = None
+    sandbox_doctor_payload: dict[str, object] | None = None
+    try:
+        from koda.services.run_graph_store import graph_payload_for_execution, replay_payload_for_execution
+
+        run_graph_payload = graph_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=runtime_events,
+        )
+        run_replay_payload = replay_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=runtime_events,
+        )
+    except Exception:
+        log.exception("runtime_task_detail_run_graph_failed", task_id=task_id)
+    try:
+        from koda.services.sandbox_doctor import build_sandbox_doctor_payload
+
+        sandbox_doctor_payload = build_sandbox_doctor_payload(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            task=task,
+            environment=environment,
+            runtime_kernel=runtime_kernel_snapshot,
+        )
+    except Exception:
+        log.exception("runtime_task_detail_sandbox_doctor_failed", task_id=task_id)
+    child_runs_payload: list[dict[str, object]] = []
+    try:
+        from koda.services.child_runs import list_child_runs_for_parent
+
+        child_runs_payload = cast(
+            list[dict[str, object]],
+            await list_child_runs_for_parent(str(task.get("agent_id") or AGENT_ID or "").strip().upper(), task_id),
+        )
+    except Exception:
+        log.exception("runtime_task_detail_child_runs_failed", task_id=task_id)
+    context_governance_payload: dict[str, object] | None = None
+    if isinstance(run_graph_payload, dict):
+        raw_nodes = run_graph_payload.get("nodes", [])
+        graph_nodes = raw_nodes if isinstance(raw_nodes, list) else []
+        context_nodes = [
+            node
+            for node in graph_nodes
+            if isinstance(node, dict)
+            and node.get("node_type") == "context_block"
+            and str(node.get("source") or "").startswith("execution_trace.grounding.context_governance")
+        ]
+        if context_nodes:
+            context_governance_payload = {
+                "schema_version": "context_governance.v1",
+                "summary": {
+                    "block_count": len(context_nodes),
+                    "included_count": sum(1 for node in context_nodes if node.get("status") == "included"),
+                    "dropped_count": sum(1 for node in context_nodes if node.get("status") == "dropped"),
+                    "review_required_count": sum(
+                        1 for node in context_nodes if node.get("status") == "review_required"
+                    ),
+                },
+                "blocks": [node.get("payload") for node in context_nodes if isinstance(node.get("payload"), dict)],
+            }
+
     return web.json_response(
         {
             "task": task,
-            "environment": controller.store.get_environment_by_task(task_id),
+            "environment": environment,
             "runtime_kernel": runtime_kernel_snapshot,
             "warnings": controller.store.list_warnings(task_id),
             "guardrails": controller.list_guardrail_hits(task_id),
@@ -682,6 +752,11 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
                 include_sensitive=_include_sensitive(request),
             ),
             "asset_refs": asset_refs,
+            "run_graph": run_graph_payload,
+            "run_replay": run_replay_payload,
+            "sandbox_doctor": sandbox_doctor_payload,
+            "child_runs": child_runs_payload,
+            "context_governance": context_governance_payload,
         }
     )
 
@@ -694,6 +769,77 @@ async def _runtime_task_events(request: web.Request) -> web.Response:
     after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
     items = get_runtime_controller().store.list_events(task_id=task_id, after_seq=after_seq)
     return web.json_response({"items": items})
+
+
+async def _runtime_task_run_graph(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    from koda.services.run_graph_store import graph_payload_for_execution
+
+    return web.json_response(
+        graph_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=events,
+        )
+    )
+
+
+async def _runtime_task_replay(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    from koda.services.run_graph_store import replay_payload_for_execution
+
+    return web.json_response(
+        replay_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=events,
+        )
+    )
+
+
+async def _runtime_task_sandbox_doctor(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    runtime_kernel_snapshot = None
+    try:
+        runtime_kernel_snapshot = await controller.get_runtime_kernel_snapshot(task_id=task_id)
+    except Exception:
+        log.exception("runtime_task_sandbox_doctor_kernel_snapshot_failed", task_id=task_id)
+    from koda.services.sandbox_doctor import build_sandbox_doctor_payload
+
+    return web.json_response(
+        build_sandbox_doctor_payload(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            task=task,
+            environment=controller.store.get_environment_by_task(task_id),
+            runtime_kernel=runtime_kernel_snapshot,
+        )
+    )
 
 
 async def _runtime_task_artifacts(request: web.Request) -> web.Response:
@@ -1233,6 +1379,25 @@ async def _runtime_cancel(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def _runtime_interrupt(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    allowed, phase = _is_mutation_allowed(task_id)
+    if not allowed:
+        return web.json_response({"error": f"mutations blocked during {phase}"}, status=409)
+    result = await get_runtime_controller().cancel_task(
+        task_id=task_id,
+        actor="runtime_api",
+        reason="Interrupted by operator.",
+    )
+    if result is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    result["action"] = "interrupted"
+    return web.json_response(result)
+
+
 async def _runtime_retry(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1540,6 +1705,9 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_detail)
     app.router.add_get("/api/runtime/environments/{env_id:\\d+}", _runtime_environment_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/run-graph", _runtime_task_run_graph)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/replay", _runtime_task_replay)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/sandbox-doctor", _runtime_task_sandbox_doctor)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/events", _runtime_task_events)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/artifacts", _runtime_task_artifacts)
     app.router.add_get("/api/runtime/artifacts/{artifact_id}/download", _runtime_artifact_download)
@@ -1566,6 +1734,7 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/ws/runtime/tasks/{task_id:\\d+}/terminals/{terminal_id:\\d+}", _runtime_terminal_ws)
     app.router.add_get("/ws/runtime/tasks/{task_id:\\d+}/browser", _runtime_browser_ws)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/cancel", _runtime_cancel)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/interrupt", _runtime_interrupt)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/retry", _runtime_retry)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/recover", _runtime_recover)
     app.router.add_patch("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_update)

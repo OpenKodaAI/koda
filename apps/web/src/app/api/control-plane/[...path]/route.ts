@@ -5,11 +5,15 @@ import { ValidationError } from "@/lib/errors";
 import { pathSegmentsSchema } from "@/lib/contracts/common";
 import { resolveBodySchema } from "@/lib/contracts/proxy-body-schemas";
 import "@/lib/contracts/agents";
+import "@/lib/contracts/auth";
 import "@/lib/contracts/workspaces";
 import "@/lib/contracts/mcp";
 import "@/lib/contracts/system";
 import "@/lib/contracts/sessions";
 import "@/lib/contracts/memory";
+import "@/lib/contracts/evals";
+import "@/lib/contracts/channel-gateway";
+import "@/lib/contracts/onboarding-readiness";
 import { controlPlaneFetch, sanitizeControlPlanePayload } from "@/lib/control-plane";
 import { getControlPlaneMutationInvalidation } from "@/lib/control-plane-cache";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
@@ -27,6 +31,7 @@ export const revalidate = 0;
 
 const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "onboarding/status",
+  "onboarding/readiness",
   "auth/status",
   "auth/bootstrap/exchange",
   "auth/login",
@@ -104,32 +109,50 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
   const upstreamUrl = new URL(pathname, "http://local.invalid");
   upstreamUrl.search = request.nextUrl.search;
 
-  let body: string | undefined;
+  let body: string | ArrayBuffer | undefined;
+  const incomingContentType = request.headers.get("content-type") || "";
+  const isMultipart = incomingContentType.toLowerCase().startsWith("multipart/");
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    const rawBody = await request.text();
-
-    const schema = resolveBodySchema(request.method, path);
-    if (schema && rawBody) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(rawBody);
-      } catch {
-        return jsonErrorResponse(
-          new ValidationError("Request body is not valid JSON."),
-          "Invalid request data.",
-        );
-      }
-      try {
-        const validated = parseSchemaOrThrow(schema, parsed, "Invalid request data.");
-        body = JSON.stringify(validated);
-      } catch (error) {
-        return jsonErrorResponse(error, "Invalid request data.");
-      }
+    if (isMultipart) {
+      // Multipart bodies are binary (and must keep their boundary). Reading
+      // them as text mangles the JPEG/PNG bytes and the upstream then sees a
+      // length-mismatched payload, which surfaces as a generic
+      // "upstream unavailable" to the operator. Forward the bytes as-is and
+      // skip JSON-schema validation since multipart is never JSON.
+      body = await request.arrayBuffer();
     } else {
-      body = rawBody || undefined;
+      const rawBody = await request.text();
+
+      const schema = resolveBodySchema(request.method, path);
+      if (schema && rawBody) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          return jsonErrorResponse(
+            new ValidationError("Request body is not valid JSON."),
+            "Invalid request data.",
+          );
+        }
+        try {
+          const validated = parseSchemaOrThrow(schema, parsed, "Invalid request data.");
+          body = JSON.stringify(validated);
+        } catch (error) {
+          return jsonErrorResponse(error, "Invalid request data.");
+        }
+      } else {
+        body = rawBody || undefined;
+      }
     }
   }
+
+  // Preserve the exact incoming Content-Type — for multipart that includes the
+  // boundary token, which is required for the upstream parser to find part
+  // separators.
+  const upstreamContentType = isMultipart
+    ? incomingContentType
+    : incomingContentType || "application/json";
 
   let response: Response;
   try {
@@ -138,12 +161,18 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
       {
         method: request.method,
         headers: {
-          "Content-Type":
-            request.headers.get("content-type") || "application/json",
+          "Content-Type": upstreamContentType,
         },
         body,
       },
-      { tier: "live" },
+      {
+        tier: "live",
+        // Multipart uploads run image-processing work upstream (Pillow decode +
+        // re-encode + disk write); the default 10s budget is tight in dev.
+        // Bump it for binary bodies so the operator never sees a spurious
+        // "upstream unavailable" while the backend is still processing.
+        ...(isMultipart ? { timeoutMs: 30_000 } : {}),
+      },
     );
   } catch (error) {
     return jsonErrorResponse(error, "Control plane upstream is unavailable");
@@ -154,7 +183,21 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
   if (contentType) {
     headers.set("Content-Type", contentType);
   }
-  headers.set("Cache-Control", "no-store");
+  // Dynamic JSON payloads must never be cached, but binary asset responses
+  // (room photos, artifact downloads) carry their own immutable cache hints
+  // and should be passed through verbatim — otherwise the operator pays for
+  // a fresh fetch on every navigation. Honour the upstream Cache-Control /
+  // ETag for non-JSON responses; force no-store for JSON.
+  if (contentType?.includes("application/json")) {
+    headers.set("Cache-Control", "no-store");
+  } else {
+    const upstreamCacheControl = response.headers.get("cache-control");
+    headers.set("Cache-Control", upstreamCacheControl ?? "no-store");
+    const upstreamEtag = response.headers.get("etag");
+    if (upstreamEtag) headers.set("ETag", upstreamEtag);
+    const upstreamLastModified = response.headers.get("last-modified");
+    if (upstreamLastModified) headers.set("Last-Modified", upstreamLastModified);
+  }
   headers.set("X-Content-Type-Options", "nosniff");
 
   if (

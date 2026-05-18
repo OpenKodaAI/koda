@@ -50,8 +50,32 @@ def _render_transcript(messages: list[dict[str, Any]]) -> list[str]:
         kind = msg.get("type") or "agent_text"
         content = _truncate(str(msg.get("content") or ""), cap=_TRANSCRIPT_SNIPPET_CHARS)
         msg_id = msg.get("id")
-        out.append(f"- [{msg_id}] [{kind}] {sender}: {content}")
+        reply_to = msg.get("in_reply_to") or (msg.get("metadata") or {}).get("in_reply_to")
+        suffix = f" reply_to={reply_to}" if reply_to else ""
+        summary = msg.get("reply_summary") if isinstance(msg.get("reply_summary"), dict) else {}
+        open_replies = int(summary.get("open") or 0) if summary else 0
+        if open_replies:
+            suffix += f" open_reply_obligations={open_replies}"
+        out.append(f"- [{msg_id}] [{kind}] {sender}{suffix}: {content}")
     return out
+
+
+def _render_reply_obligations(messages: list[dict[str, Any]]) -> list[str]:
+    open_items: list[str] = []
+    for msg in messages:
+        obligations = msg.get("reply_obligations")
+        if not isinstance(obligations, list):
+            continue
+        for item in obligations:
+            if not isinstance(item, dict) or item.get("status") != "open":
+                continue
+            target = item.get("targetAgentId") or item.get("target_agent_id") or "?"
+            source = item.get("sourceMessageId") or msg.get("id")
+            deadline = item.get("requiresResponseBy") or "no deadline"
+            open_items.append(f"- obligation={item.get('id')} source=msg-{source} target={target} due={deadline}")
+    if not open_items:
+        return []
+    return ["", "Open reply obligations (answer or follow up explicitly):", *open_items[:10]]
 
 
 def _render_active_tasks(tasks: list[TaskDescriptor]) -> list[str]:
@@ -80,6 +104,7 @@ async def build_squad_context_block(
     task_store: SquadTaskStore | None = None,
     transcript_limit: int = _DEFAULT_TRANSCRIPT_LIMIT,
     delegation_chain: list[str] | None = None,
+    visible_after: Any | None = None,
 ) -> str | None:
     """Build the runtime ``<squad_context>`` block for ``thread_id``.
 
@@ -90,7 +115,11 @@ async def build_squad_context_block(
     if thread is None:
         return None
     summaries: list[CapabilitySummary] = await capability_cache.list_for_squad(squad_id=thread.squad_id)
-    history = await thread_store.thread_history(thread_id=thread_id, limit=max(1, int(transcript_limit)))
+    history = await thread_store.thread_history(
+        thread_id=thread_id,
+        limit=max(1, int(transcript_limit)),
+        visible_after=visible_after,
+    )
     active_tasks: list[TaskDescriptor] = []
     if task_store is not None:
         active_tasks = await task_store.list_tasks(
@@ -105,6 +134,7 @@ async def build_squad_context_block(
         lines.append("")
         lines.append(format_capability_block(summaries, exclude_agent_id=executing_agent_id))
     lines.extend(_render_transcript(history))
+    lines.extend(_render_reply_obligations(history))
     lines.extend(_render_active_tasks(active_tasks))
     lines.extend(_render_delegation_chain(delegation_chain))
     lines.append("</squad_context>")
@@ -128,6 +158,17 @@ async def build_squad_context_block_default(
     cache = get_capability_cache()
     if threads is None or cache is None:
         return None
+    visible_after = None
+    if executing_agent_id:
+        try:
+            from koda.squads.access import get_squad_access_service
+
+            access = get_squad_access_service()
+            if access is not None:
+                grant = await access.require_thread_access(thread_id=thread_id, agent_id=executing_agent_id)
+                visible_after = None if grant.is_coordinator else grant.joined_at
+        except Exception:
+            return None
     return await build_squad_context_block(
         thread_id=thread_id,
         executing_agent_id=executing_agent_id,
@@ -136,4 +177,5 @@ async def build_squad_context_block_default(
         task_store=get_squad_task_store(),
         transcript_limit=transcript_limit,
         delegation_chain=delegation_chain,
+        visible_after=visible_after,
     )

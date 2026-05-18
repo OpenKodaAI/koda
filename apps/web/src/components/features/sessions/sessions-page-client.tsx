@@ -22,11 +22,19 @@ import type { ChatCommand } from "@/lib/contracts/chat-commands";
 import type { Mention } from "@/lib/contracts/sessions";
 import { ChatHeader } from "@/components/sessions/chat/chat-header";
 import { ChatThread, type PendingChatMessage } from "@/components/sessions/chat/chat-thread";
-import { SessionContextDrawer } from "@/components/sessions/context/session-context-drawer";
+import {
+  collectArtifactsFromDetail,
+  SessionArtifactRail,
+} from "@/components/sessions/context/session-artifact-rail";
 import { SessionRail } from "@/components/sessions/rail/session-rail";
+import { NewRoomDialog } from "@/components/sessions/rail/new-room-dialog";
+import { RoomChatPane } from "@/components/sessions/chat/room-chat-pane";
+import { useRooms, type RoomEntry } from "@/hooks/use-rooms";
+import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
 import { SessionsRouteLoading } from "@/components/layout/route-loading";
 import { useSessionStream } from "@/hooks/use-session-stream";
 import type { SessionStreamEvent } from "@/lib/contracts/sessions";
+import type { SquadThreadOverviewResponse } from "@/lib/squads";
 import { parseArtifactReadyPayload } from "@/lib/contracts/artifacts";
 import { executionArtifactDedupeKey } from "@/components/sessions/artifacts/artifact-detail";
 import {
@@ -215,7 +223,17 @@ function SessionsPageContent() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  const [pendingDeleteSession, setPendingDeleteSession] =
+    useState<SessionSummary | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(
+    searchParams.get("room"),
+  );
+  const [activeRoomDetail, setActiveRoomDetail] =
+    useState<SquadThreadOverviewResponse | null>(null);
+  const [newRoomOpen, setNewRoomOpen] = useState(false);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [threadScrolled, setThreadScrolled] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
   const [olderDetailPages, setOlderDetailPages] = useState<SessionDetail[]>([]);
@@ -294,6 +312,11 @@ function SessionsPageContent() {
     } else {
       params.delete("session");
     }
+    if (selectedRoomId) {
+      params.set("room", selectedRoomId);
+    } else {
+      params.delete("room");
+    }
     const nextQuery = params.toString();
     const currentQuery = searchParams.toString();
     if (nextQuery === currentQuery) return;
@@ -306,6 +329,7 @@ function SessionsPageContent() {
     queryBotId,
     router,
     searchParams,
+    selectedRoomId,
     selectedSessionId,
   ]);
 
@@ -482,6 +506,10 @@ function SessionsPageContent() {
   }, [detailBotId, selectedSessionId]);
 
   useEffect(() => {
+    setActiveRoomDetail(null);
+  }, [selectedRoomId]);
+
+  useEffect(() => {
     if (!pendingRequest || !activeDetail) return;
     if (activeDetail.summary.session_id !== pendingRequest.sessionId) return;
 
@@ -578,7 +606,6 @@ function SessionsPageContent() {
       setActiveBotId(normalizeSelectedBotId(agentId, availableBotIds));
       setNewChatSessionId(null);
       setComposerError(null);
-      setContextDrawerOpen(false);
 
       if (!hasSelectedSession) return;
 
@@ -598,6 +625,9 @@ function SessionsPageContent() {
         normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id
       );
       setSelectedSessionId(session.session_id);
+      setSelectedRoomId(null);
+      setRoomSettingsOpen(false);
+      setContextPanelOpen(true);
       setNewChatSessionId(null);
       setIsNewChatMode(false);
       setComposerError(null);
@@ -612,6 +642,83 @@ function SessionsPageContent() {
     [availableBotIds, isDesktop]
   );
 
+  const handleSelectRoom = useCallback(
+    (entry: RoomEntry) => {
+      setSelectedRoomId(entry.thread.id);
+      setSelectedSessionId(null);
+      setRoomSettingsOpen(false);
+      setContextPanelOpen(true);
+      setNewChatSessionId(null);
+      setIsNewChatMode(false);
+      setComposerError(null);
+      setPendingRequest(null);
+      setPendingMessages([]);
+      if (!isDesktop) {
+        setMobileRailOpen(false);
+      }
+    },
+    [isDesktop],
+  );
+
+  const handleRoomCreated = useCallback(
+    (result: { threadId: string; squadId: string; workspaceId: string }) => {
+      setNewRoomOpen(false);
+      setSelectedRoomId(result.threadId);
+      setSelectedSessionId(null);
+      setRoomSettingsOpen(false);
+      setContextPanelOpen(true);
+      setNewChatSessionId(null);
+      setIsNewChatMode(false);
+      setComposerError(null);
+      setPendingRequest(null);
+      setPendingMessages([]);
+      if (!isDesktop) {
+        setMobileRailOpen(false);
+      }
+    },
+    [isDesktop],
+  );
+
+  const handleRequestDeleteSession = useCallback((session: SessionSummary) => {
+    setPendingDeleteSession(session);
+  }, []);
+
+  const handleConfirmDeleteSession = useCallback(async () => {
+    const session = pendingDeleteSession;
+    if (!session || deleteSubmitting) return;
+    const targetBotId =
+      normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id;
+    setDeleteSubmitting(true);
+    try {
+      await mutateControlPlaneDashboardJson(
+        `/agents/${targetBotId}/sessions/${encodeURIComponent(session.session_id)}`,
+        {
+          method: "DELETE",
+          fallbackError: t("sessions.delete.failed", {
+            defaultValue: "Could not delete this conversation.",
+          }),
+        },
+      );
+      if (selectedSessionId === session.session_id) {
+        setSelectedSessionId(null);
+        resetThreadState();
+      }
+      setPendingDeleteSession(null);
+      void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }, [
+    availableBotIds,
+    deleteSubmitting,
+    pendingDeleteSession,
+    queryClient,
+    resetThreadState,
+    selectedSessionId,
+    sessionsQueryKey,
+    t,
+  ]);
+
   const handleNewChat = useCallback((agentId?: string) => {
     const nextSessionId = createClientSessionId();
     setActiveBotId((current) => {
@@ -620,9 +727,11 @@ function SessionsPageContent() {
       return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
     });
     setSelectedSessionId(null);
+    setSelectedRoomId(null);
+    setRoomSettingsOpen(false);
+    setContextPanelOpen(false);
     setNewChatSessionId(nextSessionId);
     setIsNewChatMode(true);
-    setContextDrawerOpen(false);
     resetThreadState();
     if (!isDesktop) {
       setMobileRailOpen(false);
@@ -773,7 +882,8 @@ function SessionsPageContent() {
           handleNewChat();
           return;
         case "open-context":
-          if (selectedSummary) setContextDrawerOpen(true);
+          // Context drawer was retired; the artifact rail surfaces the same
+          // information inline.
           return;
         case "summarize": {
           const prompt =
@@ -790,14 +900,17 @@ function SessionsPageContent() {
           return;
       }
     },
-    [handleNewChat, selectedSummary, sendMessage, t],
+    [handleNewChat, sendMessage, t],
   );
 
   const composerDisabled = !effectiveBotId;
   const showThinking = Boolean(
     pendingRequest ||
       (selectedSummary?.running_count && selectedSummary.running_count > 0) ||
-      (selectedSummary?.latest_status === "running" || selectedSummary?.latest_status === "retrying"),
+      (selectedSummary?.latest_status === "running" ||
+        selectedSummary?.latest_status === "retrying" ||
+        selectedSummary?.latest_status === "stalled" ||
+        selectedSummary?.latest_status === "degraded"),
   );
 
   const resolvedTitle = selectedSummary
@@ -822,6 +935,20 @@ function SessionsPageContent() {
     return null;
   }, [activeDetail]);
 
+  const roomsQuery = useRooms();
+  const rooms = roomsQuery.rooms;
+  const selectedRoomEntry = useMemo(
+    () => rooms.find((entry) => entry.thread.id === selectedRoomId) ?? null,
+    [rooms, selectedRoomId],
+  );
+  const sessionArtifacts = useMemo(
+    () => collectArtifactsFromDetail(selectedRoomId ? null : activeDetail),
+    [activeDetail, selectedRoomId],
+  );
+  const contextPanelAvailable = Boolean(
+    selectedRoomEntry || (!selectedRoomId && sessionArtifacts.length > 0),
+  );
+
   const tourVariant =
     stableSessionsQuery.showBlockingError || (sessionsUnavailable && sessions.length === 0)
       ? "unavailable"
@@ -839,31 +966,58 @@ function SessionsPageContent() {
       <div className="hidden md:flex" {...tourAnchor("sessions.conversation-rail")}>
         <SessionRail
           sessions={sessions}
+          rooms={rooms}
           selectedSessionId={selectedSessionId}
+          selectedRoomId={selectedRoomId}
           onSelectSession={handleSelectSession}
+          onSelectRoom={handleSelectRoom}
           onNewChat={handleNewChat}
+          onNewRoom={() => setNewRoomOpen(true)}
+          onDeleteSession={handleRequestDeleteSession}
           search={search}
           onSearchChange={setSearch}
-          loading={stableSessionsQuery.initialLoading}
+          loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
           error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
           unavailable={sessionsUnavailable}
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col" {...tourAnchor("sessions.thread")}>
+      <div className="flex min-h-0 flex-1 flex-col min-w-0" {...tourAnchor("sessions.thread")}>
+        {selectedRoomId ? (
+          <RoomChatPane
+            threadId={selectedRoomId}
+            onArchived={() => {
+              setSelectedRoomId(null);
+              setRoomSettingsOpen(false);
+              setContextPanelOpen(false);
+            }}
+            onOpenRail={() => setMobileRailOpen(true)}
+            showRailToggle
+            showContextToggle={contextPanelAvailable}
+            contextPanelOpen={contextPanelOpen}
+            onToggleContextPanel={() => setContextPanelOpen((current) => !current)}
+            settingsOpen={roomSettingsOpen}
+            onSettingsOpenChange={setRoomSettingsOpen}
+            onThreadDetailChange={setActiveRoomDetail}
+          />
+        ) : (
+          <>
         <ChatHeader
           title={resolvedTitle}
           agentId={effectiveBotId ?? null}
           sessionId={streamSessionId}
           onOpenRail={() => setMobileRailOpen(true)}
-          onOpenContext={Boolean(selectedSummary) ? () => setContextDrawerOpen(true) : undefined}
           showRailToggle
-          showContextToggle={Boolean(selectedSummary)}
+          showContextToggle={contextPanelAvailable}
+          contextPanelOpen={contextPanelOpen}
+          onToggleContextPanel={() => setContextPanelOpen((current) => !current)}
           scrolled={threadScrolled}
           sessionActive={Boolean(
             selectedSummary &&
               (selectedSummary.latest_status === "running" ||
                 selectedSummary.latest_status === "retrying" ||
+                selectedSummary.latest_status === "stalled" ||
+                selectedSummary.latest_status === "degraded" ||
                 selectedSummary.latest_status === "queued"),
           )}
           sessionPaused={selectedSummary?.latest_status === "paused"}
@@ -912,13 +1066,18 @@ function SessionsPageContent() {
             </div>
           }
         />
+          </>
+        )}
       </div>
 
-      <SessionContextDrawer
-        open={contextDrawerOpen}
-        onOpenChange={setContextDrawerOpen}
-        detail={activeDetail}
-        summary={selectedSummary}
+      <SessionArtifactRail
+        detail={selectedRoomId ? null : activeDetail}
+        summary={selectedRoomId ? null : selectedSummary}
+        room={selectedRoomEntry}
+        open={contextPanelOpen && contextPanelAvailable}
+        onOpenChange={setContextPanelOpen}
+        onOpenRoomSettings={() => setRoomSettingsOpen(true)}
+        roomThreadMessages={selectedRoomId ? activeRoomDetail?.recentMessages ?? [] : []}
       />
 
       {mobileRailPresence.shouldRender ? (
@@ -945,12 +1104,17 @@ function SessionsPageContent() {
           >
             <SessionRail
               sessions={sessions}
+              rooms={rooms}
               selectedSessionId={selectedSessionId}
+              selectedRoomId={selectedRoomId}
               onSelectSession={handleSelectSession}
+              onSelectRoom={handleSelectRoom}
               onNewChat={handleNewChat}
+              onNewRoom={() => setNewRoomOpen(true)}
+              onDeleteSession={handleRequestDeleteSession}
               search={search}
               onSearchChange={setSearch}
-              loading={stableSessionsQuery.initialLoading}
+              loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
               error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
               unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}
@@ -959,6 +1123,31 @@ function SessionsPageContent() {
           </div>
         </>
       ) : null}
+
+      <NewRoomDialog
+        open={newRoomOpen}
+        onClose={() => setNewRoomOpen(false)}
+        onCreated={handleRoomCreated}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(pendingDeleteSession)}
+        title={t("sessions.delete.title", {
+          defaultValue: "Delete this conversation?",
+        })}
+        message={t("sessions.delete.message", {
+          defaultValue:
+            "This permanently removes the conversation and its execution history. This action cannot be undone.",
+        })}
+        confirmLabel={t("sessions.delete.confirm", { defaultValue: "Delete" })}
+        confirmBusy={deleteSubmitting}
+        confirmBusyLabel={t("sessions.delete.deleting", { defaultValue: "Deleting…" })}
+        onConfirm={() => void handleConfirmDeleteSession()}
+        onCancel={() => {
+          if (deleteSubmitting) return;
+          setPendingDeleteSession(null);
+        }}
+      />
     </div>
   );
 }

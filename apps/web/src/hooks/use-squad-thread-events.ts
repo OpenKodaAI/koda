@@ -55,6 +55,9 @@ export function useSquadThreadEvents({
 
     source.addEventListener("open", handleOpen);
     source.addEventListener("message_added", handleEvent);
+    source.addEventListener("reply_added", handleEvent);
+    source.addEventListener("reply_obligation_updated", handleEvent);
+    source.addEventListener("synthesis_created", handleEvent);
     source.addEventListener("task_updated", handleEvent);
     source.addEventListener("update", handleEvent);
     source.addEventListener("error", handleError);

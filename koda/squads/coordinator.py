@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -127,10 +128,9 @@ def _row_to_history(row: Any) -> CoordinatorHistoryEntry:
 
 
 def validate_eligibility(agent_spec: dict[str, Any] | None) -> tuple[bool, list[str]]:
-    """Return (is_eligible, missing_tool_ids). When ``agent_spec`` is None the
-    check is skipped — the caller has already trusted the agent."""
+    """Return (is_eligible, missing_tool_ids) from a real AgentSpec."""
     if agent_spec is None:
-        return True, []
+        return False, list(REQUIRED_COORDINATOR_TOOL_IDS)
     tool_policy = agent_spec.get("tool_policy") or {}
     if not isinstance(tool_policy, dict):
         return False, list(REQUIRED_COORDINATOR_TOOL_IDS)
@@ -150,6 +150,7 @@ class CoordinatorService:
         schema: str = "knowledge_v2",
         pool_min_size: int = 1,
         pool_max_size: int = 4,
+        agent_spec_loader: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> None:
         if not _SCHEMA_RE.match(schema):
             raise ValueError(f"invalid postgres schema name: {schema!r}")
@@ -157,7 +158,19 @@ class CoordinatorService:
         self._schema = schema
         self._pool_min_size = max(1, int(pool_min_size))
         self._pool_max_size = max(self._pool_min_size, int(pool_max_size))
+        self._agent_spec_loader = agent_spec_loader
         self._pool: Any | None = None
+
+    def _load_agent_spec(self, agent_id: str) -> dict[str, Any] | None:
+        if self._agent_spec_loader is not None:
+            return self._agent_spec_loader(agent_id)
+        try:
+            from koda.control_plane.manager import get_control_plane_manager
+
+            return get_control_plane_manager().get_agent_spec(agent_id)
+        except Exception:
+            log.exception("squad_coordinator_agent_spec_load_failed", agent_id=agent_id)
+            return None
 
     async def _ensure_pool(self) -> Any:
         if self._pool is None:
@@ -285,7 +298,8 @@ class CoordinatorService:
     ) -> CoordinatorState:
         if not squad_id or not agent_id:
             raise ValueError("squad_id and agent_id are required")
-        eligible, missing = validate_eligibility(agent_spec)
+        resolved_spec = agent_spec if agent_spec is not None else self._load_agent_spec(agent_id)
+        eligible, missing = validate_eligibility(resolved_spec)
         if not eligible:
             raise CoordinatorEligibilityError(f"agent {agent_id!r} cannot be coordinator: missing tools {missing}")
         pool = await self._ensure_pool()

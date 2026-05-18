@@ -112,6 +112,27 @@ def _row_to_participant(row: Any) -> ParticipantInfo:
     )
 
 
+def _decode_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return value
+
+
+def _message_ref_to_id(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        return int(raw)
+    match = re.search(r"(\d+)$", raw)
+    return int(match.group(1)) if match else None
+
+
 class SquadThreadStore:
     def __init__(
         self,
@@ -258,6 +279,63 @@ class SquadThreadStore:
             rows = await conn.fetch(sql, *params)
         return [_row_to_thread(r) for r in rows]
 
+    async def update_thread(
+        self,
+        thread_id: str,
+        *,
+        title: str | None = None,
+        coordinator_agent_id: str | None = None,
+        clear_coordinator: bool = False,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> ThreadDescriptor:
+        """Patch metadata fields on a thread.
+
+        Pass ``title`` to rename, ``coordinator_agent_id`` to set/replace the
+        coordinator, ``clear_coordinator=True`` to drop it, or
+        ``metadata_patch`` to merge keys into the JSONB metadata blob (set a
+        key to ``None`` to delete it). Only fields you pass are touched;
+        everything else is preserved. Returns the post-update thread row.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                f'SELECT * FROM "{self._schema}"."squad_threads" WHERE id = $1 FOR UPDATE',
+                thread_id,
+            )
+            if row is None:
+                raise KeyError(f"thread {thread_id!r} not found")
+            sets: list[str] = []
+            params: list[Any] = []
+            if title is not None:
+                sets.append(f"title = ${len(params) + 2}")
+                params.append(title)
+            if clear_coordinator:
+                sets.append("coordinator_agent_id = NULL")
+            elif coordinator_agent_id is not None:
+                sets.append(f"coordinator_agent_id = ${len(params) + 2}")
+                params.append(coordinator_agent_id)
+            if metadata_patch:
+                current_meta = row["metadata_json"] or {}
+                if isinstance(current_meta, str):
+                    try:
+                        current_meta = json.loads(current_meta) or {}
+                    except (json.JSONDecodeError, ValueError):
+                        current_meta = {}
+                merged = dict(current_meta)
+                for key, value in metadata_patch.items():
+                    if value is None:
+                        merged.pop(key, None)
+                    else:
+                        merged[key] = value
+                sets.append(f"metadata_json = ${len(params) + 2}::jsonb")
+                params.append(json.dumps(merged))
+            if not sets:
+                return _row_to_thread(row)
+            sets.append("updated_at = NOW()")
+            sql = f'UPDATE "{self._schema}"."squad_threads" SET {", ".join(sets)} WHERE id = $1 RETURNING *'
+            row = await conn.fetchrow(sql, thread_id, *params)
+        return _row_to_thread(row)
+
     async def update_thread_status(self, thread_id: str, new_status: str) -> ThreadDescriptor:
         if new_status not in _VALID_STATUSES:
             raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
@@ -354,7 +432,30 @@ class SquadThreadStore:
         content: str,
         message_type: str = "agent_text",
         metadata: dict[str, Any] | None = None,
+        to_agent_ids: list[str] | None = None,
+        payload: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+        in_reply_to: int | str | None = None,
+        requires_response_by: datetime | None = None,
+        idempotency_key: str | None = None,
     ) -> int:
+        metadata = dict(metadata or {})
+        normalized_to_agent_ids = [str(value).strip() for value in to_agent_ids or [] if str(value).strip()]
+        if normalized_to_agent_ids:
+            metadata.setdefault("target_agent_ids", list(normalized_to_agent_ids))
+        normalized_correlation = correlation_id or metadata.get("correlation_id")
+        normalized_reply_to = in_reply_to if in_reply_to is not None else metadata.get("in_reply_to")
+        normalized_idempotency = idempotency_key or metadata.get("idempotency_key")
+        normalized_payload = payload if payload is not None else metadata.get("payload") or {"text": content}
+        if normalized_correlation:
+            metadata["correlation_id"] = str(normalized_correlation)
+        if normalized_reply_to is not None:
+            reply_to_id = _message_ref_to_id(normalized_reply_to)
+            metadata["in_reply_to"] = f"msg-{reply_to_id}" if reply_to_id is not None else str(normalized_reply_to)
+        if normalized_idempotency:
+            metadata["idempotency_key"] = str(normalized_idempotency)
+        if requires_response_by is not None:
+            metadata["requires_response_by"] = requires_response_by.isoformat()
         pool = await self._ensure_pool()
         async with pool.acquire() as conn, conn.transaction():
             exists = await conn.fetchval(
@@ -365,15 +466,35 @@ class SquadThreadStore:
                 raise KeyError(f"thread {thread_id!r} not found")
             row_id = await conn.fetchval(
                 f"""INSERT INTO "{self._schema}"."squad_messages"
-                        (thread_id, from_agent, to_agent, content, message_type, metadata_json)
-                      VALUES ($1, $2, NULL, $3, $4, $5::jsonb)
+                        (message_uuid, thread_id, from_agent, to_agent, to_agent_ids, content,
+                         message_type, kind, payload_json, metadata_json, correlation_id,
+                         in_reply_to, requires_response_by, idempotency_key)
+                      VALUES ($1, $2, $3, NULL, $4::jsonb, $5,
+                              $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13)
                       RETURNING id""",
+                str(uuid.uuid4()),
                 thread_id,
                 from_agent,
+                json.dumps(normalized_to_agent_ids),
                 content,
                 message_type,
-                json.dumps(metadata or {}),
+                message_type if message_type != "text" else "agent_text",
+                json.dumps(normalized_payload),
+                json.dumps(metadata),
+                str(normalized_correlation) if normalized_correlation else None,
+                str(metadata.get("in_reply_to")) if metadata.get("in_reply_to") else None,
+                requires_response_by,
+                str(normalized_idempotency) if normalized_idempotency else None,
             )
+            for target in normalized_to_agent_ids:
+                await conn.execute(
+                    f"""INSERT INTO "{self._schema}"."squad_message_recipients"
+                            (message_id, to_agent_id)
+                          VALUES ($1, $2)
+                          ON CONFLICT DO NOTHING""",
+                    int(row_id),
+                    target,
+                )
             await conn.execute(
                 f"""UPDATE "{self._schema}"."squad_threads"
                        SET updated_at = NOW(), current_owner_agent_id = $2
@@ -438,20 +559,68 @@ class SquadThreadStore:
         thread_id: str,
         limit: int = 50,
         before_id: int | None = None,
+        visible_after: datetime | None = None,
     ) -> list[dict[str, Any]]:
         params: list[Any] = [thread_id]
         sql = f"""SELECT id, from_agent, to_agent, content, message_type,
-                       metadata_json, created_at
+                       message_uuid, to_agent_ids, kind, payload_json,
+                       metadata_json, causation_id, correlation_id, in_reply_to,
+                       requires_response_by, idempotency_key, created_at
                   FROM "{self._schema}"."squad_messages"
                  WHERE thread_id = $1"""
         if before_id is not None:
             params.append(int(before_id))
             sql += f" AND id < ${len(params)}"
+        if visible_after is not None:
+            params.append(visible_after)
+            sql += f" AND created_at >= ${len(params)}"
         params.append(max(1, min(int(limit), 500)))
         sql += f" ORDER BY id DESC LIMIT ${len(params)}"
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)
+            row_ids = [int(row["id"]) for row in rows]
+            obligation_rows = []
+            if row_ids:
+                obligation_rows = await conn.fetch(
+                    f"""SELECT *
+                          FROM "{self._schema}"."squad_reply_obligations"
+                         WHERE thread_id = $1
+                           AND (
+                                source_message_id = ANY($2::bigint[])
+                                OR resolved_by_message_id = ANY($2::bigint[])
+                           )
+                         ORDER BY created_at ASC""",
+                    thread_id,
+                    row_ids,
+                )
+        obligations_by_source: dict[int, list[dict[str, Any]]] = {}
+        obligations_by_resolved: dict[int, list[dict[str, Any]]] = {}
+        for obligation in obligation_rows:
+            metadata = _decode_json(obligation["metadata_json"]) or {}
+            item = {
+                "id": int(obligation["id"]),
+                "obligationId": int(obligation["id"]),
+                "obligationKey": obligation["obligation_key"],
+                "threadId": str(obligation["thread_id"]),
+                "sourceMessageId": int(obligation["source_message_id"]),
+                "targetAgentId": obligation["target_agent_id"],
+                "status": obligation["status"],
+                "requiresResponseBy": obligation["requires_response_by"].isoformat()
+                if obligation["requires_response_by"]
+                else None,
+                "resolvedByMessageId": int(obligation["resolved_by_message_id"])
+                if obligation["resolved_by_message_id"] is not None
+                else None,
+                "followupCount": int(obligation["followup_count"] or 0),
+                "lastFollowupAt": (
+                    obligation["last_followup_at"].isoformat() if obligation["last_followup_at"] else None
+                ),
+                "metadata": metadata if isinstance(metadata, dict) else {},
+            }
+            obligations_by_source.setdefault(int(obligation["source_message_id"]), []).append(item)
+            if obligation["resolved_by_message_id"] is not None:
+                obligations_by_resolved.setdefault(int(obligation["resolved_by_message_id"]), []).append(item)
         out: list[dict[str, Any]] = []
         for row in rows:
             metadata = row["metadata_json"]
@@ -460,14 +629,36 @@ class SquadThreadStore:
                     metadata = json.loads(metadata)
                 except (json.JSONDecodeError, ValueError):
                     metadata = {}
+            to_agent_ids = _decode_json(row["to_agent_ids"]) or []
+            if not isinstance(to_agent_ids, list):
+                to_agent_ids = []
+            reply_obligations = obligations_by_source.get(int(row["id"]), [])
+            resolved_obligations = obligations_by_resolved.get(int(row["id"]), [])
+            open_count = sum(1 for item in reply_obligations if item.get("status") == "open")
             out.append(
                 {
                     "id": int(row["id"]),
+                    "message_uuid": row["message_uuid"],
                     "from": row["from_agent"],
                     "to": row["to_agent"],
+                    "to_agent_ids": [str(value) for value in to_agent_ids],
                     "content": row["content"],
-                    "type": row["message_type"],
+                    "type": row["kind"] or row["message_type"],
+                    "payload": _decode_json(row["payload_json"]),
                     "metadata": metadata or {},
+                    "causation_id": row["causation_id"],
+                    "correlation_id": row["correlation_id"],
+                    "in_reply_to": row["in_reply_to"],
+                    "requires_response_by": row["requires_response_by"],
+                    "idempotency_key": row["idempotency_key"],
+                    "reply_obligations": reply_obligations,
+                    "resolved_reply_obligations": resolved_obligations,
+                    "reply_summary": {
+                        "open": open_count,
+                        "answered": sum(1 for item in reply_obligations if item.get("status") == "answered"),
+                        "timedOut": sum(1 for item in reply_obligations if item.get("status") == "timed_out"),
+                        "cancelled": sum(1 for item in reply_obligations if item.get("status") == "cancelled"),
+                    },
                     "created_at": row["created_at"],
                 }
             )

@@ -8,7 +8,10 @@
     "start": "NODE_ENV=production node --env-file-if-exists=.env.local server.mjs",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml"
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=../../artifacts/web/vitest.junit.xml",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@novnc/novnc": "^1.6.0",
@@ -52,6 +55,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

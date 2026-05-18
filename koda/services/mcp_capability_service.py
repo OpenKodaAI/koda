@@ -422,10 +422,17 @@ def _persist_discovered_prompts(
 
 
 def _tool_to_payload(tool: McpToolDefinition) -> dict[str, Any]:
+    from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
+
+    assessment = assess_mcp_tool_risk(tool)
+    decision = evaluate_mcp_risk(assessment)
     payload: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description,
         "input_schema": tool.input_schema,
+        "risk_class": assessment.risk_class,
+        "approval_default": decision.decision,
+        "risk_metadata": assessment.to_payload(),
     }
     if tool.annotations:
         payload["annotations"] = {

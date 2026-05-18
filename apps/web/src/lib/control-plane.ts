@@ -1,6 +1,7 @@
 import "server-only";
 
 import { CONTROL_PLANE_CACHE_TAGS, getControlPlaneFetchConfig, type ControlPlaneFetchTier } from "@/lib/control-plane-cache";
+import type { McpCapabilityRisk } from "@/lib/contracts/mcp-risk";
 import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
 const CONTROL_PLANE_BASE_URL =
@@ -666,9 +667,13 @@ export type McpDiscoveredTool = {
     read_only_hint?: boolean;
     destructive_hint?: boolean;
     idempotent_hint?: boolean;
+    risk?: McpCapabilityRisk | unknown;
     [key: string]: unknown;
   };
   input_schema?: Record<string, unknown>;
+  risk?: McpCapabilityRisk | unknown;
+  risk_metadata?: McpCapabilityRisk | unknown;
+  mcp_risk?: McpCapabilityRisk | unknown;
 };
 
 export type McpEnvSchemaField = {
@@ -1164,6 +1169,8 @@ export type ControlPlaneAuthStatus = {
     username?: string | null;
     email?: string | null;
     display_name?: string | null;
+    profile_photo_url?: string | null;
+    profile_photo_hash?: string | null;
   } | null;
 };
 
@@ -1379,13 +1386,17 @@ export async function getControlPlaneWorkspaces() {
 }
 
 export async function getControlPlaneAgent(agentId: string) {
-  return controlPlaneFetchJson<ControlPlaneAgent>(
+  const payload = await controlPlaneFetchJson<ControlPlaneAgent | null>(
     `/api/control-plane/agents/${agentId}`,
     {},
     {
       tier: "live",
     },
   );
+  if (!payload) {
+    throw new ControlPlaneRequestError(`Agent ${agentId} not found`, 404);
+  }
+  return payload;
 }
 
 export async function getControlPlaneCompiledPrompt(agentId: string) {

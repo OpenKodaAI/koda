@@ -24,6 +24,25 @@ class MessageBus(Protocol):
 
     async def receive(self, agent_id: str, timeout: float = 30.0) -> AgentMessage | None: ...
 
+    async def receive_batch(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> list[AgentMessage]: ...
+
+    async def ack(self, agent_id: str, message_id: str, *, enqueued_task_id: int | None = None) -> None: ...
+
+    async def nack(
+        self,
+        agent_id: str,
+        message_id: str,
+        *,
+        error: str,
+        retry_after: float | None = None,
+    ) -> None: ...
+
     async def delegate(self, request: DelegationRequest) -> DelegationResult: ...
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None: ...

@@ -27,6 +27,7 @@ import {
   PageMetricStrip,
   PageMetricStripItem,
 } from "@/components/ui/page-primitives";
+import { AnimatedCardStatusList, type Card as StatusCard } from "@/components/ui/card-status-list";
 import { useToast } from "@/hooks/use-toast";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 
@@ -235,7 +236,7 @@ export function RuntimeOverviewScreen({
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
   );
-  const { overviews, loading, connected, error } = useRuntimeOverview(selectedBotIds);
+  const { overviews, loading, connected, error, refreshAgent } = useRuntimeOverview(selectedBotIds);
 
   const selectedOverviews = useMemo(() => {
     return visibleBotIds
@@ -306,6 +307,59 @@ export function RuntimeOverviewScreen({
   ).length;
   const attentionCount = totals.recovery + totals.cleanup + incidentEntries.length;
   const visibleRows = roomRows.slice(0, 10);
+  const runtimeStatusCards = useMemo<StatusCard[]>(() => {
+    const availabilityIssues = selectedOverviews.reduce((count, overview) => {
+      const availability = overview.availability;
+      return count + [availability.runtime, availability.database, availability.browser, availability.attach]
+        .filter((status) => !["available", "active"].includes(status)).length;
+    }, 0);
+    return [
+      {
+        id: "live-executions",
+        title: totals.active > 0
+          ? `${totals.active} active execution${totals.active === 1 ? "" : "s"}`
+          : "No active execution rooms",
+        status: totals.active > 0 ? "syncing" : "completed",
+      },
+      {
+        id: "runtime-agents",
+        title: `${liveAgents}/${selectedOverviews.length || 0} agents online`,
+        status:
+          selectedOverviews.length > 0 && liveAgents === selectedOverviews.length
+            ? "completed"
+            : "updates-found",
+      },
+      {
+        id: "recovery-backlog",
+        title: `${totals.recovery} recovery · ${totals.cleanup} cleanup backlog`,
+        status: totals.recovery + totals.cleanup > 0 ? "updates-found" : "completed",
+      },
+      {
+        id: "incident-review",
+        title: `${incidentEntries.length} incident${incidentEntries.length === 1 ? "" : "s"} to review`,
+        status: incidentEntries.length > 0 ? "updates-found" : "completed",
+      },
+      {
+        id: "runtime-layers",
+        title: availabilityIssues > 0
+          ? `${availabilityIssues} runtime layer issue${availabilityIssues === 1 ? "" : "s"}`
+          : "Runtime layers healthy",
+        status: availabilityIssues > 0 ? "updates-found" : "completed",
+      },
+    ];
+  }, [
+    incidentEntries.length,
+    liveAgents,
+    selectedOverviews,
+    totals.active,
+    totals.cleanup,
+    totals.recovery,
+  ]);
+
+  const refreshRuntimeStatus = async () => {
+    await Promise.all(visibleBotIds.map((agentId) => refreshAgent(agentId)));
+    showToast(t("runtime.overview.refreshQueued", { defaultValue: "Runtime status refreshed." }), "success");
+  };
 
   useEffect(() => {
     if (!error || lastErrorToastRef.current === error) return;
@@ -464,34 +518,46 @@ export function RuntimeOverviewScreen({
           </div>
         </section>
 
-        <aside>
-          <header className="mb-2 flex items-baseline justify-between px-3">
-            <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {t("runtime.overview.agents")}
-            </h3>
-            <span className="eyebrow">{liveAgents}/{selectedOverviews.length || 0}</span>
-          </header>
+        <aside className="space-y-4">
+          <AnimatedCardStatusList
+            title={t("runtime.overview.statusRail", { defaultValue: "Runtime status" })}
+            cards={runtimeStatusCards}
+            sort="attention-first"
+            synchronizeLabel={t("common.refresh", { defaultValue: "Refresh" })}
+            onSynchronize={() => {
+              void refreshRuntimeStatus();
+            }}
+          />
 
-          <div className="flex flex-col">
-            {selectedOverviews.length === 0 ? (
-              <div
-                className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
-                {...tourAnchor("runtime.empty-agents")}
-              >
-                <AgentIcon className="h-4 w-4 text-[var(--text-quaternary)]" />
-                <p className="m-0">{t("runtime.overview.noVisibleAgents")}</p>
-              </div>
-            ) : (
-              selectedOverviews.map((overview, index) => (
-                <AgentRailRow
-                  key={overview.agentId}
-                  overview={overview}
-                  live={Boolean(connected[overview.agentId])}
-                  index={index}
-                />
-              ))
-            )}
-          </div>
+          <section>
+            <header className="mb-2 flex items-baseline justify-between px-3">
+              <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+                {t("runtime.overview.agents")}
+              </h3>
+              <span className="eyebrow">{liveAgents}/{selectedOverviews.length || 0}</span>
+            </header>
+
+            <div className="flex flex-col">
+              {selectedOverviews.length === 0 ? (
+                <div
+                  className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
+                  {...tourAnchor("runtime.empty-agents")}
+                >
+                  <AgentIcon className="h-4 w-4 text-[var(--text-quaternary)]" />
+                  <p className="m-0">{t("runtime.overview.noVisibleAgents")}</p>
+                </div>
+              ) : (
+                selectedOverviews.map((overview, index) => (
+                  <AgentRailRow
+                    key={overview.agentId}
+                    overview={overview}
+                    live={Boolean(connected[overview.agentId])}
+                    index={index}
+                  />
+                ))
+              )}
+            </div>
+          </section>
         </aside>
       </div>
     </div>

@@ -23,6 +23,11 @@ from koda.squads.threads import ParticipantInfo, ThreadDescriptor, _row_to_parti
 log = get_logger(__name__)
 
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_COST_QUANT = Decimal("0.000001")
+
+
+def _cost_decimal(value: Any) -> Decimal:
+    return Decimal(str(value or 0)).quantize(_COST_QUANT).normalize()
 
 
 @dataclass
@@ -176,7 +181,7 @@ async def list_squad_overviews(
                 },
                 member_count=int(row["member_count"]),
                 last_active_at=row["last_active_at"],
-                total_cost_usd=row["total_cost"] or Decimal(0),
+                total_cost_usd=_cost_decimal(row["total_cost"]),
             )
         )
     return overviews
@@ -445,7 +450,7 @@ async def get_squad_metrics(
     cost_by_agent = [
         SquadAgentCostRow(
             agent_id=row["agent_id"],
-            cost_usd=Decimal(str(row["cost"] or 0)),
+            cost_usd=_cost_decimal(row["cost"]),
             query_count=int(row["query_count"]),
         )
         for row in agent_rows
@@ -454,7 +459,7 @@ async def get_squad_metrics(
     return SquadMetrics(
         squad_id=squad_id,
         workspace_ids=[str(w) for w in (workspaces or [])],
-        total_cost_usd=Decimal(str(thread_row["total_cost"])) if thread_row else Decimal(0),
+        total_cost_usd=_cost_decimal(thread_row["total_cost"] if thread_row else 0),
         open_thread_count=int(thread_row["open_count"]) if thread_row else 0,
         completed_thread_count=int(thread_row["completed_count"]) if thread_row else 0,
         cost_by_agent=cost_by_agent,

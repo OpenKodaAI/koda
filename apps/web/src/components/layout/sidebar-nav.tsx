@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from "react";
 import {
   ControlPlaneNavIcon,
   CostsNavIcon,
+  EvaluationsNavIcon,
   ExecutionsNavIcon,
   GeneralSettingsNavIcon,
   MemoryNavIcon,
@@ -108,6 +109,7 @@ export function buildSidebarPrimarySections(t: AppTranslator): SidebarNavSection
       label: t("sidebar.sections.analysis"),
       items: [
         buildItem(t, "/memory", "memory", MemoryNavIcon, "primary", "live", "viewport", "memory"),
+        buildItem(t, "/evaluations", "evaluations", EvaluationsNavIcon, "primary", "live", "viewport", "startsWith"),
         buildItem(t, "/costs", "costs", CostsNavIcon, "primary", "live", "viewport", "startsWith"),
       ],
     },

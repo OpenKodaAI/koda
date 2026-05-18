@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useToast } from "@/hooks/use-toast";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { prettyJson } from "@/lib/control-plane-editor";
@@ -97,9 +98,12 @@ export function GlobalDefaultsPanel({
                   type="button"
                   className="button-shell button-shell--primary button-shell--sm"
                   disabled={saving}
+                  aria-label={saving ? tl("Salvando...") : undefined}
+                  aria-busy={saving || undefined}
                   onClick={handleSave}
                 >
-                  {saving ? tl("Salvando...") : tl("Salvar defaults")}
+                  {saving ? <InlineSpinner className="h-3.5 w-3.5" /> : null}
+                  <span>{tl("Salvar defaults")}</span>
                 </button>
               </div>
             </div>

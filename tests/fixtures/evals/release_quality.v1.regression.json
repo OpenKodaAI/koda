@@ -1,0 +1,84 @@
+{
+  "schema_version": "release_quality.v1",
+  "release_id": "phase5-smoke-regression",
+  "status": "failed",
+  "suite_score": 0.42,
+  "generated_at": "2026-05-17T12:20:00Z",
+  "gates": [
+    {
+      "id": "deterministic_eval_suite",
+      "status": "failed",
+      "message": "Suite score fell below 0.85."
+    },
+    {
+      "id": "trajectory_export_redaction",
+      "status": "passed"
+    },
+    {
+      "id": "tool_policy_regression",
+      "status": "failed",
+      "message": "A tool call and policy decision drifted."
+    }
+  ],
+  "eval_runs": [
+    {
+      "schema_version": "eval_run.v1",
+      "run_id": "eval_run_phase5_tool_policy_regression",
+      "status": "failed",
+      "replay_mode": "offline",
+      "provider_calls": 0,
+      "case_results": [
+        {
+          "case_id": "case_run_7101",
+          "status": "failed",
+          "score": 0.42,
+          "expectations": {
+            "tool_calls": [
+              {
+                "tool_id": "read_file",
+                "effect": "read_context"
+              }
+            ],
+            "policy_decisions": [
+              {
+                "tool_id": "package_install",
+                "decision": "denied"
+              }
+            ]
+          },
+          "observed": {
+            "tool_calls": [
+              {
+                "tool_id": "shell_execute",
+                "effect": "code_execution"
+              }
+            ],
+            "policy_decisions": [
+              {
+                "tool_id": "package_install",
+                "decision": "allowed"
+              }
+            ]
+          },
+          "regressions": [
+            {
+              "category": "tool_regression",
+              "message": "Expected read_file but observed shell_execute."
+            },
+            {
+              "category": "policy_regression",
+              "message": "package_install changed from denied to allowed."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trajectory_export": {
+    "schema_version": "trajectory_export.v1",
+    "replay_mode": "offline",
+    "raw_prompt_included": false,
+    "raw_secret_count": 0,
+    "line_count": 3
+  }
+}

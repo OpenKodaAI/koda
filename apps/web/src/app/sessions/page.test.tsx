@@ -175,6 +175,24 @@ const sessionDetails: Record<string, SessionDetail> = {
         session_id: "session-alpha",
         error: false,
         linked_execution: executionSummary(),
+        artifacts: [
+          {
+            id: "alpha-artifact-1",
+            label: "release-notes.md",
+            kind: "text",
+            content: null,
+            description: "Release notes",
+            summary: "Release notes",
+            url: null,
+            path: "/runtime/tasks/42/artifacts/release-notes.md",
+            mime_type: "text/markdown",
+            size_bytes: 128,
+            source_type: "runtime_artifact",
+            status: "complete",
+            text_content: null,
+            metadata: { runtime_artifact_id: "alpha-artifact-1" },
+          },
+        ],
       },
     ],
     orphan_executions: [],
@@ -262,6 +280,37 @@ describe("SessionsPage chat redesign", () => {
       const url = typeof input === "string" ? input : input.toString();
       const method = init?.method ?? "GET";
 
+      if (method === "GET" && url.startsWith("/api/control-plane/agents")) {
+        const parsed = new URL(url, "http://localhost");
+        const limit = Number(parsed.searchParams.get("limit") ?? agentCatalog.length);
+        const offset = Number(parsed.searchParams.get("offset") ?? "0");
+        const query = (parsed.searchParams.get("q") ?? "").toLowerCase();
+        const filtered = query
+          ? agentCatalog.filter((agent) =>
+              `${agent.label} ${agent.id}`.toLowerCase().includes(query),
+            )
+          : agentCatalog;
+        const items = filtered.slice(offset, offset + limit).map((agent) => ({
+          id: agent.id,
+          display_name: agent.label,
+          appearance: {
+            label: agent.label,
+            color: agent.color,
+            color_rgb: agent.colorRgb,
+          },
+        }));
+        return new Response(
+          JSON.stringify({
+            items,
+            total: filtered.length,
+            limit,
+            offset,
+            has_more: offset + items.length < filtered.length,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
       if (
         method === "POST" &&
         url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/messages")
@@ -343,7 +392,20 @@ describe("SessionsPage chat redesign", () => {
     expect(
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
+  }, 10_000);
+
+  it("shows the contextual files panel only from real session artifacts", async () => {
+    renderSessionsPage();
+
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
+    const contextPanel = screen.getByLabelText("Session details");
+    expect(within(contextPanel).getByText("Files")).toBeInTheDocument();
+    expect(within(contextPanel).getByText("release-notes.md")).toBeInTheDocument();
   }, 10_000);
 
   it("loads conversations even when the agent catalog is not hydrated yet", async () => {
@@ -352,7 +414,9 @@ describe("SessionsPage chat redesign", () => {
     expect(
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
   }, 10_000);
 
   it("does not rewrite the URL on mount when the query is already normalized", async () => {
@@ -360,7 +424,9 @@ describe("SessionsPage chat redesign", () => {
     currentSearchParams = new URLSearchParams(currentQueryString);
     renderSessionsPage();
 
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -368,24 +434,30 @@ describe("SessionsPage chat redesign", () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Beta sync/i }));
 
-    expect(await screen.findByText("Here is the beta summary.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Here is the beta summary."),
+    ).toBeInTheDocument();
   }, 10_000);
 
   it("starts a new conversation and sends a message via the composer", async () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
 
     const railNewButton = screen.getAllByRole("button", { name: /New conversation/i })[0];
     await user.click(railNewButton);
     await user.click(await screen.findByRole("button", { name: /^ATLAS$/i }));
 
-    const composer = await screen.findByPlaceholderText(/Send a message/i);
+    const composer = await screen.findByRole("textbox", { name: /Send a message/i });
     await user.type(composer, "Hello from web");
 
     await user.click(screen.getByRole("button", { name: /^Send$/i }));
@@ -484,13 +556,15 @@ describe("SessionsPage chat redesign", () => {
   it("renders the composer model and agent indicator once a session is loaded", async () => {
     renderSessionsPage();
 
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("claude-opus-4-6")).toBeInTheDocument();
     });
 
-    const composerForm = screen.getByPlaceholderText(/Send a message/i).closest("form");
+    const composerForm = screen.getByRole("textbox", { name: /Send a message/i }).closest("form");
     expect(composerForm).toBeTruthy();
     if (composerForm) {
       expect(within(composerForm).getByText(/ATLAS/)).toBeInTheDocument();
@@ -525,7 +599,9 @@ describe("SessionsPage chat redesign", () => {
     vi.stubGlobal("EventSource", MockEventSource);
     const { queryClient } = renderSessionsPage();
 
-    expect(await screen.findByText("Everything shipped correctly.")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(
         sources.some((source) => source.url.includes("/sessions/session-alpha/stream") && source.onmessage),

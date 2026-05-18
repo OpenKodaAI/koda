@@ -8,6 +8,7 @@ from contextlib import suppress
 
 import pytest
 
+from koda.squads.replies import ThreadReplyError, ThreadReplyService
 from koda.squads.threads import SquadThreadStore
 
 
@@ -27,9 +28,11 @@ async def clean_squad_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_reply_obligations" RESTART IDENTITY CASCADE')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_message_recipients"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY CASCADE')
     finally:
         await conn.close()
     yield migrated_postgres
@@ -138,6 +141,82 @@ async def test_post_and_history_roundtrip(store: SquadThreadStore) -> None:
     history = await store.thread_history(thread_id=thread.id, limit=10)
     contents = [h["content"] for h in history]
     assert contents == ["on it", "hello"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_thread_reply_obligation_roundtrip(store: SquadThreadStore) -> None:
+    thread = await store.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="t",
+        coordinator_agent_id="PM",
+        participants=[("FE", "worker"), ("BE", "worker")],
+    )
+    root_id = await store.post_thread_message(
+        thread_id=thread.id,
+        from_agent="operator",
+        content="Need backend review",
+        message_type="user_input",
+        to_agent_ids=["BE"],
+        metadata={"reply_contract_version": "thread_reply.v1"},
+    )
+    service = ThreadReplyService(store)
+    obligations = await service.create_obligations(
+        thread_id=thread.id,
+        source_message_id=root_id,
+        target_agent_ids=["BE"],
+        source_agent_id="operator",
+    )
+    assert len(obligations) == 1
+    assert obligations[0].status == "open"
+
+    reply_id = await store.post_thread_message(
+        thread_id=thread.id,
+        from_agent="BE",
+        content="Reviewed.",
+        message_type="agent_reply",
+        in_reply_to=f"msg-{root_id}",
+        correlation_id=obligations[0].obligation_key,
+    )
+    resolved = await service.resolve_for_reply(
+        thread_id=thread.id,
+        reply_message_id=reply_id,
+        from_agent="BE",
+        in_reply_to=f"msg-{root_id}",
+        correlation_id=obligations[0].obligation_key,
+    )
+    assert [item.status for item in resolved] == ["answered"]
+    history = await store.thread_history(thread_id=thread.id, limit=10)
+    by_id = {item["id"]: item for item in history}
+    assert by_id[root_id]["reply_summary"]["answered"] == 1
+    assert by_id[reply_id]["resolved_reply_obligations"][0]["targetAgentId"] == "BE"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_thread_reply_rejects_non_participant_target(store: SquadThreadStore) -> None:
+    thread = await store.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="t",
+        participants=[("FE", "worker")],
+    )
+    root_id = await store.post_thread_message(
+        thread_id=thread.id,
+        from_agent="operator",
+        content="Need backend review",
+        message_type="user_input",
+    )
+    service = ThreadReplyService(store)
+    with pytest.raises(ThreadReplyError) as err:
+        await service.create_obligations(
+            thread_id=thread.id,
+            source_message_id=root_id,
+            target_agent_ids=["BE"],
+            source_agent_id="operator",
+        )
+    assert err.value.code == "reply.target_not_participant"
 
 
 @pytest.mark.postgres

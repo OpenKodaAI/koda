@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { SessionRichText } from "@/components/sessions/session-rich-text";
 import { ReasoningBlock } from "@/components/sessions/chat/reasoning-block";
 import { ToolCallCard } from "@/components/sessions/chat/tool-call-card";
 import { ApprovalPrompt } from "@/components/sessions/chat/approval-prompt";
 import { BlockRenderer } from "@/components/sessions/chat/generative/block-renderer";
 import { InlineArtifactList } from "@/components/sessions/artifacts/inline-artifact-list";
+import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
+import type { PendingApproval } from "@/lib/contracts/sessions";
 import { formatDuration } from "@/lib/utils";
 import type { ExecutionArtifact, ExecutionSummary } from "@/lib/types";
 
@@ -58,6 +61,36 @@ export function AssistantMessage({
 
   const pendingApprovalId = linkedExecution?.pending_approval_id ?? null;
   const approvalReasons = linkedExecution?.answer_gate_reasons ?? [];
+  const [pendingApprovalState, setPendingApprovalState] = useState<{
+    approvalId: string | null;
+    approval: PendingApproval | null;
+  }>({ approvalId: null, approval: null });
+  const pendingApproval =
+    pendingApprovalState.approvalId === pendingApprovalId ? pendingApprovalState.approval : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!agentId || !pendingApprovalId) return () => undefined;
+    void fetchControlPlaneDashboardJson<{ items: PendingApproval[] }>(
+      `/agents/${encodeURIComponent(agentId)}/approvals`,
+      { fallbackError: "Unable to load pending approvals" },
+    )
+      .then((response) => {
+        if (cancelled) return;
+        setPendingApprovalState({
+          approvalId: pendingApprovalId,
+          approval: response.items.find((approval) => approval.approval_id === pendingApprovalId) ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPendingApprovalState({ approvalId: pendingApprovalId, approval: null });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, pendingApprovalId]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -116,8 +149,11 @@ export function AssistantMessage({
           agentId={agentId}
           sessionId={sessionId}
           approvalId={pendingApprovalId}
-          toolName={linkedExecution?.query_text ?? null}
+          toolName={pendingApproval?.tool_id ?? pendingApproval?.tool_name ?? linkedExecution?.query_text ?? null}
           reasons={approvalReasons}
+          preview={pendingApproval?.preview_text ?? null}
+          schema={pendingApproval?.args_schema ?? pendingApproval?.schema ?? null}
+          originalParams={pendingApproval?.original_params ?? pendingApproval?.params ?? null}
         />
       ) : null}
 

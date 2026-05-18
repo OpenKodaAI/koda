@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Trash2, Edit3, ChevronDown, ChevronUp } from "lucide-react";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 interface CollectionManagerProps {
@@ -180,10 +181,12 @@ export function CollectionManager({
                       type="button"
                       onClick={() => handleEditSave(id)}
                       disabled={itemBusy}
+                      aria-label={itemBusy ? tl("Saving...") : undefined}
+                      aria-busy={itemBusy || undefined}
                       className="button-shell button-shell--primary button-shell--sm"
                     >
-                      <Edit3 size={12} />
-                      <span>{itemBusy ? tl("Saving...") : tl("Save")}</span>
+                      {itemBusy ? <InlineSpinner className="h-3.5 w-3.5" /> : <Edit3 size={12} />}
+                      <span>{tl("Save")}</span>
                     </button>
                   </div>
                 </div>
@@ -218,9 +221,12 @@ export function CollectionManager({
               type="button"
               onClick={handleAddSave}
               disabled={busy}
+              aria-label={busy ? tl("Saving...") : undefined}
+              aria-busy={busy || undefined}
               className="button-shell button-shell--primary button-shell--sm"
             >
-              <span>{busy ? tl("Saving...") : tl("Save")}</span>
+              {busy ? <InlineSpinner className="h-3.5 w-3.5" /> : null}
+              <span>{tl("Save")}</span>
             </button>
           </div>
         </div>

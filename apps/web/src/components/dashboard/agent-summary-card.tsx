@@ -22,7 +22,7 @@ interface AgentSummaryCardProps {
   active?: boolean;
 }
 
-const LIVE_STATUSES: Task["status"][] = ["running", "retrying", "queued"];
+const LIVE_STATUSES: Task["status"][] = ["running", "retrying", "queued", "stalled", "degraded"];
 
 function getFeaturedTask(stats: AgentStats) {
   return (

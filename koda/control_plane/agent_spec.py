@@ -538,9 +538,17 @@ def iter_agent_prompt_blocks(documents: dict[str, Any]) -> list[tuple[str, str, 
     return blocks
 
 
-def compose_agent_prompt(documents: dict[str, Any]) -> str:
+def compose_agent_prompt(documents: dict[str, Any], *, squad_context: str | None = None) -> str:
     """Compose the published agent-local contract prompt from markdown layers."""
-    blocks = [f"<{tag}>\n{content}\n</{tag}>" for _, tag, content in iter_agent_prompt_blocks(documents)]
+    blocks: list[str] = []
+    inserted_squad_context = False
+    for kind, tag, content in iter_agent_prompt_blocks(documents):
+        if squad_context and not inserted_squad_context and kind == "rules_md":
+            blocks.append(squad_context.strip())
+            inserted_squad_context = True
+        blocks.append(f"<{tag}>\n{content}\n</{tag}>")
+    if squad_context and not inserted_squad_context:
+        blocks.append(squad_context.strip())
     if not blocks:
         return ""
 

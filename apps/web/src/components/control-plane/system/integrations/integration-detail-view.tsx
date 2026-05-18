@@ -31,7 +31,7 @@ import {
   Database,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { cn } from "@/lib/utils";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -514,15 +514,23 @@ export function IntegrationDetailView({
                     type="button"
                     onClick={() => onRemoveMcpServer?.(entry)}
                     disabled={mcpRemoving}
+                    aria-label={mcpRemoving ? tl("Removendo") : undefined}
+                    aria-busy={mcpRemoving || undefined}
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors",
+                      "inline-flex min-w-36 items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors",
                       mcpRemoving
                         ? "cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-quaternary)]"
                         : "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg-strong)]",
                     )}
                   >
-                    <Trash2 size={14} />
-                    {mcpRemoving ? tl("Removendo") : tl("Remover servidor")}
+                    {mcpRemoving ? (
+                      <InlineSpinner className="h-3.5 w-3.5" />
+                    ) : (
+                      <>
+                        <Trash2 size={14} />
+                        {tl("Remover servidor")}
+                      </>
+                    )}
                   </button>
                 ) : null}
               </>

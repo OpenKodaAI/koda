@@ -128,6 +128,12 @@ TOOL_EXECUTIONS = Counter(
     ["agent_id", "tool_name", "status"],
 )
 
+SQUAD_REPLY_EVENTS = Counter(
+    "koda_squad_reply_events_total",
+    "Operational squad reply events",
+    ["agent_id", "event_type", "status"],
+)
+
 INTEGRATION_GRANT_DECISIONS = Counter(
     "koda_integration_grant_decisions_total",
     "Integration grant evaluation decisions",
@@ -329,6 +335,42 @@ KNOWLEDGE_EVALUATION_SCORE = Histogram(
     "Offline knowledge evaluation scores",
     ["agent_id", "strategy", "metric"],
     buckets=(0.0, 0.25, 0.5, 0.65, 0.8, 0.9, 1.0),
+)
+
+EVAL_CASE_EVENTS = Counter(
+    "koda_eval_case_events_total",
+    "Phase 5 eval case lifecycle events",
+    ["agent_id", "event", "status"],
+)
+
+EVAL_RUN_CASES = Counter(
+    "koda_eval_run_cases_total",
+    "Phase 5 offline eval case results",
+    ["agent_id", "strategy", "status"],
+)
+
+TRAJECTORY_EXPORTS = Counter(
+    "koda_trajectory_exports_total",
+    "Phase 5 redacted trajectory exports",
+    ["agent_id", "status"],
+)
+
+RELEASE_QUALITY_GATES = Counter(
+    "koda_release_quality_gates_total",
+    "Phase 5 release quality gate evaluations",
+    ["agent_id", "status"],
+)
+
+CHANNEL_GATEWAY_EVENTS = Counter(
+    "koda_channel_gateway_events_total",
+    "Phase 6 channel gateway identity, pairing, and policy events",
+    ["agent_id", "event", "status"],
+)
+
+ONBOARDING_READINESS_CHECKS = Counter(
+    "koda_onboarding_readiness_checks_total",
+    "Phase 6 onboarding readiness check outcomes",
+    ["agent_id", "check", "status"],
 )
 
 # --- Runtime environment metrics ---

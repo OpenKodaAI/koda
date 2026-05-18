@@ -80,6 +80,20 @@ def classify_mcp_tool_rw(annotations: McpToolAnnotations | None) -> bool:
     return annotations.read_only_hint is not True
 
 
+def classify_mcp_tool_payload_rw(tool_data: dict[str, Any], annotations: McpToolAnnotations | None) -> bool:
+    """Return True when a discovered MCP payload is write-capable."""
+
+    try:
+        from koda.services.mcp_risk import normalize_mcp_risk_class
+
+        risk_class = normalize_mcp_risk_class(tool_data.get("risk_class") or tool_data.get("risk_level"))
+        if risk_class != "unknown":
+            return risk_class != "read_context"
+    except Exception:
+        pass
+    return classify_mcp_tool_rw(annotations)
+
+
 def resolve_mcp_tool_policy(
     tool_policies: dict[str, str],
     tool_name: str,
@@ -497,13 +511,14 @@ def register_mcp_tools_for_agent(
                     read_only_hint=raw_ann.get("read_only_hint"),
                     destructive_hint=raw_ann.get("destructive_hint"),
                     idempotent_hint=raw_ann.get("idempotent_hint"),
+                    open_world_hint=raw_ann.get("open_world_hint"),
                 )
 
             # Register handler (closure captures tool_id and agent_id)
             tool_handlers[tid] = _make_mcp_handler(tid, agent_id)
 
             # Classify read/write
-            if classify_mcp_tool_rw(annotations):
+            if classify_mcp_tool_payload_rw(tool_data, annotations):
                 write_tools.add(tid)
                 read_tools.discard(tid)
             else:

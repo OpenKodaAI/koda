@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { X, CheckCircle2, XCircle, Clock, AlertTriangle, Copy } from "lucide-react";
 import type { DLQEntry } from "@/lib/types";
-import { formatDateTime, truncateText } from "@/lib/utils";
+import { cn, formatDateTime, truncateText } from "@/lib/utils";
 import {
   getSemanticIconStyle,
   getSemanticStyle,
@@ -25,10 +25,11 @@ interface ErrorDetailProps {
 
 function RetryStatus({ entry }: { entry: DLQEntry }) {
   const { t } = useAppI18n();
+  const baseClass = "inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium";
   if (entry.retry_eligible === 1 && !entry.retried_at) {
     return (
-      <span className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium" style={getSemanticStyle("warning")}>
-        <Clock className="h-4 w-4" />
+      <span className={baseClass} style={getSemanticStyle("warning")}>
+        <Clock className="h-3.5 w-3.5" />
         {t("dlq.detail.retryNow")}
       </span>
     );
@@ -36,16 +37,16 @@ function RetryStatus({ entry }: { entry: DLQEntry }) {
 
   if (entry.retried_at) {
     return (
-      <span className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium" style={getSemanticStyle("success")}>
-        <CheckCircle2 className="h-4 w-4" />
+      <span className={baseClass} style={getSemanticStyle("success")}>
+        <CheckCircle2 className="h-3.5 w-3.5" />
         {t("dlq.detail.retriedAt", { value: formatDateTime(entry.retried_at) })}
       </span>
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium" style={getSemanticStyle("danger")}>
-      <XCircle className="h-4 w-4" />
+    <span className={baseClass} style={getSemanticStyle("danger")}>
+      <XCircle className="h-3.5 w-3.5" />
       {t("dlq.detail.noRetry")}
     </span>
   );
@@ -58,7 +59,7 @@ function MetadataViewer({ json }: { json: string }) {
     parsed = JSON.parse(json);
   } catch {
     return (
-      <SyntaxHighlight lang="json" className="p-4">
+      <SyntaxHighlight lang="json" className="max-h-[220px] overflow-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] p-3 text-xs leading-5">
         {json}
       </SyntaxHighlight>
     );
@@ -75,7 +76,7 @@ function MetadataViewer({ json }: { json: string }) {
   }
 
   return (
-    <SyntaxHighlight lang="json" className="p-4">
+    <SyntaxHighlight lang="json" className="max-h-[220px] overflow-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] p-3 text-xs leading-5">
       {JSON.stringify(parsed, null, 2)}
     </SyntaxHighlight>
   );
@@ -84,6 +85,28 @@ function MetadataViewer({ json }: { json: string }) {
 function copyText(value: string | null | undefined) {
   if (!value) return;
   void navigator.clipboard?.writeText(value);
+}
+
+function CopyAction({
+  label,
+  onClick,
+  tone,
+}: {
+  label: string;
+  onClick: () => void;
+  tone?: "danger";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="button-shell button-shell--secondary button-shell--sm h-8 min-h-8 gap-1.5 px-2.5 text-xs"
+      style={tone === "danger" ? getSemanticIconStyle("danger") : undefined}
+    >
+      <Copy className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
 }
 
 export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
@@ -126,10 +149,10 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
           <X className="h-4 w-4" />
         </button>
 
-        <div className="app-drawer-panel h-full !overflow-y-auto p-5 lg:p-7">
-          <div className="flex flex-col gap-6">
-              <div className="flex items-start gap-4 pr-14 sm:pr-16">
-                <div className="space-y-3">
+        <div className="app-drawer-panel h-full !overflow-y-auto p-4 lg:p-5">
+          <div className="flex flex-col gap-4">
+              <div className="flex items-start gap-3 pr-12 sm:pr-14">
+                <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="app-card-row__eyebrow">DLQ #{renderedEntry.id}</span>
                     <span className="font-mono text-xs text-[var(--text-tertiary)]">Task #{renderedEntry.task_id}</span>
@@ -140,98 +163,105 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                     )}
                   </div>
                   <div>
-                    <h2 className="text-[1.35rem] font-semibold tracking-[-0.06em] text-[var(--text-primary)]">
+                    <h2 className="text-[1.08rem] font-semibold leading-6 tracking-[-0.035em] text-[var(--text-primary)] sm:text-[1.15rem]">
                       {renderedEntry.error_message
-                        ? truncateText(renderedEntry.error_message, 92)
+                        ? truncateText(renderedEntry.error_message, 110)
                         : t("dlq.detail.empty")}
                     </h2>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 <DrawerMetric label={t("common.model")} value={truncateText(renderedEntry.model ?? "—", 18)} mono />
                 <DrawerMetric label={t("common.attempts")} value={`${renderedEntry.attempt_count}`} mono />
                 <DrawerMetric label={t("common.pod")} value={truncateText(renderedEntry.pod_name ?? "—", 18)} mono />
                 <DrawerMetric label={t("common.agent")} value={renderedEntry.bot_id ?? "—"} mono />
               </div>
 
-              <div className="app-code-panel">
+              <div className="app-code-panel p-3">
                 <div className="app-code-panel__header">
                   <span className="app-code-panel__title">{t("dlq.detail.originalQuery")}</span>
-                  <button
+                  <CopyAction
+                    label={t("common.copy")}
                     onClick={() => copyText(renderedEntry.query_text)}
-                    className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {t("common.copy")}
-                  </button>
+                  />
                 </div>
-                <SyntaxHighlight className="app-code-panel__body p-4">
+                <SyntaxHighlight className="app-code-panel__body max-h-32 overflow-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] p-3 text-xs leading-6">
                   {renderedEntry.query_text || "\u2014"}
                 </SyntaxHighlight>
               </div>
 
-              <div className="app-note app-note--danger" style={getSemanticStyle("danger")}>
-                <div className="mb-4 flex items-center justify-between gap-4">
+              <div className="app-note app-note--danger p-3" style={getSemanticStyle("danger")}>
+                <div className="mb-2.5 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4" style={getSemanticTextStyle("danger")} />
                     <span className="app-card-row__eyebrow" style={getSemanticTextStyle("danger")}>
                       {t("dlq.detail.failure")}
                     </span>
                   </div>
-                  <button
+                  <CopyAction
+                    label={t("common.copy")}
                     onClick={() => copyText(renderedEntry.error_message)}
-                    className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
-                    style={getSemanticIconStyle("danger")}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {t("common.copy")}
-                  </button>
+                    tone="danger"
+                  />
                 </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-7" style={getSemanticTextStyle("danger")}>
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-[color:var(--tone-danger-border)] bg-[rgba(0,0,0,0.08)] p-3 font-mono text-xs leading-6" style={getSemanticTextStyle("danger")}>
                   {renderedEntry.error_message ?? "\u2014"}
                 </pre>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
                   {t("dlq.detail.operationalContext")}
                 </span>
-                <div className="app-detail-grid sm:grid-cols-2">
-                  <DetailRow label={t("dlq.detail.errorClass")}>
+                <div className="app-detail-grid gap-2 sm:grid-cols-2">
+                  <DetailRow
+                    label={t("dlq.detail.errorClass")}
+                    className="px-3 py-2.5 sm:py-3"
+                    valueClassName="mt-1 text-xs leading-5"
+                  >
                     {renderedEntry.error_class ? (
-                      <span className="inline-flex rounded-lg border px-2.5 py-1 font-mono text-xs" style={getSemanticStyle("danger")}>
+                      <span className="inline-flex rounded-md border px-2 py-0.5 font-mono text-xs" style={getSemanticStyle("danger")}>
                         {renderedEntry.error_class}
                       </span>
                     ) : (
                       <span className="text-subtle">&mdash;</span>
                     )}
                   </DetailRow>
-                  <DetailRow label={t("dlq.detail.retryStatus")}>
+                  <DetailRow
+                    label={t("dlq.detail.retryStatus")}
+                    className="px-3 py-2.5 sm:py-3"
+                    valueClassName="mt-1 text-xs leading-5"
+                  >
                     <RetryStatus entry={renderedEntry} />
                   </DetailRow>
-                  <DetailRow label={t("common.created")}>
+                  <DetailRow
+                    label={t("common.created")}
+                    className="px-3 py-2.5 sm:py-3"
+                    valueClassName="mt-1 font-mono text-xs leading-5"
+                  >
                     {formatDateTime(renderedEntry.original_created_at)}
                   </DetailRow>
-                  <DetailRow label={t("dlq.detail.failedAt")}>
+                  <DetailRow
+                    label={t("dlq.detail.failedAt")}
+                    className="px-3 py-2.5 sm:py-3"
+                    valueClassName="mt-1 font-mono text-xs leading-5"
+                  >
                     {formatDateTime(renderedEntry.failed_at)}
                   </DetailRow>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 <div className="flex items-center justify-between gap-4">
                   <span className="app-card-row__eyebrow">
                     {t("dlq.detail.rawPayload")}
                   </span>
-                  <button
+                  <CopyAction
+                    label={t("dlq.detail.copyJson")}
                     onClick={() => copyText(renderedEntry.metadata_json)}
-                    className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {t("dlq.detail.copyJson")}
-                  </button>
+                  />
                 </div>
                 <MetadataViewer json={renderedEntry.metadata_json} />
               </div>
@@ -245,11 +275,11 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
 
 function DrawerMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="app-kpi-card">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+    <div className="min-w-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3 py-2.5">
+      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
         {label}
       </p>
-      <p className={mono ? "mt-2 font-mono text-sm text-[var(--text-primary)]" : "mt-2 text-sm text-[var(--text-primary)]"}>
+      <p className={cn("mt-1 truncate text-[13px] leading-5 text-[var(--text-primary)]", mono && "font-mono")}>
         {value}
       </p>
     </div>

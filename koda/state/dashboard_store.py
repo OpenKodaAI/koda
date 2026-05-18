@@ -1359,6 +1359,33 @@ class DashboardStore:
             items.append(item)
         return items[offset : offset + limit]
 
+    def delete_session(self, agent_id: str, session_id: str) -> int:
+        """Remove every row associated with the given chat session.
+
+        Returns the total number of rows removed across `sessions`,
+        `query_history`, and `tasks`. The session listing is derived from
+        these tables so the conversation disappears from the rail as soon as
+        the caller invalidates its query.
+        """
+        scope = _normalize_scope(agent_id)
+        deleted = 0
+        deleted += _execute(
+            scope,
+            "DELETE FROM sessions WHERE agent_id = ? AND session_id = ?",
+            (scope, session_id),
+        )
+        deleted += _execute(
+            scope,
+            "DELETE FROM query_history WHERE agent_id = ? AND session_id = ?",
+            (scope, session_id),
+        )
+        deleted += _execute(
+            scope,
+            "DELETE FROM tasks WHERE agent_id = ? AND session_id = ?",
+            (scope, session_id),
+        )
+        return deleted
+
     def get_session(
         self,
         agent_id: str,

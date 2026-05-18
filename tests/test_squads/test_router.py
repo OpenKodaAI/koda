@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from koda.squads.coordinator import REQUIRED_COORDINATOR_TOOL_IDS
 from koda.squads.router import SquadRouter, SweepReport
 from koda.squads.tasks import ExpiredClaim, SquadTaskStore
 from koda.squads.threads import SquadThreadStore
@@ -17,6 +18,10 @@ from koda.squads.threads import SquadThreadStore
 
 def _schema() -> str:
     return (os.environ.get("KNOWLEDGE_V2_POSTGRES_SCHEMA") or "knowledge_v2").strip() or "knowledge_v2"
+
+
+def _eligible_spec() -> dict[str, object]:
+    return {"tool_policy": {"allowed_tool_ids": list(REQUIRED_COORDINATOR_TOOL_IDS)}}
 
 
 # --- non-PG unit tests ---
@@ -135,10 +140,14 @@ async def clean_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_history" RESTART IDENTITY')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_state"')
+        await conn.execute(
+            f'TRUNCATE TABLE "{schema}"."squad_message_recipients", "{schema}"."squad_messages" RESTART IDENTITY'
+        )
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_tasks"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY')
     finally:
         await conn.close()
     yield migrated_postgres
@@ -203,7 +212,7 @@ async def test_router_auto_election_promotes_first_active(
 
     threads = SquadThreadStore(dsn=clean_state, schema=_schema())
     tasks = SquadTaskStore(dsn=clean_state, schema=_schema())
-    coord = CoordinatorService(dsn=clean_state, schema=_schema())
+    coord = CoordinatorService(dsn=clean_state, schema=_schema(), agent_spec_loader=lambda _agent_id: _eligible_spec())
     try:
         # Configure auto policy without electing.
         await coord.set_election_policy(squad_id="build", policy="auto_first_active")

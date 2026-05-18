@@ -13,7 +13,7 @@ from koda.config import AGENT_ID
 from koda.knowledge.config import KNOWLEDGE_V2_STORAGE_MODE
 from koda.knowledge.types import ArtifactEvidenceNode, GraphEntity, GraphRelation, RetrievalTrace
 from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
-from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_val
+from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_one, primary_fetch_val
 
 
 def _scope(agent_id: str | None) -> str:
@@ -34,6 +34,10 @@ def _json_load(value: Any, default: Any) -> Any:
         return json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError):
         return default
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, default=str)
 
 
 def _retrieval_trace_from_row(row: Any, hits: Sequence[Any]) -> dict[str, Any]:
@@ -226,7 +230,7 @@ def _evaluation_run_from_row(row: Any) -> dict[str, Any]:
             "verification_before_finalize_rate": float(row.get("verification_before_finalize_rate") or 0.0),
             "human_correction_rate": float(row.get("human_correction_rate") or 0.0),
             "task_success_proxy": float(row.get("task_success_proxy") or 0.0),
-            "metrics": _json_load(row.get("metrics_json"), {}),
+            "metrics": _json_load(row.get("metrics_json") or row.get("metadata_json"), {}),
             "created_at": row.get("created_at"),
         }
     return {
@@ -575,7 +579,8 @@ class KnowledgeRepository:
     def list_evaluation_cases(self, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._run_coro_sync(
             primary_fetch_all(
-                """SELECT id, case_key, agent_id, source_task_id, query_text, task_kind, project_key, environment,
+                """SELECT id, case_key, agent_id, source_task_id, query AS query_text, task_kind,
+                          project_key, environment,
                           team, modality, expected_sources_json, expected_layers_json, reference_answer, status,
                           gold_source_kind, validated_by, validated_at, metadata_json, created_at, updated_at
                    FROM evaluation_cases
@@ -599,14 +604,14 @@ class KnowledgeRepository:
             payload.get("environment", ""),
             payload.get("team", ""),
             payload.get("modality", "text"),
-            list(payload.get("expected_sources") or []),
-            list(payload.get("expected_layers") or []),
+            _json_dump(list(payload.get("expected_sources") or [])),
+            _json_dump(list(payload.get("expected_layers") or [])),
             payload.get("reference_answer", ""),
             payload.get("status", "draft"),
             payload.get("gold_source_kind", "manual_gold"),
             payload.get("validated_by", ""),
             payload.get("validated_at", ""),
-            dict(payload.get("metadata") or {}),
+            _json_dump(dict(payload.get("metadata") or {})),
             now,
             now,
         )
@@ -614,16 +619,15 @@ class KnowledgeRepository:
             primary_fetch_val(
                 """INSERT INTO evaluation_cases
                    (
-                    case_key, agent_id, source_task_id, query_text, task_kind,
+                    case_key, agent_id, source_task_id, query, task_kind,
                     project_key, environment, team, modality,
                     expected_sources_json, expected_layers_json, reference_answer, status, gold_source_kind,
                     validated_by, validated_at, metadata_json, created_at, updated_at)
-                   )
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(case_key) DO UPDATE SET
+                   ON CONFLICT(agent_id, case_key) DO UPDATE SET
                        agent_id = EXCLUDED.agent_id,
                        source_task_id = EXCLUDED.source_task_id,
-                       query_text = EXCLUDED.query_text,
+                       query = EXCLUDED.query,
                        task_kind = EXCLUDED.task_kind,
                        project_key = EXCLUDED.project_key,
                        environment = EXCLUDED.environment,
@@ -652,10 +656,10 @@ class KnowledgeRepository:
         values: list[Any] = [_now_iso()]
         if "expected_sources" in payload and payload["expected_sources"] is not None:
             fields.append("expected_sources_json = ?")
-            values.append(list(payload["expected_sources"]))
+            values.append(_json_dump(list(payload["expected_sources"])))
         if "expected_layers" in payload and payload["expected_layers"] is not None:
             fields.append("expected_layers_json = ?")
-            values.append(list(payload["expected_layers"]))
+            values.append(_json_dump(list(payload["expected_layers"])))
         if "reference_answer" in payload and payload["reference_answer"] is not None:
             fields.append("reference_answer = ?")
             values.append(payload["reference_answer"])
@@ -673,16 +677,31 @@ class KnowledgeRepository:
             values.append(payload["validated_at"])
         if "metadata" in payload and payload["metadata"] is not None:
             fields.append("metadata_json = ?")
-            values.append(dict(payload["metadata"]))
-        values.append(case_key)
+            values.append(_json_dump(dict(payload["metadata"])))
+        values.extend([self._scope, case_key])
         updated = self._run_coro_sync(
             primary_execute(
-                f"UPDATE evaluation_cases SET {', '.join(fields)} WHERE case_key = ?",
+                f"UPDATE evaluation_cases SET {', '.join(fields)} WHERE agent_id = ? AND case_key = ?",
                 tuple(values),
                 agent_id=self._scope,
             )
         )
         return bool(updated)
+
+    def get_evaluation_case(self, case_key: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT id, case_key, agent_id, source_task_id, query AS query_text, task_kind, project_key,
+                          environment, team, modality, expected_sources_json, expected_layers_json,
+                          reference_answer, status, gold_source_kind, validated_by, validated_at,
+                          metadata_json, created_at, updated_at
+                   FROM evaluation_cases
+                   WHERE agent_id = ? AND case_key = ?""",
+                (self._scope, case_key),
+                agent_id=self._scope,
+            )
+        )
+        return _evaluation_case_from_row(row) if row is not None else None
 
     def list_evaluation_runs(
         self,
@@ -705,7 +724,7 @@ class KnowledgeRepository:
                 """SELECT id, case_key, agent_id, strategy, retrieval_trace_id, recall_at_k, ndcg_at_k,
                           citation_accuracy, groundedness_precision, conflict_detection_rate,
                           verification_before_finalize_rate, human_correction_rate, task_success_proxy,
-                          metrics_json, created_at
+                          metadata_json AS metrics_json, created_at
                    FROM evaluation_runs WHERE """
                 + " AND ".join(primary_where)
                 + " ORDER BY id DESC LIMIT ?",
@@ -721,7 +740,7 @@ class KnowledgeRepository:
                 """INSERT INTO evaluation_runs
                    (case_key, agent_id, strategy, retrieval_trace_id, recall_at_k, ndcg_at_k, citation_accuracy,
                     groundedness_precision, conflict_detection_rate, verification_before_finalize_rate,
-                    human_correction_rate, task_success_proxy, metrics_json, created_at)
+                    human_correction_rate, task_success_proxy, metadata_json, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    RETURNING id""",
                 (
@@ -737,7 +756,7 @@ class KnowledgeRepository:
                     payload.get("verification_before_finalize_rate", 0.0),
                     payload.get("human_correction_rate", 0.0),
                     payload.get("task_success_proxy", 0.0),
-                    dict(payload.get("metrics_payload") or {}),
+                    _json_dump(dict(payload.get("metrics_payload") or payload.get("metrics") or {})),
                     _now_iso(),
                 ),
                 agent_id=self._scope,
@@ -746,6 +765,151 @@ class KnowledgeRepository:
         if row_id is None:
             raise RuntimeError("failed_to_persist_primary_evaluation_run")
         return int(row_id)
+
+    def upsert_eval_run_batch(self, payload: dict[str, Any]) -> str:
+        run_id = str(payload["run_id"])
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO eval_run_batches
+                   (run_id, agent_id, suite_id, strategy, status, score, summary_json, case_results_json,
+                    requested_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(agent_id, run_id) DO UPDATE SET
+                       suite_id = EXCLUDED.suite_id,
+                       strategy = EXCLUDED.strategy,
+                       status = EXCLUDED.status,
+                       score = EXCLUDED.score,
+                       summary_json = EXCLUDED.summary_json,
+                       case_results_json = EXCLUDED.case_results_json,
+                       requested_by = EXCLUDED.requested_by,
+                       updated_at = EXCLUDED.updated_at""",
+                (
+                    run_id,
+                    self._scope,
+                    payload.get("suite_id", "default"),
+                    payload.get("strategy", "offline_replay"),
+                    payload.get("status", "failed"),
+                    float(payload.get("score") or 0.0),
+                    _json_dump(dict(payload.get("summary") or {})),
+                    _json_dump(list(payload.get("case_results") or [])),
+                    payload.get("requested_by", ""),
+                    payload.get("created_at") or _now_iso(),
+                    _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
+        return run_id
+
+    def _eval_run_batch_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schema_version": "eval_run.v1",
+            "run_id": row.get("run_id"),
+            "agent_id": row.get("agent_id"),
+            "suite_id": row.get("suite_id") or "default",
+            "strategy": row.get("strategy") or "offline_replay",
+            "status": row.get("status") or "failed",
+            "score": float(row.get("score") or 0.0),
+            "summary": _json_load(row.get("summary_json"), {}),
+            "case_results": _json_load(row.get("case_results_json"), []),
+            "requested_by": row.get("requested_by") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    def get_eval_run_batch(self, run_id: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT run_id, agent_id, suite_id, strategy, status, score, summary_json,
+                          case_results_json, requested_by, created_at, updated_at
+                   FROM eval_run_batches
+                   WHERE agent_id = ? AND run_id = ?""",
+                (self._scope, run_id),
+                agent_id=self._scope,
+            )
+        )
+        return self._eval_run_batch_from_row(row) if row is not None else None
+
+    def list_eval_run_batches(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT run_id, agent_id, suite_id, strategy, status, score, summary_json,
+                          case_results_json, requested_by, created_at, updated_at
+                   FROM eval_run_batches
+                   WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?""",
+                (self._scope, max(1, limit)),
+                agent_id=self._scope,
+            )
+        )
+        return [self._eval_run_batch_from_row(row) for row in rows]
+
+    def create_trajectory_export(self, payload: dict[str, Any]) -> str:
+        export_id = str(payload["export_id"])
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO trajectory_exports
+                   (export_id, agent_id, task_id, status, package_hash, payload_json, jsonl_text, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(agent_id, export_id) DO UPDATE SET
+                       status = EXCLUDED.status,
+                       package_hash = EXCLUDED.package_hash,
+                       payload_json = EXCLUDED.payload_json,
+                       jsonl_text = EXCLUDED.jsonl_text""",
+                (
+                    export_id,
+                    self._scope,
+                    payload.get("task_id"),
+                    payload.get("status", "created"),
+                    payload.get("package_hash", ""),
+                    _json_dump({key: value for key, value in payload.items() if key != "jsonl"}),
+                    payload.get("jsonl", ""),
+                    payload.get("generated_at") or _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
+        return export_id
+
+    def list_trajectory_exports(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT export_id, agent_id, task_id, status, package_hash, payload_json, created_at
+                   FROM trajectory_exports
+                   WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?""",
+                (self._scope, max(1, limit)),
+                agent_id=self._scope,
+            )
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _json_load(row.get("payload_json"), {})
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.setdefault("schema_version", "trajectory_export.v1")
+            payload.setdefault("export_id", row.get("export_id"))
+            payload.setdefault("agent_id", row.get("agent_id"))
+            payload.setdefault("task_id", row.get("task_id"))
+            payload.setdefault("status", row.get("status"))
+            payload.setdefault("package_hash", row.get("package_hash"))
+            payload.setdefault("created_at", row.get("created_at"))
+            items.append(payload)
+        return items
+
+    def create_release_quality_report(self, payload: dict[str, Any]) -> None:
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO release_quality_runs
+                   (agent_id, status, payload_json, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    self._scope,
+                    payload.get("status", "failed"),
+                    _json_dump(dict(payload)),
+                    payload.get("generated_at") or _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
 
     def _schedule_external_graph_sync(
         self,

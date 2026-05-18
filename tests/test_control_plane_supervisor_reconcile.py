@@ -216,6 +216,53 @@ async def test_reconcile_caches_health_url_for_dashboard() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconcile_skips_agent_when_publish_fails() -> None:
+    """A bad draft must not poison the whole reconcile cycle."""
+    manager = _FakeManager(
+        [
+            {"id": "BROKEN", "status": "active", "applied_version": None, "desired_version": None},
+            {"id": "HEALTHY", "status": "active", "applied_version": 1},
+        ]
+    )
+    manager.add_snapshot(_runtime_snapshot("HEALTHY", port=9100))
+
+    def publish_agent(agent_id: str) -> dict[str, Any]:
+        manager.publish_calls.append(agent_id)
+        if agent_id == "BROKEN":
+            raise ValueError("invalid draft")
+        return {"version": 1}
+
+    manager.publish_agent = publish_agent  # type: ignore[method-assign]
+
+    captured: dict[str, Any] = {}
+
+    async def fake_ensure(desired: list[AgentWorkerSpec]) -> EnsureOutcome:
+        captured["desired"] = desired
+        return EnsureOutcome(
+            current=(_running_status("HEALTHY"),),
+            spawned=1,
+            terminated=0,
+            restarted=0,
+            unchanged=0,
+        )
+
+    fake_link = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        ensure_agent_workers=AsyncMock(side_effect=fake_ensure),
+        target="unix:///tmp/fake.sock",
+    )
+
+    supervisor = _make_supervisor(manager, fake_link)
+    await supervisor._reconcile_once()
+
+    assert manager.publish_calls == ["BROKEN"]
+    assert [s.agent_id for s in captured["desired"]] == ["HEALTHY"]
+    assert "HEALTHY" in supervisor._statuses
+    assert "BROKEN" not in supervisor._statuses
+
+
+@pytest.mark.asyncio
 async def test_reconcile_binds_worker_health_api_for_remote_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNTIME_EPHEMERAL_ROOT", "/var/lib/koda/runtime")
     monkeypatch.setenv("STATE_ROOT_DIR", "/var/lib/koda/state")

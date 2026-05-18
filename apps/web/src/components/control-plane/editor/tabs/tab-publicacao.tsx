@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
 import { FormInput } from "@/components/control-plane/shared/form-field";
-import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { StatusDot } from "@/components/ui/status-dot";
 import { getAgentLifecycleState } from "@/lib/agent-lifecycle";
@@ -181,9 +181,15 @@ export function TabPublicacao() {
           type="button"
           onClick={() => setShowDeleteDialog(true)}
           disabled={isPending("delete")}
-          className="text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)] disabled:opacity-50"
+          aria-label={isPending("delete") ? tl("Removendo...") : undefined}
+          aria-busy={isPending("delete") || undefined}
+          className="inline-flex min-h-5 min-w-24 items-center justify-center text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)] disabled:opacity-50"
         >
-          {isPending("delete") ? tl("Removendo...") : tl("Remover agente")}
+          {isPending("delete") ? (
+            <InlineSpinner className="h-3.5 w-3.5" />
+          ) : (
+            tl("Remover agente")
+          )}
         </button>
       </div>
 

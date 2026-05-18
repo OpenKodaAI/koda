@@ -116,6 +116,9 @@ describe("RuntimeOverviewScreen", () => {
     expect(screen.getByTestId("runtime-overview-screen")).toBeInTheDocument();
     expect(screen.getByText("Execuções ao vivo")).toBeInTheDocument();
     expect(screen.getByText("Agentes")).toBeInTheDocument();
+    expect(screen.getByText("Runtime status")).toBeInTheDocument();
+    expect(screen.getByText("1 active execution")).toBeInTheDocument();
+    expect(screen.getByText("Runtime layers healthy")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-live-list")).toBeInTheDocument();
     expect(screen.getByText(/Revisar onboarding do ambiente/i)).toBeInTheDocument();
     expect(screen.getAllByText("ATLAS").length).toBeGreaterThan(0);

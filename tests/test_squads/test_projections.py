@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from koda.squads.coordinator import CoordinatorService
+from koda.squads.coordinator import REQUIRED_COORDINATOR_TOOL_IDS, CoordinatorService
 from koda.squads.projections import (
     get_squad_metrics,
     get_thread_overview,
@@ -22,6 +22,10 @@ from koda.squads.threads import SquadThreadStore
 
 def _schema() -> str:
     return (os.environ.get("KNOWLEDGE_V2_POSTGRES_SCHEMA") or "knowledge_v2").strip() or "knowledge_v2"
+
+
+def _eligible_spec() -> dict[str, object]:
+    return {"tool_policy": {"allowed_tool_ids": list(REQUIRED_COORDINATOR_TOOL_IDS)}}
 
 
 def test_list_overviews_rejects_invalid_schema() -> None:
@@ -43,10 +47,12 @@ async def clean_state(migrated_postgres: str) -> AsyncIterator[str]:
     try:
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_history" RESTART IDENTITY')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_state"')
+        await conn.execute(
+            f'TRUNCATE TABLE "{schema}"."squad_message_recipients", "{schema}"."squad_messages" RESTART IDENTITY'
+        )
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_tasks"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY')
     finally:
         await conn.close()
     yield migrated_postgres
@@ -103,7 +109,7 @@ async def test_list_overviews_aggregates_threads_and_tasks(
     await threads.add_participant(thread_id=t2.id, agent_id="FE", role="worker")
     await threads.add_participant(thread_id=t3.id, agent_id="OPS", role="worker")
     # Coordinator
-    await coord.elect(squad_id="build", agent_id="PM", triggered_by="admin")
+    await coord.elect(squad_id="build", agent_id="PM", triggered_by="admin", agent_spec=_eligible_spec())
 
     overviews = await list_squad_overviews(dsn=clean_state, schema=_schema())
     by_squad = {ov.squad_id: ov for ov in overviews}
@@ -167,7 +173,7 @@ async def test_get_thread_overview_bundles_data(
     await threads.add_participant(thread_id=thread.id, agent_id="FE", role="worker")
     await threads.add_participant(thread_id=thread.id, agent_id="BE", role="worker")
     # Coordinator state row (separate from participant role)
-    await coord.elect(squad_id="build", agent_id="PM", triggered_by="admin")
+    await coord.elect(squad_id="build", agent_id="PM", triggered_by="admin", agent_spec=_eligible_spec())
     # Messages
     await threads.post_thread_message(thread_id=thread.id, from_agent="user:op", content="kickoff")
     await threads.post_thread_message(thread_id=thread.id, from_agent="PM", content="splitting work")
@@ -203,7 +209,13 @@ async def test_list_squad_activity_unions_history_and_messages(
     threads, _tasks, coord = stores
     thread = await threads.create_thread(workspace_id="acme", squad_id="build", title="t")
     # Coordinator history (no thread_id)
-    await coord.elect(squad_id="build", agent_id="PM", triggered_by="admin", reason="kickoff")
+    await coord.elect(
+        squad_id="build",
+        agent_id="PM",
+        triggered_by="admin",
+        reason="kickoff",
+        agent_spec=_eligible_spec(),
+    )
     # System event message (with thread_id) — emit via thread_store directly
     await threads.post_thread_message(
         thread_id=thread.id,
@@ -285,7 +297,7 @@ async def test_get_squad_metrics_aggregates_costs_and_tasks(
     assert metrics.task_count_by_status.get("done") == 1
     by_agent = {row.agent_id: row for row in metrics.cost_by_agent}
     assert by_agent["PM"].query_count == 2
-    assert str(by_agent["PM"].cost_usd) == "0.15"
+    assert by_agent["PM"].cost_usd == Decimal("0.15")
     assert by_agent["FE"].query_count == 1
-    assert str(by_agent["FE"].cost_usd) == "0.20"
-    assert str(metrics.total_cost_usd) == "0.35"
+    assert by_agent["FE"].cost_usd == Decimal("0.20")
+    assert metrics.total_cost_usd == Decimal("0.35")

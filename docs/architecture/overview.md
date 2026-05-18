@@ -67,3 +67,17 @@ This topology is used by the local quickstart and the default single-node VPS pa
 - [`../openapi/control-plane.json`](../openapi/control-plane.json)
 
 For the execution lifecycle, continue with [Runtime Architecture](runtime.md).
+For roadmap execution contracts, continue with
+[Top-Tier Phase Contracts](top-tier-phase-contracts.md).
+For Phase 1 runtime contracts, continue with
+[AgentTurn Contract](agent-turn-contract.md) and
+[ToolRegistry And Native Tools](tool-registry-native-tools.md).
+For local extensibility contracts, continue with
+[KodaSkill Plugin SDK](koda-skill-plugin-sdk.md).
+For quality gates and deterministic evals, continue with
+[Evals, Trajectory Export, And Release Quality](evals-release-quality.md).
+For Phase 6 channel identity and first-run readiness, continue with
+[Channel Gateway And Onboarding Readiness](channel-gateway-onboarding.md).
+For operational replies and multi-agent coordination inside squad rooms,
+continue with
+[Thread Replies And Agent Coordination](thread-replies-agent-coordination.md).

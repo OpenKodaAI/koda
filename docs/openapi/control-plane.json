@@ -68,6 +68,37 @@
         }
       }
     },
+    "/api/control-plane/onboarding/readiness": {
+      "get": {
+        "summary": "Onboarding readiness checklist",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, sandbox, MCP, memory, channel, first task, first trace, docs, and release quality."
+          }
+        }
+      }
+    },
+    "/api/control-plane/onboarding/first-task": {
+      "post": {
+        "summary": "Create a safe first task for onboarding",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A dashboard first-task request was queued through the normal runtime path."
+          }
+        }
+      }
+    },
     "/api/control-plane/onboarding/bootstrap": {
       "post": {
         "summary": "Apply initial onboarding configuration",
@@ -566,6 +597,160 @@
         "responses": {
           "201": {
             "description": "Agent created"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway": {
+      "get": {
+        "summary": "Channel gateway state",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "channel_gateway.v1 identity, unknown sender, pairing code, and summary payload."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/pairing-codes": {
+      "post": {
+        "summary": "Create a channel pairing code",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A short-lived Telegram pairing code was created."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/unknown-senders": {
+      "get": {
+        "summary": "List queued unknown channel senders",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending unknown senders that were denied before task enqueue."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/approve": {
+      "post": {
+        "summary": "Approve a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was allowed for future messages."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/block": {
+      "post": {
+        "summary": "Block a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was blocked and will fail closed before enqueue."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}": {
+      "delete": {
+        "summary": "Revoke a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was revoked and can no longer enqueue messages."
           }
         }
       }

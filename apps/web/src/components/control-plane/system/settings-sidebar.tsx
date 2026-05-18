@@ -59,12 +59,6 @@ export function SettingsSidebar() {
                   : "text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
               )}
             >
-              {isActive ? (
-                <span
-                  aria-hidden
-                  className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-[var(--accent)]"
-                />
-              ) : null}
               {Icon ? (
                 <Icon
                   className={cn(

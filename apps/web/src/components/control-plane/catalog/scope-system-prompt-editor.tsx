@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   useAnimatedPresence,
@@ -103,8 +104,12 @@ export function ScopeSystemPromptEditor({
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
                 {loading ? (
-                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]">
-                    {tl("Carregando...")}
+                  <div
+                    className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]"
+                    role="status"
+                    aria-label={tl("Carregando...")}
+                  >
+                    <InlineSpinner className="h-5 w-5" />
                   </div>
                 ) : (
                   <div className="flex min-h-0 flex-1 flex-col">
@@ -135,9 +140,12 @@ export function ScopeSystemPromptEditor({
                   type="button"
                   onClick={onSave}
                   disabled={loading || saving}
+                  aria-label={saving ? tl("Salvando...") : undefined}
+                  aria-busy={saving || undefined}
                   className="button-shell button-shell--primary"
                 >
-                  {saving ? tl("Salvando...") : tl("Salvar system prompt")}
+                  {saving ? <InlineSpinner className="h-4 w-4" /> : null}
+                  <span>{tl("Salvar system prompt")}</span>
                 </button>
               </div>
             </div>

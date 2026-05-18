@@ -7,6 +7,7 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { Workflow } from "lucide-react";
 import { ExecutionTable } from "@/components/executions/execution-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
+import { ExecutionsRouteLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
 import {
@@ -19,6 +20,7 @@ import { SoftTabs } from "@/components/ui/soft-tabs";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { resolveAgentSelection } from "@/lib/agent-selection";
@@ -197,18 +199,21 @@ export default function ExecutionsPage() {
   const avgDurationDisplay = formatDuration(aggregates.avgDuration);
   const totalToolsDisplay = String(aggregates.totalTools);
   const totalWarningsDisplay = String(aggregates.totalWarnings);
-  const showInitialSkeleton = loading && executions.length === 0;
   const refreshExecutions = useCallback(() => {
     void executionsQuery.refetch();
   }, [executionsQuery]);
+
+  const showInitialSkeleton = useMinDurationFlag(loading && executions.length === 0, 350);
+  if (showInitialSkeleton) {
+    return <ExecutionsRouteLoading />;
+  }
+
   const tourVariant =
     stableExecutionsQuery.showBlockingError || (unavailable && executions.length === 0)
       ? "unavailable"
-      : showInitialSkeleton
-        ? "loading"
-        : executions.length === 0
-          ? "empty"
-          : "default";
+      : executions.length === 0
+        ? "empty"
+        : "default";
 
   return (
     <>
@@ -251,32 +256,28 @@ export default function ExecutionsPage() {
           <PageMetricStrip>
             <PageMetricStripItem
               label={t("executions.page.metrics.cost")}
-              value={showInitialSkeleton ? "—" : totalCostDisplay}
+              value={totalCostDisplay}
               hint={t("executions.page.metrics.costHint")}
             />
             <PageMetricStripItem
               label={t("executions.page.metrics.avgDuration")}
-              value={showInitialSkeleton ? "—" : avgDurationDisplay}
+              value={avgDurationDisplay}
               hint={t("executions.page.metrics.avgDurationHint")}
             />
             <PageMetricStripItem
               label={t("executions.page.metrics.tools")}
-              value={showInitialSkeleton ? "—" : totalToolsDisplay}
+              value={totalToolsDisplay}
               hint={t("executions.page.metrics.toolsHint")}
             />
             <PageMetricStripItem
               label={t("executions.page.metrics.warnings")}
-              value={showInitialSkeleton ? "—" : totalWarningsDisplay}
+              value={totalWarningsDisplay}
               hint={t("executions.page.metrics.warningsHint")}
             />
           </PageMetricStrip>
         </div>
 
-        {showInitialSkeleton ? (
-          <div {...tourAnchor("executions.table")}>
-            <ExecutionTable executions={[]} showAgent loading />
-          </div>
-        ) : stableExecutionsQuery.showBlockingError ? (
+        {stableExecutionsQuery.showBlockingError ? (
           <div {...tourAnchor("executions.unavailable")}>
             <ErrorState
               title={t("executions.unavailable")}
@@ -295,7 +296,6 @@ export default function ExecutionsPage() {
           <div {...tourAnchor("executions.table")}>
             <ExecutionTable
               executions={executions}
-              showAgent={visibleBotIds.length !== 1}
               onExecutionClick={setSelectedExecution}
               selectedExecutionId={selectedExecution?.task_id ?? null}
             />

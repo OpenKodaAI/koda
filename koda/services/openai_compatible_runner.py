@@ -4,12 +4,9 @@ Plug-in surface for HTTP-only LLM providers (Perplexity, Mistral, Qwen, Kimi,
 Groq, DeepSeek, xAI). Each provider supplies a :class:`ProviderHttpProfile`
 declaring its base URL, endpoints and quirks; this module owns the actual
 request/response handling, SSE streaming, error classification, capability
-probing and cost estimation.
-
-Native OpenAI tool-calling is intentionally *not* used. Koda parses
-``<agent_cmd>`` XML from assistant text via ``tool_dispatcher.parse_agent_commands``;
-sending a ``tools`` field would compete with that protocol and cause the
-model to emit native ``tool_calls`` that cannot be parsed.
+probing and cost estimation. Phase 1 can pass versioned registry schemas as
+OpenAI-native ``tools`` for providers that support them; unsupported providers
+continue to use the mandatory ``<agent_cmd>`` XML fallback.
 """
 
 from __future__ import annotations
@@ -49,6 +46,7 @@ _CAPABILITY_LOCK = asyncio.Lock()
 
 _SSE_DONE = "[DONE]"
 _DEFAULT_MAX_OUTPUT_TOKENS = 4096
+_NATIVE_TOOL_CALL_PROVIDERS = frozenset({"deepseek", "groq", "kimi", "mistral", "qwen", "xai"})
 
 
 def clear_openai_compatible_capability_cache() -> None:
@@ -57,6 +55,10 @@ def clear_openai_compatible_capability_cache() -> None:
 
 
 # Capability probing
+
+
+def _supports_native_tool_calls(profile: ProviderHttpProfile) -> bool:
+    return profile.provider_id in _NATIVE_TOOL_CALL_PROVIDERS
 
 
 async def get_openai_compatible_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode) -> ProviderCapabilities:
@@ -109,6 +111,11 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
             status="ready",
             can_execute=True,
             supports_native_resume=False,
+            supports_native_tool_calls=_supports_native_tool_calls(profile),
+            supports_streaming_tool_calls=False,
+            supports_structured_output=True,
+            supports_json_schema_subset=True,
+            supports_xml_fallback=True,
             checked_via="static",
         )
 
@@ -167,6 +174,11 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
             status="degraded",
             can_execute=True,
             supports_native_resume=False,
+            supports_native_tool_calls=_supports_native_tool_calls(profile),
+            supports_streaming_tool_calls=False,
+            supports_structured_output=True,
+            supports_json_schema_subset=True,
+            supports_xml_fallback=True,
             warnings=[f"{profile.provider_id} probe returned HTTP {status}; runtime may be flaky."],
             checked_via=profile.capability_probe,
         )
@@ -177,6 +189,11 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
             status="ready",
             can_execute=True,
             supports_native_resume=False,
+            supports_native_tool_calls=_supports_native_tool_calls(profile),
+            supports_streaming_tool_calls=False,
+            supports_structured_output=True,
+            supports_json_schema_subset=True,
+            supports_xml_fallback=True,
             warnings=[f"{profile.provider_id} health probe HTTP {status}; assuming runtime is reachable."],
             checked_via=profile.capability_probe,
         )
@@ -198,6 +215,11 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
         status="ready",
         can_execute=True,
         supports_native_resume=False,
+        supports_native_tool_calls=_supports_native_tool_calls(profile),
+        supports_streaming_tool_calls=False,
+        supports_structured_output=True,
+        supports_json_schema_subset=True,
+        supports_xml_fallback=True,
         checked_via=profile.capability_probe,
     )
 
@@ -223,6 +245,8 @@ async def run_openai_compatible(
     dry_run: bool = False,
     runtime_task_id: int | None = None,
     effort: str | int | None = None,
+    native_tools: list[dict[str, Any]] | None = None,
+    native_tool_choice: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Single-turn chat completion against an OpenAI-compatible endpoint."""
     del work_dir, session_id, permission_mode, max_turns, runtime_task_id
@@ -274,6 +298,8 @@ async def run_openai_compatible(
         max_budget=max_budget,
         stream=False,
         effort=effort,
+        native_tools=native_tools if capabilities.supports_native_tool_calls else None,
+        native_tool_choice=native_tool_choice,
     )
 
     started_at = time.monotonic()
@@ -347,6 +373,7 @@ async def run_openai_compatible(
         )
 
     text = _extract_message_text(data)
+    tool_calls = _extract_tool_calls(data)
     citations = _extract_citations(profile, data)
     if citations:
         text = _append_citations_footer(text, citations)
@@ -357,6 +384,9 @@ async def run_openai_compatible(
     _record_metrics(profile.provider_id, model, elapsed, streaming=False, success=True)
 
     result = _ok_result(profile, turn_mode, capabilities, text=text, usage=usage, cost=cost)
+    if tool_calls:
+        result["_tool_uses"] = tool_calls
+        result.setdefault("metadata", {})["native_tool_calls"] = len(tool_calls)
     if citations:
         metadata = result.setdefault("metadata", {})
         metadata["citations"] = citations
@@ -619,6 +649,8 @@ def _build_chat_payload(
     max_budget: float,
     stream: bool,
     effort: str | int | None = None,
+    native_tools: list[dict[str, Any]] | None = None,
+    native_tool_choice: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     if system_prompt and system_prompt.strip():
@@ -637,6 +669,9 @@ def _build_chat_payload(
         payload["stream_options"] = {"include_usage": True}
     for key, value in profile.extra_payload:
         payload[key] = value
+    if native_tools:
+        payload["tools"] = native_tools
+        payload["tool_choice"] = native_tool_choice if native_tool_choice is not None else "auto"
     if effort is not None:
         from koda.provider_models import get_model_effort_capability
 
@@ -704,6 +739,63 @@ def _extract_message_text(data: dict[str, Any]) -> str:
         parts = [str(item.get("text", "")) for item in content if isinstance(item, dict) and item.get("type") == "text"]
         return "\n".join(part for part in parts if part).strip()
     return ""
+
+
+def _extract_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize OpenAI-compatible native tool calls into queue loop metadata."""
+
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return []
+    first = choices[0]
+    if not isinstance(first, dict):
+        return []
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return []
+    raw_calls = message.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw_call in enumerate(raw_calls):
+        if not isinstance(raw_call, dict):
+            continue
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "").strip()
+        if not name:
+            continue
+        raw_arguments = function.get("arguments", {})
+        parsed_arguments = _parse_tool_call_arguments(raw_arguments)
+        normalized.append(
+            {
+                "source": "openai_compatible_tool_call",
+                "id": str(raw_call.get("id") or f"tool_call_{index}"),
+                "type": str(raw_call.get("type") or "function"),
+                "name": name,
+                "arguments": parsed_arguments,
+                "arguments_json": raw_arguments if isinstance(raw_arguments, str) else json.dumps(parsed_arguments),
+                "function": {
+                    "name": name,
+                    "arguments": parsed_arguments,
+                },
+            }
+        )
+    return normalized
+
+
+def _parse_tool_call_arguments(raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return dict(raw_arguments)
+    if not isinstance(raw_arguments, str) or not raw_arguments.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_arguments)
+    except json.JSONDecodeError:
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
 
 
 def _extract_delta_text(chunk: dict[str, Any]) -> str:

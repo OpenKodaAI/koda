@@ -366,6 +366,8 @@ async def run_llm(
     dry_run: bool = False,
     runtime_task_id: int | None = None,
     effort: str | int | None = None,
+    native_tools: list[dict[str, Any]] | None = None,
+    native_tool_choice: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one non-streaming LLM turn through the selected provider."""
     normalized = normalize_provider(provider)
@@ -408,6 +410,8 @@ async def run_llm(
             dry_run=dry_run,
             runtime_task_id=runtime_task_id,
             effort=effort,
+            native_tools=native_tools,
+            native_tool_choice=native_tool_choice,
         )
         result = result_obj
     else:

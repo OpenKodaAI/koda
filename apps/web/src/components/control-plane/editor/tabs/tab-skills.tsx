@@ -1,11 +1,17 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronRight,
+  PackageCheck,
   Plus,
+  RotateCcw,
+  ShieldAlert,
   Trash2,
   Wand2,
+  XCircle,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
@@ -28,6 +34,13 @@ import {
   serializeSkillPolicy,
   type CustomSkill,
 } from "@/lib/policy-serializers";
+import {
+  parseSkillPackageLocks,
+  parseSkillScanResult,
+  skillPackageErrorMessage,
+  type SkillPackageLock,
+  type SkillScanResult,
+} from "@/lib/contracts/skill-package";
 
 /*  Constants                                                                  */
 
@@ -88,11 +101,38 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
+function PackageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm text-[var(--text-secondary)]">{value}</p>
+    </div>
+  );
+}
+
+async function skillPackageRequest(path: string, init: RequestInit = {}) {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(skillPackageErrorMessage(payload, `Request failed with status ${response.status}`));
+  }
+  return payload;
+}
+
 /*  TabSkills                                                                  */
 
 export function TabSkills() {
   const { state, developerMode, updateAgentSpecField } = useAgentEditor();
   const { tl } = useAppI18n();
+  const agentId = state.agent.id;
 
   const skillPolicy = useMemo(
     () => parseSkillPolicy(state.skillPolicyJson),
@@ -115,6 +155,95 @@ export function TabSkills() {
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [touched, setTouched] = useState<Record<string, Set<string>>>({});
+  const [packagePath, setPackagePath] = useState("");
+  const [packageLocks, setPackageLocks] = useState<SkillPackageLock[]>([]);
+  const [packageScan, setPackageScan] = useState<SkillScanResult | null>(null);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const [packageBusy, setPackageBusy] = useState<"list" | "scan" | "install" | "uninstall" | "rollback" | null>(null);
+
+  const packageBasePath = `/api/control-plane/agents/${encodeURIComponent(agentId)}/skills/packages`;
+
+  const refreshPackages = useCallback(async () => {
+    setPackageBusy((current) => current ?? "list");
+    try {
+      const payload = await skillPackageRequest(packageBasePath);
+      setPackageLocks(parseSkillPackageLocks(payload));
+      setPackageError(null);
+    } catch (error) {
+      setPackageError(error instanceof Error ? error.message : tl("Failed to load installed packages."));
+    } finally {
+      setPackageBusy((current) => (current === "list" ? null : current));
+    }
+  }, [packageBasePath, tl]);
+
+  useEffect(() => {
+    void refreshPackages();
+  }, [refreshPackages]);
+
+  async function scanPackage() {
+    setPackageBusy("scan");
+    setPackageError(null);
+    try {
+      const payload = await skillPackageRequest(`${packageBasePath}/scan`, {
+        method: "POST",
+        body: JSON.stringify({ path: packagePath }),
+      });
+      const scan = parseSkillScanResult(payload);
+      setPackageScan(scan);
+      if (!scan) setPackageError(tl("Scan response did not match the skill_scan.v1 contract."));
+    } catch (error) {
+      setPackageScan(null);
+      setPackageError(error instanceof Error ? error.message : tl("Package scan failed."));
+    } finally {
+      setPackageBusy(null);
+    }
+  }
+
+  async function installPackage() {
+    setPackageBusy("install");
+    setPackageError(null);
+    try {
+      await skillPackageRequest(`${packageBasePath}/install`, {
+        method: "POST",
+        body: JSON.stringify({
+          path: packagePath,
+          review_accepted: packageScan?.decision === "review_required",
+        }),
+      });
+      setPackageScan(null);
+      await refreshPackages();
+    } catch (error) {
+      setPackageError(error instanceof Error ? error.message : tl("Package install failed."));
+    } finally {
+      setPackageBusy(null);
+    }
+  }
+
+  async function uninstallPackage(packageId: string) {
+    setPackageBusy("uninstall");
+    setPackageError(null);
+    try {
+      await skillPackageRequest(`${packageBasePath}/${encodeURIComponent(packageId)}`, { method: "DELETE" });
+      await refreshPackages();
+    } catch (error) {
+      setPackageError(error instanceof Error ? error.message : tl("Package uninstall failed."));
+    } finally {
+      setPackageBusy(null);
+    }
+  }
+
+  async function rollbackPackage(packageId: string) {
+    setPackageBusy("rollback");
+    setPackageError(null);
+    try {
+      await skillPackageRequest(`${packageBasePath}/${encodeURIComponent(packageId)}/rollback`, { method: "POST" });
+      await refreshPackages();
+    } catch (error) {
+      setPackageError(error instanceof Error ? error.message : tl("Package rollback failed."));
+    } finally {
+      setPackageBusy(null);
+    }
+  }
 
   const markTouched = useCallback((skillId: string, field: string) => {
     setTouched((prev) => {
@@ -422,6 +551,178 @@ export function TabSkills() {
             </button>
           </div>
         )}
+      </section>
+
+      {/* ── Skill Packages ───────────────────────────────────── */}
+      <section className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+          <div className="flex items-center gap-2">
+            <PackageCheck size={15} className="text-[var(--text-quaternary)]" />
+            <h3 className="eyebrow">{tl("Skill packages")}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={refreshPackages}
+            disabled={packageBusy !== null}
+            className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RotateCcw size={13} />
+            {tl("Refresh")}
+          </button>
+        </div>
+
+        <div className="rounded-[1.15rem] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-5">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
+            <FormInput
+              label={tl("Package path")}
+              description={tl("Local folder or manifest path. The backend scans statically before install.")}
+              value={packagePath}
+              onChange={(event) => setPackagePath(event.target.value)}
+              placeholder="~/koda-skills/example-safe"
+            />
+            <button
+              type="button"
+              onClick={scanPackage}
+              disabled={!packagePath.trim() || packageBusy !== null}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ShieldAlert size={15} />
+              {packageBusy === "scan" ? tl("Scanning") : tl("Scan")}
+            </button>
+            <button
+              type="button"
+              onClick={installPackage}
+              disabled={!packagePath.trim() || packageBusy !== null || packageScan?.decision === "deny"}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-[var(--tone-info-tint)] px-4 text-sm font-medium text-[var(--tone-info-text)] transition-colors hover:bg-[rgba(15,123,255,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CheckCircle2 size={15} />
+              {packageScan?.decision === "review_required" ? tl("Install after review") : tl("Install")}
+            </button>
+          </div>
+
+          {packageError ? (
+            <div className="mt-4 flex gap-2 rounded-xl border border-[rgba(250,82,82,0.25)] bg-[rgba(250,82,82,0.08)] px-3 py-2 text-xs leading-relaxed text-[var(--tone-danger-text)]">
+              <XCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{packageError}</span>
+            </div>
+          ) : null}
+
+          {packageScan ? (
+            <div className="mt-5 flex flex-col gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                    {packageScan.package.name} v{packageScan.package.version}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--text-quaternary)]">
+                    {packageScan.package.id} · {packageScan.scanner_version}
+                  </p>
+                </div>
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                    packageScan.decision === "allow"
+                      ? "bg-[var(--tone-success-tint)] text-[var(--tone-success-text)]"
+                      : packageScan.decision === "deny"
+                        ? "bg-[rgba(250,82,82,0.10)] text-[var(--tone-danger-text)]"
+                        : "bg-[var(--tone-warning-tint)] text-[var(--tone-warning-text)]"
+                  }`}
+                >
+                  {packageScan.decision}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <PackageMetric label={tl("Skills")} value={String(packageScan.package.skills.length)} />
+                <PackageMetric label={tl("Tools")} value={String(packageScan.package.tools.length)} />
+                <PackageMetric label={tl("Risk classes")} value={packageScan.risk_classes.join(", ") || tl("none")} />
+              </div>
+
+              {Object.keys(packageScan.permissions_requested).length > 0 ? (
+                <pre className="max-h-40 overflow-auto rounded-xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,0.18)] p-3 text-xs text-[var(--text-tertiary)]">
+                  {JSON.stringify(packageScan.permissions_requested, null, 2)}
+                </pre>
+              ) : null}
+
+              {packageScan.findings.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {packageScan.findings.map((finding) => (
+                    <div
+                      key={`${finding.id}-${finding.path}-${finding.message}`}
+                      className="flex gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-3 py-2 text-xs"
+                    >
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--tone-warning-text)]" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-[var(--text-secondary)]">
+                          {finding.severity} · {finding.id}
+                        </p>
+                        <p className="mt-1 text-[var(--text-quaternary)]">{finding.message}</p>
+                        {finding.path ? (
+                          <p className="mt-1 truncate font-mono text-[10px] text-[var(--text-quaternary)]">
+                            {finding.path}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--text-quaternary)]">{tl("No findings reported by scanner.")}</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {packageLocks.length === 0 ? (
+            <div className="rounded-[1.15rem] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] px-5 py-6 text-sm text-[var(--text-quaternary)]">
+              {tl("No installed skill packages. Custom skills above remain unchanged.")}
+            </div>
+          ) : (
+            packageLocks.map((lock) => (
+              <div
+                key={`${lock.package_id}-${lock.package_hash}`}
+                className="rounded-[1.15rem] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                      {lock.name} v{lock.version}
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--text-quaternary)]">
+                      {lock.package_id} · {lock.installed_skills.length} {tl("skills")} · {lock.installed_tools.length}{" "}
+                      {tl("tools")}
+                    </p>
+                    {lock.package_path ? (
+                      <p className="mt-2 truncate font-mono text-[10px] text-[var(--text-quaternary)]">
+                        {lock.package_path}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => rollbackPackage(lock.package_id)}
+                      disabled={!lock.rollback_ref || packageBusy !== null}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCcw size={13} />
+                      {tl("Rollback")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => uninstallPackage(lock.package_id)}
+                      disabled={packageBusy !== null}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[rgba(250,82,82,0.30)] px-3 py-2 text-xs text-[var(--tone-danger-text)] transition-colors hover:bg-[rgba(250,82,82,0.08)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                      {tl("Uninstall")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </section>
 
       {/* ── Section 3: Developer Mode ────────────────────────── */}

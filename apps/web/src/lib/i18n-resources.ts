@@ -16203,4 +16203,28 @@ Object.assign(literalResources["de-DE"] as Record<string, string>, {
   "{{label}} pronto.": "{{label}} bereit.",
 });
 
+const sidebarEvaluationLabels: Record<
+  string,
+  { label: string; loading: string }
+> = {
+  "en-US": { label: "Evals", loading: "Opening evals" },
+  "pt-BR": { label: "Evals", loading: "Abrindo evals" },
+  "es-ES": { label: "Evals", loading: "Abriendo evals" },
+  "fr-FR": { label: "Evals", loading: "Ouverture des evals" },
+  "de-DE": { label: "Evals", loading: "Evals werden geoffnet" },
+};
+
+for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
+  const sidebar = mutableResources[language]?.translation.sidebar;
+  if (!sidebar) continue;
+  sidebar.items = {
+    ...(sidebar.items ?? {}),
+    evaluations: labels.label,
+  };
+  sidebar.loading = {
+    ...(sidebar.loading ?? {}),
+    evaluations: labels.loading,
+  };
+}
+
 export type ResourceLanguages = keyof typeof resources;

@@ -216,6 +216,8 @@
   --terminal-scrollbar-hover: #c5c0b1;
   --terminal-scrollbar-active: #939084;
   --koda-mark-filter: brightness(0) saturate(0) contrast(0.94);
+  --auth-form-logo-filter: brightness(0) saturate(0) contrast(0.94)
+    drop-shadow(0 4px 16px rgba(var(--accent-rgb), 0.18));
 
   --separator: #e3ddd4;
   --separator-strong: #c5c0b1;
@@ -361,6 +363,7 @@
     --terminal-scrollbar-hover: #3A3A3A;
     --terminal-scrollbar-active: #4A4A4A;
     --koda-mark-filter: none;
+    --auth-form-logo-filter: drop-shadow(0 4px 16px rgba(var(--accent-rgb), 0.18));
 
     --separator: #1A1A1A;
     --separator-strong: #262626;
@@ -517,6 +520,7 @@ html.dark {
   --terminal-scrollbar-hover: #3A3A3A;
   --terminal-scrollbar-active: #4A4A4A;
   --koda-mark-filter: none;
+  --auth-form-logo-filter: drop-shadow(0 4px 16px rgba(var(--accent-rgb), 0.18));
 
   --separator: #1A1A1A;
   --separator-strong: #262626;
@@ -709,6 +713,114 @@ select:focus-visible,
 ::selection {
   background: var(--selection-bg);
   color: var(--text-primary);
+}
+
+.composer-editable[contenteditable="true"]:empty::before {
+  content: "";
+}
+
+.composer-suggestion-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--divider-hair);
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  min-height: 2.25rem;
+}
+
+.composer-suggestion-search__input {
+  caret-color: var(--accent);
+}
+
+.composer-suggestion-footer {
+  list-style: none;
+  display: block;
+}
+
+/* Composer suggestion popover (sessions page only): the design system contract
+ * applies glass-blur to every floating panel, but the user explicitly opted out
+ * for the inline composer dropdowns. The compound selector keeps the canonical
+ * `.app-floating-panel` rule untouched, so the glass-blur contract test still
+ * passes. */
+.app-floating-panel.composer-suggestions-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--panel) !important;
+}
+
+.composer-mention-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem 0;
+}
+
+.composer-mention-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 1.5rem;
+  padding: 0 0.25rem 0 0.5rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-soft);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--text-primary);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.composer-mention-badge__logo {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.composer-mention-badge__logo > .composer-mention-badge__logo-art,
+.composer-mention-badge__logo > svg,
+.composer-mention-badge__logo > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.composer-mention-badge__label {
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1;
+}
+
+.composer-mention-badge__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  color: var(--text-tertiary);
+  transition:
+    background-color var(--transition-fast, 120ms) ease,
+    color var(--transition-fast, 120ms) ease;
+}
+
+.composer-mention-badge__remove:hover {
+  background: var(--hover-tint);
+  color: var(--text-primary);
+}
+
+.composer-mention-badge__x {
+  width: 0.625rem;
+  height: 0.625rem;
 }
 
 ::-webkit-scrollbar {
@@ -2225,6 +2337,7 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .table-shell {
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -2257,6 +2370,10 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .glass-table tbody tr:hover {
+  background: transparent;
+}
+
+.glass-table tbody tr:hover > td {
   background: var(--table-row-hover);
 }
 
@@ -2280,7 +2397,7 @@ button[aria-label="Open Next Dev Tools"] {
   right: 0;
   z-index: 2;
   border-left: 1px solid var(--divider-hair);
-  background: var(--surface-elevated);
+  background: var(--sticky-table-bg, var(--surface-elevated));
   background-clip: padding-box;
   box-shadow: -18px 0 24px -22px rgba(0, 0, 0, 0.7);
 }
@@ -2299,9 +2416,11 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .glass-table--sticky-last thead th:last-child,
-.glass-table--sticky-last tbody td:last-child {
+.glass-table--sticky-last tbody td:last-child:not([colspan]) {
   position: sticky;
   right: 0;
+  width: var(--sticky-last-width, auto);
+  min-width: var(--sticky-last-width, auto);
   border-left: 1px solid var(--divider-hair);
   background-clip: padding-box;
   box-shadow: -18px 0 24px -22px rgba(0, 0, 0, 0.7);
@@ -2312,16 +2431,20 @@ button[aria-label="Open Next Dev Tools"] {
   background: var(--table-header-bg);
 }
 
-.glass-table--sticky-last tbody td:last-child {
+.glass-table--sticky-last tbody td:last-child:not([colspan]) {
   z-index: 2;
-  background: var(--surface-elevated);
+  background: var(--sticky-table-bg, var(--surface-elevated));
 }
 
-.glass-table--sticky-last tbody tr:hover td:last-child {
+.glass-table--sticky-last tbody tr:hover td:last-child:not([colspan]) {
   background: var(--table-row-hover);
 }
 
-.glass-table--sticky-last tbody tr.bg-\[var\(--surface-tint\)\] td:last-child {
+.glass-table--sticky-last tbody tr.bg-\[var\(--surface-tint\)\] > td {
+  background: var(--table-row-selected);
+}
+
+.glass-table--sticky-last tbody tr.bg-\[var\(--surface-tint\)\] td:last-child:not([colspan]) {
   background: var(--table-row-selected);
 }
 
@@ -3598,26 +3721,50 @@ input[type="range"]::-moz-range-thumb {
   animation-delay: 72ms;
 }
 
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: -200% 0;
+@keyframes skeleton-fade-in {
+  from {
+    opacity: 0;
   }
 
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
   100% {
-    background-position: 200% 0;
+    background-color: rgba(255, 255, 255, 0.07);
+  }
+
+  50% {
+    background-color: rgba(255, 255, 255, 0.11);
   }
 }
 
 .skeleton {
   border-radius: var(--radius-panel-sm);
-  background: linear-gradient(
-    90deg,
-    rgba(236, 236, 236, 0.045) 20%,
-    rgba(142, 142, 142, 0.11) 50%,
-    rgba(236, 236, 236, 0.045) 80%
-  );
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+  background-color: rgba(255, 255, 255, 0.07);
+  opacity: 0;
+  animation:
+    skeleton-fade-in 200ms cubic-bezier(0.22, 1, 0.36, 1) 120ms forwards,
+    skeleton-pulse 2.4s ease-in-out 320ms infinite;
+}
+
+/*
+ * Soften Tailwind's `animate-pulse` (default oscillates opacity 1↔0.5,
+ * causing "blinking" perception). Override the `pulse` keyframe globally
+ * so any skeleton using `animate-pulse` matches the calmer skeleton style.
+ */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.78;
+  }
 }
 
 .skeleton-text {
@@ -3641,6 +3788,10 @@ input[type="range"]::-moz-range-thumb {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .skeleton {
+    opacity: 1;
   }
 }
 
@@ -9898,7 +10049,7 @@ html body [contenteditable="true"]:focus-visible {
 .auth-form__logo {
   height: 3.25rem;
   width: 3.25rem;
-  filter: drop-shadow(0 4px 16px rgba(var(--accent-rgb), 0.18));
+  filter: var(--auth-form-logo-filter);
   animation: auth-logo-enter 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 

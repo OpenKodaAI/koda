@@ -28,6 +28,7 @@ from koda.config import (
 )
 from koda.services.cache_config import CACHE_ENABLED, SCRIPT_LIBRARY_ENABLED
 from koda.services.execution_policy import resolve_execution_policy_allowed_tool_ids
+from koda.services.tool_registry import TOOL_SCHEMA_VERSION, get_default_tool_registry
 
 # Compatibility export kept for older tests and monkeypatch-based callers.
 POSTGRES_ENABLED = _POSTGRES_ENABLED
@@ -138,6 +139,7 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "workflow_delete",
             "agent_send",
             "agent_receive",
+            "task",
             "agent_delegate",
             "agent_list_agents",
             "agent_broadcast",
@@ -163,6 +165,7 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "squad_inbox_drain",
             "squad_dashboard_overview",
             "squad_thread_overview",
+            "squad_artifact_list",
         }
         if tool_id not in allowed_tool_ids
     }
@@ -306,6 +309,8 @@ def build_agent_tools_prompt(
     sections: list[str] = []
     resolved_feature_flags = {
         "browser": BROWSER_FEATURES_ENABLED,
+        "browser_network": BROWSER_NETWORK_INTERCEPTION_ENABLED,
+        "browser_session": BROWSER_SESSION_PERSISTENCE_ENABLED,
         "fileops": FILEOPS_ENABLED,
         "shell": SHELL_ENABLED,
         "git": GIT_ENABLED,
@@ -313,6 +318,7 @@ def build_agent_tools_prompt(
         "workflows": WORKFLOW_ENABLED,
         "inter_agent": INTER_AGENT_ENABLED,
         "snapshots": SNAPSHOT_ENABLED,
+        "webhooks": WEBHOOK_ENABLED,
         **dict(feature_flags or {}),
     }
     tool_policy = _configured_tool_policy(tool_policy)
@@ -403,6 +409,26 @@ The runtime can block low-confidence writes if the plan or sources are missing.
                         "instead of forcing the call."
                     ),
                     *[f"- {line}" for line in integration_grant_summaries],
+                    "",
+                ]
+            )
+        )
+
+    registry_allowed_ids = allowed_tool_ids if has_tool_subset else available_tool_ids
+    registry_entries = get_default_tool_registry(
+        feature_flags=resolved_feature_flags,
+        allowed_tool_ids=registry_allowed_ids,
+    ).export_xml_prompt_entries()
+    if registry_entries:
+        sections.append(
+            "\n".join(
+                [
+                    "",
+                    "## Versioned Tool Registry",
+                    "This registry is the contract source for XML and native tool-call schemas.",
+                    f'<tool_registry schema_version="{TOOL_SCHEMA_VERSION}">',
+                    registry_entries,
+                    "</tool_registry>",
                     "",
                 ]
             )
@@ -635,6 +661,11 @@ Communicate with other agents, delegate tasks, and coordinate work.
 
 - `agent_send` — Send a message to another agent. Params: `{"to": "agent-2", "message": "Hello"}`
 - `agent_receive` — Receive the next message from inbox. Params: `{"timeout": 30}`
+- `task` — Delegate one ephemeral child run, or a bounded fan-out of child runs.
+  It waits for structured results.
+  Single params: `{"goal": "Inspect X", "prompt": "Summarize risk", "toolset": "read_only"}`
+  Fan-out params: `{"tasks": [{"goal": "A", "prompt": "..."}, {"goal": "B", "prompt": "..."}], "toolset": "read_only"}`
+  Use this for temporary subagent work. Do not use it for persistent Squad Room coordination.
 - `agent_delegate` — Delegate a task and wait for result.
   Params: `{"to": "agent-2", "task": "Analyze report", "timeout": 60}`
 - `agent_list_agents` — List known agents and inbox status. Params: `{}`
@@ -648,6 +679,14 @@ Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
             "participants": [{"agent_id": "FRONTEND", "role": "worker"}],
             "coordinator_agent_id": "PM"}`
 - `squad_post` — Post a message in a thread. Params: `{"thread_id": "<uuid>", "content": "..."}`
+- `squad_reply` — Reply to a thread message and optionally require agents to respond.
+  Params: `{"content": "...", "reply_to_message_id": "msg-42", "target_agent_ids": ["BACKEND"]}`
+- `squad_request_input` — Ask one or more active room agents for a bounded contribution.
+  Params: `{"target_agent_ids": ["QA"], "question": "Please verify the failure path."}`
+- `squad_follow_up` — Send a limited follow-up for an open reply obligation.
+  Params: `{"obligation_id": 12, "note": "Need your answer before synthesis."}`
+- `squad_synthesize` — Coordinator-only final synthesis for a reply cycle.
+  Params: `{"content": "Final answer...", "reply_to_message_id": "msg-42"}`
 - `squad_thread_history` — Read recent messages. Params: `{"thread_id": "<uuid>", "limit": 30}`
 
 ### Squad Tasks
@@ -669,17 +708,17 @@ Decompose squad work into tracked tasks. Single-owner-per-task via optimistic lo
   Params: `{"squad_id": "<id>", "exclude_agent_id": "<self>"}`
 - `squad_context` — Snapshot of a thread (members, recent transcript, active tasks).
   Params: `{"thread_id": "<uuid>", "transcript_limit": 8}`
+- `squad_artifact_list` — List visible artifacts pinned/associated with a thread.
+  Params: `{"thread_id": "<uuid>"}`
 
 ### Squad Coordinator
 A squad MAY have an elected coordinator that orchestrates the team. Without one,
 routing falls back to @mention + capability scoring.
 
 - `squad_coordinator_elect` — Promote an agent to coordinator.
-  Params: `{"squad_id": "<id>", "agent_id": "PM", "force_replace": false,
-            "reason": "...", "validate_tool_ids": ["agent_delegate", ...]}`
-  Validation (when ``validate_tool_ids`` is provided): the agent must allow
-  ``agent_delegate``, ``squad_thread_create``, ``squad_post``, ``squad_task_create``,
-  ``squad_task_claim``, ``squad_task_update``.
+  Params: `{"squad_id": "<id>", "agent_id": "PM", "force_replace": false, "reason": "..."}`
+  Validation reads the real AgentSpec from the control plane; caller-provided
+  tool lists are ignored.
 - `squad_coordinator_demote` — Demote the current coordinator. Params: `{"squad_id": "<id>", "reason": "..."}`
 - `squad_coordinator_get` — Show current coordinator + recent history.
   Params: `{"squad_id": "<id>", "history_limit": 5}`

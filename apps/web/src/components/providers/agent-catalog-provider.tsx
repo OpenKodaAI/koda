@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -66,7 +67,10 @@ export function AgentCatalogProvider({
   const [agents, setAgents] = useState(() =>
     initialAgents.length > 0 ? initialAgents : getAgentCatalog(),
   );
-  setAgentCatalog(agents);
+
+  useEffect(() => {
+    setAgentCatalog(agents);
+  }, [agents]);
 
   const mergeAgents = useCallback((items: AgentDisplay[]) => {
     setAgents((current) => mergeAgentDisplays(current, items));

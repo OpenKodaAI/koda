@@ -74,7 +74,7 @@ export function ExecutionDetailDrawer({
         onClick={onClose}
       />
       <div
-        className="app-drawer-anim-right fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,720px)] xl:w-[620px] 2xl:w-[680px]"
+        className="app-drawer-anim-right fixed inset-y-0 right-0 z-[70] w-full sm:w-[min(100vw,760px)] 2xl:w-[780px]"
         data-visible={presence.isVisible}
         role="dialog"
         aria-modal="true"
@@ -133,7 +133,7 @@ export function ExecutionDetailDrawer({
 
             {/* Query — the action */}
             {data.query_text ? (
-              <p className="m-0 mt-4 line-clamp-3 text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)]">
+              <p className="m-0 mt-4 line-clamp-3 break-words text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)]">
                 {data.query_text}
               </p>
             ) : null}

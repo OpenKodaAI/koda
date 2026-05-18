@@ -185,6 +185,9 @@ export function AgentGlyph({
   variant = "card",
   shape = "orb",
 }: AgentGlyphProps) {
+  const [forceStaticGlyph] = useState(
+    () => typeof navigator !== "undefined" && Boolean(navigator.webdriver),
+  );
   const orbColor = getAgentOrbColor(color);
   const isListVariant = variant === "list";
   const sizeClass = isListVariant ? "h-8 w-8" : "h-12 w-12";
@@ -211,7 +214,7 @@ export function AgentGlyph({
   });
   const shouldMountOrb = useDeferredOrbMount(shape === "orb" && inView, seed);
 
-  if (shape === "swatch") {
+  if (shape === "swatch" || forceStaticGlyph) {
     return (
       <span
         className={cn(

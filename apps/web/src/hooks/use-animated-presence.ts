@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface UseAnimatedPresenceOptions {
   duration?: number;
@@ -32,7 +32,8 @@ export function useAnimatedPresence<T>(
 ) {
   const { duration = 200 } = options;
   const [shouldRender, setShouldRender] = useState(isOpen);
-  const [renderedValue, setRenderedValue] = useState(value);
+  const [closedValue, setClosedValue] = useState(value);
+  const wasOpenRef = useRef(isOpen);
 
   // The lint rule discourages calling setState in an effect body, but
   // this hook is mirroring an external prop (`isOpen`) into local
@@ -42,23 +43,27 @@ export function useAnimatedPresence<T>(
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (isOpen) {
+      wasOpenRef.current = true;
       setShouldRender(true);
-      setRenderedValue(value);
       return;
+    }
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      setClosedValue(value);
     }
     if (!shouldRender) return;
     const timer = window.setTimeout(() => {
       setShouldRender(false);
     }, duration);
     return () => window.clearTimeout(timer);
-  }, [isOpen, value, shouldRender, duration]);
+  }, [isOpen, shouldRender, duration, value]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   return {
     shouldRender,
     isVisible: isOpen,
     dataState: (isOpen ? "open" : "closed") as "open" | "closed",
-    renderedValue,
+    renderedValue: isOpen ? value : closedValue,
   };
 }
 

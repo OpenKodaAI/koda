@@ -42,7 +42,7 @@ function AppleLogo({ size = 18 }: { size?: number }) {
     </svg>
   );
 }
-import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { SecretInput } from "@/components/ui/secret-controls";
@@ -1367,12 +1367,18 @@ export function ProviderAuthPanel({
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
                   {tl("Modelos detectados")}
                 </div>
-                <div className="text-xs text-[var(--text-quaternary)]">
-                  {ollamaModelsLoading
-                    ? tl("Carregando...")
-                    : ollamaModelCatalog.items.length
-                      ? tl("{{count}} modelos", { count: ollamaModelCatalog.items.length })
-                      : tl("Nenhum modelo")}
+                <div
+                  className="inline-flex min-h-4 min-w-16 items-center justify-end text-xs text-[var(--text-quaternary)]"
+                  role={ollamaModelsLoading ? "status" : undefined}
+                  aria-label={ollamaModelsLoading ? tl("Carregando...") : undefined}
+                >
+                  {ollamaModelsLoading ? (
+                    <InlineSpinner className="h-3.5 w-3.5" />
+                  ) : ollamaModelCatalog.items.length ? (
+                    tl("{{count}} modelos", { count: ollamaModelCatalog.items.length })
+                  ) : (
+                    tl("Nenhum modelo")
+                  )}
                 </div>
               </div>
               {ollamaModelCatalog.items.length ? (

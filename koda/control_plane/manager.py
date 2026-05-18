@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import os
@@ -1422,6 +1423,7 @@ class ControlPlaneManager:
         self._elevenlabs_voice_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._elevenlabs_subscription_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ollama_model_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._global_sections_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
         self._provider_login_processes: dict[str, Any] = {}
         self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
         self._provider_download_threads: dict[str, threading.Thread] = {}
@@ -3249,6 +3251,24 @@ class ControlPlaneManager:
 
         return get_dashboard_execution_detail(normalized, task_id)
 
+    def get_dashboard_execution_run_graph(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_run_graph
+
+        return get_dashboard_execution_run_graph(normalized, task_id)
+
+    def get_dashboard_execution_replay(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_replay
+
+        return get_dashboard_execution_replay(normalized, task_id)
+
+    def get_dashboard_execution_sandbox_doctor(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_sandbox_doctor
+
+        return get_dashboard_execution_sandbox_doctor(normalized, task_id)
+
     def list_dashboard_sessions(
         self,
         agent_id: str,
@@ -3329,6 +3349,10 @@ class ControlPlaneManager:
                 before=before,
             ),
         )
+
+    def delete_dashboard_session(self, agent_id: str, session_id: str) -> int:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        return int(self._dashboard_store().delete_session(normalized, session_id))
 
     def get_dashboard_runtime_artifact_for_download(
         self,
@@ -4952,6 +4976,147 @@ class ControlPlaneManager:
             "openapi_url": "/openapi/control-plane.json",
             "setup_url": "/setup",
         }
+
+    def get_channel_gateway_state(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import gateway_state
+
+        allowed_raw = self.get_decrypted_secret_value(normalized, "ALLOWED_USER_IDS") or ""
+        return gateway_state(
+            normalized,
+            legacy_allowed_user_ids=[str(item) for item in _normalize_user_id_values(allowed_raw)],
+        )
+
+    def create_channel_gateway_pairing_code(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import create_pairing_code
+
+        ttl_seconds = int(payload.get("ttl_seconds") or 15 * 60)
+        return create_pairing_code(
+            normalized,
+            channel_type=str(payload.get("channel_type") or "telegram"),
+            created_by=str(payload.get("created_by") or ""),
+            ttl_seconds=ttl_seconds,
+        )
+
+    def list_channel_gateway_unknown_senders(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import CHANNEL_GATEWAY_SCHEMA_VERSION, list_unknown_senders
+
+        return {
+            "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION,
+            "agent_id": normalized,
+            "items": list_unknown_senders(normalized),
+        }
+
+    def approve_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import approve_identity
+
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": approve_identity(
+                normalized,
+                identity_id,
+                approved_by=str(payload.get("approved_by") or ""),
+                rationale=str(payload.get("rationale") or ""),
+            ),
+        }
+
+    def block_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import block_identity
+
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": block_identity(
+                normalized,
+                identity_id,
+                blocked_by=str(payload.get("blocked_by") or ""),
+                rationale=str(payload.get("rationale") or ""),
+            ),
+        }
+
+    def revoke_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import revoke_identity
+
+        request_payload = payload or {}
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": revoke_identity(
+                normalized,
+                identity_id,
+                revoked_by=str(request_payload.get("revoked_by") or ""),
+                rationale=str(request_payload.get("rationale") or ""),
+            ),
+        }
+
+    def get_onboarding_readiness(self) -> dict[str, Any]:
+        from koda.services.onboarding_readiness import build_onboarding_readiness
+
+        status = self.get_onboarding_status()
+        agents = [dict(item) for item in status.get("agents") or [] if isinstance(item, dict)]
+        primary_agent_id = str((agents[0] if agents else {}).get("id") or "")
+        channel_gateway = self.get_channel_gateway_state(primary_agent_id) if primary_agent_id else None
+        release_quality = None
+        if primary_agent_id:
+            try:
+                release_quality = self.get_release_quality_latest(primary_agent_id)
+            except Exception:
+                release_quality = None
+        payload = build_onboarding_readiness(
+            status=status,
+            channel_gateway=channel_gateway,
+            release_quality=release_quality,
+        )
+        self._persist_onboarding_readiness(payload)
+        return payload
+
+    def create_onboarding_first_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        status = self.get_onboarding_status()
+        agents = [dict(item) for item in status.get("agents") or [] if isinstance(item, dict)]
+        requested_agent = str(payload.get("agent_id") or "").strip()
+        agent_id = requested_agent or str((agents[0] if agents else {}).get("id") or "")
+        if not agent_id:
+            raise ValueError("no agent is available for first task")
+        text = str(payload.get("text") or "Summarize the Koda setup status and list the next safe action.").strip()
+        session_id = str(payload.get("session_id") or "onboarding:first-task").strip()
+        result = self.send_dashboard_session_message(agent_id, text=text, session_id=session_id)
+        return {
+            "schema_version": "onboarding_readiness.v1",
+            "agent_id": _normalize_agent_id(agent_id),
+            "status": "created",
+            "task_id": result.get("task_id"),
+            "session_id": result.get("session_id") or session_id,
+            "result": result,
+        }
+
+    def _persist_onboarding_readiness(self, payload: dict[str, Any]) -> None:
+        agent_id = str(payload.get("primary_agent_id") or payload.get("agent_id") or "default")
+        try:
+            from koda.state.primary import get_primary_state_backend, run_coro_sync
+
+            backend = get_primary_state_backend(agent_id=agent_id)
+            if backend is not None and hasattr(backend, "persist_onboarding_readiness_run"):
+                run_coro_sync(backend.persist_onboarding_readiness_run(agent_id, payload))
+        except Exception:
+            log.debug("onboarding_readiness_primary_persist_skipped", exc_info=True)
 
     def complete_onboarding(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_seeded()
@@ -7853,6 +8018,217 @@ class ControlPlaneManager:
             created += 1
         return {"ok": True, "seeded": created}
 
+    def create_eval_case_from_run(self, agent_id: str, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        execution = self.get_dashboard_execution(normalized, int(task_id))
+        if execution is None:
+            raise KeyError(str(task_id))
+
+        from koda.services.evals import build_eval_case_from_run
+        from koda.services.metrics import EVAL_CASE_EVENTS
+
+        repository = self._knowledge_repository(normalized)
+        run_graph = execution.get("run_graph") if isinstance(execution.get("run_graph"), dict) else None
+        replay = execution.get("run_replay") if isinstance(execution.get("run_replay"), dict) else None
+        case_payload = build_eval_case_from_run(
+            agent_id=normalized,
+            task_id=int(task_id),
+            execution=execution,
+            run_graph=run_graph,
+            replay=replay,
+            payload=payload,
+        )
+        repository.upsert_evaluation_case(**case_payload)
+        case = repository.get_evaluation_case(str(case_payload["case_key"])) or case_payload
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.case_created",
+            task_id=int(task_id),
+            details={
+                "schema_version": "eval_case.v1",
+                "case_key": case_payload["case_key"],
+                "source": "execution_run",
+            },
+        )
+        EVAL_CASE_EVENTS.labels(agent_id=normalized, event="created", status=str(case.get("status") or "draft")).inc()
+        return {"schema_version": "eval_case.v1", **case}
+
+    def list_eval_cases(self, agent_id: str, *, limit: int = 100) -> dict[str, Any]:
+        return {
+            "schema_version": "eval_case.v1",
+            "items": self.list_evaluation_cases(agent_id, limit=limit),
+        }
+
+    def update_eval_case(self, agent_id: str, case_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        case = self.update_evaluation_case(agent_id, case_key, payload)
+        return {"schema_version": "eval_case.v1", **case}
+
+    def run_eval_suite(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import OFFLINE_REPLAY_STRATEGY, build_eval_run_batch
+        from koda.services.metrics import EVAL_RUN_CASES, KNOWLEDGE_EVALUATION_RUNS, KNOWLEDGE_EVALUATION_SCORE
+
+        repository = self._knowledge_repository(normalized)
+        requested_keys = {str(item) for item in payload.get("case_keys") or [] if str(item)}
+        raw_cases = repository.list_evaluation_cases(limit=int(payload.get("limit") or 100))
+        cases = [
+            case
+            for case in raw_cases
+            if str(case.get("status") or "draft") != "archived"
+            and (not requested_keys or str(case.get("case_key") or "") in requested_keys)
+        ]
+        batch = build_eval_run_batch(
+            agent_id=normalized,
+            cases=cases,
+            suite_id=str(payload.get("suite_id") or "default"),
+            requested_by=str(payload.get("requested_by") or ""),
+        )
+        repository.upsert_eval_run_batch(batch)
+        for result in batch.get("case_results") or []:
+            if not isinstance(result, dict):
+                continue
+            status = str(result.get("status") or "failed")
+            metrics_payload = dict(result.get("metrics") or {})
+            repository.create_evaluation_run(
+                case_key=str(result.get("case_key") or ""),
+                strategy=OFFLINE_REPLAY_STRATEGY,
+                task_success_proxy=float(metrics_payload.get("task_success_proxy") or result.get("score") or 0.0),
+                metrics_payload={
+                    **metrics_payload,
+                    "status": status,
+                    "failures": list(result.get("failures") or []),
+                    "warnings": list(result.get("warnings") or []),
+                    "run_id": batch["run_id"],
+                },
+            )
+            EVAL_RUN_CASES.labels(agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, status=status).inc()
+            KNOWLEDGE_EVALUATION_RUNS.labels(agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, result=status).inc()
+            for metric, value in metrics_payload.items():
+                try:
+                    KNOWLEDGE_EVALUATION_SCORE.labels(
+                        agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, metric=str(metric)
+                    ).observe(float(value))
+                except (TypeError, ValueError):
+                    continue
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.suite_run",
+            details={
+                "schema_version": "eval_run.v1",
+                "run_id": batch["run_id"],
+                "status": batch["status"],
+                "summary": batch.get("summary") or {},
+            },
+        )
+        return batch
+
+    def list_eval_runs(self, agent_id: str, *, limit: int = 50) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        repository = self._knowledge_repository(normalized)
+        return {
+            "schema_version": "eval_run.v1",
+            "items": repository.list_eval_run_batches(limit=limit),
+            "legacy_items": self.list_evaluation_runs(normalized, limit=limit),
+        }
+
+    def get_eval_run(self, agent_id: str, run_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        batch = self._knowledge_repository(normalized).get_eval_run_batch(run_id)
+        if batch is None:
+            raise KeyError(run_id)
+        return dict(batch)
+
+    def create_trajectory_export(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import build_trajectory_export
+        from koda.services.metrics import TRAJECTORY_EXPORTS
+
+        repository = self._knowledge_repository(normalized)
+        try:
+            task_id = int(payload.get("task_id") or 0)
+        except (TypeError, ValueError):
+            task_id = 0
+        if task_id <= 0:
+            case_key = str(payload.get("case_key") or "")
+            case = repository.get_evaluation_case(case_key) if case_key else None
+            task_id = int((case or {}).get("source_task_id") or 0)
+        if task_id <= 0:
+            run_id = str(payload.get("run_id") or "").strip()
+            batch = repository.get_eval_run_batch(run_id) if run_id else None
+            for result in list((batch or {}).get("case_results") or []):
+                if not isinstance(result, dict):
+                    continue
+                case_key = str(result.get("case_key") or "")
+                case = repository.get_evaluation_case(case_key) if case_key else None
+                task_id = int((case or {}).get("source_task_id") or 0)
+                if task_id > 0:
+                    break
+        if task_id <= 0:
+            raise ValueError("trajectory export requires task_id or an eval case with source_task_id")
+        execution = self.get_dashboard_execution(normalized, task_id)
+        if execution is None:
+            raise KeyError(str(task_id))
+        export = build_trajectory_export(
+            agent_id=normalized,
+            task_id=task_id,
+            execution=execution,
+            run_graph=execution.get("run_graph") if isinstance(execution.get("run_graph"), dict) else None,
+            replay=execution.get("run_replay") if isinstance(execution.get("run_replay"), dict) else None,
+        )
+        export["status"] = "created"
+        repository.create_trajectory_export(export)
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.trajectory_export_created",
+            task_id=task_id,
+            details={
+                "schema_version": "trajectory_export.v1",
+                "export_id": export["export_id"],
+                "record_count": export["record_count"],
+                "package_hash": export["package_hash"],
+            },
+        )
+        TRAJECTORY_EXPORTS.labels(agent_id=normalized, status="created").inc()
+        return export
+
+    def get_release_quality_latest(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import build_release_quality_report
+        from koda.services.metrics import RELEASE_QUALITY_GATES
+
+        repository = self._knowledge_repository(normalized)
+        runs = repository.list_eval_run_batches(limit=20)
+        exports = repository.list_trajectory_exports(limit=20)
+        report = build_release_quality_report(
+            agent_id=normalized,
+            latest_run=runs[0] if runs else None,
+            recent_runs=runs,
+            trajectory_exports=exports,
+        )
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.release_quality_checked",
+            details={
+                "schema_version": "release_quality.v1",
+                "status": report["status"],
+                "gates": report.get("gates") or {},
+            },
+        )
+        RELEASE_QUALITY_GATES.labels(agent_id=normalized, status=str(report["status"])).inc()
+        return report
+
+    def _emit_eval_audit_event(
+        self,
+        agent_id: str,
+        *,
+        event_type: str,
+        details: dict[str, Any],
+        task_id: int | None = None,
+    ) -> None:
+        from koda.services.audit import AuditEvent, emit
+
+        emit(AuditEvent(event_type=event_type, agent_id=agent_id, task_id=task_id, details=details))
+
     def create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = _normalize_agent_id(str(payload.get("id") or ""))
         display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
@@ -8178,6 +8554,7 @@ class ControlPlaneManager:
                 """,
                 (section, json_dump(_safe_json_object(value)), now_iso()),
             )
+        self._invalidate_global_sections_cache()
         # Post-write verification — read back and confirm the sections we just
         # wrote are visible. A silent failure in the DB layer (missing row,
         # no-op backend) becomes a loud 500 here instead of a 200 OK that
@@ -11243,9 +11620,18 @@ class ControlPlaneManager:
             (json_dump({"sections": sections}), now_iso()),
         )
 
+    def _invalidate_global_sections_cache(self) -> None:
+        self._global_sections_cache = None
+
     def _load_global_sections(self) -> dict[str, dict[str, Any]]:
+        now = time.monotonic()
+        cached = getattr(self, "_global_sections_cache", None)
+        if cached is not None and (now - cached[0]) < 2.0:
+            return copy.deepcopy(cached[1])
         rows = fetch_all("SELECT section, data_json, updated_at FROM cp_global_sections ORDER BY section ASC")
-        return {str(row["section"]): json_load(row["data_json"], {}) for row in rows}
+        sections = {str(row["section"]): json_load(row["data_json"], {}) for row in rows}
+        self._global_sections_cache = (now, copy.deepcopy(sections))
+        return copy.deepcopy(sections)
 
     def _resolved_shared_env_values(
         self,
@@ -12227,10 +12613,17 @@ class ControlPlaneManager:
         )
 
     def _tool_to_payload(self, tool: Any) -> dict[str, Any]:
+        from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
+
+        assessment = assess_mcp_tool_risk(tool)
+        decision = evaluate_mcp_risk(assessment)
         payload: dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
             "input_schema": tool.input_schema,
+            "risk_class": assessment.risk_class,
+            "approval_default": decision.decision,
+            "risk_metadata": assessment.to_payload(),
         }
         if tool.annotations:
             payload["annotations"] = {
@@ -12238,6 +12631,7 @@ class ControlPlaneManager:
                 "read_only_hint": tool.annotations.read_only_hint,
                 "destructive_hint": tool.annotations.destructive_hint,
                 "idempotent_hint": tool.annotations.idempotent_hint,
+                "open_world_hint": tool.annotations.open_world_hint,
             }
         return payload
 
@@ -12256,6 +12650,9 @@ class ControlPlaneManager:
             "input_schema": json_load(str(row.get("input_schema_json") or "{}"), {}),
             "annotations": annotations,
             "risk_level": str(row.get("risk_level") or "read"),
+            "risk_class": str(row.get("risk_class") or row.get("risk_level") or "unknown"),
+            "approval_default": str(row.get("approval_default") or "require_approval"),
+            "risk_metadata": json_load(str(row.get("risk_metadata_json") or "{}"), {}),
             "signature_hash": str(row.get("schema_hash") or ""),
             "discovered_at": str(row.get("discovered_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
@@ -12276,13 +12673,29 @@ class ControlPlaneManager:
         return [self._serialize_mcp_discovered_tool_row(row) for row in rows]
 
     def _build_tool_summary(self, tools: list[dict[str, Any]]) -> dict[str, int]:
-        summary = {"total": len(tools), "read_only": 0, "write": 0, "destructive": 0}
+        summary = {
+            "total": len(tools),
+            "read_only": 0,
+            "write": 0,
+            "destructive": 0,
+            "unknown": 0,
+            "high_risk": 0,
+        }
         for tool in tools:
-            annotations = _safe_json_object(tool.get("annotations"))
-            if annotations.get("destructive_hint") is True:
-                summary["destructive"] += 1
-            if annotations.get("read_only_hint") is True:
+            risk_class = str(tool.get("risk_class") or tool.get("risk_level") or "unknown")
+            if risk_class == "read_context":
                 summary["read_only"] += 1
+            elif risk_class == "destructive_write":
+                summary["destructive"] += 1
+                summary["high_risk"] += 1
+                summary["write"] += 1
+            elif risk_class in {"network_write", "secret_access", "code_execution"}:
+                summary["high_risk"] += 1
+                summary["write"] += 1
+            elif risk_class == "unknown":
+                summary["unknown"] += 1
+                summary["high_risk"] += 1
+                summary["write"] += 1
             else:
                 summary["write"] += 1
         return summary
@@ -12342,6 +12755,7 @@ class ControlPlaneManager:
         )
         for tool in tools:
             annotations = _safe_json_object(tool.get("annotations"))
+            risk_class = str(tool.get("risk_class") or "unknown")
             execute(
                 """
                 INSERT INTO cp_connection_discovery_run_tools (
@@ -12355,7 +12769,7 @@ class ControlPlaneManager:
                     str(tool.get("description") or ""),
                     json_dump(tool.get("input_schema") or {}),
                     json_dump(annotations),
-                    str(tool.get("risk_level") or "read"),
+                    risk_class if risk_class != "read_context" else "read",
                     str(tool.get("signature_hash") or self._mcp_tool_signature_hash(tool)),
                     now,
                 ),
@@ -12462,19 +12876,25 @@ class ControlPlaneManager:
         )
         for tool in tools:
             annotations = _safe_json_object(tool.get("annotations"))
-            risk_level = "read"
-            if annotations.get("destructive_hint") is True:
+            from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
+
+            assessment = assess_mcp_tool_risk(tool)
+            decision = evaluate_mcp_risk(assessment)
+            risk_class = str(tool.get("risk_class") or assessment.risk_class)
+            approval_default = str(tool.get("approval_default") or decision.decision)
+            risk_metadata = _safe_json_object(tool.get("risk_metadata") or assessment.to_payload())
+            risk_level = "read" if risk_class == "read_context" else "write"
+            if risk_class == "destructive_write":
                 risk_level = "destructive"
-            elif annotations.get("read_only_hint") is not True:
-                risk_level = "write"
             schema_json = json_dump(tool.get("input_schema") or {})
             signature_hash = self._mcp_tool_signature_hash(tool)
             execute(
                 """
                 INSERT INTO cp_mcp_discovered_tools (
                     agent_id, server_key, tool_name, description, input_schema_json,
-                    annotations_json, risk_level, schema_hash, discovered_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    annotations_json, risk_level, schema_hash, discovered_at, updated_at,
+                    risk_class, approval_default, risk_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """,
                 (
                     agent_id,
@@ -12487,6 +12907,9 @@ class ControlPlaneManager:
                     signature_hash,
                     discovered_at,
                     discovered_at,
+                    risk_class,
+                    approval_default,
+                    json_dump(risk_metadata),
                 ),
             )
 

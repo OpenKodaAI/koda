@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Plus, Search } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
@@ -192,8 +193,12 @@ function MarketplaceGrid({
           </div>
 
           {mcpCatalogLoading ? (
-            <div className="text-xs text-[var(--text-quaternary)]">
-              {tl("Atualizando estado do catálogo MCP...")}
+            <div
+              className="flex items-center py-1 text-[var(--text-quaternary)]"
+              role="status"
+              aria-label={tl("Atualizando estado do catálogo MCP...")}
+            >
+              <InlineSpinner className="h-3.5 w-3.5" />
             </div>
           ) : null}
 

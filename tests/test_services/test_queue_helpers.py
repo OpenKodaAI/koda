@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,19 +19,27 @@ from koda.services.queue_manager import (
     QueueItem,
     RunResult,
     TaskInfo,
+    _agent_turn_input_audit_payload,
+    _agent_turn_output_audit_payload,
     _apply_policy_overrides,
     _compact_tool_label,
+    _control_plane_prompt_for_agent,
     _detect_audio_response_request,
     _get_throttle_interval,
+    _maybe_enqueue_unblocked_squad_tasks,
+    _native_tool_schemas_for_runtime,
     _parse_queue_item,
     _post_process,
     _prepare_query_context,
     _process_queue,
+    _recover_provider_error_with_completed_output,
     _resolve_provider_context,
+    _run_result_has_native_tool_calls,
     _run_streaming,
     _run_with_provider_fallback,
     _select_policy_runbook,
     _should_switch_provider,
+    _squad_coordination_integrity_override,
     enqueue,
     enqueue_dashboard_chat_task,
 )
@@ -78,6 +87,340 @@ class TestCompactToolLabel:
         assert _compact_tool_label("Read") == "Read"
         assert _compact_tool_label("Read", None) == "Read"
         assert _compact_tool_label("Read", {}) == "Read"
+
+
+def test_control_plane_prompt_for_agent_reads_documents_without_agent_spec_validation() -> None:
+    manager = MagicMock()
+
+    def _doc(_agent_id: str, kind: str) -> dict[str, str]:
+        if kind == "identity_md":
+            return {"content_md": "I am the Frontend specialist."}
+        if kind == "instructions_md":
+            return {"content_md": "Own React UI implementation."}
+        return {"content_md": ""}
+
+    manager.get_document.side_effect = _doc
+    with patch("koda.control_plane.manager.get_control_plane_manager", return_value=manager):
+        prompt = _control_plane_prompt_for_agent("FE")
+
+    assert prompt is not None
+    assert "Frontend specialist" in prompt
+    assert "React UI implementation" in prompt
+    assert not manager.method_calls or all(call[0] == "get_document" for call in manager.method_calls)
+
+
+class TestRecoverProviderErrorWithCompletedOutput:
+    def test_recovers_completed_artifact_response(self) -> None:
+        run_result = RunResult(
+            provider="codex",
+            model="gpt-5.4-mini",
+            result=(
+                "Fechei em sequência, como você pediu: o planejador travou o briefing "
+                "e o desenvolvedor já entregou a LP.\n\n"
+                "**Artefato**\n"
+                "- [fintech_landing_page.html](runtime_home/fintech_landing_page.html)\n\n"
+                "**O que ficou pronto**\n"
+                "- Landing page única, autocontida e responsiva."
+            ),
+            session_id="session-1",
+            provider_session_id="provider-session-1",
+            cost_usd=0.01,
+            error=True,
+            stop_reason="error",
+            error_kind="provider_runtime",
+        )
+
+        assert _recover_provider_error_with_completed_output(run_result) is True
+        assert run_result.error is False
+        assert run_result.retryable is False
+        assert run_result.error_kind == ""
+        assert run_result.stop_reason == "completed_with_provider_warning"
+        assert any("completed response" in warning for warning in run_result.warnings)
+
+    def test_keeps_auth_failure_as_error(self) -> None:
+        run_result = RunResult(
+            provider="codex",
+            model="gpt-5.4-mini",
+            result="Codex authentication failed. Reauthenticate the Codex CLI and try again.",
+            session_id="session-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            error_kind="provider_auth",
+        )
+
+        assert _recover_provider_error_with_completed_output(run_result) is False
+        assert run_result.error is True
+        assert run_result.error_kind == "provider_auth"
+
+    def test_keeps_retryable_text_as_error(self) -> None:
+        run_result = RunResult(
+            provider="codex",
+            model="gpt-5.4-mini",
+            result="Error: rate limit exceeded. Please retry later.",
+            session_id="session-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            error_kind="provider_runtime",
+        )
+
+        assert _recover_provider_error_with_completed_output(run_result) is False
+        assert run_result.error is True
+
+
+class TestPhase1NativeToolHelpers:
+    def test_detects_native_openai_tool_calls(self):
+        run_result = RunResult(
+            provider="mistral",
+            model="mistral-large-latest",
+            result="",
+            session_id="s",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=False,
+            stop_reason="tool_calls",
+            tool_uses=[
+                {
+                    "source": "openai_compatible_tool_call",
+                    "id": "call_1",
+                    "name": "web_search",
+                    "arguments": {"query": "koda"},
+                }
+            ],
+        )
+
+        assert _run_result_has_native_tool_calls(run_result) is True
+
+    def test_runtime_native_schemas_come_from_tool_registry(self, monkeypatch):
+        import koda.config as config_module
+
+        monkeypatch.setattr(config_module, "FILEOPS_ENABLED", True)
+        monkeypatch.setattr(config_module, "BROWSER_FEATURES_ENABLED", False)
+        monkeypatch.setattr(config_module, "BROWSER_NETWORK_INTERCEPTION_ENABLED", False)
+        monkeypatch.setattr(config_module, "BROWSER_SESSION_PERSISTENCE_ENABLED", False)
+        monkeypatch.setattr(config_module, "SHELL_ENABLED", False)
+        monkeypatch.setattr(config_module, "GIT_ENABLED", False)
+        monkeypatch.setattr(config_module, "PLUGIN_SYSTEM_ENABLED", False)
+        monkeypatch.setattr(config_module, "WORKFLOW_ENABLED", False)
+        monkeypatch.setattr(config_module, "INTER_AGENT_ENABLED", False)
+        monkeypatch.setattr(config_module, "SNAPSHOT_ENABLED", False)
+        monkeypatch.setattr(config_module, "WEBHOOK_ENABLED", False)
+
+        schemas = _native_tool_schemas_for_runtime()
+        schema_by_name = {item["function"]["name"]: item for item in schemas}
+
+        assert "web_search" in schema_by_name
+        assert schema_by_name["web_search"]["function"]["parameters"]["required"] == ["query"]
+        assert schema_by_name["file_write"]["function"]["parameters"]["required"] == ["path", "content"]
+
+    def test_agent_turn_audit_payloads_redact_large_text_to_hashes(self):
+        ctx = QueryContext(
+            provider="mistral",
+            work_dir="/tmp",
+            model="mistral-large-latest",
+            session_id="session-1",
+            provider_session_id=None,
+            system_prompt="secret prompt",
+            agent_mode="autonomous",
+            permission_mode="guarded",
+            max_turns=1,
+        )
+        result = RunResult(
+            provider="mistral",
+            model="mistral-large-latest",
+            result="done",
+            session_id="session-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=False,
+            stop_reason="completed",
+        )
+
+        input_payload = _agent_turn_input_audit_payload(ctx)
+        output_payload = _agent_turn_output_audit_payload(result)
+
+        assert input_payload["contract_version"] == "agent_turn.v1"
+        assert "compiled_prompt" not in input_payload
+        assert input_payload["compiled_prompt_chars"] == len("secret prompt")
+        assert output_payload["contract_version"] == "agent_turn.v1"
+        assert "result" not in output_payload
+        assert output_payload["result_chars"] == len("done")
+
+
+class TestSquadCoordinationIntegrity:
+    @pytest.mark.asyncio
+    async def test_repairs_coordinator_delegation_claim_without_task_evidence(self) -> None:
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="PM",
+            squad_thread_id="thread-1",
+            parent_message_id="msg-1",
+        )
+        store = AsyncMock()
+        store.get_thread = AsyncMock(return_value=MagicMock(coordinator_agent_id="PM"))
+        store.thread_history = AsyncMock(return_value=[{"type": "agent_text", "metadata": {}}])
+        store.post_thread_message = AsyncMock(return_value=99)
+        with patch("koda.squads.get_squad_thread_store", return_value=store):
+            override = await _squad_coordination_integrity_override(
+                ctx,
+                "Chamei o planejador e o desenvolvedor já entregou a LP.",
+            )
+        assert override is not None
+        assert "sem um rastro real" in override
+        store.post_thread_message.assert_awaited_once()
+        assert store.post_thread_message.await_args.kwargs["metadata"]["event_type"] == (
+            "coordination_integrity_violation"
+        )
+
+    @pytest.mark.asyncio
+    async def test_allows_delegation_claim_with_task_request_evidence(self) -> None:
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="PM",
+            squad_thread_id="thread-1",
+            parent_message_id="msg-1",
+        )
+        store = AsyncMock()
+        store.get_thread = AsyncMock(return_value=MagicMock(coordinator_agent_id="PM"))
+        store.thread_history = AsyncMock(
+            return_value=[{"type": "task_request", "metadata": {"parent_message_id": "msg-1"}}]
+        )
+        store.post_thread_message = AsyncMock(return_value=99)
+        with patch("koda.squads.get_squad_thread_store", return_value=store):
+            override = await _squad_coordination_integrity_override(
+                ctx,
+                "Chamei o planejador e o desenvolvedor já entregou a LP.",
+            )
+        assert override is None
+        store.post_thread_message.assert_not_called()
+
+
+def _squad_task_descriptor(
+    task_id: str,
+    *,
+    agent_id: str,
+    kind: str,
+    status: str = "pending",
+    depends_on: list[str] | None = None,
+) -> object:
+    from koda.squads.tasks import TaskDescriptor
+
+    return TaskDescriptor(
+        id=task_id,
+        thread_id="thread-1",
+        parent_task_id=None,
+        depends_on=list(depends_on or []),
+        assigned_agent_id=agent_id,
+        assigner_agent_id="PM",
+        kind=kind,
+        title=f"{kind} task",
+        description=f"Do {kind}",
+        status=status,
+        acceptance_criteria=["done"],
+        deliverables_spec=["result"],
+        delivered_artifact_ids=[],
+        claim_token=None,
+        claim_expires_at=None,
+        delegation_depth=0,
+        idempotency_key=None,
+        cost_usd_so_far=Decimal(0),
+        runtime_task_id=None,
+        version=1,
+        metadata={"coordination_parent_message_id": "msg-1"},
+    )
+
+
+class TestSquadTaskDependencyDispatch:
+    @pytest.mark.asyncio
+    async def test_enqueues_only_pending_tasks_whose_dependencies_are_done(self) -> None:
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="COPY",
+            squad_thread_id="thread-1",
+            squad_task_id="copy-task",
+            parent_message_id="msg-1",
+            telegram_message_thread_id=7,
+        )
+        app = MagicMock()
+        bot_context = MagicMock(application=app, bot=MagicMock())
+        thread = MagicMock(
+            id="thread-1",
+            squad_id="build",
+            coordinator_agent_id="PM",
+            owner_user_id=42,
+            telegram_chat_id=-100,
+            telegram_message_thread_id=7,
+        )
+        frontend = _squad_task_descriptor("frontend-task", agent_id="FE", kind="frontend", depends_on=["copy-task"])
+        review = _squad_task_descriptor("review-task", agent_id="QA", kind="review", depends_on=["frontend-task"])
+        claimed_frontend = _squad_task_descriptor(
+            "frontend-task",
+            agent_id="FE",
+            kind="frontend",
+            status="claimed",
+            depends_on=["copy-task"],
+        )
+        copy_done = _squad_task_descriptor("copy-task", agent_id="COPY", kind="brief_copy", status="done")
+        frontend_pending = _squad_task_descriptor(
+            "frontend-task",
+            agent_id="FE",
+            kind="frontend",
+            status="pending",
+            depends_on=["copy-task"],
+        )
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(return_value=thread)
+        thread_store.post_thread_message = AsyncMock(return_value=88)
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(return_value=[frontend, review])
+        task_store.get_task = AsyncMock(side_effect=[copy_done, frontend_pending])
+        task_store.claim_task = AsyncMock(return_value=claimed_frontend)
+        enqueue = AsyncMock(return_value=123)
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.services.queue_manager.enqueue_squad_agent_task", enqueue),
+        ):
+            dispatched = await _maybe_enqueue_unblocked_squad_tasks(
+                user_id=42,
+                context=bot_context,
+                ctx=ctx,
+            )
+
+        assert dispatched == 1
+        task_store.claim_task.assert_awaited_once_with(task_id="frontend-task", agent_id="FE", ttl_seconds=900)
+        enqueue.assert_awaited_once()
+        assert enqueue.await_args.kwargs["executing_agent_id"] == "FE"
+        assert enqueue.await_args.kwargs["squad_task_id"] == "frontend-task"
+        thread_store.post_thread_message.assert_awaited_once()
 
 
 class TestAudioResponseIntent:

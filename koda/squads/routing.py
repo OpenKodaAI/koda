@@ -1,20 +1,19 @@
-"""Routing decisions for inbound squad-thread messages.
+"""Structural routing helpers for inbound squad-thread messages.
 
-Pure functions that decide *which* squad agents should be notified about a
-message, given the thread's participants and elected coordinator. The actual
-delivery mechanism (``AgentMessageBus.send`` to each target) lives in the
-inbound handler — this module only ranks the candidates.
-
-Priority (highest first):
-  1. Explicit ``@mention`` of a participant agent.
-  2. The squad's elected coordinator (if any participant in the thread).
-  3. (None — capability-based fallback is the next slice's work.)
+Semantic ranking lives in :mod:`koda.squads.semantic_router`. This module keeps
+only language-independent control flow: explicit mentions, reply continuation,
+semantic results supplied by the caller, coordinator fallback, and a stable
+tie-breaker.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from koda.squads.semantic_router import SemanticRoutingResult
 
 _MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z][A-Za-z0-9_-]*)")
 
@@ -47,6 +46,10 @@ def select_targets(
     *,
     participant_agent_ids: Iterable[str],
     coordinator_agent_id: str | None = None,
+    reply_to_agent_id: str | None = None,
+    capability_hints: dict[str, str] | None = None,
+    semantic_result: SemanticRoutingResult | None = None,
+    explicit_mention_agent_ids: Iterable[str] | None = None,
 ) -> list[str]:
     """Decide which squad members should be notified about ``text``.
 
@@ -57,9 +60,34 @@ def select_targets(
     participants = [p for p in participant_agent_ids if isinstance(p, str) and p]
     if not participants:
         return []
+    explicit_mentions = _dedupe([agent_id for agent_id in explicit_mention_agent_ids or [] if agent_id in participants])
+    if explicit_mentions:
+        return explicit_mentions
     mentioned = extract_mentions(text, participants)
     if mentioned:
         return mentioned
+    if reply_to_agent_id and reply_to_agent_id in participants:
+        return [reply_to_agent_id]
+    if semantic_result is not None and semantic_result.available:
+        semantic_targets = [
+            agent_id for agent_id in semantic_result.top_agents(include_coordinator=False) if agent_id in participants
+        ]
+        if semantic_targets:
+            return semantic_targets
+    _ = capability_hints
     if coordinator_agent_id and coordinator_agent_id in participants:
         return [coordinator_agent_id]
+    if participants:
+        return [participants[0]]
     return []
+
+
+def _dedupe(values: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        out.append(value)
+        seen.add(value)
+    return out

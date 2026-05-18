@@ -73,6 +73,10 @@ _CORE_TOOL_FAMILY_OVERRIDES = {
     "agent_delegate": "agent_comm",
     "agent_list_agents": "agent_comm",
     "agent_broadcast": "agent_comm",
+    "squad_reply": "agent_comm",
+    "squad_request_input": "agent_comm",
+    "squad_follow_up": "agent_comm",
+    "squad_synthesize": "agent_comm",
 }
 _ACTION_GROUPING_TEMPLATES = (
     {
@@ -223,9 +227,17 @@ def _effect_tags_for_core_action(tool_id: str, access_level: str, description: s
         tags.add("browser_state_mutation")
         if access_level != "read":
             tags.add("identity_admin")
-    if normalized in {"agent_send", "agent_delegate", "agent_broadcast"}:
+    if normalized in {
+        "agent_send",
+        "agent_delegate",
+        "agent_broadcast",
+        "squad_reply",
+        "squad_request_input",
+        "squad_follow_up",
+        "squad_synthesize",
+    }:
         tags.add("external_communication")
-    if normalized == "agent_delegate":
+    if normalized in {"agent_delegate", "squad_request_input"}:
         tags.add("delegation")
     if normalized.startswith("job_") or normalized.startswith("cron_") or normalized.startswith("workflow_"):
         tags.add("delegation")
@@ -268,6 +280,10 @@ def _core_tool_action_entries(*, feature_flags: dict[str, bool] | None = None) -
         "agent_send",
         "agent_delegate",
         "agent_broadcast",
+        "squad_reply",
+        "squad_request_input",
+        "squad_follow_up",
+        "squad_synthesize",
     }
     destructive_write_only_tools = {
         "shell_kill",

@@ -53,6 +53,17 @@ async def test_agent_cmd_round_trip_preserves_requests_and_preview():
             "op_type": "agent_cmd",
             "agent_id": "agent-a",
             "preview_text": "Tool: file_delete",
+            "tool_id": "file_delete",
+            "original_params": {"path": "tmp.txt"},
+            "args_schema": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            "risk_class": "destructive",
+            "trace_id": "trace-1",
+            "run_graph_node_id": "node-1",
             "requests": [
                 {
                     "envelope": {
@@ -75,6 +86,12 @@ async def test_agent_cmd_round_trip_preserves_requests_and_preview():
     ops = await load_pending_ops()
     assert ops["agent-1"]["agent_id"] == "agent-a"
     assert ops["agent-1"]["preview_text"] == "Tool: file_delete"
+    assert ops["agent-1"]["tool_id"] == "file_delete"
+    assert ops["agent-1"]["original_params"] == {"path": "tmp.txt"}
+    assert ops["agent-1"]["args_schema"]["required"] == ["path"]
+    assert ops["agent-1"]["risk_class"] == "destructive"
+    assert ops["agent-1"]["trace_id"] == "trace-1"
+    assert ops["agent-1"]["run_graph_node_id"] == "node-1"
     assert ops["agent-1"]["requests"][0]["envelope"]["tool_id"] == "file_delete"
 
 

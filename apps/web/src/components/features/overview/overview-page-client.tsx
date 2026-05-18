@@ -24,6 +24,7 @@ import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useOptionalAuth, type AuthOperator } from "@/components/providers/auth-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDailyActivity } from "@/hooks/use-daily-activity";
+import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useSetupChecklist } from "@/hooks/use-setup-checklist";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAgentStats } from "@/hooks/use-agent-stats";
@@ -49,7 +50,6 @@ export default function OverviewPage() {
     </Suspense>
   );
 }
-
 function OverviewPageFallback() {
   return <OverviewRouteLoading />;
 }
@@ -268,7 +268,9 @@ function OverviewPageContent() {
     [t],
   );
 
-  if (loading && !allStats) {
+  const showInitialSkeleton = useMinDurationFlag(loading && !allStats, 350);
+
+  if (showInitialSkeleton) {
     return <OverviewRouteLoading />;
   }
 

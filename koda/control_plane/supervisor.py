@@ -204,6 +204,7 @@ class ControlPlaneSupervisor:
         self._health_urls: dict[str, str] = {}
         self._crash_history: dict[str, list[float]] = {}
         self._crash_loop_alerted: set[str] = set()
+        self._publish_failure_alerted: set[str] = set()
 
     async def start(self) -> None:
         from koda.observability import init_tracing
@@ -445,7 +446,18 @@ class ControlPlaneSupervisor:
                 continue
             desired_version = int(agent.get("desired_version") or agent.get("applied_version") or 0)
             if desired_version <= 0:
-                desired_version = int(self._manager.publish_agent(agent_id)["version"])
+                try:
+                    desired_version = int(self._manager.publish_agent(agent_id)["version"])
+                    self._publish_failure_alerted.discard(agent_id)
+                except Exception as exc:
+                    if agent_id not in self._publish_failure_alerted:
+                        log.warning(
+                            "control_plane_publish_agent_error",
+                            agent_id=agent_id,
+                            error=str(exc)[:500],
+                        )
+                        self._publish_failure_alerted.add(agent_id)
+                    continue
             try:
                 runtime = self._manager.build_runtime_snapshot(agent_id, version=desired_version)
             except Exception:

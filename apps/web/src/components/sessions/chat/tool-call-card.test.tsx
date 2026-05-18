@@ -49,7 +49,7 @@ describe("ToolCallCard", () => {
   it("expands on click and calls onOpenDetails with task id", async () => {
     const onOpenDetails = vi.fn();
     const user = userEvent.setup();
-    render(
+    const { container } = render(
       <I18nProvider initialLanguage="en-US">
         <ToolCallCard execution={baseExecution()} onOpenDetails={onOpenDetails} />
       </I18nProvider>,
@@ -59,6 +59,9 @@ describe("ToolCallCard", () => {
     expect(screen.getByText(/task:/i)).toBeInTheDocument();
     expect(screen.getByText(/#1042/i)).toBeInTheDocument();
     expect(screen.getByText(/model:/i)).toBeInTheDocument();
+    expect(container.querySelector('[data-metadata-visual="task"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-metadata-visual="model"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-metadata-visual="cost"]')).toBeInTheDocument();
     expect(screen.queryByText("List files in /tmp")).not.toBeInTheDocument();
     const viewExecution = screen.getByRole("button", { name: /View execution/i });
     await user.click(viewExecution);

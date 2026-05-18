@@ -51,6 +51,8 @@ registerBodySchema({
 export const approvalDecisionSchema = z.enum([
   "approve",
   "approved",
+  "edit",
+  "respond",
   "scope",
   "approve_scope",
   "approved_scope",
@@ -59,8 +61,12 @@ export const approvalDecisionSchema = z.enum([
   "reject",
 ]);
 
+const approvalParamsSchema = z.record(z.string(), z.unknown());
+
 export const postApprovalBodySchema = z.object({
   decision: approvalDecisionSchema,
+  edited_params: approvalParamsSchema.nullable().optional(),
+  response_text: safeContent(10_000).nullable().optional(),
   rationale: z.string().trim().max(500).nullable().optional(),
 });
 
@@ -74,10 +80,25 @@ registerBodySchema({
 });
 
 export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+export type ApprovalParams = z.infer<typeof approvalParamsSchema>;
+export type PostApprovalBody = z.infer<typeof postApprovalBodySchema>;
 
 export interface PendingApprovalRequest {
   envelope?: Record<string, unknown>;
   approval_scope?: Record<string, unknown>;
+  tool_id?: string | null;
+  args_schema?: Record<string, unknown> | null;
+  risk_class?: string | null;
+  trace_id?: string | null;
+  run_graph_node_id?: string | null;
+  schema?: Record<string, unknown> | null;
+  tool_schema?: Record<string, unknown> | null;
+  input_schema?: Record<string, unknown> | null;
+  params?: Record<string, unknown> | null;
+  original_params?: Record<string, unknown> | null;
+  edited_params?: Record<string, unknown> | null;
+  response_text?: string | null;
+  rationale?: string | null;
 }
 
 export interface PendingApproval {
@@ -89,6 +110,20 @@ export interface PendingApproval {
   user_id: number | null;
   description: string;
   preview_text: string | null;
+  tool_id?: string | null;
+  tool_name?: string | null;
+  args_schema?: Record<string, unknown> | null;
+  risk_class?: string | null;
+  trace_id?: string | null;
+  run_graph_node_id?: string | null;
+  schema?: Record<string, unknown> | null;
+  tool_schema?: Record<string, unknown> | null;
+  input_schema?: Record<string, unknown> | null;
+  params?: Record<string, unknown> | null;
+  original_params?: Record<string, unknown> | null;
+  edited_params?: Record<string, unknown> | null;
+  response_text?: string | null;
+  rationale?: string | null;
   requests: PendingApprovalRequest[];
   created_at: number | null;
   decision: string | null;

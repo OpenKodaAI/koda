@@ -717,10 +717,29 @@ BLOCKED_NPM_PATTERN: re.Pattern | None = re.compile(_blocked_npm, re.I) if _bloc
 
 # --- Inter-agent communication ---
 INTER_AGENT_ENABLED: bool = _env("INTER_AGENT_ENABLED", "false").lower() == "true"
+SQUADS_ENABLED: bool = _env("SQUADS_ENABLED", "false").lower() == "true"
 INTER_AGENT_MAX_DELEGATION_DEPTH: int = int(_env("INTER_AGENT_MAX_DELEGATION_DEPTH", "3"))
 INTER_AGENT_MESSAGE_TIMEOUT: int = int(_env("INTER_AGENT_MESSAGE_TIMEOUT", "60"))
 # "memory" keeps the legacy in-process bus; "postgres" persists + delivers cross-process via LISTEN/NOTIFY.
 INTER_AGENT_BUS_BACKEND: str = (_env("INTER_AGENT_BUS_BACKEND", "memory") or "memory").strip().lower()
+SQUAD_MESSAGE_TIMEOUT_S: int = int(_env("SQUAD_MESSAGE_TIMEOUT_S", "300"))
+SQUAD_INBOX_MAX_DEPTH: int = int(_env("SQUAD_INBOX_MAX_DEPTH", "200"))
+SQUAD_INBOX_MAX_DELIVERY_ATTEMPTS: int = int(_env("SQUAD_INBOX_MAX_DELIVERY_ATTEMPTS", "5"))
+SQUAD_BUS_LISTEN_ENABLED: bool = _env("SQUAD_BUS_LISTEN_ENABLED", "true").lower() == "true"
+SQUAD_POLL_INTERVAL_S: float = float(_env("SQUAD_POLL_INTERVAL_S", "2"))
+SQUAD_DEBOUNCE_MS: int = int(_env("SQUAD_DEBOUNCE_MS", "800"))
+SQUAD_FANOUT_MAX_PER_TURN: int = int(_env("SQUAD_FANOUT_MAX_PER_TURN", "5"))
+SQUAD_CLAIM_TTL_S: int = int(_env("SQUAD_CLAIM_TTL_S", "900"))
+SQUAD_ROUTER_SWEEP_INTERVAL_S: float = float(_env("SQUAD_ROUTER_SWEEP_INTERVAL_S", "15"))
+SQUAD_COORDINATOR_MODE: str = _env("SQUAD_COORDINATOR_MODE", "supervisor").strip().lower()
+SQUAD_COORDINATOR_PLANNER: str = _env("SQUAD_COORDINATOR_PLANNER", "semantic_llm").strip().lower()
+SQUAD_SEMANTIC_ROUTING_ENABLED: bool = _env("SQUAD_SEMANTIC_ROUTING_ENABLED", "true").lower() == "true"
+SQUAD_SEMANTIC_TOP_K: int = int(_env("SQUAD_SEMANTIC_TOP_K", "5"))
+SQUAD_SEMANTIC_MIN_SCORE: float = float(_env("SQUAD_SEMANTIC_MIN_SCORE", "0.28"))
+SQUAD_SEMANTIC_NEGATIVE_PENALTY: float = float(_env("SQUAD_SEMANTIC_NEGATIVE_PENALTY", "0.35"))
+SQUAD_COORDINATOR_LLM_TIMEOUT_S: float = float(_env("SQUAD_COORDINATOR_LLM_TIMEOUT_S", "20"))
+SQUAD_OPERATOR_BREAK_GLASS_ENABLED: bool = _env("SQUAD_OPERATOR_BREAK_GLASS_ENABLED", "false").lower() == "true"
+SQUAD_TELEGRAM_STRICT_ADMIN_CHECK: bool = _env("SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", "true").lower() == "true"
 
 # --- MCP Bridge ---
 MCP_ENABLED: bool = _env("MCP_ENABLED", "false").lower() in ("1", "true", "yes")

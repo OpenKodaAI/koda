@@ -340,9 +340,12 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                     </Button>
                   ) : null}
                   {showDownloading ? (
-                    <span className="inline-flex items-center gap-1 rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+                    <span
+                      className="inline-flex h-5 min-w-7 items-center justify-center rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                      role="status"
+                      aria-label={tl("Baixando...")}
+                    >
                       <Loader2 size={11} className="animate-spin" />
-                      {tl("Baixando...")}
                     </span>
                   ) : null}
                   {model.installed ? (

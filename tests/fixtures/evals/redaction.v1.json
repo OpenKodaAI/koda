@@ -1,0 +1,28 @@
+{
+  "schema_version": "trajectory_export.v1",
+  "fixture_id": "phase5-redaction",
+  "forbidden_strings": [
+    "sk-live-secret",
+    "Bearer abcdefghijklmnopqrstuvwxyz123456",
+    "BEGIN PRIVATE KEY",
+    "DATABASE_URL=postgres://user:pass@localhost/koda"
+  ],
+  "payload": {
+    "model_call": {
+      "prompt_hash": "sha256:7b6f9d1d9c0d4d6c8b9b2f1c4d3e5a708192a6f2d3c4b5a69788776655443322",
+      "prompt_preview": "Deploy the release after smoke checks pass.",
+      "raw_prompt_included": false
+    },
+    "tool_request": {
+      "params_hash": "sha256:8c6f9d1d9c0d4d6c8b9b2f1c4d3e5a708192a6f2d3c4b5a69788776655443322",
+      "params_preview": {
+        "path": "output/release-health.json",
+        "token": "[REDACTED]"
+      }
+    },
+    "environment": {
+      "DATABASE_URL": "[REDACTED]",
+      "API_KEY": "[REDACTED]"
+    }
+  }
+}

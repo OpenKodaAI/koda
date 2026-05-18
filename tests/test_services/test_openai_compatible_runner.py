@@ -16,6 +16,7 @@ from koda.services.openai_compatible_runner import (
     _extract_citations,
     _extract_delta_text,
     _extract_message_text,
+    _extract_tool_calls,
     _normalize_usage,
     clear_openai_compatible_capability_cache,
 )
@@ -68,8 +69,8 @@ def ready_capability() -> ProviderCapabilities:
 
 
 class TestPayloadBuilder:
-    def test_no_tools_field_in_payload(self, mistral_profile):
-        """Sentinel: koda parses <agent_cmd> XML, never the OpenAI tools field."""
+    def test_no_tools_field_in_payload_by_default(self, mistral_profile):
+        """XML fallback remains the default when no registry schemas are supplied."""
         payload = _build_chat_payload(
             profile=mistral_profile,
             model="mistral-large-latest",
@@ -86,6 +87,34 @@ class TestPayloadBuilder:
         assert len(payload["messages"]) == 2
         assert payload["messages"][0]["role"] == "system"
         assert payload["messages"][1]["role"] == "user"
+
+    def test_native_tools_field_in_payload_when_supplied(self, mistral_profile):
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Search the web.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        payload = _build_chat_payload(
+            profile=mistral_profile,
+            model="mistral-large-latest",
+            query="hi",
+            system_prompt="you are helpful",
+            image_paths=None,
+            max_budget=0.0,
+            stream=False,
+            native_tools=[tool_schema],
+            native_tool_choice="auto",
+        )
+        assert payload["tools"] == [tool_schema]
+        assert payload["tool_choice"] == "auto"
 
     def test_streaming_payload_includes_usage_options(self, mistral_profile):
         payload = _build_chat_payload(
@@ -327,6 +356,39 @@ class TestMessageExtraction:
 
     def test_extract_delta_text_empty_when_no_choices(self):
         assert _extract_delta_text({"choices": []}) == ""
+
+    def test_extract_tool_calls_normalizes_function_arguments(self):
+        data = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": '{"query": "phase 1"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        calls = _extract_tool_calls(data)
+        assert calls == [
+            {
+                "source": "openai_compatible_tool_call",
+                "id": "call_1",
+                "type": "function",
+                "name": "web_search",
+                "arguments": {"query": "phase 1"},
+                "arguments_json": '{"query": "phase 1"}',
+                "function": {"name": "web_search", "arguments": {"query": "phase 1"}},
+            }
+        ]
 
 
 class TestCitations:

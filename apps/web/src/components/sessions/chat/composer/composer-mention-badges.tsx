@@ -2,86 +2,47 @@
 
 import { Sparkles, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { Badge } from "@/components/ui/badge";
-import {
-  getIntegrationAccent,
-  getIntegrationLogo,
-} from "@/components/control-plane/system/integrations/integration-logos";
+import { renderIntegrationLogo } from "@/components/control-plane/system/integrations/integration-logos";
 import type { Mention } from "@/lib/contracts/sessions";
 
-export interface ComposerMentionBadge {
+export interface TrackedMention {
   kind: Mention["kind"];
   slug: string;
-  /** Human-readable label resolved from the catalog at insertion time. */
   label: string;
-  /** True when the slug isn't recognised by the current catalog (e.g. pasted token). */
-  unresolved?: boolean;
 }
 
-export interface ComposerMentionBadgesProps {
-  mentions: ComposerMentionBadge[];
-  onRemove: (mention: ComposerMentionBadge) => void;
+interface ComposerMentionBadgesProps {
+  mentions: TrackedMention[];
+  onRemove: (mention: TrackedMention) => void;
 }
 
-const MAX_VISIBLE = 12;
-
-/** Skills don't carry a brand colour — use the canonical Koda accent so the
- * row reads as a single family while still distinguishing them from MCPs. */
-const SKILL_ACCENT = { from: "var(--accent)", to: "var(--accent-hover)" } as const;
-
-export function ComposerMentionBadges({
-  mentions,
-  onRemove,
-}: ComposerMentionBadgesProps) {
+export function ComposerMentionBadges({ mentions, onRemove }: ComposerMentionBadgesProps) {
   const { t } = useAppI18n();
-
   if (mentions.length === 0) return null;
-  const visible = mentions.slice(0, MAX_VISIBLE);
-  const overflow = mentions.length - visible.length;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-1 max-h-16 overflow-y-auto">
-      {visible.map((mention) => {
-        const Logo =
-          mention.kind === "mcp" && !mention.unresolved
-            ? getIntegrationLogo(mention.slug)
-            : null;
-        const accent =
-          mention.kind === "mcp" && !mention.unresolved
-            ? getIntegrationAccent(mention.slug)
-            : SKILL_ACCENT;
-        const tinted = !mention.unresolved
-          ? {
-              borderColor:
-                mention.kind === "mcp" ? `${accent.from}66` : "var(--border-subtle)",
-              background:
-                mention.kind === "mcp" ? `${accent.from}1a` : "var(--panel-soft)",
-            }
-          : undefined;
-
+    <div className="composer-mention-row">
+      {mentions.map((mention) => {
+        const isMcp = mention.kind === "mcp";
         return (
-          <Badge
+          <span
             key={`${mention.kind}:${mention.slug}`}
-            variant={mention.unresolved ? "warning" : "outline"}
-            size="sm"
-            className="inline-flex items-center gap-1.5 pl-1.5 pr-1"
-            style={tinted}
+            className="composer-mention-badge"
+            data-mention-kind={mention.kind}
+            data-mention-slug={mention.slug}
           >
-            {Logo ? (
-              <Logo className="h-3 w-3 shrink-0" />
-            ) : (
-              <Sparkles
-                className="icon-xs shrink-0"
-                strokeWidth={1.75}
-                aria-hidden
-                style={
-                  mention.kind === "skill" && !mention.unresolved
-                    ? { color: "var(--accent)" }
-                    : undefined
-                }
-              />
-            )}
-            <span className="truncate max-w-[160px]">{mention.label}</span>
+            <span className="composer-mention-badge__logo" aria-hidden>
+              {isMcp ? (
+                renderIntegrationLogo(mention.slug, "composer-mention-badge__logo-art")
+              ) : (
+                <Sparkles
+                  className="composer-mention-badge__logo-art"
+                  strokeWidth={1.75}
+                  style={{ color: "var(--text-tertiary)" }}
+                />
+              )}
+            </span>
+            <span className="composer-mention-badge__label">{mention.label}</span>
             <button
               type="button"
               onClick={() => onRemove(mention)}
@@ -89,18 +50,13 @@ export function ComposerMentionBadges({
                 defaultValue: "Remove {{label}}",
                 label: mention.label,
               })}
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-[var(--hover-tint)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              className="composer-mention-badge__remove"
             >
-              <X className="icon-xs" strokeWidth={1.75} aria-hidden />
+              <X className="composer-mention-badge__x" strokeWidth={2} aria-hidden />
             </button>
-          </Badge>
+          </span>
         );
       })}
-      {overflow > 0 ? (
-        <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-          +{overflow}
-        </span>
-      ) : null}
     </div>
   );
 }

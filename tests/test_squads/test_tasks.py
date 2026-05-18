@@ -15,6 +15,7 @@ from koda.squads.tasks import (
     SquadTaskStore,
     StaleVersionError,
     TaskClaimConflictError,
+    TaskDependencyError,
     TaskDescriptor,
     TaskNotFoundError,
     TaskOwnershipError,
@@ -38,10 +39,11 @@ async def clean_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_message_recipients"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_tasks"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
         await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY')
+        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY CASCADE')
     finally:
         await conn.close()
     yield migrated_postgres
@@ -146,6 +148,27 @@ async def test_ownership_enforced(stores: tuple[SquadThreadStore, SquadTaskStore
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+async def test_coordinator_override_can_transition_assigned_task(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    threads, tasks = stores
+    tid = await _seed_thread(threads)
+    task = await tasks.create_task(thread_id=tid, title="t", assigner_agent_id="PM")
+    await tasks.claim_task(task_id=task.id, agent_id="A")
+
+    updated = await tasks.update_task_status(
+        task_id=task.id,
+        new_status="in_progress",
+        agent_id="PM",
+        coordinator_override=True,
+    )
+
+    assert updated.status == "in_progress"
+    assert updated.assigned_agent_id == "A"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 async def test_concurrent_claim_one_wins(stores: tuple[SquadThreadStore, SquadTaskStore]) -> None:
     threads, tasks = stores
     tid = await _seed_thread(threads)
@@ -162,6 +185,66 @@ async def test_concurrent_claim_one_wins(stores: tuple[SquadThreadStore, SquadTa
     failures = [r for r in (a, b) if isinstance(r, TaskClaimConflictError)]
     assert len(successes) == 1
     assert len(failures) == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_preassigned_task_can_only_be_claimed_by_assignee(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    threads, tasks = stores
+    tid = await _seed_thread(threads)
+    task = await tasks.create_task(
+        thread_id=tid,
+        title="backend api",
+        assigner_agent_id="PM",
+        assigned_agent_id="BE",
+    )
+    with pytest.raises(TaskClaimConflictError):
+        await tasks.claim_task(task_id=task.id, agent_id="FE")
+    claimed = await tasks.claim_task(task_id=task.id, agent_id="BE")
+    assert claimed.assigned_agent_id == "BE"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_dependency_references_must_exist_in_same_thread(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    threads, tasks = stores
+    tid = await _seed_thread(threads)
+    with pytest.raises(TaskDependencyError):
+        await tasks.create_task(
+            thread_id=tid,
+            title="bad",
+            assigner_agent_id="PM",
+            depends_on=[str(uuid.uuid4())],
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_dependencies_must_be_done_before_in_progress(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    threads, tasks = stores
+    tid = await _seed_thread(threads)
+    upstream = await tasks.create_task(thread_id=tid, title="research", assigner_agent_id="PM")
+    dependent = await tasks.create_task(
+        thread_id=tid,
+        title="build",
+        assigner_agent_id="PM",
+        depends_on=[upstream.id],
+    )
+    await tasks.claim_task(task_id=dependent.id, agent_id="FE")
+    with pytest.raises(TaskDependencyError):
+        await tasks.update_task_status(task_id=dependent.id, new_status="in_progress", agent_id="FE")
+
+    await tasks.claim_task(task_id=upstream.id, agent_id="PM")
+    await tasks.update_task_status(task_id=upstream.id, new_status="in_progress", agent_id="PM")
+    await tasks.complete_task(task_id=upstream.id, agent_id="PM")
+    started = await tasks.update_task_status(task_id=dependent.id, new_status="in_progress", agent_id="FE")
+    assert started.status == "in_progress"
 
 
 @pytest.mark.postgres

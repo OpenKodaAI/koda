@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowDown, MessageSquareText } from "lucide-react";
+import { ArrowDown, LoaderCircle, MessageSquareText } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { AssistantMessage } from "@/components/sessions/chat/assistant-message";
 import { DaySeparator } from "@/components/sessions/chat/day-separator";
@@ -220,7 +220,7 @@ function ChatThreadImpl({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         {loading && !hasConversation ? (
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-8 px-6 pt-10 pb-8">
+          <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-6 pt-8 pb-8 lg:px-10">
             {Array.from({ length: 3 }).map((_, index) => (
               <div
                 key={index}
@@ -242,13 +242,13 @@ function ChatThreadImpl({
             <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
           </div>
         ) : !hasConversation ? (
-          <div className="mx-auto flex h-full w-full max-w-[680px] flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="mx-auto flex h-full w-full max-w-[620px] flex-col items-center justify-center gap-3 px-6 text-center">
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {emptyEyebrow ??
                 agentLabel ??
                 t("sessions.thread.newChatEyebrow", { defaultValue: "New conversation" })}
             </p>
-            <h1 className="display-serif m-0 text-[var(--font-size-display)] font-medium leading-[1.05] text-[var(--text-primary)]">
+            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
                 t("sessions.thread.heroTitle", { defaultValue: "What could we build today?" })}
             </h1>
@@ -261,14 +261,16 @@ function ChatThreadImpl({
             </p>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-8 px-6 pt-10 pb-8">
+          <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-6 pt-8 pb-8 lg:px-10">
             {loadingOlder ? (
               <div className="flex justify-center">
-                <span className="chat-thinking-dots" aria-hidden>
-                  <span />
-                  <span />
-                  <span />
-                </span>
+                <LoaderCircle
+                  className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                  aria-label={t("sessions.thread.loadingOlder", {
+                    defaultValue: "Loading older messages",
+                  })}
+                  strokeWidth={1.75}
+                />
               </div>
             ) : null}
             {items.map((item) => {

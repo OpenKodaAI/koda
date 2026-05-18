@@ -11,7 +11,7 @@ function SkeletonLine({
   return <div className={cn("skeleton rounded-xl", className)} style={style} aria-hidden="true" />;
 }
 
-function MetricStripSkeleton({ count = 4 }: { count?: number }) {
+export function MetricStripSkeleton({ count = 4 }: { count?: number }) {
   return (
     <div className="metric-strip">
       {Array.from({ length: count }).map((_, index) => (
@@ -39,7 +39,7 @@ function SoftTabsSkeleton({ count = 3, itemWidth = "w-24" }: { count?: number; i
   );
 }
 
-function SetupChecklistSkeleton() {
+export function SetupChecklistSkeleton() {
   return (
     <section className="relative flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3.5">
       <header className="flex items-start justify-between gap-3">
@@ -62,7 +62,7 @@ function SetupChecklistSkeleton() {
   );
 }
 
-function ActivityHeatmapSkeleton() {
+export function ActivityHeatmapSkeleton() {
   return (
     <section className="relative flex w-full flex-col gap-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -96,7 +96,7 @@ function ActivityHeatmapSkeleton() {
   );
 }
 
-function ExecutionHistorySkeleton() {
+export function ExecutionHistorySkeleton() {
   return (
     <section className="w-full">
       <header className="mb-3 flex items-baseline justify-between px-3">
@@ -157,14 +157,53 @@ export function OverviewRouteLoading() {
 
 export function AccountRouteLoading() {
   return (
-    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-6 sm:px-6 lg:px-8" data-testid="account-route-loading">
-      <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] p-5">
-        <div className="flex items-start gap-4">
-          <SkeletonLine className="h-12 w-12 rounded-full" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <SkeletonLine className="h-5 w-44 rounded" />
-            <SkeletonLine className="h-3 w-64 rounded" />
-            <SkeletonLine className="h-3 w-36 rounded" />
+    <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8" data-testid="account-route-loading">
+      <div className="space-y-2">
+        <SkeletonLine className="h-5 w-28 rounded" />
+        <SkeletonLine className="h-3 w-72 rounded" />
+      </div>
+      <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)]">
+        <div className="border-b border-[var(--divider-hair)] px-5 py-4">
+          <SkeletonLine className="h-4 w-32 rounded" />
+        </div>
+        <div className="grid lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="space-y-4 border-b border-[var(--divider-hair)] p-5 lg:border-b-0 lg:border-r">
+            <div className="flex flex-col items-center gap-3">
+              <SkeletonLine className="h-24 w-24 rounded-full" />
+              <SkeletonLine className="h-3 w-32 rounded" />
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {Array.from({ length: 10 }).map((_, index) => (
+                <SkeletonLine key={index} className="h-10 rounded-[var(--radius-panel-sm)]" />
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="border-b border-[var(--divider-hair)] p-4">
+              <SkeletonLine className="mb-2 h-2.5 w-24 rounded" />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <SkeletonLine className="h-9 flex-1 rounded-[var(--radius-input)]" />
+                <div className="flex gap-2">
+                  <SkeletonLine className="h-9 w-20 rounded-[var(--radius-panel-sm)]" />
+                  <SkeletonLine className="h-9 w-20 rounded-[var(--radius-panel-sm)]" />
+                </div>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="flex items-start gap-3 border-b border-[var(--divider-hair)] px-4 py-3.5 sm:border-r">
+                  <SkeletonLine className="h-7 w-7 rounded-md" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <SkeletonLine className="h-2.5 w-20 rounded" />
+                    <SkeletonLine className="h-3.5 w-32 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="col-span-full flex items-center justify-between gap-3 px-4 py-4">
+              <SkeletonLine className="h-3 w-48 rounded" />
+              <SkeletonLine className="h-9 w-24 rounded-[var(--radius-panel-sm)]" />
+            </div>
           </div>
         </div>
       </div>
@@ -175,22 +214,29 @@ export function AccountRouteLoading() {
             <SkeletonLine className="h-4 w-36 rounded" />
           </div>
         </div>
-        <div className="flex flex-col gap-6 p-5">
-          <div className="flex flex-col gap-3">
-            <SkeletonLine className="h-3 w-32 rounded" />
-            <SkeletonLine className="h-10 w-full rounded-[var(--radius-input)]" />
-            <SkeletonLine className="h-10 w-full rounded-[var(--radius-input)]" />
-            <SkeletonLine className="h-8 w-40 rounded-[var(--radius-input)]" />
-          </div>
-          <div className="border-t border-[color:var(--divider-hair)]" />
-          <div className="flex flex-col gap-3">
-            <div className="space-y-2">
-              <SkeletonLine className="h-3.5 w-40 rounded" />
-              <SkeletonLine className="h-3 w-56 rounded" />
+        <div className="grid gap-px bg-[var(--divider-hair)] sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="bg-[var(--panel)] px-4 py-3">
+              <SkeletonLine className="h-2.5 w-20 rounded" />
+              <SkeletonLine className="mt-2 h-3.5 w-24 rounded" />
             </div>
-            <SkeletonLine className="h-10 w-full rounded-[var(--radius-input)]" />
-            <SkeletonLine className="h-8 w-44 rounded-[var(--radius-input)]" />
-          </div>
+          ))}
+        </div>
+        <div className="grid divide-y divide-[var(--divider-hair)] lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div key={index} className="flex flex-col gap-3 p-5">
+              <div className="flex items-start gap-3">
+                <SkeletonLine className="h-8 w-8 rounded-lg" />
+                <div className="space-y-2">
+                  <SkeletonLine className="h-4 w-44 rounded" />
+                  <SkeletonLine className="h-3 w-64 rounded" />
+                </div>
+              </div>
+              <SkeletonLine className="h-9 w-full rounded-[var(--radius-input)]" />
+              {index === 0 ? <SkeletonLine className="h-9 w-full rounded-[var(--radius-input)]" /> : null}
+              <SkeletonLine className="h-9 w-44 rounded-[var(--radius-panel-sm)]" />
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -452,51 +498,57 @@ export function CostRouteLoading() {
 }
 
 function DLQTableSkeleton() {
+  const stickyLastStyle = { "--sticky-last-width": "192px" } as CSSProperties;
+
   return (
     <>
       <div className="hidden md:block">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1040px] border-separate border-spacing-0">
+        <div className="table-shell" style={stickyLastStyle}>
+          <table className="glass-table glass-table--sticky-last min-w-[1340px] table-fixed">
+            <colgroup>
+              <col className="w-[140px]" />
+              <col className="w-[128px]" />
+              <col className="w-[360px]" />
+              <col className="w-[360px]" />
+              <col className="w-[160px]" />
+              <col className="w-[192px]" />
+            </colgroup>
             <thead>
-              <tr className="border-b border-[color:var(--divider-hair)]">
+              <tr>
                 {Array.from({ length: 6 }).map((_, index) => (
                   <th
                     key={index}
-                    className={cn(
-                      "py-2.5 pr-4 text-left",
-                      index === 5 &&
-                        "sticky-table-last sticky-table-last--header w-[176px] min-w-[176px] pl-4 pr-0 text-right",
-                    )}
+                    className={cn(index === 5 && "text-right")}
                   >
                     <SkeletonLine className={cn("h-3 w-20 rounded", index === 5 && "ml-auto")} />
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-[color:var(--divider-hair)]">
+            <tbody>
               {Array.from({ length: 5 }).map((_, index) => (
                 <tr key={index}>
-                  <td className="w-[140px] py-3 pr-4">
+                  <td>
                     <SkeletonLine className="mb-2 h-3 w-16 rounded" />
                     <SkeletonLine className="h-2.5 w-24 rounded" />
                   </td>
-                  <td className="w-[128px] py-3 pr-4">
+                  <td>
                     <SkeletonLine className="mb-2 h-3 w-12 rounded" />
                     <SkeletonLine className="h-2.5 w-20 rounded" />
                   </td>
-                  <td className="min-w-[260px] py-3 pr-4">
+                  <td>
                     <SkeletonLine className="mb-2 h-3 w-[84%] rounded" />
                     <SkeletonLine className="h-3 w-[62%] rounded" />
                   </td>
-                  <td className="min-w-[260px] py-3 pr-4">
+                  <td>
                     <SkeletonLine className="mb-2 h-3 w-[78%] rounded" />
                     <SkeletonLine className="h-2.5 w-32 rounded" />
                   </td>
-                  <td className="w-[160px] py-3 pr-4">
+                  <td>
                     <SkeletonLine className="mb-2 h-3 w-20 rounded" />
                     <SkeletonLine className="h-2.5 w-24 rounded" />
                   </td>
-                  <td className="sticky-table-last w-[176px] min-w-[176px] py-3 pl-4 pr-0 text-right">
+                  <td className="text-right">
                     <SkeletonLine className="ml-auto h-3 w-20 rounded" />
                   </td>
                 </tr>

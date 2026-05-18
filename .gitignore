@@ -11,6 +11,9 @@ node_modules/
 apps/web/.next/
 apps/web/output/
 apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/tests/e2e/.auth/
 apps/web/tsconfig.tsbuildinfo
 agent_data*.pickle
 *.pickle

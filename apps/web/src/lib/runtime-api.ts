@@ -9,6 +9,7 @@ import {
 import { resolveRuntimeAvailability } from "@/lib/runtime-availability";
 import { normalizeRuntimeRequestError } from "@/lib/runtime-errors";
 import { translateLiteralForLanguage } from "@/lib/i18n";
+import { parseChildRuns, parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
 import type {
   RuntimeAgentHealth,
   RuntimeBrowserSession,
@@ -379,7 +380,7 @@ export async function getRuntimeOverview(
       [
         ...queueItems
           .filter((item) =>
-            ["queued", "running", "retrying"].includes(
+            ["queued", "running", "retrying", "stalled", "degraded"].includes(
               String(item.status || ""),
             ),
           )
@@ -557,6 +558,11 @@ export async function getRuntimeTaskBundle(
       environment?: RuntimeEnvironment | null;
       warnings?: RuntimeTaskBundle["warnings"];
       guardrails?: RuntimeTaskBundle["guardrails"];
+      run_graph?: RuntimeTaskBundle["run_graph"];
+      run_replay?: RuntimeTaskBundle["run_replay"];
+      sandbox_doctor?: RuntimeTaskBundle["sandbox_doctor"];
+      child_runs?: RuntimeTaskBundle["child_runs"];
+      context_governance?: RuntimeTaskBundle["context_governance"];
     }>(agent, `/api/runtime/tasks/${taskId}`),
     runtimeFetchJsonForAgent<{ items?: RuntimeEvent[] }>(
       agent,
@@ -670,6 +676,11 @@ export async function getRuntimeTaskBundle(
       browser_sessions: [],
       terminals: [],
     },
+    run_graph: detail.data.run_graph ?? null,
+    run_replay: detail.data.run_replay ?? null,
+    sandbox_doctor: detail.data.sandbox_doctor ?? null,
+    child_runs: parseChildRuns(detail.data.child_runs ?? []),
+    context_governance: parseContextGovernancePayload(detail.data.context_governance ?? null),
     errors,
   };
 }

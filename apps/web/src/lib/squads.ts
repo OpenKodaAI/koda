@@ -44,6 +44,7 @@ export type SquadThreadSummary = {
   telegramChatId: number | null;
   telegramMessageThreadId: number | null;
   costUsdAccum: string;
+  photoUrl?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   completedAt: string | null;
@@ -85,6 +86,8 @@ export type SquadThreadOverviewResponse = {
     telegramMessageThreadId: number | null;
     budgetUsdCap: string | null;
     costUsdAccum: string;
+    photoUrl?: string | null;
+    metadata?: Record<string, unknown>;
     createdAt: string | null;
     updatedAt: string | null;
   };
@@ -97,13 +100,35 @@ export type SquadThreadOverviewResponse = {
   }>;
   recentMessages: Array<{
     id: number;
+    messageUuid?: string | null;
     from: string | null;
     to: string | null;
+    toAgentIds?: string[];
     content: string;
     type: string;
+    payload?: Record<string, unknown>;
     metadata: Record<string, unknown>;
+    causationId?: string | null;
+    correlationId?: string | null;
+    inReplyTo?: string | null;
+    requiresResponseBy?: string | null;
+    idempotencyKey?: string | null;
+    replyObligations?: SquadReplyObligation[];
+    resolvedReplyObligations?: SquadReplyObligation[];
+    replySummary?: {
+      open?: number;
+      answered?: number;
+      timedOut?: number;
+      cancelled?: number;
+    };
     createdAt: string | null;
   }>;
+  page?: {
+    limit: number;
+    returned: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
   activeTasks: Array<{
     id: string;
     title: string;
@@ -113,8 +138,48 @@ export type SquadThreadOverviewResponse = {
     kind: string;
     version: number;
   }>;
+  artifacts: Array<{
+    artifactId: string;
+    threadId: string;
+    taskId: string | null;
+    ownerAgentId: string;
+    version: number;
+    kind: string;
+    pathOrUri: string;
+    downloadUrl?: string;
+    visibleToSquad: boolean;
+    metadata: Record<string, unknown>;
+  }>;
   openTaskCount: number;
   doneTaskCount: number;
+};
+
+export type SquadReplyObligation = {
+  id: number;
+  obligationId?: number;
+  obligationKey: string;
+  threadId: string;
+  sourceMessageId: number;
+  targetAgentId: string;
+  status: "open" | "answered" | "timed_out" | "cancelled" | string;
+  requiresResponseBy: string | null;
+  resolvedByMessageId: number | null;
+  followupCount: number;
+  lastFollowupAt: string | null;
+  metadata: Record<string, unknown>;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type SquadThreadPostMessageRequest = {
+  content: string;
+  from_agent?: string;
+  metadata?: Record<string, unknown>;
+  replyToMessageId?: string | number | null;
+  replyKind?: string;
+  replyTargetAgentId?: string | null;
+  targetAgentIds?: string[];
+  requiresResponseBy?: string | null;
 };
 
 export function formatRelativeTimestamp(value: string | null): string {

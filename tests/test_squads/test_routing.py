@@ -3,6 +3,24 @@
 from __future__ import annotations
 
 from koda.squads.routing import extract_mentions, select_targets
+from koda.squads.semantic_router import SemanticAgentScore, SemanticRoutingResult
+
+
+def _semantic_result(*agent_ids: str) -> SemanticRoutingResult:
+    return SemanticRoutingResult(
+        available=True,
+        model_name="test-model",
+        scores=[
+            SemanticAgentScore(
+                agent_id=agent_id,
+                score=0.9 - (idx * 0.05),
+                positive_score=0.9 - (idx * 0.05),
+                negative_score=0.0,
+                summary_text=f"{agent_id} semantic summary",
+            )
+            for idx, agent_id in enumerate(agent_ids)
+        ],
+    )
 
 
 def test_extract_mentions_empty_text() -> None:
@@ -58,6 +76,17 @@ def test_select_targets_mention_takes_priority_over_coordinator() -> None:
     assert targets == ["FE"]
 
 
+def test_select_targets_resolved_channel_mention_takes_priority() -> None:
+    targets = select_targets(
+        "@frontend_bot please look",
+        participant_agent_ids=["FE", "PM"],
+        coordinator_agent_id="PM",
+        semantic_result=_semantic_result("PM"),
+        explicit_mention_agent_ids=["FE"],
+    )
+    assert targets == ["FE"]
+
+
 def test_select_targets_falls_back_to_coordinator() -> None:
     targets = select_targets(
         "any update on the work?",
@@ -67,24 +96,116 @@ def test_select_targets_falls_back_to_coordinator() -> None:
     assert targets == ["PM"]
 
 
-def test_select_targets_empty_when_no_mention_and_no_coordinator() -> None:
+def test_select_targets_routes_capability_match_before_coordinator() -> None:
     targets = select_targets(
-        "any update on the work?",
+        "preciso de uma UI frontend polida",
+        participant_agent_ids=["FE", "PM"],
+        coordinator_agent_id="PM",
+        semantic_result=_semantic_result("FE"),
+    )
+    assert targets == ["FE"]
+
+
+def test_select_targets_routes_multiple_capability_matches() -> None:
+    targets = select_targets(
+        "build frontend React and backend API",
+        participant_agent_ids=["FE", "BE", "PM"],
+        coordinator_agent_id="PM",
+        semantic_result=_semantic_result("FE", "BE"),
+    )
+    assert targets == ["FE", "BE"]
+
+
+def test_select_targets_reply_continuation_before_coordinator() -> None:
+    targets = select_targets(
+        "can you clarify?",
+        participant_agent_ids=["FE", "PM"],
+        coordinator_agent_id="PM",
+        reply_to_agent_id="FE",
+    )
+    assert targets == ["FE"]
+
+
+def test_select_targets_reply_continuation_beats_semantic_ranking() -> None:
+    targets = select_targets(
+        "chame os agentes especializados para planejamento e frontend landing page",
+        participant_agent_ids=["PM", "PLANNER", "FE"],
+        coordinator_agent_id="PM",
+        reply_to_agent_id="PM",
+        semantic_result=_semantic_result("FE", "PLANNER"),
+    )
+    assert targets == ["PM"]
+
+
+def test_select_targets_falls_back_to_reply_without_semantic_result() -> None:
+    targets = select_targets(
+        "chame eles e trabalhem em conjunto",
+        participant_agent_ids=["PM", "PLANNER", "FE", "BE"],
+        coordinator_agent_id="PM",
+        reply_to_agent_id="PM",
+    )
+    assert targets == ["PM"]
+
+
+def test_select_targets_semantic_does_not_include_coordinator_by_default() -> None:
+    targets = select_targets(
+        "chame os agentes especializados e trabalhem em conjunto",
+        participant_agent_ids=["PM", "PLANNER", "FE"],
+        coordinator_agent_id="PM",
+        semantic_result=SemanticRoutingResult(
+            available=True,
+            model_name="test-model",
+            scores=[
+                SemanticAgentScore(
+                    agent_id="PM",
+                    score=0.95,
+                    positive_score=0.95,
+                    negative_score=0.0,
+                    summary_text="pm",
+                    is_coordinator=True,
+                ),
+                SemanticAgentScore(
+                    agent_id="FE",
+                    score=0.9,
+                    positive_score=0.9,
+                    negative_score=0.0,
+                    summary_text="fe",
+                ),
+            ],
+        ),
+    )
+    assert targets == ["FE"]
+
+
+def test_select_targets_semantic_single_specialist_match() -> None:
+    targets = select_targets(
+        "chame o frontend e trabalhem em conjunto",
+        participant_agent_ids=["PM", "PLANNER", "FE"],
+        coordinator_agent_id="PM",
+        semantic_result=_semantic_result("FE"),
+    )
+    assert targets == ["FE"]
+
+
+def test_select_targets_capability_fallback_when_no_coordinator() -> None:
+    targets = select_targets(
+        "please build the API",
         participant_agent_ids=["FE", "BE"],
         coordinator_agent_id=None,
+        semantic_result=_semantic_result("BE"),
     )
-    assert targets == []
+    assert targets == ["BE"]
 
 
 def test_select_targets_skips_coordinator_not_in_participants() -> None:
     # Coordinator was elected but isn't a participant of THIS thread (e.g.,
-    # already left). Don't notify them; fall through to no-target.
+    # already left). Don't notify them; fall through to deterministic fallback.
     targets = select_targets(
         "anyone home?",
         participant_agent_ids=["FE", "BE"],
         coordinator_agent_id="PM",
     )
-    assert targets == []
+    assert targets == ["FE"]
 
 
 def test_select_targets_multiple_mentions() -> None:

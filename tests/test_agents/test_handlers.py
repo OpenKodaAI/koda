@@ -19,9 +19,13 @@ from koda.services.tool_dispatcher import (
     _handle_squad_coordinator_elect,
     _handle_squad_coordinator_get,
     _handle_squad_dashboard_overview,
+    _handle_squad_follow_up,
     _handle_squad_inbox_drain,
     _handle_squad_post,
+    _handle_squad_reply,
+    _handle_squad_request_input,
     _handle_squad_router_tick,
+    _handle_squad_synthesize,
     _handle_squad_task_claim,
     _handle_squad_task_complete,
     _handle_squad_task_create,
@@ -36,6 +40,31 @@ from koda.services.tool_dispatcher import (
     _handle_squad_thread_history,
     _handle_squad_thread_overview,
 )
+
+
+class _FakeThreadAccess:
+    is_coordinator = False
+    joined_at = None
+
+    def __init__(self, squad_id: str = "build") -> None:
+        self.thread = type("Thread", (), {"squad_id": squad_id})()
+
+
+class _FakeSquadAccess:
+    async def require_thread_access(self, **_: object) -> _FakeThreadAccess:
+        return _FakeThreadAccess()
+
+    async def require_task_access(self, **_: object) -> tuple[_FakeThreadAccess, dict[str, object]]:
+        return _FakeThreadAccess(), {}
+
+    async def require_coordinator(self, **_: object) -> None:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def default_squad_access() -> object:
+    with patch("koda.squads.get_squad_access_service", return_value=_FakeSquadAccess()):
+        yield
 
 
 @pytest.fixture
@@ -364,6 +393,79 @@ async def test_squad_post_success(ctx: ToolContext, monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_squad_reply_success(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "00000000-0000-0000-0000-000000000001"
+    ctx.parent_message_id = "msg-1"
+    mock_store = AsyncMock()
+    mock_store.post_thread_message = AsyncMock(return_value=43)
+    mock_store.notify_event = AsyncMock()
+    mock_service = AsyncMock()
+    mock_service.resolve_for_reply = AsyncMock(return_value=[])
+    with (
+        patch("koda.squads.get_squad_thread_store", return_value=mock_store),
+        patch("koda.squads.get_thread_reply_service", return_value=mock_service),
+    ):
+        result = await _handle_squad_reply({"content": "answer"}, ctx)
+    assert result.success
+    assert result.data == {
+        "thread_id": ctx.squad_thread_id,
+        "message_id": 43,
+        "resolved_obligations": [],
+        "created_obligations": [],
+    }
+    mock_store.post_thread_message.assert_awaited_once()
+    assert mock_store.post_thread_message.await_args.kwargs["in_reply_to"] == "msg-1"
+    mock_service.resolve_for_reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_squad_request_input_requires_targets(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    result = await _handle_squad_request_input({"question": "Need review"}, ctx)
+    assert not result.success
+    assert "target_agent_ids" in result.output
+
+
+@pytest.mark.asyncio
+async def test_squad_follow_up_limit_path(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "00000000-0000-0000-0000-000000000001"
+    mock_store = AsyncMock()
+    mock_store.post_thread_message = AsyncMock(return_value=44)
+    mock_store.notify_event = AsyncMock()
+    obligation = MagicMock()
+    obligation.id = 7
+    obligation.target_agent_id = "BE"
+    obligation.source_message_id = 1
+    obligation.obligation_key = "reply:x:1:BE"
+    obligation.to_dict.return_value = {"id": 7, "targetAgentId": "BE"}
+    mock_service = AsyncMock()
+    mock_service.follow_up = AsyncMock(return_value=obligation)
+    with (
+        patch("koda.squads.get_squad_thread_store", return_value=mock_store),
+        patch("koda.squads.get_thread_reply_service", return_value=mock_service),
+    ):
+        result = await _handle_squad_follow_up({"obligation_id": 7, "note": "Ping"}, ctx)
+    assert result.success
+    mock_service.follow_up.assert_awaited_once()
+    mock_store.post_thread_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_squad_synthesize_requires_coordinator(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "WORKER"
+    ctx.squad_thread_id = "00000000-0000-0000-0000-000000000001"
+    mock_store = AsyncMock()
+    mock_store.get_thread = AsyncMock(return_value=MagicMock(coordinator_agent_id="PM"))
+    with patch("koda.squads.get_squad_thread_store", return_value=mock_store):
+        result = await _handle_squad_synthesize({"content": "Final"}, ctx)
+    assert not result.success
+    assert "synthesis_blocked" in result.output
+
+
+@pytest.mark.asyncio
 async def test_squad_thread_history_missing_params(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     result = await _handle_squad_thread_history({}, ctx)
@@ -675,6 +777,12 @@ def _coordinator_state(**overrides: object) -> object:
     return CoordinatorState(**base)  # type: ignore[arg-type]
 
 
+def _eligible_spec() -> dict[str, object]:
+    from koda.squads.coordinator import REQUIRED_COORDINATOR_TOOL_IDS
+
+    return {"tool_policy": {"allowed_tool_ids": list(REQUIRED_COORDINATOR_TOOL_IDS)}}
+
+
 @pytest.mark.asyncio
 async def test_coordinator_elect_disabled(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", False)
@@ -697,7 +805,11 @@ async def test_coordinator_elect_conflict(ctx: ToolContext, monkeypatch: pytest.
 
     mock_service = AsyncMock()
     mock_service.elect = AsyncMock(side_effect=CoordinatorConflictError("already coord"))
-    with patch("koda.squads.get_coordinator_service", return_value=mock_service):
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
         result = await _handle_squad_coordinator_elect({"squad_id": "build", "agent_id": "PM"}, ctx)
     assert not result.success
     assert "already coord" in result.output
@@ -710,7 +822,11 @@ async def test_coordinator_elect_eligibility_error(ctx: ToolContext, monkeypatch
 
     mock_service = AsyncMock()
     mock_service.elect = AsyncMock(side_effect=CoordinatorEligibilityError("missing tools"))
-    with patch("koda.squads.get_coordinator_service", return_value=mock_service):
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
         result = await _handle_squad_coordinator_elect(
             {
                 "squad_id": "build",
@@ -730,9 +846,11 @@ async def test_coordinator_elect_success(ctx: ToolContext, monkeypatch: pytest.M
     mock_service = AsyncMock()
     mock_service.elect = AsyncMock(return_value=state)
     with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
         patch("koda.squads.get_coordinator_service", return_value=mock_service),
         patch("koda.squads.get_squad_thread_store", return_value=None),
     ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
         result = await _handle_squad_coordinator_elect(
             {"squad_id": "build", "agent_id": "PM", "reason": "kickoff"},
             ctx,
@@ -824,7 +942,10 @@ async def test_router_tick_empty_sweep(ctx: ToolContext, monkeypatch: pytest.Mon
 @pytest.mark.asyncio
 async def test_telegram_bind_disabled(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", False)
-    result = await _handle_squad_telegram_bind({"squad_id": "build", "telegram_chat_id": -100}, ctx)
+    result = await _handle_squad_telegram_bind(
+        {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+        ctx,
+    )
     assert not result.success
 
 
@@ -839,7 +960,10 @@ async def test_telegram_bind_missing_params(ctx: ToolContext, monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_telegram_bind_chat_id_not_int(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
-    result = await _handle_squad_telegram_bind({"squad_id": "x", "telegram_chat_id": "not"}, ctx)
+    result = await _handle_squad_telegram_bind(
+        {"workspace_id": "acme", "squad_id": "x", "telegram_chat_id": "not", "is_forum": True},
+        ctx,
+    )
     assert not result.success
     assert "integer" in result.output
 
@@ -853,7 +977,7 @@ async def test_telegram_bind_conflict(ctx: ToolContext, monkeypatch: pytest.Monk
     mock_service.bind = AsyncMock(side_effect=TelegramBindingConflictError("chat owned by other"))
     with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
         result = await _handle_squad_telegram_bind(
-            {"squad_id": "build", "telegram_chat_id": -100},
+            {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
             ctx,
         )
     assert not result.success
@@ -878,7 +1002,7 @@ async def test_telegram_bind_success(ctx: ToolContext, monkeypatch: pytest.Monke
     mock_service.bind = AsyncMock(return_value=binding)
     with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
         result = await _handle_squad_telegram_bind(
-            {"squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+            {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
             ctx,
         )
     assert result.success

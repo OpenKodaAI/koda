@@ -1,6 +1,7 @@
 """Agent tool dispatcher: parses <agent_cmd> tags, executes tools, and formats results."""
 
 import asyncio
+import contextlib
 import json
 import re
 import time as _time
@@ -140,8 +141,13 @@ _WRITE_TOOLS = frozenset(
         "workflow_run",
         "workflow_delete",
         "agent_send",
+        "task",
         "agent_delegate",
         "agent_broadcast",
+        "squad_reply",
+        "squad_request_input",
+        "squad_follow_up",
+        "squad_synthesize",
     }
 )
 
@@ -286,7 +292,11 @@ class ToolContext:
     squad_task_id: str | None = None
     parent_message_id: str | None = None
     delegation_chain: list[str] = field(default_factory=list)
+    delegation_request_id: str | None = None
+    delegation_origin_agent_id: str | None = None
     bot: Any | None = None
+    application: Any | None = None
+    context_governance: dict[str, Any] | None = None
 
 
 def parse_agent_commands(text: str) -> tuple[list[AgentToolCall], str]:
@@ -337,11 +347,11 @@ def _infer_tool_category(tool: str) -> str:
         return "workflow"
     if tool.startswith("snapshot_"):
         return "snapshots"
+    if tool == "task":
+        return "agent_comm"
     if tool in {"agent_send", "agent_receive", "agent_delegate", "agent_list_agents", "agent_broadcast"}:
         return "agent_comm"
-    if tool in {"squad_thread_create", "squad_post", "squad_thread_history"}:
-        return "agent_comm"
-    if tool.startswith("squad_task_"):
+    if tool.startswith("squad_"):
         return "agent_comm"
     return "tool"
 
@@ -553,6 +563,10 @@ async def _execute_tool_traced(
     handler = _TOOL_HANDLERS.get(call.tool)
     if not handler:
         if PLUGIN_SYSTEM_ENABLED:
+            with contextlib.suppress(Exception):
+                from koda.skills._package import ensure_installed_package_tools_registered
+
+                ensure_installed_package_tools_registered(AGENT_ID or "default")
             from koda.plugins import get_registry
 
             handler = get_registry().get_handler(call.tool)
@@ -872,6 +886,12 @@ def _is_write_tool(tool: str, params: dict) -> bool:
         return False
     if tool == "browser_cookies" and str(params.get("action", "get")).strip().lower() == "get":
         return False
+    with contextlib.suppress(Exception):
+        from koda.services.tool_registry import get_tool_definition
+
+        definition = get_tool_definition(tool)
+        if definition is not None and definition.source == "skill_package":
+            return definition.access_level != "read"
     if tool not in _TOOL_HANDLERS:
         return False
     resolution = resolve_integration_action(tool, params)
@@ -2893,6 +2913,10 @@ async def _handle_plugin_list(params: dict, ctx: ToolContext) -> AgentToolResult
     err = await _check_plugin_available("plugin_list")
     if err:
         return err
+    from koda.config import AGENT_ID
+    from koda.skills._package import ensure_installed_package_tools_registered
+
+    ensure_installed_package_tools_registered(AGENT_ID or "default")
     from koda.plugins import get_registry
 
     plugins = get_registry().list_plugins()
@@ -2921,6 +2945,10 @@ async def _handle_plugin_info(params: dict, ctx: ToolContext) -> AgentToolResult
     name = params.get("name", "")
     if not name:
         return AgentToolResult(tool="plugin_info", success=False, output="Missing required param: 'name'.")
+    from koda.config import AGENT_ID
+    from koda.skills._package import ensure_installed_package_tools_registered
+
+    ensure_installed_package_tools_registered(AGENT_ID or "default")
     from koda.plugins import get_registry
 
     plugins = get_registry().list_plugins()
@@ -2952,32 +2980,41 @@ async def _handle_plugin_install(params: dict, ctx: ToolContext) -> AgentToolRes
     path = params.get("path", "")
     if not path:
         return AgentToolResult(tool="plugin_install", success=False, output="Missing required param: 'path'.")
-    from pathlib import Path as P
+    from koda.config import AGENT_ID
+    from koda.skills._package import SkillPackageError, install_skill_package
 
-    plugin_dir = P(path)
-    manifest_path = plugin_dir / "plugin.yaml"
-    from koda.plugins.manifest import parse_manifest
-    from koda.plugins.validator import validate_manifest
-
-    manifest = parse_manifest(manifest_path)
-    if isinstance(manifest, str):
-        return AgentToolResult(tool="plugin_install", success=False, output=manifest)
-    errors = validate_manifest(manifest)
-    if errors:
+    try:
+        result = install_skill_package(
+            path,
+            agent_id=AGENT_ID or "default",
+            review_accepted=bool(params.get("review_accepted") or params.get("approved")),
+        )
+    except SkillPackageError as exc:
+        error = dict(exc.error)
+        scan = error.get("scan") if isinstance(error.get("scan"), dict) else {}
+        raw_findings = scan.get("findings") if isinstance(scan, dict) else []
+        findings = raw_findings if isinstance(raw_findings, list) else []
+        finding_lines = "\n".join(
+            f"  - {item.get('id')}: {item.get('message')}" for item in findings if isinstance(item, dict)
+        )
+        output = error.get("message", "Skill package install failed.")
+        if finding_lines:
+            output = f"{output}\n{finding_lines}"
         return AgentToolResult(
             tool="plugin_install",
             success=False,
-            output="Validation errors:\n" + "\n".join(f"  - {e}" for e in errors),
+            output=output,
+            metadata={"data": {"error": error}, "data_format": "json"},
         )
-    from koda.plugins import get_registry
-
-    reg_err = get_registry().register(manifest)
-    if reg_err:
-        return AgentToolResult(tool="plugin_install", success=False, output=reg_err)
+    lock = result["lock"]
     return AgentToolResult(
         tool="plugin_install",
         success=True,
-        output=f"Plugin '{manifest.name}' installed with {len(manifest.tools)} tools.",
+        output=(
+            f"Plugin package '{lock.get('package_id')}' installed with "
+            f"{len(lock.get('installed_tools') or [])} tools and {len(lock.get('installed_skills') or [])} skills."
+        ),
+        metadata={"data": result, "data_format": "json"},
     )
 
 
@@ -2988,6 +3025,26 @@ async def _handle_plugin_uninstall(params: dict, ctx: ToolContext) -> AgentToolR
     name = params.get("name", "")
     if not name:
         return AgentToolResult(tool="plugin_uninstall", success=False, output="Missing required param: 'name'.")
+    from koda.config import AGENT_ID
+    from koda.skills._package import SkillPackageError, get_skill_package_lock, uninstall_skill_package
+
+    if get_skill_package_lock(AGENT_ID or "default", name):
+        try:
+            result = uninstall_skill_package(AGENT_ID or "default", name)
+        except SkillPackageError as exc:
+            error = dict(exc.error)
+            return AgentToolResult(
+                tool="plugin_uninstall",
+                success=False,
+                output=str(error.get("message") or "Skill package uninstall failed."),
+                metadata={"data": {"error": error}, "data_format": "json"},
+            )
+        return AgentToolResult(
+            tool="plugin_uninstall",
+            success=True,
+            output=f"Plugin package '{name}' uninstalled.",
+            metadata={"data": result, "data_format": "json"},
+        )
     from koda.plugins import get_registry
 
     unreg_err = get_registry().unregister(name)
@@ -3003,6 +3060,12 @@ async def _handle_plugin_reload(params: dict, ctx: ToolContext) -> AgentToolResu
     name = params.get("name", "")
     if not name:
         return AgentToolResult(tool="plugin_reload", success=False, output="Missing required param: 'name'.")
+    from koda.config import AGENT_ID
+    from koda.skills._package import ensure_installed_package_tools_registered, get_skill_package_lock
+
+    if get_skill_package_lock(AGENT_ID or "default", name):
+        ensure_installed_package_tools_registered(AGENT_ID or "default", force=True)
+        return AgentToolResult(tool="plugin_reload", success=True, output=f"Plugin package '{name}' reloaded.")
     from koda.plugins import get_registry
 
     reload_err = get_registry().reload(name)
@@ -3145,6 +3208,64 @@ async def _check_inter_agent_available(tool: str) -> AgentToolResult | None:
     return None
 
 
+def _ctx_agent_id(ctx: ToolContext) -> str:
+    from koda.config import AGENT_ID
+
+    return ctx.executing_agent_id or AGENT_ID or "default"
+
+
+async def _require_squad_thread_access(
+    *,
+    tool: str,
+    ctx: ToolContext,
+    thread_id: str,
+    require_write: bool = False,
+) -> AgentToolResult | None:
+    from koda.squads import SquadAccessError, SquadResourceNotFoundError, get_squad_access_service
+
+    service = get_squad_access_service()
+    if service is None:
+        return AgentToolResult(tool=tool, success=False, output="Squad access service unavailable.")
+    try:
+        await service.require_thread_access(
+            thread_id=thread_id,
+            agent_id=_ctx_agent_id(ctx),
+            require_write=require_write,
+        )
+    except SquadResourceNotFoundError as exc:
+        return AgentToolResult(tool=tool, success=False, output=str(exc))
+    except SquadAccessError as exc:
+        return AgentToolResult(tool=tool, success=False, output=f"Forbidden: {exc}")
+    return None
+
+
+async def _require_squad_task_access(
+    *,
+    tool: str,
+    ctx: ToolContext,
+    task_id: str,
+    require_write: bool = False,
+    coordinator_override: bool = False,
+) -> AgentToolResult | None:
+    from koda.squads import SquadAccessError, SquadResourceNotFoundError, get_squad_access_service
+
+    service = get_squad_access_service()
+    if service is None:
+        return AgentToolResult(tool=tool, success=False, output="Squad access service unavailable.")
+    try:
+        await service.require_task_access(
+            task_id=task_id,
+            agent_id=_ctx_agent_id(ctx),
+            require_write=require_write,
+            coordinator_override=coordinator_override,
+        )
+    except SquadResourceNotFoundError as exc:
+        return AgentToolResult(tool=tool, success=False, output=str(exc))
+    except SquadAccessError as exc:
+        return AgentToolResult(tool=tool, success=False, output=f"Forbidden: {exc}")
+    return None
+
+
 async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("agent_send")
     if err:
@@ -3153,13 +3274,42 @@ async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     message = params.get("message", "")
     if not to or not message:
         return AgentToolResult(tool="agent_send", success=False, output="Missing 'to' and 'message'.")
+    if ctx.squad_thread_id:
+        access_err = await _require_squad_thread_access(
+            tool="agent_send",
+            ctx=ctx,
+            thread_id=ctx.squad_thread_id,
+            require_write=True,
+        )
+        if access_err:
+            return access_err
+        from koda.squads import SquadAccessError, SquadResourceNotFoundError, get_squad_access_service
+
+        service = get_squad_access_service()
+        if service is None:
+            return AgentToolResult(tool="agent_send", success=False, output="Squad access service unavailable.")
+        try:
+            await service.require_thread_access(thread_id=ctx.squad_thread_id, agent_id=to)
+        except (SquadAccessError, SquadResourceNotFoundError) as exc:
+            return AgentToolResult(tool="agent_send", success=False, output=f"Forbidden target: {exc}")
 
     from koda.agents import get_message_bus
-    from koda.config import AGENT_ID
 
-    log.info("inter_agent_communication", tool="agent_send", from_agent=AGENT_ID, to_agent=to, user_id=ctx.user_id)
-    _audit_blocked("agent_send", f"inter_agent:{AGENT_ID or 'default'}->{to}", user_id=ctx.user_id)
-    msg_id = await get_message_bus().send(AGENT_ID or "default", to, message)
+    from_agent = _ctx_agent_id(ctx)
+    log.info("inter_agent_communication", tool="agent_send", from_agent=from_agent, to_agent=to, user_id=ctx.user_id)
+    _audit_blocked("agent_send", f"inter_agent:{from_agent}->{to}", user_id=ctx.user_id)
+    msg_id = await get_message_bus().send(
+        from_agent,
+        to,
+        message,
+        {
+            "thread_id": ctx.squad_thread_id,
+            "squad_task_id": ctx.squad_task_id,
+            "parent_message_id": ctx.parent_message_id,
+            "delegation_chain": ctx.delegation_chain,
+            "kind": "agent_text",
+        },
+    )
     if msg_id.startswith("Error"):
         return AgentToolResult(tool="agent_send", success=False, output=msg_id)
     return AgentToolResult(tool="agent_send", success=True, output=f"Message sent to '{to}'. ID: {msg_id}")
@@ -3174,13 +3324,15 @@ async def _handle_agent_receive(params: dict, ctx: ToolContext) -> AgentToolResu
     from koda.agents import get_message_bus
     from koda.config import AGENT_ID
 
-    msg = await get_message_bus().receive(AGENT_ID or "default", timeout=timeout)
+    agent_id = ctx.executing_agent_id or AGENT_ID or "default"
+    msg = await get_message_bus().receive(agent_id, timeout=timeout)
     if not msg:
         return AgentToolResult(
             tool="agent_receive",
             success=False,
             output=f"No message received (timeout: {timeout}s).",
         )
+    await get_message_bus().ack(agent_id, msg.message_id)
     return AgentToolResult(
         tool="agent_receive",
         success=True,
@@ -3196,21 +3348,52 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
     task = params.get("task", "")
     if not to or not task:
         return AgentToolResult(tool="agent_delegate", success=False, output="Missing 'to' and 'task'.")
+    if to in set(ctx.delegation_chain or []):
+        return AgentToolResult(tool="agent_delegate", success=False, output=f"Delegation cycle detected for '{to}'.")
+    if ctx.squad_thread_id:
+        access_err = await _require_squad_thread_access(
+            tool="agent_delegate",
+            ctx=ctx,
+            thread_id=ctx.squad_thread_id,
+            require_write=True,
+        )
+        if access_err:
+            return access_err
+        from koda.squads import SquadAccessError, get_squad_access_service
+
+        service = get_squad_access_service()
+        if service is None:
+            return AgentToolResult(tool="agent_delegate", success=False, output="Squad access service unavailable.")
+        try:
+            await service.require_thread_access(thread_id=ctx.squad_thread_id, agent_id=to)
+        except SquadAccessError as exc:
+            return AgentToolResult(tool="agent_delegate", success=False, output=f"Forbidden target: {exc}")
     timeout = min(int(params.get("timeout", 60)), 300)
     context = params.get("context", {})
 
     from koda.agents import get_message_bus
     from koda.agents.models import DelegationRequest
-    from koda.config import AGENT_ID
 
-    log.info("inter_agent_communication", tool="agent_delegate", from_agent=AGENT_ID, to_agent=to, user_id=ctx.user_id)
-    _audit_blocked("agent_delegate", f"inter_agent:{AGENT_ID or 'default'}->{to}", user_id=ctx.user_id)
+    from_agent = _ctx_agent_id(ctx)
+    log.info(
+        "inter_agent_communication",
+        tool="agent_delegate",
+        from_agent=from_agent,
+        to_agent=to,
+        user_id=ctx.user_id,
+    )
+    _audit_blocked("agent_delegate", f"inter_agent:{from_agent}->{to}", user_id=ctx.user_id)
     request = DelegationRequest(
-        from_agent=AGENT_ID or "default",
+        from_agent=from_agent,
         to_agent=to,
         task=task,
         context=context if isinstance(context, dict) else {},
         timeout=timeout,
+        delegation_depth=len(ctx.delegation_chain or []),
+        thread_id=ctx.squad_thread_id,
+        parent_message_id=ctx.parent_message_id,
+        squad_task_id=ctx.squad_task_id,
+        correlation_id=ctx.squad_task_id or ctx.parent_message_id,
     )
     result = await get_message_bus().delegate(request)
     if not result.success:
@@ -3220,6 +3403,15 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
         success=True,
         output=f"Delegation to '{to}' completed:\n{result.result}",
     )
+
+
+async def _handle_task(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_inter_agent_available("task")
+    if err:
+        return err
+    from koda.services.child_runs import delegate_child_task_tool
+
+    return cast(AgentToolResult, await delegate_child_task_tool(params, ctx))
 
 
 async def _handle_agent_list_agents(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3322,8 +3514,15 @@ async def _handle_squad_post(params: dict, ctx: ToolContext) -> AgentToolResult:
     content = params.get("content", "")
     if not thread_id or not content:
         return AgentToolResult(tool="squad_post", success=False, output="Missing 'thread_id' or 'content'.")
+    access_err = await _require_squad_thread_access(
+        tool="squad_post",
+        ctx=ctx,
+        thread_id=thread_id,
+        require_write=True,
+    )
+    if access_err:
+        return access_err
 
-    from koda.config import AGENT_ID
     from koda.squads import get_squad_thread_store
 
     store = get_squad_thread_store()
@@ -3337,7 +3536,7 @@ async def _handle_squad_post(params: dict, ctx: ToolContext) -> AgentToolResult:
     try:
         msg_id = await store.post_thread_message(
             thread_id=thread_id,
-            from_agent=AGENT_ID or "default",
+            from_agent=_ctx_agent_id(ctx),
             content=content,
             message_type="agent_text",
             metadata=metadata,
@@ -3353,6 +3552,347 @@ async def _handle_squad_post(params: dict, ctx: ToolContext) -> AgentToolResult:
     )
 
 
+def _parse_tool_deadline(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _normalize_tool_targets(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        agent_id = str(item or "").strip()
+        key = agent_id.lower()
+        if not agent_id or key in seen:
+            continue
+        seen.add(key)
+        out.append(agent_id)
+    return out[:8]
+
+
+async def _handle_squad_reply(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_inter_agent_available("squad_reply")
+    if err:
+        return err
+    thread_id = params.get("thread_id") or ctx.squad_thread_id
+    content = str(params.get("content") or "").strip()
+    if not thread_id or not content:
+        return AgentToolResult(
+            tool="squad_reply",
+            success=False,
+            output="Missing 'thread_id' (or current squad thread) and 'content'.",
+        )
+    access_err = await _require_squad_thread_access(
+        tool="squad_reply",
+        ctx=ctx,
+        thread_id=str(thread_id),
+        require_write=True,
+    )
+    if access_err:
+        return access_err
+
+    from koda.squads import (
+        ThreadReplyError,
+        dispatch_squad_turn,
+        get_squad_thread_store,
+        get_thread_reply_service,
+        message_ref,
+    )
+
+    store = get_squad_thread_store()
+    if store is None:
+        return AgentToolResult(tool="squad_reply", success=False, output="Squad thread store unavailable.")
+    reply_service = get_thread_reply_service(store)
+    if reply_service is None:
+        return AgentToolResult(tool="squad_reply", success=False, output="Thread reply service unavailable.")
+
+    raw_metadata = params.get("metadata")
+    metadata: dict[str, Any] = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    reply_to = message_ref(params.get("reply_to_message_id") or ctx.parent_message_id)
+    reply_kind = str(params.get("reply_kind") or "agent_reply").strip() or "agent_reply"
+    target_agent_ids = _normalize_tool_targets(params.get("target_agent_ids"))
+    deadline = None
+    try:
+        deadline = _parse_tool_deadline(params.get("requires_response_by"))
+    except ValueError:
+        return AgentToolResult(
+            tool="squad_reply",
+            success=False,
+            output="reply.policy_denied: requires_response_by must be an ISO timestamp.",
+        )
+    from_agent = _ctx_agent_id(ctx)
+    metadata.update(
+        {
+            "reply_contract_version": "thread_reply.v1",
+            "reply_kind": reply_kind,
+            "reply_to_message_id": reply_to,
+            "source": "squad_reply",
+        }
+    )
+    correlation_id = str(params.get("correlation_id") or ctx.delegation_request_id or "")
+    if correlation_id:
+        metadata["correlation_id"] = correlation_id
+    idempotency_key = str(params.get("idempotency_key") or "").strip() or None
+    message_type = "coordinator_synthesis" if reply_kind == "synthesis" else reply_kind
+    try:
+        msg_id = await store.post_thread_message(
+            thread_id=str(thread_id),
+            from_agent=from_agent,
+            content=content,
+            message_type=message_type,
+            metadata=metadata,
+            to_agent_ids=target_agent_ids,
+            in_reply_to=reply_to,
+            requires_response_by=deadline,
+            idempotency_key=idempotency_key,
+            payload={
+                "markdown": content,
+                "reply_kind": reply_kind,
+                "target_agent_ids": target_agent_ids,
+                "reply_to_message_id": reply_to,
+            },
+        )
+        resolved = await reply_service.resolve_for_reply(
+            thread_id=str(thread_id),
+            reply_message_id=msg_id,
+            from_agent=from_agent,
+            in_reply_to=reply_to,
+            correlation_id=correlation_id or None,
+        )
+        obligations = []
+        if target_agent_ids:
+            obligations = await reply_service.create_obligations(
+                thread_id=str(thread_id),
+                source_message_id=msg_id,
+                target_agent_ids=target_agent_ids,
+                source_agent_id=from_agent,
+                requires_response_by=deadline,
+                metadata={
+                    "origin": "tool",
+                    "reply_kind": reply_kind,
+                    "reply_to_message_id": reply_to,
+                    "correlation_id": f"reply:{thread_id}:{msg_id}",
+                },
+            )
+            thread = await store.get_thread(str(thread_id))
+            if thread is not None:
+                for obligation in obligations:
+                    await dispatch_squad_turn(
+                        target_agent_id=obligation.target_agent_id,
+                        thread=thread,
+                        thread_store=store,
+                        query_text=content,
+                        parent_message_id=f"msg-{msg_id}",
+                        metadata={
+                            "from_agent": from_agent,
+                            "source": "squad_reply",
+                            "delivery_intent": "reply_required",
+                            "reply_contract_version": "thread_reply.v1",
+                            "reply_kind": reply_kind,
+                            "reply_to_message_id": reply_to,
+                            "correlation_id": obligation.obligation_key,
+                        },
+                        application=ctx.application,
+                        user_id=ctx.user_id,
+                        chat_id=ctx.chat_id,
+                        delegation_chain=[*(ctx.delegation_chain or []), from_agent],
+                        delegation_request_id=obligation.obligation_key,
+                        delegation_origin_agent_id=from_agent,
+                    )
+        await store.notify_event(
+            thread_id=str(thread_id),
+            event_type="synthesis_created" if reply_kind == "synthesis" else "reply_added",
+            data={
+                "message_id": msg_id,
+                "from_agent": from_agent,
+                "in_reply_to": reply_to,
+                "target_agent_ids": target_agent_ids,
+            },
+        )
+    except ThreadReplyError as exc:
+        return AgentToolResult(tool="squad_reply", success=False, output=f"{exc.code}: {exc.message}")
+    except (KeyError, ValueError) as exc:
+        return AgentToolResult(tool="squad_reply", success=False, output=f"Reply failed: {exc}")
+    return AgentToolResult(
+        tool="squad_reply",
+        success=True,
+        output=f"Reply posted to thread '{thread_id}' (msg-{msg_id}).",
+        data={
+            "thread_id": str(thread_id),
+            "message_id": msg_id,
+            "resolved_obligations": [item.to_dict() for item in resolved],
+            "created_obligations": [item.to_dict() for item in obligations],
+        },
+        data_format="json",
+    )
+
+
+async def _handle_squad_request_input(params: dict, ctx: ToolContext) -> AgentToolResult:
+    targets = _normalize_tool_targets(params.get("target_agent_ids"))
+    question = str(params.get("question") or "").strip()
+    if not targets or not question:
+        return AgentToolResult(
+            tool="squad_request_input",
+            success=False,
+            output="Missing 'target_agent_ids' or 'question'.",
+        )
+    reason = str(params.get("reason") or "").strip()
+    urgency = str(params.get("urgency") or "").strip()
+    content_parts = [question]
+    if reason:
+        content_parts.append(f"\nReason: {reason}")
+    if urgency:
+        content_parts.append(f"\nUrgency: {urgency}")
+    result = await _handle_squad_reply(
+        {
+            "thread_id": params.get("thread_id"),
+            "content": "\n".join(content_parts),
+            "reply_to_message_id": params.get("parent_message_id") or ctx.parent_message_id,
+            "target_agent_ids": targets,
+            "reply_kind": "agent_request",
+            "requires_response_by": params.get("requires_response_by"),
+            "metadata": {"reason": reason, "urgency": urgency, "source": "squad_request_input"},
+        },
+        ctx,
+    )
+    result.tool = "squad_request_input"
+    return result
+
+
+async def _handle_squad_follow_up(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_inter_agent_available("squad_follow_up")
+    if err:
+        return err
+    thread_id = params.get("thread_id") or ctx.squad_thread_id
+    obligation_id = params.get("obligation_id")
+    if not thread_id or obligation_id is None:
+        return AgentToolResult(tool="squad_follow_up", success=False, output="Missing 'thread_id' or 'obligation_id'.")
+    access_err = await _require_squad_thread_access(
+        tool="squad_follow_up",
+        ctx=ctx,
+        thread_id=str(thread_id),
+        require_write=True,
+    )
+    if access_err:
+        return access_err
+    from koda.squads import ThreadReplyError, get_squad_thread_store, get_thread_reply_service
+
+    store = get_squad_thread_store()
+    reply_service = get_thread_reply_service(store)
+    if store is None or reply_service is None:
+        return AgentToolResult(tool="squad_follow_up", success=False, output="Thread reply service unavailable.")
+    note = str(params.get("note") or "").strip()
+    actor_id = _ctx_agent_id(ctx)
+    try:
+        obligation = await reply_service.follow_up(
+            thread_id=str(thread_id),
+            obligation_id=int(obligation_id),
+            actor_id=actor_id,
+            note=note,
+        )
+        msg_id = await store.post_thread_message(
+            thread_id=str(thread_id),
+            from_agent=actor_id,
+            content=note or f"Follow-up requested from {obligation.target_agent_id}.",
+            message_type="agent_followup",
+            metadata={
+                "reply_contract_version": "thread_reply.v1",
+                "reply_kind": "agent_followup",
+                "obligation_id": obligation.id,
+                "target_agent_id": obligation.target_agent_id,
+                "source": "squad_follow_up",
+            },
+            to_agent_ids=[obligation.target_agent_id],
+            in_reply_to=obligation.source_message_id,
+            correlation_id=obligation.obligation_key,
+        )
+        await store.notify_event(
+            thread_id=str(thread_id),
+            event_type="reply_obligation_updated",
+            data={"message_id": msg_id, "obligations": [obligation.to_dict()]},
+        )
+    except ThreadReplyError as exc:
+        return AgentToolResult(tool="squad_follow_up", success=False, output=f"{exc.code}: {exc.message}")
+    return AgentToolResult(
+        tool="squad_follow_up",
+        success=True,
+        output=f"Follow-up sent for obligation {obligation.id}.",
+        data=obligation.to_dict(),
+        data_format="json",
+    )
+
+
+async def _handle_squad_synthesize(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_inter_agent_available("squad_synthesize")
+    if err:
+        return err
+    thread_id = params.get("thread_id") or ctx.squad_thread_id
+    content = str(params.get("content") or "").strip()
+    if not thread_id or not content:
+        return AgentToolResult(tool="squad_synthesize", success=False, output="Missing 'thread_id' or 'content'.")
+    access_err = await _require_squad_thread_access(
+        tool="squad_synthesize",
+        ctx=ctx,
+        thread_id=str(thread_id),
+        require_write=True,
+    )
+    if access_err:
+        return access_err
+    from koda.squads import get_squad_thread_store
+
+    store = get_squad_thread_store()
+    if store is None:
+        return AgentToolResult(tool="squad_synthesize", success=False, output="Squad thread store unavailable.")
+    thread = await store.get_thread(str(thread_id))
+    actor_id = _ctx_agent_id(ctx)
+    if thread is None:
+        return AgentToolResult(
+            tool="squad_synthesize",
+            success=False,
+            output="reply.parent_not_found: thread not found.",
+        )
+    if thread.coordinator_agent_id and actor_id != thread.coordinator_agent_id:
+        return AgentToolResult(
+            tool="squad_synthesize",
+            success=False,
+            output="reply.synthesis_blocked: only the coordinator can finalize synthesis.",
+        )
+    if not thread.coordinator_agent_id:
+        await store.post_thread_message(
+            thread_id=str(thread_id),
+            from_agent="system",
+            content="[synthesis_blocked] thread has no coordinator",
+            message_type="system_event",
+            metadata={"event_type": "synthesis_blocked", "actor_id": actor_id},
+        )
+        return AgentToolResult(
+            tool="squad_synthesize",
+            success=False,
+            output="reply.synthesis_blocked: thread has no coordinator.",
+        )
+    result = await _handle_squad_reply(
+        {
+            "thread_id": str(thread_id),
+            "content": content,
+            "reply_to_message_id": params.get("reply_to_message_id") or ctx.parent_message_id,
+            "reply_kind": "synthesis",
+            "metadata": {"synthesis_state": "final", **dict(params.get("metadata") or {})},
+        },
+        ctx,
+    )
+    result.tool = "squad_synthesize"
+    return result
+
+
 async def _handle_squad_thread_history(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("squad_thread_history")
     if err:
@@ -3360,6 +3900,17 @@ async def _handle_squad_thread_history(params: dict, ctx: ToolContext) -> AgentT
     thread_id = params.get("thread_id", "")
     if not thread_id:
         return AgentToolResult(tool="squad_thread_history", success=False, output="Missing 'thread_id'.")
+    from koda.squads import SquadAccessError, SquadResourceNotFoundError, get_squad_access_service
+
+    access_service = get_squad_access_service()
+    if access_service is None:
+        return AgentToolResult(tool="squad_thread_history", success=False, output="Squad access service unavailable.")
+    try:
+        access = await access_service.require_thread_access(thread_id=thread_id, agent_id=_ctx_agent_id(ctx))
+    except SquadResourceNotFoundError as exc:
+        return AgentToolResult(tool="squad_thread_history", success=False, output=str(exc))
+    except SquadAccessError as exc:
+        return AgentToolResult(tool="squad_thread_history", success=False, output=f"Forbidden: {exc}")
     limit = min(int(params.get("limit", 30)), 200)
     before_id = params.get("before_id")
 
@@ -3374,6 +3925,7 @@ async def _handle_squad_thread_history(params: dict, ctx: ToolContext) -> AgentT
             thread_id=thread_id,
             limit=limit,
             before_id=int(before_id) if before_id is not None else None,
+            visible_after=None if access.is_coordinator else access.joined_at,
         )
     except (ValueError, KeyError) as exc:
         return AgentToolResult(tool="squad_thread_history", success=False, output=f"Read failed: {exc}")
@@ -3419,8 +3971,15 @@ async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentTool
             success=False,
             output="Missing 'thread_id' or 'title'.",
         )
+    access_err = await _require_squad_thread_access(
+        tool="squad_task_create",
+        ctx=ctx,
+        thread_id=thread_id,
+        require_write=True,
+    )
+    if access_err:
+        return access_err
 
-    from koda.config import AGENT_ID
     from koda.squads import get_squad_task_store
 
     store = get_squad_task_store()
@@ -3431,7 +3990,7 @@ async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentTool
         task = await store.create_task(
             thread_id=thread_id,
             title=title,
-            assigner_agent_id=AGENT_ID or "default",
+            assigner_agent_id=_ctx_agent_id(ctx),
             description=str(params.get("description", "")),
             kind=str(params.get("kind", "")),
             parent_task_id=params.get("parent_task_id") or None,
@@ -3462,8 +4021,17 @@ async def _handle_squad_task_claim(params: dict, ctx: ToolContext) -> AgentToolR
     if not task_id:
         return AgentToolResult(tool="squad_task_claim", success=False, output="Missing 'task_id'.")
     ttl = min(int(params.get("ttl_seconds", 300)), 3600)
+    coordinator_override = bool(params.get("coordinator_override", False))
+    access_err = await _require_squad_task_access(
+        tool="squad_task_claim",
+        ctx=ctx,
+        task_id=task_id,
+        require_write=True,
+        coordinator_override=coordinator_override,
+    )
+    if access_err:
+        return access_err
 
-    from koda.config import AGENT_ID
     from koda.squads import TaskClaimConflictError, TaskNotFoundError, get_squad_task_store
 
     store = get_squad_task_store()
@@ -3471,7 +4039,12 @@ async def _handle_squad_task_claim(params: dict, ctx: ToolContext) -> AgentToolR
         return AgentToolResult(tool="squad_task_claim", success=False, output="Squad task store unavailable.")
 
     try:
-        task = await store.claim_task(task_id=task_id, agent_id=AGENT_ID or "default", ttl_seconds=ttl)
+        task = await store.claim_task(
+            task_id=task_id,
+            agent_id=_ctx_agent_id(ctx),
+            ttl_seconds=ttl,
+            coordinator_override=coordinator_override,
+        )
     except TaskNotFoundError:
         return AgentToolResult(tool="squad_task_claim", success=False, output=f"Task '{task_id}' not found.")
     except TaskClaimConflictError as exc:
@@ -3491,6 +4064,7 @@ async def _run_status_update(
     *,
     tool_name: str,
     params: dict,
+    ctx: ToolContext,
     new_status: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> AgentToolResult:
@@ -3501,11 +4075,21 @@ async def _run_status_update(
     target_status = new_status or params.get("new_status", "")
     if not task_id or not target_status:
         return AgentToolResult(tool=tool_name, success=False, output="Missing 'task_id' or 'new_status'.")
+    coordinator_override = bool(params.get("coordinator_override", False))
+    access_err = await _require_squad_task_access(
+        tool=tool_name,
+        ctx=ctx,
+        task_id=task_id,
+        require_write=True,
+        coordinator_override=coordinator_override,
+    )
+    if access_err:
+        return access_err
 
-    from koda.config import AGENT_ID
     from koda.squads import (
         IllegalTransitionError,
         StaleVersionError,
+        TaskDependencyError,
         TaskNotFoundError,
         TaskOwnershipError,
         get_squad_task_store,
@@ -3522,17 +4106,20 @@ async def _run_status_update(
         task = await store.update_task_status(
             task_id=task_id,
             new_status=target_status,
-            agent_id=AGENT_ID or "default",
+            agent_id=_ctx_agent_id(ctx),
             expected_version=int(expected_version) if expected_version is not None else None,
             error_message=extra.get("error_message") or params.get("error_message"),
             result_summary=extra.get("result_summary") or params.get("result_summary"),
             deliverables=extra.get("deliverables") or _string_list(params.get("deliverables")) or None,
             metadata_patch=metadata_patch if isinstance(metadata_patch, dict) else None,
+            coordinator_override=coordinator_override,
         )
     except TaskNotFoundError:
         return AgentToolResult(tool=tool_name, success=False, output=f"Task '{task_id}' not found.")
     except (IllegalTransitionError, ValueError) as exc:
         return AgentToolResult(tool=tool_name, success=False, output=f"Illegal transition: {exc}")
+    except TaskDependencyError as exc:
+        return AgentToolResult(tool=tool_name, success=False, output=f"Dependency blocked: {exc}")
     except StaleVersionError as exc:
         return AgentToolResult(tool=tool_name, success=False, output=f"Stale version: {exc}")
     except TaskOwnershipError as exc:
@@ -3547,7 +4134,7 @@ async def _run_status_update(
 
 
 async def _handle_squad_task_update(params: dict, ctx: ToolContext) -> AgentToolResult:
-    return await _run_status_update(tool_name="squad_task_update", params=params)
+    return await _run_status_update(tool_name="squad_task_update", params=params, ctx=ctx)
 
 
 async def _handle_squad_task_complete(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -3555,6 +4142,7 @@ async def _handle_squad_task_complete(params: dict, ctx: ToolContext) -> AgentTo
     return await _run_status_update(
         tool_name="squad_task_complete",
         params=params,
+        ctx=ctx,
         new_status="done",
         extra={
             "result_summary": params.get("result_summary"),
@@ -3570,6 +4158,7 @@ async def _handle_squad_task_escalate(params: dict, ctx: ToolContext) -> AgentTo
     return await _run_status_update(
         tool_name="squad_task_escalate",
         params=params,
+        ctx=ctx,
         new_status="escalated",
         extra={"error_message": reason},
     )
@@ -3586,6 +4175,9 @@ async def _handle_squad_context(params: dict, ctx: ToolContext) -> AgentToolResu
             success=False,
             output="Missing 'thread_id' (and ToolContext has no squad_thread_id).",
         )
+    access_err = await _require_squad_thread_access(tool="squad_context", ctx=ctx, thread_id=thread_id)
+    if access_err:
+        return access_err
     transcript_limit = min(int(params.get("transcript_limit", 8)), 50)
 
     from koda.config import AGENT_ID
@@ -3678,6 +4270,9 @@ async def _handle_squad_thread_overview(params: dict, ctx: ToolContext) -> Agent
             success=False,
             output="Missing 'thread_id' (and ToolContext has no squad_thread_id).",
         )
+    access_err = await _require_squad_thread_access(tool="squad_thread_overview", ctx=ctx, thread_id=thread_id)
+    if access_err:
+        return access_err
     message_limit = min(max(int(params.get("message_limit", 30)), 1), 200)
     task_limit = min(max(int(params.get("task_limit", 30)), 1), 200)
 
@@ -3745,6 +4340,61 @@ async def _handle_squad_thread_overview(params: dict, ctx: ToolContext) -> Agent
     )
 
 
+async def _handle_squad_artifact_list(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_inter_agent_available("squad_artifact_list")
+    if err:
+        return err
+    thread_id = params.get("thread_id") or ctx.squad_thread_id
+    if not thread_id:
+        return AgentToolResult(
+            tool="squad_artifact_list",
+            success=False,
+            output="Missing 'thread_id' (and ToolContext has no squad_thread_id).",
+        )
+    access_err = await _require_squad_thread_access(tool="squad_artifact_list", ctx=ctx, thread_id=thread_id)
+    if access_err:
+        return access_err
+    from koda.squads import get_squad_artifact_store
+
+    store = get_squad_artifact_store()
+    if store is None:
+        return AgentToolResult(tool="squad_artifact_list", success=False, output="Squad artifact store unavailable.")
+    artifacts = await store.list_for_thread(thread_id=thread_id)
+    if not artifacts:
+        return AgentToolResult(
+            tool="squad_artifact_list",
+            success=True,
+            output="(no artifacts)",
+            data={"thread_id": thread_id, "artifacts": []},
+        )
+    lines = [f"Artifacts for thread '{thread_id}' ({len(artifacts)}):"]
+    payload = []
+    for artifact in artifacts:
+        lines.append(
+            f"  {artifact.artifact_id} v{artifact.version} [{artifact.kind or 'artifact'}] "
+            f"owner={artifact.owner_agent_id} path={artifact.path_or_uri}"
+        )
+        payload.append(
+            {
+                "artifact_id": artifact.artifact_id,
+                "thread_id": artifact.thread_id,
+                "task_id": artifact.task_id,
+                "owner_agent_id": artifact.owner_agent_id,
+                "version": artifact.version,
+                "kind": artifact.kind,
+                "path_or_uri": artifact.path_or_uri,
+                "visible_to_squad": artifact.visible_to_squad,
+                "metadata": artifact.metadata,
+            }
+        )
+    return AgentToolResult(
+        tool="squad_artifact_list",
+        success=True,
+        output="\n".join(lines),
+        data={"thread_id": thread_id, "artifacts": payload},
+    )
+
+
 async def _handle_squad_inbox_drain(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("squad_inbox_drain")
     if err:
@@ -3779,6 +4429,7 @@ async def _handle_squad_inbox_drain(params: dict, ctx: ToolContext) -> AgentTool
                 "timestamp": msg.timestamp,
             }
         )
+        await bus.ack(agent_id, msg.message_id)
     if not drained:
         return AgentToolResult(
             tool="squad_inbox_drain",
@@ -3819,8 +4470,16 @@ async def _handle_squad_telegram_post(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="Missing 'thread_id' or 'content'.",
         )
+    access_err = await _require_squad_thread_access(
+        tool="squad_telegram_post",
+        ctx=ctx,
+        thread_id=thread_id,
+        require_write=True,
+    )
+    if access_err:
+        return access_err
 
-    from koda.config import AGENT_ID, AGENT_NAME, AGENT_TOKEN
+    from koda.config import AGENT_NAME, AGENT_TOKEN
     from koda.squads import (
         TaskNotFoundError,  # noqa: F401  - imported for type-check parity
         get_outbound_bot,
@@ -3863,15 +4522,15 @@ async def _handle_squad_telegram_post(params: dict, ctx: ToolContext) -> AgentTo
     if isinstance(raw_label, str) and raw_label.strip():
         agent_label: str | None = raw_label.strip()
     else:
-        agent_label = AGENT_NAME or AGENT_ID or None
+        agent_label = AGENT_NAME or _ctx_agent_id(ctx) or None
 
     metadata = {
-        "agent_id": AGENT_ID,
+        "agent_id": _ctx_agent_id(ctx),
         "agent_label": agent_label,
     }
     msg_id = await store.post_thread_message(
         thread_id=thread_id,
-        from_agent=AGENT_ID or "default",
+        from_agent=_ctx_agent_id(ctx),
         content=content,
         message_type="agent_text",
         metadata=metadata,
@@ -3905,12 +4564,19 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
     if err:
         return err
     squad_id = params.get("squad_id", "")
+    workspace_id = params.get("workspace_id", "")
     raw_chat = params.get("telegram_chat_id")
-    if not squad_id or raw_chat is None:
+    if not squad_id or not workspace_id or raw_chat is None:
         return AgentToolResult(
             tool="squad_telegram_bind",
             success=False,
-            output="Missing 'squad_id' or 'telegram_chat_id'.",
+            output="Missing 'workspace_id', 'squad_id', or 'telegram_chat_id'.",
+        )
+    if not bool(params.get("is_forum", False)):
+        return AgentToolResult(
+            tool="squad_telegram_bind",
+            success=False,
+            output="Telegram squad binding requires a forum-enabled supergroup.",
         )
     try:
         chat_id = int(raw_chat)
@@ -3937,6 +4603,9 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
             bound_by = int(raw_user)
         except (TypeError, ValueError):
             bound_by = None
+    raw_metadata = params.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    metadata["workspace_id"] = str(workspace_id)
     try:
         binding = await service.bind(
             squad_id=squad_id,
@@ -3945,7 +4614,7 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
             is_forum=bool(params.get("is_forum", False)),
             bound_by_user_id=bound_by if bound_by is not None else ctx.user_id,
             force=bool(params.get("force", False)),
-            metadata=params.get("metadata") if isinstance(params.get("metadata"), dict) else None,
+            metadata=metadata,
         )
     except TelegramBindingConflictError as exc:
         return AgentToolResult(tool="squad_telegram_bind", success=False, output=str(exc))
@@ -4134,10 +4803,16 @@ async def _handle_squad_coordinator_elect(params: dict, ctx: ToolContext) -> Age
     )
     force_replace = bool(params.get("force_replace", False))
     reason = params.get("reason") if isinstance(params.get("reason"), str) else None
-    validate_tool_ids = params.get("validate_tool_ids")
-    agent_spec: dict[str, Any] | None = None
-    if isinstance(validate_tool_ids, list):
-        agent_spec = {"tool_policy": {"allowed_tool_ids": [str(x) for x in validate_tool_ids]}}
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        agent_spec = get_control_plane_manager().get_agent_spec(agent_id)
+    except Exception as exc:
+        return AgentToolResult(
+            tool="squad_coordinator_elect",
+            success=False,
+            output=f"Election failed: unable to load real AgentSpec for {agent_id!r}: {exc}",
+        )
 
     try:
         state = await service.elect(
@@ -4284,6 +4959,18 @@ async def _handle_squad_capabilities(params: dict, ctx: ToolContext) -> AgentToo
     squad_id = params.get("squad_id", "")
     if not squad_id:
         return AgentToolResult(tool="squad_capabilities", success=False, output="Missing 'squad_id'.")
+    if ctx.squad_thread_id:
+        from koda.squads import SquadAccessError, get_squad_access_service
+
+        access = get_squad_access_service()
+        if access is None:
+            return AgentToolResult(tool="squad_capabilities", success=False, output="Squad access service unavailable.")
+        try:
+            grant = await access.require_thread_access(thread_id=ctx.squad_thread_id, agent_id=_ctx_agent_id(ctx))
+        except SquadAccessError as exc:
+            return AgentToolResult(tool="squad_capabilities", success=False, output=f"Forbidden: {exc}")
+        if grant.thread.squad_id != squad_id:
+            return AgentToolResult(tool="squad_capabilities", success=False, output="Forbidden: squad mismatch.")
 
     from koda.squads import format_capability_block, get_capability_cache
 
@@ -4323,6 +5010,16 @@ async def _handle_squad_task_list(params: dict, ctx: ToolContext) -> AgentToolRe
             tool="squad_task_list",
             success=False,
             output="Provide 'thread_id' or 'assigned_agent_id'.",
+        )
+    if thread_id:
+        access_err = await _require_squad_thread_access(tool="squad_task_list", ctx=ctx, thread_id=thread_id)
+        if access_err:
+            return access_err
+    elif assigned_agent_id != _ctx_agent_id(ctx):
+        return AgentToolResult(
+            tool="squad_task_list",
+            success=False,
+            output="Forbidden: assigned_agent_id listing is limited to the current agent unless thread_id is provided.",
         )
     raw_status = params.get("status")
     status_filter: str | list[str] | None
@@ -4649,11 +5346,16 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "workflow_delete": _handle_workflow_delete,
     "agent_send": _handle_agent_send,
     "agent_receive": _handle_agent_receive,
+    "task": _handle_task,
     "agent_delegate": _handle_agent_delegate,
     "agent_list_agents": _handle_agent_list_agents,
     "agent_broadcast": _handle_agent_broadcast,
     "squad_thread_create": _handle_squad_thread_create,
     "squad_post": _handle_squad_post,
+    "squad_reply": _handle_squad_reply,
+    "squad_request_input": _handle_squad_request_input,
+    "squad_follow_up": _handle_squad_follow_up,
+    "squad_synthesize": _handle_squad_synthesize,
     "squad_thread_history": _handle_squad_thread_history,
     "squad_task_create": _handle_squad_task_create,
     "squad_task_claim": _handle_squad_task_claim,
@@ -4674,6 +5376,7 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "squad_inbox_drain": _handle_squad_inbox_drain,
     "squad_dashboard_overview": _handle_squad_dashboard_overview,
     "squad_thread_overview": _handle_squad_thread_overview,
+    "squad_artifact_list": _handle_squad_artifact_list,
     "webhook_register": _handle_webhook_register,
     "webhook_unregister": _handle_webhook_unregister,
     "webhook_list": _handle_webhook_list,

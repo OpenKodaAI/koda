@@ -19,9 +19,9 @@ export function RailSearch({ value, onChange, placeholder, className }: RailSear
   return (
     <label
       className={cn(
-        "flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] bg-[var(--panel-soft)] px-3",
-        "transition-[background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--accent-muted)]",
+        "flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3",
+        "transition-[background-color,border-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--border-strong)]",
         className,
       )}
     >

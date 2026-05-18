@@ -3,13 +3,13 @@
 Adapts the Telegram-native approval queue (``koda.utils.approval``) into a
 read / resolve / stream surface that the dashboard can drive. Pending
 approvals are still owned by ``koda.utils.approval`` (in-memory +
-``state.pending_approvals`` JSON). This module provides three capabilities on
+``state.pending_approvals`` primary backend/JSON fallback). This module provides three capabilities on
 top of that store:
 
 * ``list_pending_for_session`` — enumerate pending agent-cmd approvals
   scoped to an agent + session.
-* ``resolve_approval`` — submit a decision (``approved``/``denied``/
-  ``approved_scope``) from outside Telegram.
+* ``resolve_approval`` — submit a decision (``approve``/``edit``/
+  ``reject``/``respond`` plus legacy aliases) from outside Telegram.
 * ``publish_approval_required`` / ``publish_approval_resolved`` — emit
   runtime SSE events so connected dashboard clients can react in real
   time.
@@ -65,6 +65,15 @@ def _approval_summary(op_id: str, op: dict[str, Any]) -> dict[str, Any]:
         "task_id": task_id,
         "description": str(op.get("description") or ""),
         "preview_text": str(op.get("preview_text") or "") or None,
+        "tool_id": str(op.get("tool_id") or "").strip() or None,
+        "original_params": op.get("original_params") if isinstance(op.get("original_params"), dict) else {},
+        "args_schema": op.get("args_schema") if isinstance(op.get("args_schema"), dict) else {},
+        "risk_class": str(op.get("risk_class") or "").strip() or None,
+        "trace_id": str(op.get("trace_id") or "").strip() or None,
+        "run_graph_node_id": str(op.get("run_graph_node_id") or "").strip() or None,
+        "edited_params": op.get("edited_params") if isinstance(op.get("edited_params"), dict) else None,
+        "response_text": str(op.get("response_text") or "") or None,
+        "rationale": str(op.get("rationale") or "") or None,
         "requests": requests,
         "created_at": op.get("timestamp"),
         "decision": op.get("decision"),
@@ -97,7 +106,47 @@ def _serialize_request(request: dict[str, Any]) -> dict[str, Any]:
         payload["envelope"] = envelope_payload
     if scope_payload:
         payload["approval_scope"] = scope_payload
+    for key in ("tool_id", "original_params", "args_schema", "risk_class", "trace_id", "run_graph_node_id"):
+        value = request.get(key)
+        if value not in (None, {}, [], ""):
+            payload[key] = value
     return payload
+
+
+def _validate_params_against_schema(params: dict[str, Any], schema: dict[str, Any]) -> None:
+    """Small JSON-Schema subset validator for human-edited tool args."""
+    if not schema:
+        return
+    if schema.get("type") not in (None, "object"):
+        raise ValueError("approval edited_params schema must be an object schema")
+    required = schema.get("required")
+    if isinstance(required, list):
+        for key in required:
+            if isinstance(key, str) and key not in params:
+                raise ValueError(f"edited_params missing required field: {key}")
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return
+    type_checks = {
+        "string": lambda value: isinstance(value, str),
+        "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+        "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+        "boolean": lambda value: isinstance(value, bool),
+        "object": lambda value: isinstance(value, dict),
+        "array": lambda value: isinstance(value, list),
+    }
+    for key, value in params.items():
+        prop = properties.get(key)
+        if not isinstance(prop, dict):
+            continue
+        expected = prop.get("type")
+        if isinstance(expected, list):
+            if "null" in expected and value is None:
+                continue
+            expected = next((item for item in expected if item != "null"), None)
+        check = type_checks.get(str(expected))
+        if check is not None and not check(value):
+            raise ValueError(f"edited_params field {key!r} must be {expected}")
 
 
 def list_pending_for_session(
@@ -150,12 +199,14 @@ async def resolve_approval(
     approval_id: str,
     decision: str,
     rationale: str | None = None,
+    edited_params: dict[str, Any] | None = None,
+    response_text: str | None = None,
 ) -> dict[str, Any]:
     """Resolve a pending approval from the dashboard.
 
-    Valid decisions mirror the Telegram callback: ``approved``,
-    ``approved_scope``, ``denied``. Returns the updated summary or raises
-    ``KeyError`` when the approval id is unknown.
+    Valid decisions include schema-driven dashboard decisions and legacy
+    Telegram aliases. Returns the updated summary or raises ``KeyError`` when
+    the approval id is unknown.
     """
     from koda.utils.approval import (
         _PENDING_AGENT_CMD_OPS,
@@ -173,6 +224,12 @@ async def resolve_approval(
         "deny": "denied",
         "denied": "denied",
         "reject": "denied",
+        "rejected": "denied",
+        "edit": "edited",
+        "edited": "edited",
+        "respond": "responded",
+        "response": "responded",
+        "responded": "responded",
     }
     resolved_decision = mapping.get(normalized)
     if resolved_decision is None:
@@ -181,6 +238,14 @@ async def resolve_approval(
     op = _PENDING_AGENT_CMD_OPS.get(approval_id)
     if op is None:
         raise KeyError(approval_id)
+    if resolved_decision == "edited":
+        if not isinstance(edited_params, dict):
+            raise ValueError("edited_params is required for edit decisions")
+        schema_value = op.get("args_schema")
+        schema: dict[str, Any] = dict(schema_value) if isinstance(schema_value, dict) else {}
+        _validate_params_against_schema(edited_params, schema)
+    if resolved_decision == "responded" and not str(response_text or "").strip():
+        raise ValueError("response_text is required for respond decisions")
 
     grants: list[dict[str, Any]] = []
     if resolved_decision in {"approved", "approved_scope"}:
@@ -194,11 +259,22 @@ async def resolve_approval(
             issued_by_op_id=approval_id,
         )
 
-    resolve_agent_cmd_approval(approval_id, resolved_decision, grants=grants)
+    resolve_agent_cmd_approval(
+        approval_id,
+        resolved_decision,
+        grants=grants,
+        edited_params=edited_params if resolved_decision == "edited" else None,
+        response_text=str(response_text or "").strip() if resolved_decision == "responded" else None,
+        rationale=rationale,
+    )
 
     summary = _approval_summary(approval_id, op)
     summary["decision"] = resolved_decision
     summary["rationale"] = rationale or None
+    if resolved_decision == "edited":
+        summary["edited_params"] = edited_params
+    if resolved_decision == "responded":
+        summary["response_text"] = str(response_text or "").strip()
     summary["grants_issued"] = len(grants)
     await publish_approval_resolved(
         approval_id=approval_id,

@@ -2032,12 +2032,9 @@ export function AgentCatalog({
                       loading={organizationBusy}
                       onClick={() => void handleSubmitOrganizationForm()}
                       disabled={organizationBusy}
+                      aria-label={organizationBusy ? tl("Salvando...") : undefined}
                     >
-                      {organizationBusy
-                        ? tl("Salvando...")
-                        : renderedOrganizationForm.mode === "create"
-                          ? tl("Criar")
-                          : tl("Salvar")}
+                      {renderedOrganizationForm.mode === "create" ? tl("Criar") : tl("Salvar")}
                     </ActionButton>
                   </div>
                 </div>

@@ -1,27 +1,60 @@
 import { expect, test } from "@playwright/test";
+import {
+  attachCheckpoint,
+  E2E_EMAIL,
+  E2E_PASSWORD,
+  STORAGE_STATE,
+  expectNoConsoleIssues,
+  expectNoHorizontalOverflow,
+  gotoHealthy,
+  installConsoleGuard,
+  sameOriginHeaders,
+} from "./helpers/koda-e2e";
 
 /**
- * Smoke specs are tagged @smoke so they run on every PR; they require no
- * authenticated state and no Python backend. They exist to prove the
- * toolchain is wired correctly.
+ * Authenticated smoke specs prove the full dashboard shell works against the
+ * local Docker E2E stack.
  */
 
 test.describe("smoke @smoke", () => {
-  test("public landing page renders without console errors", async ({ page }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(String(err)));
-    page.on("console", (msg) => {
-      if (msg.type() === "error") errors.push(msg.text());
-    });
-
-    await page.goto("/");
+  test("dashboard home renders without console errors or overflow", async ({ page }, testInfo) => {
+    const consoleIssues = installConsoleGuard(page);
+    await gotoHealthy(page, "/");
     await expect(page).toHaveTitle(/koda/i);
-    expect(errors).toHaveLength(0);
+    await expectNoHorizontalOverflow(page);
+    await attachCheckpoint(page, testInfo, "home");
+    expectNoConsoleIssues(consoleIssues);
   });
 
-  test("auth bootstrap page is reachable", async ({ page }) => {
-    const response = await page.goto("/setup");
-    // Either the page renders (200) or redirects to a known route.
-    expect([200, 302, 307, 308]).toContain(response?.status() ?? 200);
+  test("auth session can sign out and sign back in", async ({ page, request }) => {
+    const consoleIssues = installConsoleGuard(page);
+    await gotoHealthy(page, "/");
+    await page.getByTestId("account-menu-trigger").click();
+    await page.getByTestId("account-menu-sign-out").click();
+
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await request.get("/api/health")).ok();
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 45_000 },
+      )
+      .toBe(true);
+    await request.post("/api/control-plane/auth/logout", {
+      data: {},
+      headers: sameOriginHeaders(),
+    });
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => undefined);
+    await page.locator("#login-identifier").fill(E2E_EMAIL);
+    await page.locator("#login-password").fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: /sign in|entrar|login/i }).click();
+    await expect(page).toHaveURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 });
+    await page.context().storageState({ path: STORAGE_STATE });
+    expectNoConsoleIssues(consoleIssues);
   });
 });

@@ -3,20 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { LogOut, User } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar } from "@/components/ui/avatar";
+import { OperatorAvatar, useStoredOperatorAvatar } from "@/components/ui/avatar-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { useOptionalAuth, type AuthOperator } from "@/components/providers/auth-provider";
+import { useOptionalAuth } from "@/components/providers/auth-provider";
 import { cn } from "@/lib/utils";
-
-function deriveInitial(operator: AuthOperator): string {
-  const candidate =
-    operator.display_name?.trim() ||
-    operator.email?.trim() ||
-    operator.username?.trim() ||
-    "";
-  return candidate.charAt(0).toUpperCase() || "?";
-}
 
 export interface AccountMenuProps {
   className?: string;
@@ -25,11 +17,11 @@ export interface AccountMenuProps {
 export function AccountMenu({ className }: AccountMenuProps) {
   const { t } = useAppI18n();
   const auth = useOptionalAuth();
+  const selectedAvatarId = useStoredOperatorAvatar();
   const [open, setOpen] = useState(false);
 
   if (!auth?.operator) return null;
   const operator = auth.operator;
-  const initial = deriveInitial(operator);
   const label =
     operator.display_name?.trim() ||
     operator.email?.trim() ||
@@ -53,10 +45,18 @@ export function AccountMenu({ className }: AccountMenuProps) {
           )}
           data-testid="account-menu-trigger"
         >
-          <Avatar className="h-7 w-7">
-            <AvatarFallback className="bg-transparent text-[12px] font-medium text-[var(--text-primary)] border-none">
-              {initial}
-            </AvatarFallback>
+          <Avatar className="h-7 w-7 overflow-hidden rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)]">
+            {operator.profile_photo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={operator.profile_photo_url}
+                alt=""
+                className="h-full w-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <OperatorAvatar avatarId={selectedAvatarId} size={28} className="h-full w-full" />
+            )}
           </Avatar>
         </button>
       </PopoverTrigger>

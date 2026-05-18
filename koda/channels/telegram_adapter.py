@@ -9,7 +9,9 @@ so that the :class:`ChannelManager` can wire a unified callback if needed.
 
 from __future__ import annotations
 
+import inspect
 import time
+from contextlib import suppress
 from typing import Any
 
 from koda.channels.base import ChannelAdapter
@@ -128,6 +130,19 @@ class TelegramAdapter(ChannelAdapter):
         if user is None or chat is None:
             return None
 
+        timestamp = time.time()
+        date = getattr(msg, "date", None)
+        if date is not None:
+            with suppress(Exception):
+                candidate = date.timestamp()
+                if inspect.iscoroutine(candidate):
+                    with suppress(Exception):
+                        candidate.close()
+                elif inspect.isawaitable(candidate):
+                    pass
+                elif isinstance(candidate, (int, float)):
+                    timestamp = float(candidate)
+
         return IncomingMessage(
             id=str(msg.message_id),
             channel=ChannelIdentity(
@@ -138,7 +153,7 @@ class TelegramAdapter(ChannelAdapter):
                 is_group=chat.type in ("group", "supergroup"),
             ),
             text=msg.text or msg.caption or "",
-            timestamp=msg.date.timestamp() if msg.date else time.time(),
+            timestamp=timestamp,
             reply_to_id=str(msg.reply_to_message.message_id) if msg.reply_to_message else None,
             raw_platform_data=update,
         )

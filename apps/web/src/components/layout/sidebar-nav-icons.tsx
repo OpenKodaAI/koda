@@ -185,6 +185,41 @@ export function MemoryNavIcon(props: SidebarIconProps) {
   );
 }
 
+export function EvaluationsNavIcon(props: SidebarIconProps) {
+  return (
+    <BaseIcon {...props}>
+      <rect
+        x="7.25"
+        y="3"
+        width="5.5"
+        height="3.25"
+        rx="1"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M8.35 6.25V8.1C8.35 8.55 8.2 8.975 7.925 9.325L4.925 13.125C3.825 14.525 4.825 16.5833 6.606 16.5833H13.394C15.175 16.5833 16.175 14.525 15.075 13.125L12.075 9.325C11.8 8.975 11.65 8.55 11.65 8.1V6.25"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.75 13.25H13.25"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.15 11.25H11.85"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </BaseIcon>
+  );
+}
+
 export function MemoryCurationNavIcon(props: SidebarIconProps) {
   return (
     <BaseIcon {...props}>
@@ -246,4 +281,3 @@ export function RoutinesNavIcon(props: SidebarIconProps) {
     </BaseIcon>
   );
 }
-

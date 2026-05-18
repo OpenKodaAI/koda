@@ -555,6 +555,13 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
         feature_flag="inter_agent",
     ),
     CoreToolDefinition(
+        "task",
+        "Delegate Task",
+        "agent_comm",
+        "Launch one or more bounded child runs and wait for structured results.",
+        feature_flag="inter_agent",
+    ),
+    CoreToolDefinition(
         "agent_delegate",
         "Agent delegate",
         "agent_comm",
@@ -574,6 +581,34 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
         "Agent broadcast",
         "agent_comm",
         "Broadcast a message to all known agents.",
+        feature_flag="inter_agent",
+    ),
+    CoreToolDefinition(
+        "squad_reply",
+        "Squad reply",
+        "agent_comm",
+        "Reply inside the current squad thread and optionally require participant responses.",
+        feature_flag="inter_agent",
+    ),
+    CoreToolDefinition(
+        "squad_request_input",
+        "Squad request input",
+        "agent_comm",
+        "Ask one or more thread participants for a bounded contribution.",
+        feature_flag="inter_agent",
+    ),
+    CoreToolDefinition(
+        "squad_follow_up",
+        "Squad follow up",
+        "agent_comm",
+        "Send a limited follow-up for an open squad reply obligation.",
+        feature_flag="inter_agent",
+    ),
+    CoreToolDefinition(
+        "squad_synthesize",
+        "Squad synthesize",
+        "agent_comm",
+        "Record the coordinator's final synthesis for a thread reply cycle.",
         feature_flag="inter_agent",
     ),
 )
@@ -1096,6 +1131,10 @@ _DEFAULT_DENY_CORE_TOOL_IDS: frozenset[str] = frozenset(
         "agent_send",
         "agent_delegate",
         "agent_broadcast",
+        "squad_reply",
+        "squad_request_input",
+        "squad_follow_up",
+        "squad_synthesize",
         "browser_cookies",
         "browser_network_capture_start",
         "browser_network_capture_stop",
@@ -1629,9 +1668,18 @@ def _normalize_effect_tags(
         "broadcast",
     } or normalized_action.endswith(".send"):
         tags.add("external_communication")
-    if normalized_tool in {"agent_send", "agent_delegate", "agent_broadcast"}:
+    if normalized_tool in {
+        "agent_send",
+        "agent_delegate",
+        "agent_broadcast",
+        "task",
+        "squad_reply",
+        "squad_request_input",
+        "squad_follow_up",
+        "squad_synthesize",
+    }:
         tags.add("external_communication")
-    if normalized_tool == "agent_delegate":
+    if normalized_tool in {"agent_delegate", "task", "squad_request_input"}:
         tags.add("delegation")
 
     if normalized_tool in {"plugin_install", "plugin_uninstall", "plugin_reload"} or normalized_action in {
@@ -2081,6 +2129,20 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             resource_method=action_id,
         )
 
+    if tool == "task":
+        integration = _integration_defaults("agent_runtime")
+        return IntegrationActionResolution(
+            integration_id=integration.id,
+            action_id="child_run",
+            access_level="write",
+            transport=integration.transport,
+            risk_class="code_execution",
+            default_approval_mode="require_approval",
+            tool_id=tool,
+            auth_modes=integration.auth_modes,
+            resource_method="child_run",
+        )
+
     if tool.startswith("agent_"):
         integration = _integration_defaults("agent_runtime")
         action_id = tool.removeprefix("agent_")
@@ -2096,6 +2158,30 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             auth_modes=integration.auth_modes,
             path=str(payload.get("path") or "").strip() or None,
             resource_method=action_id,
+        )
+
+    try:
+        from koda.services.tool_registry import get_tool_definition
+
+        registry_definition = get_tool_definition(tool)
+    except Exception:
+        registry_definition = None
+    if registry_definition is not None and registry_definition.source == "skill_package":
+        package_id = str(registry_definition.ui_metadata.get("source_package_id") or "").strip()
+        integration = _integration_defaults(f"skill_package:{package_id}" if package_id else "skill_package")
+        approval_default = (
+            str(registry_definition.approval_default or integration.default_approval_mode).strip().lower()
+        )
+        return IntegrationActionResolution(
+            integration_id=integration.id,
+            action_id=tool,
+            access_level=str(registry_definition.access_level or "write"),
+            transport=integration.transport,
+            risk_class=str(registry_definition.risk_class or "unknown"),
+            default_approval_mode=approval_default,
+            tool_id=tool,
+            auth_modes=integration.auth_modes,
+            resource_method=tool,
         )
 
     integration = _integration_defaults(tool)

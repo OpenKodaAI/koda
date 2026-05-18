@@ -19,15 +19,22 @@ class _Request:
         *,
         query: dict[str, str] | None = None,
         payload: dict[str, object] | None = None,
+        body: bytes | None = None,
+        content_type: str = "application/json",
     ) -> None:
         self.query = query or {}
         self.match_info: dict[str, str] = {}
         self.headers: dict[str, str] = {}
         self.can_read_body = payload is not None
         self._payload = payload or {}
+        self._body = body or b""
+        self.content_type = content_type
 
     async def json(self) -> dict[str, object]:
         return dict(self._payload)
+
+    async def read(self) -> bytes:
+        return self._body
 
 
 @pytest.mark.asyncio
@@ -50,6 +57,75 @@ def test_control_plane_authorization_fails_closed_without_token() -> None:
     assert response is not None
     assert response.status == 401
     assert json.loads(response.text) == {"error": "operator session is required"}
+
+
+@pytest.mark.asyncio
+async def test_auth_profile_route_updates_display_name() -> None:
+    auth_service = MagicMock()
+    auth_service.update_profile.return_value = {
+        "ok": True,
+        "operator": {"id": "usr_1", "display_name": "Ryan"},
+    }
+    context = control_plane_api.OperatorAuthContext(
+        auth_kind="session",
+        subject_type="operator",
+        user_id="usr_1",
+        username="owner",
+        email="owner@example.com",
+        display_name="Owner",
+    )
+
+    with (
+        patch("koda.control_plane.api._auth_service", return_value=auth_service),
+        patch("koda.control_plane.api._require_auth_context", return_value=context),
+    ):
+        response = await control_plane_api.auth_update_profile(_Request(payload={"display_name": "Ryan"}))
+
+    assert json.loads(response.text)["operator"]["display_name"] == "Ryan"
+    auth_service.update_profile.assert_called_once_with(context, display_name="Ryan")
+
+
+@pytest.mark.asyncio
+async def test_auth_profile_photo_routes_cover_upload_get_delete() -> None:
+    auth_service = MagicMock()
+    auth_service.set_profile_photo.return_value = {
+        "ok": True,
+        "photoUrl": "/api/control-plane/auth/profile/photo?v=abc123",
+        "photoHash": "abc123",
+        "byteSize": 4,
+        "operator": {"id": "usr_1", "profile_photo_hash": "abc123"},
+    }
+    auth_service.get_profile_photo.return_value = (b"jpeg", "abc123")
+    auth_service.delete_profile_photo.return_value = {"ok": True, "removed": True, "operator": {"id": "usr_1"}}
+    context = control_plane_api.OperatorAuthContext(
+        auth_kind="session",
+        subject_type="operator",
+        user_id="usr_1",
+        username="owner",
+        email="owner@example.com",
+        display_name="Owner",
+    )
+
+    with (
+        patch("koda.control_plane.api._auth_service", return_value=auth_service),
+        patch("koda.control_plane.api._require_auth_context", return_value=context),
+    ):
+        upload_response = await control_plane_api.auth_upload_profile_photo(
+            _Request(body=b"jpeg", content_type="image/jpeg")
+        )
+        get_request = _Request(query={"v": "abc123"})
+        get_response = await control_plane_api.auth_get_profile_photo(get_request)
+        delete_response = await control_plane_api.auth_delete_profile_photo(_Request())
+
+    assert upload_response.status == 201
+    assert json.loads(upload_response.text)["photoHash"] == "abc123"
+    auth_service.set_profile_photo.assert_called_once_with(context, raw=b"jpeg")
+    assert get_response.status == 200
+    assert get_response.headers["ETag"] == '"abc123"'
+    assert get_response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    auth_service.get_profile_photo.assert_called_once_with(context, requested_hash="abc123")
+    assert json.loads(delete_response.text)["removed"] is True
+    auth_service.delete_profile_photo.assert_called_once_with(context)
 
 
 @pytest.mark.asyncio
@@ -81,6 +157,32 @@ async def test_onboarding_status_route_proxies_manager_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_onboarding_readiness_route_proxies_manager_payload() -> None:
+    manager = MagicMock()
+    manager.get_onboarding_readiness.return_value = {
+        "schema_version": "onboarding_readiness.v1",
+        "status": "pending",
+        "checks": [],
+        "summary": {"passed": 0, "warning": 0, "failed": 0, "pending": 1},
+    }
+
+    with patch("koda.control_plane.api._manager", return_value=manager):
+        response = await control_plane_api.onboarding_readiness(_Request())
+
+    payload = json.loads(response.text)
+    assert payload["schema_version"] == "onboarding_readiness.v1"
+    assert payload["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_onboarding_first_task_requires_operator_session() -> None:
+    with patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []):
+        response = await control_plane_api.onboarding_first_task(_Request(payload={}))
+
+    assert response.status == 401
+
+
+@pytest.mark.asyncio
 async def test_onboarding_bootstrap_route_is_deprecated() -> None:
     """/api/control-plane/onboarding/bootstrap was removed — the setup wizard
     no longer bundles provider/agent setup into first-run. The endpoint must
@@ -98,6 +200,9 @@ async def test_control_plane_openapi_route_serves_spec() -> None:
     payload = json.loads(response.text)
     assert payload["openapi"].startswith("3.")
     assert "/api/control-plane/onboarding/status" in payload["paths"]
+    assert "/api/control-plane/onboarding/readiness" in payload["paths"]
+    assert "/api/control-plane/onboarding/first-task" in payload["paths"]
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway" in payload["paths"]
     assert "/api/control-plane/connections/defaults/{connection_key}" in payload["paths"]
 
 
@@ -110,6 +215,8 @@ def test_setup_control_plane_routes_registers_onboarding_surfaces() -> None:
     assert "/setup" in canonicals
     assert "/openapi/control-plane.json" in canonicals
     assert "/api/control-plane/onboarding/status" in canonicals
+    assert "/api/control-plane/onboarding/readiness" in canonicals
+    assert "/api/control-plane/onboarding/first-task" in canonicals
     assert "/api/control-plane/onboarding/bootstrap" in canonicals
     assert "/api/control-plane/auth/status" in canonicals
     assert "/api/control-plane/auth/bootstrap/exchange" in canonicals
@@ -128,6 +235,110 @@ def test_setup_control_plane_routes_registers_onboarding_surfaces() -> None:
     assert "/api/control-plane/connections/defaults/{connection_key}/verify" in canonicals
     assert "/api/control-plane/integrations/{integration_id}/system" in canonicals
     assert "/api/control-plane/integrations/{integration_id}/health" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway/pairing-codes" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway/unknown-senders" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/approve" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/block" in canonicals
+    assert "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}" in canonicals
+
+
+@pytest.mark.asyncio
+async def test_channel_gateway_handlers_proxy_to_manager_methods() -> None:
+    manager = MagicMock()
+    manager.get_channel_gateway_state.return_value = {
+        "schema_version": "channel_gateway.v1",
+        "agent_id": "ATLAS",
+        "identities": [],
+        "unknown_senders": [],
+        "pairing_codes": [],
+    }
+    manager.create_channel_gateway_pairing_code.return_value = {
+        "schema_version": "channel_gateway.v1",
+        "pairing_code_id": "chgpair_1",
+        "code": "PAIR123",
+    }
+    manager.list_channel_gateway_unknown_senders.return_value = {"items": [{"identity_id": "chgid_1"}]}
+    manager.approve_channel_gateway_identity.return_value = {"identity_id": "chgid_1", "status": "allowed"}
+    manager.block_channel_gateway_identity.return_value = {"identity_id": "chgid_2", "status": "blocked"}
+    manager.revoke_channel_gateway_identity.return_value = {"identity_id": "chgid_3", "status": "revoked"}
+
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch("koda.control_plane.api._resolve_owner_user_id", return_value="operator-1"),
+        patch("koda.control_plane.api._manager", return_value=manager),
+    ):
+        state_request = _Request()
+        state_request.match_info = {"agent_id": "ATLAS"}
+        state_response = await control_plane_api.get_channel_gateway_route(state_request)
+
+        pairing_request = _Request(payload={"ttl_seconds": 600})
+        pairing_request.match_info = {"agent_id": "ATLAS"}
+        pairing_response = await control_plane_api.create_channel_gateway_pairing_code_route(pairing_request)
+
+        unknown_request = _Request()
+        unknown_request.match_info = {"agent_id": "ATLAS"}
+        unknown_response = await control_plane_api.list_channel_gateway_unknown_senders_route(unknown_request)
+
+        approve_request = _Request(payload={"rationale": "known user"})
+        approve_request.match_info = {"agent_id": "ATLAS", "identity_id": "chgid_1"}
+        approve_response = await control_plane_api.approve_channel_gateway_identity_route(approve_request)
+
+        block_request = _Request(payload={"rationale": "spam"})
+        block_request.match_info = {"agent_id": "ATLAS", "identity_id": "chgid_2"}
+        block_response = await control_plane_api.block_channel_gateway_identity_route(block_request)
+
+        revoke_request = _Request(payload={"rationale": "left workspace"})
+        revoke_request.match_info = {"agent_id": "ATLAS", "identity_id": "chgid_3"}
+        revoke_response = await control_plane_api.revoke_channel_gateway_identity_route(revoke_request)
+
+    manager.get_channel_gateway_state.assert_called_once_with("ATLAS")
+    manager.create_channel_gateway_pairing_code.assert_called_once_with(
+        "ATLAS",
+        {"ttl_seconds": 600, "created_by": "operator-1"},
+    )
+    manager.list_channel_gateway_unknown_senders.assert_called_once_with("ATLAS")
+    manager.approve_channel_gateway_identity.assert_called_once_with(
+        "ATLAS",
+        "chgid_1",
+        {"rationale": "known user", "approved_by": "operator-1"},
+    )
+    manager.block_channel_gateway_identity.assert_called_once_with(
+        "ATLAS",
+        "chgid_2",
+        {"rationale": "spam", "blocked_by": "operator-1"},
+    )
+    manager.revoke_channel_gateway_identity.assert_called_once_with(
+        "ATLAS",
+        "chgid_3",
+        {"rationale": "left workspace", "revoked_by": "operator-1"},
+    )
+
+    assert json.loads(state_response.text)["schema_version"] == "channel_gateway.v1"
+    assert pairing_response.status == 201
+    assert json.loads(pairing_response.text)["code"] == "PAIR123"
+    assert json.loads(unknown_response.text) == {"items": [{"identity_id": "chgid_1"}]}
+    assert json.loads(approve_response.text)["status"] == "allowed"
+    assert json.loads(block_response.text)["status"] == "blocked"
+    assert json.loads(revoke_response.text)["status"] == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_channel_gateway_missing_identity_returns_error_envelope() -> None:
+    manager = MagicMock()
+    manager.approve_channel_gateway_identity.side_effect = KeyError("chgid_missing")
+
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch("koda.control_plane.api._manager", return_value=manager),
+    ):
+        request = _Request(payload={})
+        request.match_info = {"agent_id": "ATLAS", "identity_id": "chgid_missing"}
+        response = await control_plane_api.approve_channel_gateway_identity_route(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 404
+    assert payload["error"]["code"] == "channel.identity_unknown"
 
 
 def test_doctor_script_reports_expected_checks() -> None:
