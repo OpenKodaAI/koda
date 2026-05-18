@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koda"
-version = "1.0.15"
+version = "1.0.17"
 description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
 requires-python = ">=3.11"
 dependencies = [
@@ -38,6 +38,7 @@ dependencies = [
     # lxml is pulled in transitively; pin a floor here so Snyk/pip-audit stop
     # flagging CVE-2026-41066 on older wheels.
     "lxml>=6.1.0,<7.0",
+    "urllib3>=2.7.0,<3.0",
 ]
 
 [project.optional-dependencies]

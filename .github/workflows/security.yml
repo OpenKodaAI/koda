@@ -101,7 +101,7 @@ jobs:
             --require-hashes \
             --disable-pip
       - name: Node dependency audit
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=moderate
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit
@@ -250,6 +250,9 @@ jobs:
           docker build -f apps/web/Dockerfile -t koda-web:ci .
           docker build -f Dockerfile.memory -t koda-memory:ci .
           docker build -f Dockerfile.security -t koda-security:ci .
+          docker build -f Dockerfile.artifact -t koda-artifact:ci .
+          docker build -f Dockerfile.retrieval -t koda-retrieval:ci .
+          docker build -f Dockerfile.runtime-kernel -t koda-runtime-kernel:ci .
       - name: Install Trivy
         run: |
           set -euo pipefail
@@ -272,6 +275,9 @@ jobs:
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:ci
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:ci
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-artifact.sarif --exit-code 1 koda-artifact:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-retrieval.sarif --exit-code 1 koda-retrieval:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-runtime-kernel.sarif --exit-code 1 koda-runtime-kernel:ci
       - name: Upload Trivy SARIF for koda
         if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.35.1
@@ -296,6 +302,24 @@ jobs:
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
           category: trivy-koda-security
+      - name: Upload Trivy SARIF for koda-artifact
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-artifact.sarif
+          category: trivy-koda-artifact
+      - name: Upload Trivy SARIF for koda-retrieval
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-retrieval.sarif
+          category: trivy-koda-retrieval
+      - name: Upload Trivy SARIF for koda-runtime-kernel
+        if: always() && github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-runtime-kernel.sarif
+          category: trivy-koda-runtime-kernel
       - name: Upload container scan artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.0

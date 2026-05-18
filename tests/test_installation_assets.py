@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -172,6 +173,121 @@ def test_release_compose_carries_bootstrap_and_runtime_tokens_into_app_service()
     assert "RUNTIME_LOCAL_UI_TOKEN" not in web_block
 
 
+def test_release_compose_ships_full_runtime_sidecar_set() -> None:
+    """Issue #88 regression guard.
+
+    The npm release compose previously omitted artifact, retrieval, and
+    runtime-kernel even though `app` connects to them. That left the control
+    plane reporting status=degraded and `/api/runtime/ready` returning 404
+    on every fresh install. Lock the full sidecar set into the release bundle
+    so it stays in sync with the dev compose.
+    """
+    compose_path = ROOT / "packages" / "cli" / "release" / "bundle" / "docker-compose.release.yml"
+    compose_payload = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    services = compose_payload["services"]
+
+    expected_services = {
+        "app",
+        "web",
+        "security",
+        "memory",
+        "artifact",
+        "retrieval",
+        "runtime-kernel",
+        "postgres",
+        "seaweedfs",
+        "seaweedfs-init",
+    }
+    assert expected_services <= set(services), f"Missing required release services: {expected_services - set(services)}"
+
+    # Each new sidecar must use a release image variable so the manifest drives
+    # the deployed tag rather than a build context that does not exist on the
+    # operator's machine.
+    assert services["artifact"]["image"] == "${KODA_ARTIFACT_IMAGE:?Set by the release manifest}"
+    assert services["retrieval"]["image"] == "${KODA_RETRIEVAL_IMAGE:?Set by the release manifest}"
+    assert services["runtime-kernel"]["image"] == "${KODA_RUNTIME_KERNEL_IMAGE:?Set by the release manifest}"
+
+    # `app` must wire all five gRPC targets so the control plane is not stuck in
+    # a degraded state.
+    app_env = services["app"]["environment"]
+    assert app_env["SECURITY_GRPC_TARGET"] == "security:50065"
+    assert app_env["MEMORY_GRPC_TARGET"] == "memory:50063"
+    assert app_env["ARTIFACT_GRPC_TARGET"] == "artifact:50064"
+    assert app_env["RETRIEVAL_GRPC_TARGET"] == "retrieval:50062"
+    assert app_env["RUNTIME_KERNEL_GRPC_TARGET"] == "runtime-kernel:50061"
+    assert app_env["RUNTIME_KERNEL_SOCKET"] == "runtime-kernel:50061"
+
+    # Dependencies are declared so the app container does not race the sidecars
+    # and trip its own healthcheck during boot.
+    app_deps = set(services["app"]["depends_on"].keys())
+    assert {"artifact", "retrieval", "runtime-kernel"} <= app_deps
+
+
+def test_release_manifest_ships_three_new_sidecar_image_refs() -> None:
+    """The npm CLI fans the manifest's image refs into .release.env. Without
+    the new keys, `koda install` would still substitute empty strings and let
+    docker compose start with no image tag.
+    """
+    manifest = json.loads((ROOT / "packages" / "cli" / "release" / "manifest.json").read_text(encoding="utf-8"))
+    images = manifest["images"]
+    version = manifest["version"]
+
+    assert images["artifact"] == f"ghcr.io/openkodaai/koda-artifact:{version}"
+    assert images["retrieval"] == f"ghcr.io/openkodaai/koda-retrieval:{version}"
+    assert images["runtime_kernel"] == f"ghcr.io/openkodaai/koda-runtime-kernel:{version}"
+
+
+def test_npm_cli_writes_three_new_sidecar_image_env_vars() -> None:
+    """The CLI must expand manifest.images.{artifact,retrieval,runtime_kernel}
+    into KODA_*_IMAGE entries inside .release.env, otherwise compose would
+    refuse to start the new services."""
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+    assert "KODA_ARTIFACT_IMAGE: manifest.images.artifact" in cli_text
+    assert "KODA_RETRIEVAL_IMAGE: manifest.images.retrieval" in cli_text
+    assert "KODA_RUNTIME_KERNEL_IMAGE: manifest.images.runtime_kernel" in cli_text
+    # Hard fail if the manifest is partial: this is the only place that
+    # surfaces a missing image ref before docker is invoked.
+    assert "Release manifest is missing required image refs:" in cli_text
+
+
+def test_release_smoke_test_builds_three_new_sidecar_images() -> None:
+    """`scripts/release_smoke_test.py` must build the three new images locally
+    so the release smoke covers the full release surface, not just app/web/
+    memory/security."""
+    script_text = (ROOT / "scripts" / "release_smoke_test.py").read_text(encoding="utf-8")
+    assert 'images["artifact"]' in script_text
+    assert 'images["retrieval"]' in script_text
+    assert 'images["runtime_kernel"]' in script_text
+    assert "Dockerfile.artifact" in script_text
+    assert "Dockerfile.retrieval" in script_text
+    assert "Dockerfile.runtime-kernel" in script_text
+
+
+def test_ci_workflows_publish_three_new_sidecar_images() -> None:
+    release_text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    security_text = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    cut_release_text = (ROOT / ".github" / "workflows" / "cut-release-tag.yml").read_text(encoding="utf-8")
+
+    # publish-ghcr matrix in release.yml must include the new images.
+    for image in ("koda-artifact", "koda-retrieval", "koda-runtime-kernel"):
+        assert f"image: {image}" in release_text, f"release.yml publish matrix missing {image}"
+
+    # Both release and security workflows must build + scan the new images so
+    # GHCR never serves an unscanned tag.
+    for workflow_text in (release_text, security_text):
+        assert "docker build -f Dockerfile.artifact" in workflow_text
+        assert "docker build -f Dockerfile.retrieval" in workflow_text
+        assert "docker build -f Dockerfile.runtime-kernel" in workflow_text
+        for sarif in ("koda-artifact.sarif", "koda-retrieval.sarif", "koda-runtime-kernel.sarif"):
+            assert sarif in workflow_text
+
+    # cut-release-tag must verify the new images are public + multi-arch.
+    assert (
+        "images=(koda-app koda-web koda-memory koda-security koda-artifact koda-retrieval koda-runtime-kernel)"
+        in cut_release_text
+    )
+
+
 def test_release_artifact_build_outputs_bundle_tarball_and_npm_tarball(tmp_path) -> None:
     build_script_text = (ROOT / "scripts" / "build_release_artifacts.py").read_text(encoding="utf-8")
     assert '(stage_dir / "README.md").write_text(build_package_readme(), encoding="utf-8")' in build_script_text
@@ -248,6 +364,124 @@ def test_npm_cli_update_rolls_back_via_tempdir_outside_install_root() -> None:
     assert 'join(installDir, ".rollback")' not in cli_text
 
 
+def test_npm_cli_serializes_compose_up_by_default() -> None:
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    assert "function composeUpEnv()" in cli_text
+    assert 'COMPOSE_PARALLEL_LIMIT: limit && limit.trim() ? limit : "1"' in cli_text
+    assert cli_text.count("env: composeUpEnv()") == 4
+
+
+def test_npm_cli_install_guards_against_orphan_postgres_volumes() -> None:
+    """Issue #89 regression guard.
+
+    A user reinstalling Koda inherits the previous compose project's volumes,
+    which still pin the old Postgres password. The CLI must detect that pairing
+    before it ever runs `up`, surface an actionable error, and offer a
+    `--reset-volumes` escape hatch instead of letting the app container die on
+    a healthcheck.
+    """
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    # Help advertises the new flag so it is discoverable by `koda` and `koda help`.
+    assert "[--reset-volumes]" in cli_text
+    assert "Destroy any pre-existing Docker volumes managed by the" in cli_text
+
+    # Preflight functions exist and are wired into the install path.
+    assert "function composeProjectName(installDir)" in cli_text
+    assert "function listManagedVolumes(projectName)" in cli_text
+    assert "function resetManagedVolumes(installDir)" in cli_text
+    assert "function describeReinstallConflict(installDir, volumes)" in cli_text
+    assert "label=com.docker.compose.project=" in cli_text
+
+    # Detection runs before any compose `up`, so a fresh install dir layered
+    # over previous volumes aborts deterministically instead of timing out.
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    assert 'consumeFlag(args, "--reset-volumes")' in install_block
+    assert "describeReinstallConflict" in install_block
+    detection = install_block.find("listManagedVolumes")
+    compose_up = install_block.find('runDockerCompose(installDir, ["up", "-d"]')
+    assert detection != -1 and compose_up != -1 and detection < compose_up
+
+
+def test_npm_cli_install_probes_postgres_auth_on_failure() -> None:
+    """Issue #89: when `up` fails, surface auth errors instead of generic ones."""
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+
+    assert "async function probePostgresAuth(installDir, env)" in cli_text
+    assert "function describePostgresAuthFailure(installDir, output)" in cli_text
+    # The probe is invoked from the install command's catch handler so the
+    # InvalidPasswordError surfaces before the user sees only "container is unhealthy".
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    assert "probePostgresAuth(installDir, env)" in install_block
+    assert "describePostgresAuthFailure" in install_block
+
+
+def test_npm_cli_reports_docker_daemon_unavailable_before_staging_install(tmp_path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'if [ "$1" = "info" ]; then',
+                '  echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2',
+                '  echo "Is the docker daemon running?" >&2',
+                "  exit 1",
+                "fi",
+                'echo "unexpected docker command: $*" >&2',
+                "exit 99",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+
+    install_dir = tmp_path / "install"
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "packages" / "cli" / "bin" / "koda.mjs"),
+            "install",
+            "--dir",
+            str(install_dir),
+            "--headless",
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "CI": "true",
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 1
+    assert "Koda needs Docker to start its local services" in combined_output
+    assert "Docker daemon is not reachable" in combined_output
+    assert "Docker said:" in combined_output
+    assert "docker info" in combined_output
+    assert "Postgres" not in combined_output
+    assert "unexpected docker command" not in combined_output
+    assert not (install_dir / ".env").exists()
+
+
+def test_npm_cli_does_not_report_postgres_auth_when_docker_daemon_drops() -> None:
+    cli_text = (ROOT / "packages" / "cli" / "bin" / "koda.mjs").read_text(encoding="utf-8")
+    install_block = cli_text.split("async function installCommand(args)")[1].split("async function upCommand(")[0]
+    daemon_check = install_block.find("isDockerDaemonUnavailableOutput(probe.output)")
+    postgres_message = install_block.find("describePostgresAuthFailure")
+
+    assert "function isDockerDaemonUnavailableOutput(text)" in cli_text
+    assert 'function dockerDaemonUnavailableError(output = "")' in cli_text
+    assert daemon_check != -1 and postgres_message != -1 and daemon_check < postgres_message
+
+
 def test_systemd_example_operates_docker_compose() -> None:
     unit_text = (ROOT / "koda.service.example").read_text(encoding="utf-8")
 
@@ -268,7 +502,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "publish-ghcr" in jobs
     assert "publish-npm" in jobs
     assert "github-release" in jobs
-    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "write"
+    assert jobs["ensure-release-tag"]["permissions"]["contents"] == "read"
     assert jobs["publish-ghcr"]["environment"] == "release"
     assert jobs["publish-npm"]["environment"] == "release"
     assert jobs["github-release"]["environment"] == "release"
@@ -280,6 +514,9 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
 
     workflow_text = workflow_path.read_text(encoding="utf-8")
     assert "NPM_TOKEN" in workflow_text
+    assert "Manual publish runs must execute the workflow from main" in workflow_text
+    assert "Manual publish mode only accepts an existing v<version> release tag" in workflow_text
+    assert "Publish mode only accepts an existing v<version> release tag" in workflow_text
     assert "trusted publishing" in workflow_text
     assert "npm publish" in workflow_text
     assert "Upgrade npm for trusted publishing support" not in workflow_text
@@ -319,7 +556,7 @@ def test_release_workflow_enforces_validation_and_protected_publish_path() -> No
     assert "Create or update GitHub release" in workflow_text
     assert "draft: ${{ steps.release_mode.outputs.draft }}" in workflow_text
     assert "Publish status:" in workflow_text
-    assert 'git push origin "refs/tags/${RELEASE_TAG}"' in workflow_text
+    assert 'git push origin "refs/tags/${RELEASE_TAG}"' not in workflow_text
     assert "scripts/sync_npm_readme.py" in workflow_text
     assert "docker/build-push-action" in workflow_text
     assert "Verify public GHCR image tags" in workflow_text
@@ -432,6 +669,9 @@ def test_release_docs_explain_main_release_automation() -> None:
     assert "treat it as immutable" in release_docs_text
     assert "cut-release-tag.yml" in release_docs_text
     assert "release.yml" in release_docs_text
+    assert "Manual `release.yml` publish runs are intentionally tag-only" in release_docs_text
+    assert "`release_ref` must be an existing `v<version>` tag" in release_docs_text
+    assert "Branch refs remain valid for `dry-run`, but cannot publish" in release_docs_text
     assert "Configure npm trusted publishing against `OpenKodaAI/koda` and `release.yml`" in release_docs_text
     assert "Grant `id-token: write` to both `release.yml` and `cut-release-tag.yml`" in release_docs_text
     assert "optional `release` environment" in release_docs_text
@@ -499,6 +739,9 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         "koda-web.sarif --exit-code 1 koda-web:",
         "koda-memory.sarif --exit-code 1 koda-memory:",
         "koda-security.sarif --exit-code 1 koda-security:",
+        "koda-artifact.sarif --exit-code 1 koda-artifact:",
+        "koda-retrieval.sarif --exit-code 1 koda-retrieval:",
+        "koda-runtime-kernel.sarif --exit-code 1 koda-runtime-kernel:",
     )
 
     for workflow_text in (release_workflow_text, security_workflow_text):
@@ -506,6 +749,9 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
         assert "docker build -f apps/web/Dockerfile -t koda-web:" in workflow_text
         assert "docker build -f Dockerfile.memory -t koda-memory:" in workflow_text
         assert "docker build -f Dockerfile.security -t koda-security:" in workflow_text
+        assert "docker build -f Dockerfile.artifact -t koda-artifact:" in workflow_text
+        assert "docker build -f Dockerfile.retrieval -t koda-retrieval:" in workflow_text
+        assert "docker build -f Dockerfile.runtime-kernel -t koda-runtime-kernel:" in workflow_text
         for trivy_target in trivy_targets:
             assert trivy_target in workflow_text
 

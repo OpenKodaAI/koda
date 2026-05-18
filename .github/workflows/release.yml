@@ -45,7 +45,6 @@ jobs:
       ref: ${{ steps.resolve.outputs.ref }}
       checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       publish: ${{ steps.resolve.outputs.publish }}
-      create_tag: ${{ steps.resolve.outputs.create_tag }}
       version: ${{ steps.version.outputs.version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       publish_latest: ${{ steps.version.outputs.publish_latest }}
@@ -60,7 +59,6 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             release_ref="${GITHUB_REF_NAME}"
             publish="true"
-            create_tag="false"
           else
             release_ref="${{ inputs.release_ref }}"
             if [ -z "${release_ref}" ]; then
@@ -71,7 +69,17 @@ jobs:
             else
               publish="false"
             fi
-            create_tag="false"
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${publish}" = "true" ]; then
+            if [ "${GITHUB_REF_NAME}" != "main" ]; then
+              echo "Manual publish runs must execute the workflow from main; use dry-run for other workflow refs." >&2
+              exit 1
+            fi
+            if [[ "${release_ref}" != v* ]]; then
+              echo "Manual publish mode only accepts an existing v<version> release tag. Use cut-release-tag or dry-run for branch refs." >&2
+              exit 1
+            fi
           fi
 
           if [[ "${release_ref}" == v* ]]; then
@@ -79,7 +87,8 @@ jobs:
           else
             checkout_ref="${release_ref}"
             if [ "${publish}" = "true" ]; then
-              create_tag="true"
+              echo "Publish mode only accepts an existing v<version> release tag. Use dry-run for branch refs." >&2
+              exit 1
             fi
           fi
 
@@ -87,7 +96,6 @@ jobs:
             echo "ref=${release_ref}"
             echo "checkout_ref=${checkout_ref}"
             echo "publish=${publish}"
-            echo "create_tag=${create_tag}"
           } >> "${GITHUB_OUTPUT}"
 
       - uses: actions/checkout@v6.0.2
@@ -369,7 +377,7 @@ jobs:
             --require-hashes \
             --disable-pip
       - name: Node dependency audit
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=moderate
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit
@@ -509,6 +517,9 @@ jobs:
           docker build -f apps/web/Dockerfile -t koda-web:release .
           docker build -f Dockerfile.memory -t koda-memory:release .
           docker build -f Dockerfile.security -t koda-security:release .
+          docker build -f Dockerfile.artifact -t koda-artifact:release .
+          docker build -f Dockerfile.retrieval -t koda-retrieval:release .
+          docker build -f Dockerfile.runtime-kernel -t koda-runtime-kernel:release .
       - name: Install Trivy
         run: |
           set -euo pipefail
@@ -531,6 +542,9 @@ jobs:
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-web.sarif --exit-code 1 koda-web:release
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-memory.sarif --exit-code 1 koda-memory:release
           trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-security.sarif --exit-code 1 koda-security:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-artifact.sarif --exit-code 1 koda-artifact:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-retrieval.sarif --exit-code 1 koda-retrieval:release
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format sarif --output artifacts/security/trivy/koda-runtime-kernel.sarif --exit-code 1 koda-runtime-kernel:release
       - name: Upload Trivy SARIF for koda
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4.35.1
@@ -555,6 +569,24 @@ jobs:
         with:
           sarif_file: artifacts/security/trivy/koda-security.sarif
           category: trivy-koda-security
+      - name: Upload Trivy SARIF for koda-artifact
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-artifact.sarif
+          category: trivy-koda-artifact
+      - name: Upload Trivy SARIF for koda-retrieval
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-retrieval.sarif
+          category: trivy-koda-retrieval
+      - name: Upload Trivy SARIF for koda-runtime-kernel
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4.35.1
+        with:
+          sarif_file: artifacts/security/trivy/koda-runtime-kernel.sarif
+          category: trivy-koda-runtime-kernel
       - name: Upload container scan artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.0
@@ -685,7 +717,7 @@ jobs:
       - npm-pack-smoke
     if: needs.prepare.outputs.publish == 'true' && github.repository_owner == 'OpenKodaAI'
     permissions:
-      contents: write
+      contents: read
     outputs:
       publish_ref: ${{ steps.ensure.outputs.publish_ref }}
     steps:
@@ -693,16 +725,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-      - name: Configure git author
-        if: needs.prepare.outputs.create_tag == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Ensure release tag exists on the validated commit
         id: ensure
         shell: bash
         env:
-          CREATE_TAG: ${{ needs.prepare.outputs.create_tag }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
@@ -715,26 +741,28 @@ jobs:
             remote_commit="$(git ls-remote --tags origin "${publish_ref}" | awk 'NR==1 { print $1 }')"
           fi
 
-          if [ -n "${remote_commit}" ]; then
-            if [ "${remote_commit}" != "${current_sha}" ]; then
-              echo "Tag ${RELEASE_TAG} already exists on ${remote_commit}, expected ${current_sha}." >&2
-              exit 1
-            fi
-            echo "Tag ${RELEASE_TAG} already exists on the validated commit."
-          elif [ "${CREATE_TAG}" = "true" ]; then
-            git tag -a "${RELEASE_TAG}" -m "Koda ${RELEASE_TAG#v}"
-            git push origin "refs/tags/${RELEASE_TAG}"
-          else
+          if [ -z "${remote_commit}" ]; then
             echo "Expected tag ${RELEASE_TAG} to exist on origin before publish." >&2
             exit 1
           fi
 
+          if [ "${remote_commit}" != "${current_sha}" ]; then
+            echo "Tag ${RELEASE_TAG} already exists on ${remote_commit}, expected ${current_sha}." >&2
+            exit 1
+          fi
+
+          echo "Tag ${RELEASE_TAG} already exists on the validated commit."
           echo "publish_ref=${publish_ref}" >> "${GITHUB_OUTPUT}"
 
   publish-ghcr:
     name: publish-ghcr
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Multi-arch builds for the heavier Rust sidecars (notably koda-artifact)
+    # exceed 45 minutes on standard runners. v1.0.17's release run hit this
+    # cap twice on koda-artifact while the other six images finished in
+    # 14-40 min. Bump the cap to 90 to leave headroom without letting a
+    # genuinely stuck build squat on a runner indefinitely.
+    timeout-minutes: 90
     needs:
       - prepare
       - build-release-bundle
@@ -760,6 +788,15 @@ jobs:
             context: .
           - image: koda-security
             dockerfile: Dockerfile.security
+            context: .
+          - image: koda-artifact
+            dockerfile: Dockerfile.artifact
+            context: .
+          - image: koda-retrieval
+            dockerfile: Dockerfile.retrieval
+            context: .
+          - image: koda-runtime-kernel
+            dockerfile: Dockerfile.runtime-kernel
             context: .
     steps:
       - uses: actions/checkout@v6.0.2
