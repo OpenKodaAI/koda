@@ -224,6 +224,127 @@ describe("AgentCatalog organization board", () => {
         );
       }
 
+      if (url === "/api/control-plane/workspaces/scan-directory" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              schema_version: "workspace_config_scan.v1",
+              root_path: "/tmp/sample-repo",
+              root_kind: "local_path",
+              scan_hash: "scan123",
+              status: "completed",
+              summary: {
+                total_sources: 4,
+                by_kind: { instructions: 2, mcp: 1, hook: 1 },
+                by_tool: { codex: 1, claude: 2, cursor: 1 },
+                by_risk: { low: 2, review: 1, blocked: 1 },
+                importable: 2,
+                review_required: 1,
+                blocked: 1,
+                truncated: false,
+              },
+              sources: [
+                {
+                  source_id: "src_agents",
+                  tool: "codex",
+                  kind: "instructions",
+                  relative_path: "AGENTS.md",
+                  scope: "workspace",
+                  name: "AGENTS.md",
+                  description: "Codex instructions",
+                  confidence: "high",
+                  risk: "low",
+                  status: "detected",
+                  import_action: "append_workspace_prompt",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "Use tests.",
+                },
+                {
+                  source_id: "src_claude",
+                  tool: "claude",
+                  kind: "instructions",
+                  relative_path: "CLAUDE.md",
+                  scope: "workspace",
+                  name: "CLAUDE.md",
+                  description: "Claude memory",
+                  confidence: "high",
+                  risk: "low",
+                  status: "detected",
+                  import_action: "append_workspace_prompt",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "Prefer safe imports.",
+                },
+                {
+                  source_id: "src_mcp",
+                  tool: "cursor",
+                  kind: "mcp",
+                  relative_path: ".cursor/mcp.json",
+                  scope: "workspace",
+                  name: "mcp",
+                  description: "MCP candidate",
+                  confidence: "high",
+                  risk: "review",
+                  status: "detected",
+                  import_action: "mcp_review",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "",
+                },
+                {
+                  source_id: "src_hook",
+                  tool: "claude",
+                  kind: "hook",
+                  relative_path: ".claude/settings.json",
+                  scope: "workspace",
+                  name: "PostToolUse hook",
+                  description: "Blocked hook",
+                  confidence: "high",
+                  risk: "blocked",
+                  status: "blocked",
+                  import_action: "blocked_hook",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "echo [REDACTED]",
+                },
+              ],
+              warnings: [],
+              limits: {
+                max_depth: 8,
+                max_entries: 2500,
+                max_file_bytes: 262144,
+                max_total_bytes: 3145728,
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/import" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              workspace: {
+                id: "sample-repo",
+                name: "sample-repo",
+                description: "",
+                root_path: "/tmp/sample-repo",
+              },
+              import_result: { applied: [], skipped: [], conflicts: [] },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
       if (
         url.startsWith("/api/control-plane/agents/") &&
         method === "PATCH" &&
@@ -362,6 +483,49 @@ describe("AgentCatalog organization board", () => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         "/api/control-plane/workspaces",
         expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("scans a folder import and keeps review-only sources disabled", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: /^Criar$/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: /Import from folder|Importar/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("menuitem", { name: /Import from folder|Importar/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /Import from folder/i })).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/Folder path/i), "/tmp/sample-repo");
+    await user.click(within(dialog).getByRole("button", { name: /Scan/i }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByText("AGENTS.md")).toBeInTheDocument();
+      expect(within(dialog).getByText("CLAUDE.md")).toBeInTheDocument();
+      expect(within(dialog).getByText(".cursor/mcp.json")).toBeInTheDocument();
+      expect(within(dialog).getByText(".claude/settings.json")).toBeInTheDocument();
+    });
+
+    const blockedRow = within(dialog).getByText(".claude/settings.json").closest("label");
+    expect(blockedRow).not.toBeNull();
+    expect(within(blockedRow as HTMLElement).getByRole("checkbox")).toBeDisabled();
+    expect(within(dialog).getByText(/2 selected prompt source/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /^Import$/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/control-plane/workspaces/import",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            path: "/tmp/sample-repo",
+            selectedSourceIds: ["src_agents", "src_claude"],
+          }),
+        }),
       );
     });
   });
