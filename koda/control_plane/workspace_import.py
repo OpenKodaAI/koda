@@ -275,38 +275,39 @@ def scan_workspace_directory(
     entries = 0
     total_bytes = 0
 
-    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-        current_path = Path(current)
-        try:
-            relative_dir = current_path.relative_to(root)
-        except ValueError:
-            dirnames[:] = []
-            continue
-        depth = 0 if str(relative_dir) == "." else len(relative_dir.parts)
-        if depth > max_depth:
-            dirnames[:] = []
-            result.truncated = True
-            continue
-        dirnames[:] = [
-            dirname
-            for dirname in dirnames
-            if dirname not in IGNORED_DIR_NAMES and not (current_path / dirname).is_symlink()
-        ]
-        for filename in sorted(filenames):
-            entries += 1
-            if entries > max_entries:
-                result.truncated = True
-                result.warnings.append("scan.max_entries_reached")
-                return result
-            file_path = current_path / filename
-            if not _candidate_file(root, file_path):
-                continue
+    try:
+        for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            current_path = Path(current)
             try:
-                size = file_path.stat().st_size
-            except OSError:
+                relative_dir = current_path.relative_to(root)
+            except ValueError:
+                dirnames[:] = []
                 continue
-            if size > max_file_bytes:
-                if _path_might_be_source(root, file_path):
+            depth = 0 if str(relative_dir) == "." else len(relative_dir.parts)
+            if depth > max_depth:
+                dirnames[:] = []
+                result.truncated = True
+                continue
+            dirnames[:] = [
+                dirname
+                for dirname in dirnames
+                if dirname not in IGNORED_DIR_NAMES and not (current_path / dirname).is_symlink()
+            ]
+            for filename in sorted(filenames):
+                entries += 1
+                if entries > max_entries:
+                    result.truncated = True
+                    result.warnings.append("scan.max_entries_reached")
+                    _record_workspace_scan_metrics(result)
+                    return result
+                file_path = current_path / filename
+                if not _candidate_file(root, file_path):
+                    continue
+                try:
+                    size = file_path.stat().st_size
+                except OSError:
+                    continue
+                if size > max_file_bytes:
                     result.sources.append(
                         _source(
                             root,
@@ -319,17 +320,23 @@ def scan_workspace_directory(
                             warnings=["file.too_large"],
                         )
                     )
-                continue
-            if total_bytes + size > max_total_bytes:
-                result.truncated = True
-                result.warnings.append("scan.max_total_bytes_reached")
-                return result
-            text = _read_text_file(file_path)
-            if text is None:
-                continue
-            total_bytes += len(text.encode("utf-8", errors="ignore"))
-            result.sources.extend(_detect_sources(root, file_path, text))
-    return result
+                    continue
+                if total_bytes + size > max_total_bytes:
+                    result.truncated = True
+                    result.warnings.append("scan.max_total_bytes_reached")
+                    _record_workspace_scan_metrics(result)
+                    return result
+                text = _read_text_file(file_path)
+                if text is None:
+                    continue
+                total_bytes += len(text.encode("utf-8", errors="ignore"))
+                result.sources.extend(_detect_sources(root, file_path, text))
+        _record_workspace_scan_metrics(result)
+        return result
+    except Exception:
+        result.status = "error"
+        _record_workspace_scan_metrics(result)
+        raise
 
 
 def read_importable_source_content(
@@ -348,6 +355,59 @@ def read_importable_source_content(
     return text
 
 
+def record_workspace_import_metrics(result: dict[str, Any]) -> None:
+    try:
+        from koda.services.metrics import WORKSPACE_IMPORT_APPLIES_TOTAL
+    except Exception:  # pragma: no cover - metrics must never block imports
+        return
+    for outcome in ("applied", "skipped", "conflicts"):
+        items = result.get(outcome) if isinstance(result, dict) else []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            action = "unknown"
+            if isinstance(item, dict):
+                action = _metric_label(str(item.get("action") or item.get("reason") or "unknown"))
+            WORKSPACE_IMPORT_APPLIES_TOTAL.labels(action=action, outcome=outcome).inc()
+
+
+def _record_workspace_scan_metrics(result: WorkspaceScanResult) -> None:
+    try:
+        from koda.services.metrics import (
+            WORKSPACE_IMPORT_BLOCKED_TOTAL,
+            WORKSPACE_IMPORT_LIMIT_HITS_TOTAL,
+            WORKSPACE_IMPORT_SCANS_TOTAL,
+            WORKSPACE_IMPORT_SOURCES_TOTAL,
+        )
+    except Exception:  # pragma: no cover - metrics must never block scans
+        return
+    WORKSPACE_IMPORT_SCANS_TOTAL.labels(
+        status=_metric_label(result.status),
+        root_kind=_metric_label(result.root_kind),
+        truncated=str(bool(result.truncated)).lower(),
+    ).inc()
+    for warning in result.warnings:
+        if str(warning).startswith("scan.max_"):
+            WORKSPACE_IMPORT_LIMIT_HITS_TOTAL.labels(limit=_metric_label(str(warning))).inc()
+    for source in result.sources:
+        WORKSPACE_IMPORT_SOURCES_TOTAL.labels(
+            tool=_metric_label(source.tool),
+            kind=_metric_label(source.kind),
+            risk=_metric_label(source.risk),
+            import_action=_metric_label(source.import_action),
+        ).inc()
+        if source.risk == "blocked" or source.status == "blocked":
+            WORKSPACE_IMPORT_BLOCKED_TOTAL.labels(reason=_metric_label(source.import_action)).inc()
+        for warning in source.warnings:
+            if str(warning).startswith("file.too_large"):
+                WORKSPACE_IMPORT_LIMIT_HITS_TOTAL.labels(limit="file.too_large").inc()
+
+
+def _metric_label(value: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(value or "unknown")).strip("_")
+    return clean[:80] or "unknown"
+
+
 def _candidate_file(root: Path, file_path: Path) -> bool:
     try:
         resolved = file_path.resolve()
@@ -358,7 +418,9 @@ def _candidate_file(root: Path, file_path: Path) -> bool:
     name = file_path.name
     if name in SKIP_FILE_NAMES:
         return False
-    return not any(fnmatch.fnmatch(name, pattern) for pattern in SKIP_FILE_PATTERNS)
+    if any(fnmatch.fnmatch(name, pattern) for pattern in SKIP_FILE_PATTERNS):
+        return False
+    return _path_might_be_source(root, file_path)
 
 
 def _path_might_be_source(root: Path, file_path: Path) -> bool:
@@ -373,18 +435,23 @@ def _path_might_be_source(root: Path, file_path: Path) -> bool:
             "CLAUDE.local.md",
             ".cursorrules",
             ".mcp.json",
-            "mcp.json",
-            "SKILL.md",
             "koda-skill.yaml",
             "plugin.yaml",
             "plugin.yml",
             "MEMORY.md",
             "SOUL.md",
         }
-        or rel.startswith(".claude/")
-        or rel.startswith(".codex/")
-        or rel.startswith(".cursor/")
-        or rel.startswith(".agents/")
+        or (rel.startswith(".claude/rules/") and name.endswith(".md"))
+        or (rel.startswith(".claude/agents/") and name.endswith(".md"))
+        or (rel.startswith(".claude/skills/") and name == "SKILL.md")
+        or (rel.startswith(".claude/") and fnmatch.fnmatch(name, "settings*.json"))
+        or (rel.startswith(".codex/agents/") and name.endswith(".toml"))
+        or rel == ".codex/config.toml"
+        or (rel.startswith(".cursor/rules/") and name.endswith(".mdc"))
+        or rel == ".cursor/mcp.json"
+        or (rel.startswith(".agents/skills/") and name == "SKILL.md")
+        or rel.startswith(".agents/memory")
+        or rel.startswith(".agents/soul")
         or rel.startswith(".mcp/")
     )
 
@@ -456,7 +523,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
             )
         ]
     if rel.startswith(".claude/rules/") and name.endswith(".md"):
-        metadata, _ = _parse_frontmatter(text)
+        metadata, _, parse_warnings = _parse_frontmatter(text)
         return [
             _source(
                 root,
@@ -469,11 +536,12 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="low",
                 import_action="append_workspace_prompt",
                 metadata={"frontmatter": metadata},
+                warnings=parse_warnings,
                 text=text,
             )
         ]
     if rel.startswith(".cursor/rules/") and name.endswith(".mdc"):
-        metadata, _ = _parse_frontmatter(text)
+        metadata, _, parse_warnings = _parse_frontmatter(text)
         return [
             _source(
                 root,
@@ -486,6 +554,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="low",
                 import_action="append_workspace_prompt",
                 metadata={"frontmatter": metadata, "globs": metadata.get("globs")},
+                warnings=parse_warnings,
                 text=text,
             )
         ]
@@ -504,7 +573,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
             )
         ]
     if name in {".mcp.json", "mcp.json"} or rel == ".cursor/mcp.json" or rel.startswith(".mcp/"):
-        metadata = _parse_mcp_metadata(text)
+        metadata, parse_warnings = _parse_mcp_metadata(text)
         safe_excerpt = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
         return [
             _source(
@@ -517,11 +586,12 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action="mcp_review",
                 metadata=metadata,
+                warnings=parse_warnings,
                 text=safe_excerpt,
             )
         ]
     if rel.startswith(".claude/agents/") and name.endswith(".md"):
-        metadata, body = _parse_frontmatter(text)
+        metadata, body, parse_warnings = _parse_frontmatter(text)
         return [
             _source(
                 root,
@@ -533,11 +603,12 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action="create_agent_draft",
                 metadata={"frontmatter": metadata},
+                warnings=parse_warnings,
                 text=text,
             )
         ]
     if rel.startswith(".codex/agents/") and name.endswith(".toml"):
-        metadata = _parse_toml_metadata(text)
+        metadata, parse_warnings = _parse_toml_metadata(text)
         return [
             _source(
                 root,
@@ -549,11 +620,12 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action="create_agent_draft",
                 metadata={"toml": metadata},
+                warnings=parse_warnings,
                 text=text,
             )
         ]
     if rel == ".codex/config.toml":
-        metadata = _parse_toml_metadata(text)
+        metadata, parse_warnings = _parse_toml_metadata(text)
         action = "mcp_review" if "mcp" in metadata or "mcp_servers" in metadata else "settings_review"
         return [
             _source(
@@ -566,6 +638,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action=action,
                 metadata={"toml_keys": sorted(metadata.keys())},
+                warnings=parse_warnings,
                 text=text,
             )
         ]
@@ -587,7 +660,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
         ]
     if name in {"koda-skill.yaml", "plugin.yaml", "plugin.yml"}:
         manifest_metadata: dict[str, Any] = {"manifest_name": name}
-        warnings: list[str] = []
+        source_warnings: list[str] = []
         try:
             scan = scan_skill_package(file_path.parent)
             manifest_metadata["skill_scan"] = {
@@ -597,7 +670,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 "package_hash": scan.package_hash,
             }
         except (SkillPackageError, ValueError) as exc:
-            warnings.append(str(exc))
+            source_warnings.append(str(exc))
         return [
             _source(
                 root,
@@ -609,7 +682,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action="skill_review",
                 metadata=manifest_metadata,
-                warnings=warnings,
+                warnings=source_warnings,
                 text=text,
             )
         ]
@@ -655,7 +728,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
 
 
 def _settings_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceScanSource]:
-    metadata = _parse_json_metadata(text)
+    metadata, warnings = _parse_json_metadata(text)
     sources = [
         _source(
             root,
@@ -667,6 +740,7 @@ def _settings_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceS
             risk="review",
             import_action="settings_review",
             metadata={"json_keys": sorted(metadata.keys())},
+            warnings=warnings,
             text=text,
         )
     ]
@@ -776,41 +850,51 @@ def _clip(value: str, limit: int) -> str:
 
 def _redact_text(value: str) -> str:
     return SECRET_RE.sub(
-        lambda match: f"{match.group(1)}{match.group(2)}{match.group(1)}{match.group(3)}"
-        f"{match.group(4)}[REDACTED]{match.group(5)}",
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(1)}{match.group(3)}"
+            f"{match.group(4)}[REDACTED]{match.group(5)}"
+        ),
         value,
     )
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+def _parse_warning(code: str, exc: BaseException | str) -> str:
+    return f"{code}: {_clip(_redact_text(str(exc)), 180)}"
+
+
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str, list[str]]:
     match = FRONTMATTER_RE.match(text)
     if not match:
-        return {}, text
+        return {}, text, []
     try:
         metadata = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError:
-        metadata = {}
-    return (metadata if isinstance(metadata, dict) else {}), text[match.end() :]
+    except yaml.YAMLError as exc:
+        return {}, text[match.end() :], [_parse_warning("parse.invalid_yaml_frontmatter", exc)]
+    if not isinstance(metadata, dict):
+        return {}, text[match.end() :], ["parse.invalid_yaml_frontmatter: expected mapping"]
+    return metadata, text[match.end() :], []
 
 
-def _parse_json_metadata(text: str) -> dict[str, Any]:
+def _parse_json_metadata(text: str) -> tuple[dict[str, Any], list[str]]:
     try:
         loaded = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    except json.JSONDecodeError as exc:
+        return {}, [_parse_warning("parse.invalid_json", exc)]
+    if not isinstance(loaded, dict):
+        return {}, ["parse.invalid_json: expected object"]
+    return loaded, []
 
 
-def _parse_toml_metadata(text: str) -> dict[str, Any]:
+def _parse_toml_metadata(text: str) -> tuple[dict[str, Any], list[str]]:
     try:
         loaded = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    except tomllib.TOMLDecodeError as exc:
+        return {}, [_parse_warning("parse.invalid_toml", exc)]
+    return loaded if isinstance(loaded, dict) else {}, []
 
 
-def _parse_mcp_metadata(text: str) -> dict[str, Any]:
-    raw = _parse_json_metadata(text)
+def _parse_mcp_metadata(text: str) -> tuple[dict[str, Any], list[str]]:
+    raw, warnings = _parse_json_metadata(text)
     servers = raw.get("mcpServers") or raw.get("servers") or raw
     parsed_servers: list[dict[str, Any]] = []
     if isinstance(servers, dict):
@@ -832,7 +916,10 @@ def _parse_mcp_metadata(text: str) -> dict[str, Any]:
                     "env_keys": sorted(str(key) for key in env),
                 }
             )
-    return {"servers": parsed_servers}
+    metadata: dict[str, Any] = {"servers": parsed_servers}
+    if warnings:
+        metadata["parse_status"] = "invalid"
+    return metadata, warnings
 
 
 def _extract_hook_commands(value: Any) -> list[str]:

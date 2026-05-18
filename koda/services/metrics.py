@@ -134,6 +134,36 @@ SQUAD_REPLY_EVENTS = Counter(
     ["agent_id", "event_type", "status"],
 )
 
+WORKSPACE_IMPORT_SCANS_TOTAL = Counter(
+    "koda_workspace_import_scans_total",
+    "Workspace directory import scans",
+    ["status", "root_kind", "truncated"],
+)
+
+WORKSPACE_IMPORT_SOURCES_TOTAL = Counter(
+    "koda_workspace_import_sources_total",
+    "Workspace directory import sources detected",
+    ["tool", "kind", "risk", "import_action"],
+)
+
+WORKSPACE_IMPORT_APPLIES_TOTAL = Counter(
+    "koda_workspace_import_applies_total",
+    "Workspace directory import apply outcomes",
+    ["action", "outcome"],
+)
+
+WORKSPACE_IMPORT_BLOCKED_TOTAL = Counter(
+    "koda_workspace_import_blocked_total",
+    "Workspace directory import blocked findings",
+    ["reason"],
+)
+
+WORKSPACE_IMPORT_LIMIT_HITS_TOTAL = Counter(
+    "koda_workspace_import_limit_hits_total",
+    "Workspace directory import scanner limit hits",
+    ["limit"],
+)
+
 INTEGRATION_GRANT_DECISIONS = Counter(
     "koda_integration_grant_decisions_total",
     "Integration grant evaluation decisions",

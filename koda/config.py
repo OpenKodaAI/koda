@@ -275,6 +275,26 @@ KOKORO_DEFAULT_LANGUAGE: str = _env("KOKORO_DEFAULT_LANGUAGE", "pt-br") or ""
 KOKORO_DEFAULT_VOICE: str = _env("KOKORO_DEFAULT_VOICE", "pf_dora") or ""
 KOKORO_VOICES_PATH: str = _env("KOKORO_VOICES_PATH", "") or ""
 
+# Supertonic
+SUPERTONIC_ENABLED: bool = _env("SUPERTONIC_ENABLED", "true").lower() == "true"
+SUPERTONIC_AVAILABLE_MODELS: list[str] = _env_csv(
+    "SUPERTONIC_AVAILABLE_MODELS",
+    "supertonic-3,supertonic-2,supertonic",
+)
+SUPERTONIC_DEFAULT_MODEL: str = _env("SUPERTONIC_DEFAULT_MODEL", "supertonic-3") or ""
+SUPERTONIC_DEFAULT_LANGUAGE: str = _env("SUPERTONIC_DEFAULT_LANGUAGE", "pt") or ""
+SUPERTONIC_DEFAULT_VOICE: str = _env("SUPERTONIC_DEFAULT_VOICE", "F1") or ""
+SUPERTONIC_ASSET_ROOT: str = _env("SUPERTONIC_ASSET_ROOT", "") or ""
+SUPERTONIC_TOTAL_STEPS: int = int(_env("SUPERTONIC_TOTAL_STEPS", "8"))
+SUPERTONIC_SPEED: float = float(_env("SUPERTONIC_SPEED", "1.05"))
+SUPERTONIC_MAX_CHUNK_LENGTH: int = int(_env("SUPERTONIC_MAX_CHUNK_LENGTH", "300"))
+SUPERTONIC_SILENCE_DURATION: float = float(_env("SUPERTONIC_SILENCE_DURATION", "0.3"))
+SUPERTONIC_INTRA_OP_THREADS: int | None = int(_env("SUPERTONIC_INTRA_OP_THREADS", "0") or "0") or None
+SUPERTONIC_INTER_OP_THREADS: int | None = int(_env("SUPERTONIC_INTER_OP_THREADS", "0") or "0") or None
+SUPERTONIC_ONNX_PROVIDERS: list[str] = _env_csv("SUPERTONIC_ONNX_PROVIDERS", "CPUExecutionProvider")
+SUPERTONIC_COREML_EXPERIMENTAL: bool = _env("SUPERTONIC_COREML_EXPERIMENTAL", "false").lower() == "true"
+SUPERTONIC_MODEL_REVISION: str = _env("SUPERTONIC_MODEL_REVISION", "") or ""
+
 # --- Perplexity (HTTP, OpenAI-compatible) ---
 PERPLEXITY_ENABLED: bool = _env("PERPLEXITY_ENABLED", "false").lower() == "true"
 PERPLEXITY_AVAILABLE_MODELS: list[str] = _env_csv(
@@ -410,6 +430,24 @@ XAI_DEFAULT_MODEL: str = _env("XAI_DEFAULT_MODEL", XAI_TIER_MODELS["large"])
 XAI_TIMEOUT: int = int(_env("XAI_TIMEOUT", "120"))
 XAI_FIRST_CHUNK_TIMEOUT: int = int(_env("XAI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
 
+# --- OpenRouter (multi-provider routing, OpenAI-compatible) ---
+OPENROUTER_ENABLED: bool = _env("OPENROUTER_ENABLED", "false").lower() == "true"
+OPENROUTER_AVAILABLE_MODELS: list[str] = _env_csv(
+    "OPENROUTER_AVAILABLE_MODELS",
+    (
+        "openrouter/auto,~openai/gpt-mini-latest,~google/gemini-flash-latest,"
+        "~anthropic/claude-sonnet-latest,~openai/gpt-latest,openrouter/pareto-code"
+    ),
+)
+OPENROUTER_TIER_MODELS: dict[str, str] = {
+    "small": _env("OPENROUTER_MODEL_SMALL", "~openai/gpt-mini-latest"),
+    "medium": _env("OPENROUTER_MODEL_MEDIUM", "~google/gemini-flash-latest"),
+    "large": _env("OPENROUTER_MODEL_LARGE", "~anthropic/claude-sonnet-latest"),
+}
+OPENROUTER_DEFAULT_MODEL: str = _env("OPENROUTER_DEFAULT_MODEL", "openrouter/auto")
+OPENROUTER_TIMEOUT: int = int(_env("OPENROUTER_TIMEOUT", "180"))
+OPENROUTER_FIRST_CHUNK_TIMEOUT: int = int(_env("OPENROUTER_FIRST_CHUNK_TIMEOUT", "60"))
+
 # --- llama.cpp (local Metal-accelerated inference, OpenAI-compatible) ---
 LLAMACPP_ENABLED: bool = _env("LLAMACPP_ENABLED", "false").lower() == "true"
 LLAMACPP_API_KEY: str = _env("LLAMACPP_API_KEY", "") or ""
@@ -506,6 +544,7 @@ AVAILABLE_PROVIDERS: list[str] = [
         ("groq", GROQ_ENABLED),
         ("deepseek", DEEPSEEK_ENABLED),
         ("xai", XAI_ENABLED),
+        ("openrouter", OPENROUTER_ENABLED),
     )
     if enabled
 ]
@@ -526,6 +565,7 @@ PROVIDER_MODELS: dict[str, list[str]] = {
     "groq": GROQ_AVAILABLE_MODELS,
     "deepseek": DEEPSEEK_AVAILABLE_MODELS,
     "xai": XAI_AVAILABLE_MODELS,
+    "openrouter": OPENROUTER_AVAILABLE_MODELS,
 }
 PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "claude": CLAUDE_DEFAULT_MODEL,
@@ -541,6 +581,7 @@ PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "groq": GROQ_DEFAULT_MODEL,
     "deepseek": DEEPSEEK_DEFAULT_MODEL,
     "xai": XAI_DEFAULT_MODEL,
+    "openrouter": OPENROUTER_DEFAULT_MODEL,
 }
 PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
     "claude": CLAUDE_TIER_MODELS,
@@ -556,6 +597,7 @@ PROVIDER_TIER_MODELS: dict[str, dict[str, str]] = {
     "groq": GROQ_TIER_MODELS,
     "deepseek": DEEPSEEK_TIER_MODELS,
     "xai": XAI_TIER_MODELS,
+    "openrouter": OPENROUTER_TIER_MODELS,
 }
 DEFAULT_MODEL: str = PROVIDER_DEFAULT_MODELS.get(DEFAULT_PROVIDER, CLAUDE_DEFAULT_MODEL)
 AVAILABLE_MODELS: list[str] = [model for models in PROVIDER_MODELS.values() for model in models]
@@ -890,9 +932,11 @@ _transcription_default_provider, _transcription_default_model = _functional_defa
 TRANSCRIPTION_PROVIDER: str = (_transcription_default_provider or "whispercpp").strip().lower()
 TRANSCRIPTION_MODEL: str = (_transcription_default_model or "whisper-cpp-local").strip()
 
-# --- TTS (ElevenLabs + Kokoro fallback) ---
+# --- TTS (ElevenLabs + local Kokoro/Supertonic fallback) ---
+_audio_default_provider, _audio_default_model = _functional_default("audio")
 TTS_ENABLED: bool = _env("TTS_ENABLED", "true").lower() == "true"
-TTS_DEFAULT_VOICE: str = _env("TTS_DEFAULT_VOICE", KOKORO_DEFAULT_VOICE or "pf_dora")
+_tts_default_voice = SUPERTONIC_DEFAULT_VOICE if _audio_default_provider == "supertonic" else KOKORO_DEFAULT_VOICE
+TTS_DEFAULT_VOICE: str = _env("TTS_DEFAULT_VOICE", _tts_default_voice or "pf_dora")
 ELEVENLABS_DEFAULT_LANGUAGE: str = _env("ELEVENLABS_DEFAULT_LANGUAGE", "pt")
 TTS_MAX_CHARS: int = int(_env("TTS_MAX_CHARS", "4000"))
 TTS_SPEED: float = float(_env("TTS_SPEED", "1.0"))
@@ -901,7 +945,6 @@ VOICE_SPOKEN_MAX_CHARS: int = int(_env("VOICE_SPOKEN_MAX_CHARS", "900"))
 # --- ElevenLabs TTS ---
 ELEVENLABS_ENABLED: bool = _env("ELEVENLABS_ENABLED", "false").lower() == "true"
 ELEVENLABS_API_KEY: str | None = _env("ELEVENLABS_API_KEY")
-_audio_default_provider, _audio_default_model = _functional_default("audio")
 ELEVENLABS_MODEL: str = _env(
     "ELEVENLABS_MODEL",
     _audio_default_model if _audio_default_provider == "elevenlabs" and _audio_default_model else "eleven_flash_v2_5",

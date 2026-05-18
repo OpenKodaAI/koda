@@ -202,6 +202,15 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
         "grok-2-vision-1212": "Grok 2 Vision",
         "grok-2-1212": "Grok 2",
     },
+    "openrouter": {
+        "openrouter/auto": "OpenRouter Auto",
+        "~openai/gpt-mini-latest": "OpenAI GPT Mini Latest",
+        "~google/gemini-flash-latest": "Google Gemini Flash Latest",
+        "~google/gemini-pro-latest": "Google Gemini Pro Latest",
+        "~anthropic/claude-sonnet-latest": "Anthropic Claude Sonnet Latest",
+        "~openai/gpt-latest": "OpenAI GPT Latest",
+        "openrouter/pareto-code": "Pareto Code Router",
+    },
 }
 
 # ── Real pricing & metadata for general (dynamic) models ─────────────
@@ -1373,6 +1382,57 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "speed_tier": 4,
         "intelligence_tier": 4,
     },
+    # ── OpenRouter curated aliases (dynamic catalog fills provider/model IDs) ─
+    ("openrouter", "openrouter/auto"): {
+        "description": "Roteador automatico do OpenRouter para escolher modelos e fallback conforme disponibilidade.",
+        "context_window": 2_000_000,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~openai/gpt-mini-latest"): {
+        "description": "Alias OpenRouter para o modelo mini mais recente da OpenAI.",
+        "context_window": 400_000,
+        "input_cost_per_1m": 0.75,
+        "output_cost_per_1m": 4.50,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~google/gemini-flash-latest"): {
+        "description": "Alias OpenRouter para Gemini Flash recente, bom equilibrio de latencia e contexto longo.",
+        "context_window": 1_048_576,
+        "input_cost_per_1m": 0.50,
+        "output_cost_per_1m": 3.00,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~google/gemini-pro-latest"): {
+        "description": "Alias OpenRouter para Gemini Pro recente, focado em contexto longo e tarefas complexas.",
+        "context_window": 1_048_576,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "~anthropic/claude-sonnet-latest"): {
+        "description": "Alias OpenRouter para Claude Sonnet recente, forte em raciocinio e agentes.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 3.00,
+        "output_cost_per_1m": 15.00,
+        "speed_tier": 4,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "~openai/gpt-latest"): {
+        "description": "Alias OpenRouter para o modelo GPT generalista mais recente da OpenAI.",
+        "context_window": 1_050_000,
+        "input_cost_per_1m": 5.00,
+        "output_cost_per_1m": 30.00,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "openrouter/pareto-code"): {
+        "description": "Roteador OpenRouter orientado a tarefas de codigo.",
+        "context_window": 2_000_000,
+        "speed_tier": 4,
+        "intelligence_tier": 5,
+    },
 }
 
 _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
@@ -1608,6 +1668,29 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
         "Geracao musical da ElevenLabs.",
     ),
     ProviderModelDefinition("kokoro", "kokoro-v1", "Kokoro v1", "audio", "Modelo local de TTS."),
+    ProviderModelDefinition(
+        "supertonic",
+        "supertonic-3",
+        "Supertonic 3",
+        "audio",
+        "Modelo local ONNX de TTS multilingue com 31 idiomas.",
+    ),
+    ProviderModelDefinition(
+        "supertonic",
+        "supertonic-2",
+        "Supertonic 2",
+        "audio",
+        "Modelo local ONNX legado com cobertura multilingue menor.",
+        status="legacy",
+    ),
+    ProviderModelDefinition(
+        "supertonic",
+        "supertonic",
+        "Supertonic",
+        "audio",
+        "Modelo local ONNX legado em ingles.",
+        status="legacy",
+    ),
     ProviderModelDefinition(
         "whispercpp",
         "whisper-cpp-local",

@@ -5,8 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from aiohttp import web
 
 import koda.control_plane.manager as manager_mod
+import koda.control_plane.workspace_import as workspace_import_mod
+from koda.control_plane import api as control_plane_api
 from koda.control_plane.workspace_import import scan_workspace_directory
 from koda.services.tool_dispatcher import ToolContext, _handle_set_workdir
 
@@ -38,6 +41,7 @@ def _write_sample_workspace(root: Path) -> None:
 
 def test_workspace_scanner_detects_sources_redacts_and_blocks_hooks(tmp_path: Path) -> None:
     _write_sample_workspace(tmp_path)
+    (tmp_path / "notes.md").write_text("api_key = 'plain-secret-that-is-not-a-source'", encoding="utf-8")
     outside = tmp_path.parent / "outside-secret.txt"
     outside.write_text("secret", encoding="utf-8")
     (tmp_path / "linked-secret.txt").symlink_to(outside)
@@ -51,7 +55,10 @@ def test_workspace_scanner_detects_sources_redacts_and_blocks_hooks(tmp_path: Pa
     assert ".claude/agents/reviewer.md" in rels
     assert ".mcp.json" in rels
     assert ".env" not in rels
+    assert "notes.md" not in rels
     assert "linked-secret.txt" not in rels
+    assert "SHOULD_NOT_BE_SCANNED" not in json.dumps(scan)
+    assert "plain-secret-that-is-not-a-source" not in json.dumps(scan)
     assert any(source["kind"] == "hook" and source["risk"] == "blocked" for source in scan["sources"])
     agents = next(source for source in scan["sources"] if source["relative_path"] == "AGENTS.md")
     assert "[REDACTED]" in agents["content_excerpt"]
@@ -61,6 +68,49 @@ def test_workspace_scanner_detects_sources_redacts_and_blocks_hooks(tmp_path: Pa
     assert "LINEAR_API_KEY" in mcp_source["content_excerpt"]
     assert '"x"' not in mcp_source["content_excerpt"]
     assert '"x"' not in json.dumps(mcp_source["metadata"])
+
+
+def test_workspace_directory_routes_are_registered_before_workspace_id_route() -> None:
+    app = web.Application()
+    control_plane_api.setup_control_plane_routes(app)
+    ordered_canonicals = list(dict.fromkeys(route.resource.canonical for route in app.router.routes()))
+    route_methods: dict[str, set[str]] = {}
+    for route in app.router.routes():
+        route_methods.setdefault(route.resource.canonical, set()).add(route.method)
+
+    workspace_id_index = ordered_canonicals.index("/api/control-plane/workspaces/{workspace_id}")
+    fixed_routes = {
+        "/api/control-plane/workspaces/directory-roots": "GET",
+        "/api/control-plane/workspaces/list-directory": "POST",
+        "/api/control-plane/workspaces/scan-directory": "POST",
+        "/api/control-plane/workspaces/import": "POST",
+    }
+    for canonical, method in fixed_routes.items():
+        assert method in route_methods[canonical]
+        assert ordered_canonicals.index(canonical) < workspace_id_index
+
+
+def test_workspace_scanner_reads_only_known_source_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "AGENTS.md").write_text("Known source", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("Plain project notes", encoding="utf-8")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "secret-not-a-source.txt").write_text("token = plain", encoding="utf-8")
+    seen: list[str] = []
+    original_read = workspace_import_mod._read_text_file
+
+    def spy_read(path: Path) -> str | None:
+        seen.append(path.relative_to(tmp_path).as_posix())
+        return original_read(path)
+
+    monkeypatch.setattr(workspace_import_mod, "_read_text_file", spy_read)
+
+    scan = scan_workspace_directory(str(tmp_path)).to_dict()
+
+    assert {source["relative_path"] for source in scan["sources"]} == {"AGENTS.md"}
+    assert seen == ["AGENTS.md"]
 
 
 def test_workspace_scanner_handles_invalid_files_ignored_dirs_and_stable_hash(tmp_path: Path) -> None:
@@ -84,6 +134,10 @@ def test_workspace_scanner_handles_invalid_files_ignored_dirs_and_stable_hash(tm
     assert ".cursor/rules/bad.mdc" in rels
     assert ".mcp.json" in rels
     assert "node_modules/AGENTS.md" not in rels
+    warning_blob = json.dumps(first["sources"])
+    assert "parse.invalid_toml" in warning_blob
+    assert "parse.invalid_yaml_frontmatter" in warning_blob
+    assert "parse.invalid_json" in warning_blob
     assert first["scan_hash"] == second["scan_hash"]
     assert truncated["summary"]["truncated"] is True
 
@@ -161,6 +215,13 @@ class _WorkspaceMemDB:
                     "updated_at": params[6],
                 }
             )
+            return 1
+        if "UPDATE cp_workspaces" in query and "scan_status = ?" in query and "import_history_json" in query:
+            row = self.fetch_one("SELECT * FROM cp_workspaces WHERE id = ?", (params[3],))
+            assert row is not None
+            row["scan_status"] = params[0]
+            row["import_history_json"] = params[1]
+            row["updated_at"] = params[2]
             return 1
         if "UPDATE cp_workspaces" in query and "documents_json" in query:
             row = self.fetch_one("SELECT * FROM cp_workspaces WHERE id = ?", (params[3],))
@@ -250,6 +311,11 @@ def workspace_manager(monkeypatch: pytest.MonkeyPatch) -> tuple[manager_mod.Cont
 
     monkeypatch.setattr(manager, "create_agent", create_agent_stub)
     monkeypatch.setattr(manager, "upsert_document", upsert_document_stub)
+    monkeypatch.setattr(
+        manager,
+        "upsert_mcp_catalog_entry",
+        lambda server_key, payload: db.mcp.append({"server_key": server_key, **payload}) or db.mcp[-1],
+    )
     return manager, db
 
 
@@ -294,13 +360,61 @@ def test_workspace_import_creates_paused_draft_agent(
     _write_sample_workspace(tmp_path)
     scan = manager.scan_workspace_directory({"path": str(tmp_path)})
     agent_source = next(source for source in scan["sources"] if source["import_action"] == "create_agent_draft")
-    result = manager.import_workspace_from_directory({"path": str(tmp_path), "selectedSourceIds": [agent_source["source_id"]]})
+    result = manager.import_workspace_from_directory(
+        {"path": str(tmp_path), "selectedSourceIds": [agent_source["source_id"]]}
+    )
 
     assert result["import_result"]["applied"][0]["action"] == "agent_draft"
     assert db.agents[0]["status"] == "paused"
     metadata = json.loads(db.agents[0]["metadata_json"])
     assert metadata["imported_from"]["source_id"] == agent_source["source_id"]
     assert db.documents[0]["kind"] == "system_prompt_md"
+
+
+def test_workspace_import_creates_disabled_mcp_candidate_without_env_values(
+    workspace_manager: tuple[manager_mod.ControlPlaneManager, _WorkspaceMemDB],
+    tmp_path: Path,
+) -> None:
+    manager, db = workspace_manager
+    _write_sample_workspace(tmp_path)
+    scan = manager.scan_workspace_directory({"path": str(tmp_path)})
+    mcp_source = next(source for source in scan["sources"] if source["import_action"] == "mcp_review")
+
+    result = manager.import_workspace_from_directory(
+        {"path": str(tmp_path), "selectedSourceIds": [mcp_source["source_id"]]}
+    )
+
+    assert result["import_result"]["applied"][0]["action"] == "mcp_candidate"
+    assert db.mcp[0]["enabled"] is False
+    assert db.mcp[0]["metadata"]["review_required"] is True
+    assert db.mcp[0]["env_schema"] == [{"key": "LINEAR_API_KEY", "label": "LINEAR_API_KEY", "required": False}]
+    assert "LINEAR_API_KEY" in json.dumps(db.mcp[0])
+    assert '"x"' not in json.dumps(db.mcp[0])
+
+
+def test_workspace_rescan_records_error_and_preserves_previous_scan(
+    workspace_manager: tuple[manager_mod.ControlPlaneManager, _WorkspaceMemDB],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, db = workspace_manager
+    _write_sample_workspace(tmp_path)
+    workspace = manager.import_workspace_from_directory({"path": str(tmp_path), "selectedSourceIds": []})["workspace"]
+    previous_scan = db.workspaces[0]["config_sources_json"]
+
+    def fail_scan(payload: dict[str, Any]) -> dict[str, Any]:
+        raise ValueError("api_key=sk-secret-rescan")
+
+    monkeypatch.setattr(manager, "scan_workspace_directory", fail_scan)
+
+    with pytest.raises(ValueError):
+        manager.rescan_workspace(workspace["id"], {})
+
+    assert db.workspaces[0]["scan_status"] == "error"
+    assert db.workspaces[0]["config_sources_json"] == previous_scan
+    history = json.loads(db.workspaces[0]["import_history_json"])
+    assert history[-1]["event"] == "scan_error"
+    assert "sk-secret-rescan" not in history[-1]["error"]
 
 
 @pytest.mark.asyncio

@@ -155,6 +155,10 @@ class TestRunLLM:
 
 
 class TestProviderHealthSnapshot:
+    def test_openrouter_http_runner_is_registered(self):
+        assert "openrouter" in llm_runner_module._HTTP_PROVIDER_RUNNERS
+        assert llm_runner_module._HTTP_PROVIDER_RUNNERS["openrouter"]["first_chunk_timeout"] > 0
+
     @pytest.mark.asyncio
     async def test_snapshot_marks_provider_degraded_when_only_new_turn_is_available(self):
         async def _mock_capabilities(provider: str, turn_mode: str) -> ProviderCapabilities:

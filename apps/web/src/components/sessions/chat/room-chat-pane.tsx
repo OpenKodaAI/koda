@@ -2,6 +2,7 @@
 
 import {
   Fragment,
+  type CSSProperties,
   type FormEvent,
   useCallback,
   useEffect,
@@ -10,11 +11,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, PanelLeft, PanelRight, Reply, Settings2, Users, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useOptionalAuth } from "@/components/providers/auth-provider";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { AgentGlyph } from "@/components/ui/agent-glyph";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { useSquadThreadEvents } from "@/hooks/use-squad-thread-events";
@@ -61,6 +64,20 @@ interface RoomChatPaneProps {
 
 const OPERATOR_AGENT_ID = "operator";
 const ROOM_THREAD_PAGE_SIZE = 32;
+const ROOM_HISTORY_STALE_MS = 5 * 60 * 1000;
+const ROOM_HISTORY_GC_MS = 15 * 60 * 1000;
+const TOP_LOAD_THRESHOLD_PX = 320;
+const EMPTY_ROOM_DETAIL_PAGES: SquadThreadOverviewResponse[] = [];
+const AGENT_MESSAGE_ACCENTS = [
+  "#22C7D8",
+  "#7C8CFF",
+  "#56C271",
+  "#F2A93B",
+  "#E879B4",
+  "#A78BFA",
+  "#5ED0A9",
+  "#F9735B",
+];
 
 type RoomMessage = SquadThreadOverviewResponse["recentMessages"][number];
 type ReplyDraft = {
@@ -80,12 +97,16 @@ function mergeRoomMessagePages(
     orderedPages.push(latestDetail);
   }
 
-  const seen = new Set<number>();
+  const indexById = new Map<number, number>();
   const messages: RoomMessage[] = [];
   for (const page of orderedPages) {
     for (const message of page.recentMessages ?? []) {
-      if (seen.has(message.id)) continue;
-      seen.add(message.id);
+      const existingIndex = indexById.get(message.id);
+      if (existingIndex !== undefined) {
+        messages[existingIndex] = message;
+        continue;
+      }
+      indexById.set(message.id, messages.length);
       messages.push(message);
     }
   }
@@ -150,6 +171,112 @@ function isReplyTargetAgent(message: RoomMessage): boolean {
   return true;
 }
 
+function senderInitials(value: string): string {
+  const parts = value
+    .trim()
+    .split(/[\s_.-]+/)
+    .filter(Boolean);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || value.trim().slice(0, 2).toUpperCase() || "?";
+}
+
+function readableAvatarTextColor(background: string | null | undefined): string {
+  if (!background?.startsWith("#")) return "var(--text-primary)";
+  const hex = background.replace("#", "");
+  if (hex.length !== 6) return "var(--text-primary)";
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some(Number.isNaN)) return "var(--text-primary)";
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance > 0.66 ? "#111111" : "#ffffff";
+}
+
+function fallbackAgentAccent(seed: string): string {
+  let hash = 2166136261 >>> 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return AGENT_MESSAGE_ACCENTS[hash % AGENT_MESSAGE_ACCENTS.length] ?? "#A7ADB4";
+}
+
+function MessageSenderAvatar({
+  label,
+  color,
+  imageUrl,
+}: {
+  label: string;
+  color: string | null;
+  imageUrl?: string | null;
+}) {
+  const isAgent = Boolean(color);
+  const accentColor = color ?? null;
+  const avatarStyle = isAgent
+    ? ({
+        "--message-agent-color": accentColor,
+        backgroundColor: `color-mix(in srgb, ${accentColor} 18%, var(--panel-strong))`,
+        borderColor: `color-mix(in srgb, ${accentColor} 42%, var(--divider-hair))`,
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${accentColor} 18%, transparent)`,
+      } as CSSProperties)
+    : undefined;
+  return (
+    <Avatar
+      className={cn(
+        "relative h-9 w-9 overflow-hidden rounded-[0.65rem] border bg-[var(--panel-strong)] shadow-[var(--shadow-xs)]",
+        isAgent ? "border-[color:var(--message-agent-color)]" : "border-[color:var(--divider-hair)]",
+      )}
+      style={avatarStyle}
+    >
+      {imageUrl ? (
+        <AvatarImage
+          src={imageUrl}
+          alt={label}
+          className="h-full w-full rounded-[0.65rem] object-cover"
+          referrerPolicy="no-referrer"
+        />
+      ) : null}
+      {isAgent ? (
+        <>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-95"
+            style={{
+              background: `radial-gradient(circle at 28% 22%, color-mix(in srgb, ${accentColor} 34%, transparent), transparent 46%)`,
+            }}
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute bottom-1 right-1 h-2 w-2 rounded-full ring-2 ring-[var(--canvas)]"
+            style={{ backgroundColor: accentColor ?? undefined }}
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-1 left-1 w-0.5 rounded-full"
+            style={{ backgroundColor: accentColor ?? undefined }}
+          />
+        </>
+      ) : null}
+      <AvatarFallback
+        className={cn(
+          "relative z-[1] rounded-[0.65rem] border-0 bg-transparent font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.02em]",
+          isAgent && "pl-0.5",
+        )}
+        style={{
+          color: isAgent
+            ? readableAvatarTextColor(accentColor)
+            : "var(--text-primary)",
+        }}
+      >
+        {senderInitials(label)}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
 export function RoomChatPane({
   threadId,
   onArchived,
@@ -163,6 +290,7 @@ export function RoomChatPane({
   onThreadDetailChange,
 }: RoomChatPaneProps) {
   const { t } = useAppI18n();
+  const auth = useOptionalAuth();
   const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
@@ -172,8 +300,6 @@ export function RoomChatPane({
   const [replyDraft, setReplyDraft] = useState<ReplyDraft | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [olderDetailPages, setOlderDetailPages] = useState<SquadThreadOverviewResponse[]>([]);
-  const [loadingOlderDetailPages, setLoadingOlderDetailPages] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prependAnchorRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
@@ -218,15 +344,58 @@ export function RoomChatPane({
   const onLiveEvent = useCallback(() => {
     void queryClient.invalidateQueries({
       queryKey: queryKeys.dashboard.squadThread(threadId),
+      exact: true,
     });
   }, [queryClient, threadId]);
   useSquadThreadEvents({ threadId, onEvent: onLiveEvent });
 
   const detail = stable.data ?? null;
-  const activeOlderDetailPages = useMemo(
-    () => olderDetailPages.filter((page) => page.thread.id === threadId),
-    [olderDetailPages, threadId],
+  const latestHistoryBoundaryCursor = detail?.page?.nextCursor ?? null;
+  const olderDetailPagesQueryKey = useMemo(
+    () =>
+      queryKeys.dashboard.squadThreadOlderPages(
+        threadId || "__disabled__",
+        latestHistoryBoundaryCursor ?? "__none__",
+        ROOM_THREAD_PAGE_SIZE,
+      ),
+    [latestHistoryBoundaryCursor, threadId],
   );
+  const olderDetailPagesQuery = useInfiniteQuery({
+    queryKey: olderDetailPagesQueryKey,
+    enabled: Boolean(threadId && latestHistoryBoundaryCursor),
+    initialPageParam: latestHistoryBoundaryCursor ?? "",
+    staleTime: ROOM_HISTORY_STALE_MS,
+    gcTime: ROOM_HISTORY_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    queryFn: ({ pageParam, signal }) => {
+      const cursor = typeof pageParam === "string" ? pageParam : "";
+      if (!threadId || !cursor) {
+        throw new Error(
+          t("sessions.room.loadError", {
+            defaultValue: "Could not load this room.",
+          }),
+        );
+      }
+      return fetchControlPlaneDashboardJson<SquadThreadOverviewResponse>(
+        `/squads/threads/${threadId}`,
+        {
+          signal,
+          params: {
+            message_limit: ROOM_THREAD_PAGE_SIZE,
+            before: cursor,
+          },
+          fallbackError: t("sessions.room.loadError", {
+            defaultValue: "Could not load this room.",
+          }),
+        },
+      );
+    },
+    getNextPageParam: (lastPage) => lastPage.page?.nextCursor ?? undefined,
+  });
+  const activeOlderDetailPages = olderDetailPagesQuery.data?.pages ?? EMPTY_ROOM_DETAIL_PAGES;
   const messages = useMemo<RoomMessage[]>(
     () => mergeRoomMessagePages(detail, activeOlderDetailPages),
     [activeOlderDetailPages, detail],
@@ -236,8 +405,6 @@ export function RoomChatPane({
   }, [detail, onThreadDetailChange]);
 
   useEffect(() => {
-    setOlderDetailPages([]);
-    setLoadingOlderDetailPages(false);
     setReplyDraft(null);
     setSubmitError(null);
     setDraft("");
@@ -247,32 +414,21 @@ export function RoomChatPane({
   }, [threadId]);
 
   const oldestLoadedPage = activeOlderDetailPages[activeOlderDetailPages.length - 1] ?? detail;
-  const hasOlderMessages = oldestLoadedPage?.page?.hasMore ?? false;
-  const nextHistoryCursor = oldestLoadedPage?.page?.nextCursor ?? null;
+  const hasOlderMessages = Boolean(
+    latestHistoryBoundaryCursor &&
+      (activeOlderDetailPages.length > 0
+        ? oldestLoadedPage?.page?.hasMore
+        : detail?.page?.hasMore),
+  );
+  const loadingOlderDetailPages = olderDetailPagesQuery.isFetchingNextPage;
+  const fetchOlderDetailPage = olderDetailPagesQuery.fetchNextPage;
 
   const loadOlderMessages = useCallback(async () => {
-    if (!threadId || !detail || loadingOlderDetailPages || !hasOlderMessages || !nextHistoryCursor) {
+    if (!hasOlderMessages || loadingOlderDetailPages) {
       return;
     }
-    setLoadingOlderDetailPages(true);
-    try {
-      const page = await fetchControlPlaneDashboardJson<SquadThreadOverviewResponse>(
-        `/squads/threads/${threadId}`,
-        {
-          params: {
-            message_limit: ROOM_THREAD_PAGE_SIZE,
-            before: nextHistoryCursor,
-          },
-          fallbackError: t("sessions.room.loadError", {
-            defaultValue: "Could not load this room.",
-          }),
-        },
-      );
-      setOlderDetailPages((current) => [...current, page]);
-    } finally {
-      setLoadingOlderDetailPages(false);
-    }
-  }, [detail, hasOlderMessages, loadingOlderDetailPages, nextHistoryCursor, t, threadId]);
+    await fetchOlderDetailPage();
+  }, [fetchOlderDetailPage, hasOlderMessages, loadingOlderDetailPages]);
 
   const agentLabelMap = useMemo(() => {
     const map = new Map<string, { label: string; color: string }>();
@@ -298,27 +454,51 @@ export function RoomChatPane({
     [agentLabelMap],
   );
 
+  const triggerLoadOlderMessages = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (
+      !viewport ||
+      !hasOlderMessages ||
+      loadingOlderDetailPages ||
+      loadOlderLockRef.current
+    ) {
+      return;
+    }
+    loadOlderLockRef.current = true;
+    prependAnchorRef.current = {
+      scrollHeight: viewport.scrollHeight,
+      scrollTop: viewport.scrollTop,
+    };
+    void Promise.resolve(loadOlderMessages()).finally(() => {
+      loadOlderLockRef.current = false;
+    });
+  }, [hasOlderMessages, loadOlderMessages, loadingOlderDetailPages]);
+
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     if (
-      viewport.scrollTop <= 120 &&
+      viewport.scrollTop <= TOP_LOAD_THRESHOLD_PX &&
       hasOlderMessages &&
       !loadingOlderDetailPages &&
       !loadOlderLockRef.current
     ) {
-      loadOlderLockRef.current = true;
-      prependAnchorRef.current = {
-        scrollHeight: viewport.scrollHeight,
-        scrollTop: viewport.scrollTop,
-      };
-      void loadOlderMessages();
+      triggerLoadOlderMessages();
     }
-  }, [hasOlderMessages, loadOlderMessages, loadingOlderDetailPages]);
+  }, [hasOlderMessages, loadingOlderDetailPages, triggerLoadOlderMessages]);
 
   useEffect(() => {
     if (!loadingOlderDetailPages) loadOlderLockRef.current = false;
   }, [loadingOlderDetailPages]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || messages.length === 0) return;
+    if (viewport.clientHeight <= 0) return;
+    if (viewport.scrollHeight <= viewport.clientHeight + TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlderMessages();
+    }
+  }, [messages.length, triggerLoadOlderMessages]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -346,6 +526,12 @@ export function RoomChatPane({
     () => detail?.participants ?? [],
     [detail?.participants],
   );
+  const operatorAvatarLabel =
+    auth?.operator?.display_name?.trim() ||
+    auth?.operator?.username?.trim() ||
+    auth?.operator?.email?.trim() ||
+    t("sessions.room.you", { defaultValue: "You" });
+  const operatorPhotoUrl = auth?.operator?.profile_photo_url ?? null;
   const participantAvatars = useMemo(
     () =>
       participants.map((participant) => {
@@ -519,6 +705,7 @@ export function RoomChatPane({
         setReplyDraft(null);
         void queryClient.invalidateQueries({
           queryKey: queryKeys.dashboard.squadThread(threadId),
+          exact: true,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
@@ -722,6 +909,10 @@ export function RoomChatPane({
               const authorLabel = userAuthored
                 ? t("sessions.room.you", { defaultValue: "You" })
                 : meta.label;
+              const agentAccentColor =
+                !userAuthored && message.type !== "system_event"
+                  ? (meta.color ?? fallbackAgentAccent(message.from ?? authorLabel))
+                  : null;
               return (
                 <Fragment key={message.id}>
                   {showDaySeparator ? (
@@ -735,9 +926,9 @@ export function RoomChatPane({
                   ) : null}
                   <article
                     className={cn(
-                      "group relative -mx-3 grid grid-cols-[2rem_minmax(0,1fr)] gap-3 rounded-[var(--radius-panel-sm)] px-3",
+                      "group relative -mx-3 grid grid-cols-[3rem_minmax(0,1fr)_2rem] gap-x-3 rounded-[var(--radius-panel-sm)] px-3",
                       "transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]",
-                      isContinuation ? "py-0.5" : "py-1.5",
+                      isContinuation ? "py-0.5" : "py-2",
                       message.type === "system_event" && "opacity-90",
                     )}
                     aria-label={t("sessions.room.messageFrom", {
@@ -745,36 +936,39 @@ export function RoomChatPane({
                       label: authorLabel,
                     })}
                   >
-                    <div className="flex justify-center pt-1">
+                    <div className="flex justify-center pt-0.5">
                       {isContinuation ? (
-                        <span className="mt-0.5 font-mono text-[0.625rem] leading-5 text-[var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100">
+                        <span className="w-full whitespace-nowrap pt-0.5 text-right font-mono text-[0.5625rem] leading-5 text-[var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100">
                           {time}
                         </span>
                       ) : (
-                        <span
-                          aria-hidden
-                          className="mt-1 block h-8 w-1 rounded-full"
-                          style={{
-                            background: userAuthored
-                              ? "var(--border-strong)"
-                              : (meta.color ?? "#A7ADB4"),
-                          }}
+                        <MessageSenderAvatar
+                          label={userAuthored ? operatorAvatarLabel : authorLabel}
+                          color={agentAccentColor}
+                          imageUrl={userAuthored ? operatorPhotoUrl : null}
                         />
                       )}
                     </div>
-                    <div className="min-w-0 pr-8">
+                    <div className="min-w-0">
                       {!isContinuation ? (
                         <div className="flex min-w-0 items-baseline gap-2">
-                          <span className="truncate text-[0.875rem] font-medium text-[var(--text-primary)]">
+                          {agentAccentColor ? (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: agentAccentColor }}
+                              aria-hidden
+                            />
+                          ) : null}
+                          <span className="truncate text-[0.9375rem] font-semibold text-[var(--text-primary)]">
                             {authorLabel}
                           </span>
                           {time ? (
-                            <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                            <span className="shrink-0 text-[0.75rem] text-[var(--text-quaternary)]">
                               {time}
                             </span>
                           ) : null}
                           {message.type === "coordinator_synthesis" ? (
-                            <span className="shrink-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-info-dot)]">
+                            <span className="shrink-0 rounded-full bg-[var(--tone-info-bg)] px-2 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-info-dot)]">
                               {t("sessions.room.reply.synthesized", {
                                 defaultValue: "Synthesized",
                               })}
@@ -783,8 +977,7 @@ export function RoomChatPane({
                         </div>
                       ) : null}
                       {inReplyTo ? (
-                        <div className="mt-1 flex items-center gap-2 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
-                          <span className="h-4 w-px rounded-full bg-[var(--border-strong)]" aria-hidden />
+                        <div className="mt-1.5 flex max-w-full items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] px-2 py-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
                           <Reply className="h-3 w-3 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
                           <span className="truncate">
                             {t("sessions.room.reply.parentPreview", {
@@ -798,18 +991,18 @@ export function RoomChatPane({
                       ) : null}
                       <div
                         className={cn(
-                          "whitespace-pre-wrap break-words text-[0.9375rem] leading-[1.5] text-[var(--text-primary)]",
-                          isContinuation ? "pt-0" : "pt-0.5",
+                          "whitespace-pre-wrap break-words text-[0.9375rem] leading-[1.45] text-[var(--text-primary)]",
+                          isContinuation ? "pt-0" : "pt-1",
                           message.type === "system_event" && "text-[var(--text-tertiary)]",
                         )}
                       >
                         <RoomMentionRichText text={message.content} mentionsByToken={mentionLookup} />
                       </div>
                       {openReplies > 0 || answeredReplies > 0 ? (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
                           {openReplies > 0 ? (
-                            <span className="inline-flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--tone-warning-dot)]" aria-hidden />
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-warning-bg)] px-2 py-0.5 font-medium text-[var(--tone-warning-dot)]">
+                              <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                               {t("sessions.room.reply.waiting", {
                                 defaultValue: "{{count}} waiting",
                                 count: openReplies,
@@ -817,8 +1010,8 @@ export function RoomChatPane({
                             </span>
                           ) : null}
                           {answeredReplies > 0 ? (
-                            <span className="inline-flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--tone-success-dot)]" aria-hidden />
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-success-bg)] px-2 py-0.5 font-medium text-[var(--tone-success-dot)]">
+                              <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                               {t("sessions.room.reply.answered", {
                                 defaultValue: "{{count}} answered",
                                 count: answeredReplies,
@@ -832,7 +1025,7 @@ export function RoomChatPane({
                       type="button"
                       onClick={() => startReply(message)}
                       className={cn(
-                        "absolute right-2 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)]",
+                        "mt-0.5 inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-[var(--radius-panel-sm)]",
                         "border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] opacity-0 shadow-[var(--shadow-xs)]",
                         "transition-[opacity,background-color,color,border-color] duration-[120ms]",
                         "hover:border-[color:var(--border-strong)] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]",

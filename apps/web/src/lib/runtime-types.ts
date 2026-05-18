@@ -149,6 +149,7 @@ export interface RuntimeEnvironment {
   runtime_dir?: string | null;
   base_work_dir?: string | null;
   source_root_path?: string | null;
+  source_root_exists?: boolean | null;
   branch_name?: string | null;
   created_worktree?: number | boolean | null;
   worktree_mode?: string | null;

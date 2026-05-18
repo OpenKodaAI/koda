@@ -7,6 +7,7 @@ import { SessionRow } from "@/components/sessions/rail/session-row";
 import { RoomRow } from "@/components/sessions/rail/room-row";
 import { RailSearch } from "@/components/sessions/rail/rail-search";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { SessionSummary } from "@/lib/types";
@@ -35,6 +36,9 @@ interface SessionRailProps {
   search: string;
   onSearchChange: (value: string) => void;
   loading?: boolean;
+  hasMoreSessions?: boolean;
+  loadingMoreSessions?: boolean;
+  onLoadMoreSessions?: () => void;
   error?: string | null;
   unavailable?: boolean;
   onClose?: () => void;
@@ -63,6 +67,9 @@ function SessionRailImpl({
   search,
   onSearchChange,
   loading = false,
+  hasMoreSessions = false,
+  loadingMoreSessions = false,
+  onLoadMoreSessions,
   error,
   unavailable = false,
   onClose,
@@ -488,6 +495,15 @@ function SessionRailImpl({
                     />
                   );
                 })}
+                {onLoadMoreSessions ? (
+                  <InfiniteListFooter
+                    hasMore={hasMoreSessions}
+                    loading={loadingMoreSessions}
+                    onLoadMore={onLoadMoreSessions}
+                    label={t("common.loadMore", { defaultValue: "Load more" })}
+                    className="py-3"
+                  />
+                ) : null}
               </>
             ) : null}
           </>

@@ -83,6 +83,8 @@ describe("RuntimeTaskRoom", () => {
           status: "active",
           current_phase: "running",
           branch_name: "task/42",
+          source_root_path: "/missing/source",
+          source_root_exists: false,
           workspace_path: "/tmp/runtime-42",
           runtime_dir: "/tmp/runtime-42/.runtime",
           last_heartbeat_at: "2026-03-19T00:01:00.000Z",
@@ -195,6 +197,8 @@ describe("RuntimeTaskRoom", () => {
     expect(screen.getByText("Sandbox doctor unavailable")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Detalhes" }));
     expect(screen.getByRole("tab", { name: "Arquivos" })).toBeInTheDocument();
+    expect(screen.getByText("/missing/source")).toBeInTheDocument();
+    expect(screen.getByText(/Source root is unavailable|raiz/i)).toBeInTheDocument();
     expect(screen.getByText("/tmp/runtime-42")).toBeInTheDocument();
     expect(screen.getByText(/Git status|Status do Git/i)).toBeInTheDocument();
     const statusLine = screen.getByText("M src/app.tsx");

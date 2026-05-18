@@ -30,6 +30,11 @@ from koda.services.metrics import (
     STALE_SOURCE_USAGE,
     TOOL_EXECUTIONS,
     VERIFICATION_BEFORE_FINALIZE,
+    WORKSPACE_IMPORT_APPLIES_TOTAL,
+    WORKSPACE_IMPORT_BLOCKED_TOTAL,
+    WORKSPACE_IMPORT_LIMIT_HITS_TOTAL,
+    WORKSPACE_IMPORT_SCANS_TOTAL,
+    WORKSPACE_IMPORT_SOURCES_TOTAL,
 )
 
 
@@ -64,6 +69,11 @@ class TestMetricsExist:
         assert PROVIDER_COMPATIBILITY_STATE is not None
         assert PROVIDER_RESUME_DEGRADED_TOTAL is not None
         assert PROVIDER_ADAPTER_CONTRACT_ERRORS_TOTAL is not None
+        assert WORKSPACE_IMPORT_SCANS_TOTAL is not None
+        assert WORKSPACE_IMPORT_SOURCES_TOTAL is not None
+        assert WORKSPACE_IMPORT_APPLIES_TOTAL is not None
+        assert WORKSPACE_IMPORT_BLOCKED_TOTAL is not None
+        assert WORKSPACE_IMPORT_LIMIT_HITS_TOTAL is not None
 
     def test_counter_increment(self):
         REQUESTS_TOTAL.labels(agent_id="test", status="completed").inc()

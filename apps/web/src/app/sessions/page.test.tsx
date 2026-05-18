@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +37,8 @@ vi.mock("@/hooks/use-animated-presence", () => ({
   useEscapeToClose: () => undefined,
   useMediaQuery: () => true,
 }));
+
+const THREAD_PAGE_SIZE = 24;
 
 const agentCatalog = [
   {
@@ -392,6 +394,142 @@ describe("SessionsPage chat redesign", () => {
     expect(
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+    ).toBeInTheDocument();
+  }, 10_000);
+
+  it("loads older regular session pages near the top and reuses them from cache", async () => {
+    currentQueryString = "agent=ATLAS&session=session-alpha";
+    currentSearchParams = new URLSearchParams(currentQueryString);
+    const user = userEvent.setup();
+    const defaultFetch = vi.mocked(global.fetch).getMockImplementation();
+    const latestAlpha: SessionDetail = {
+      ...sessionDetails["session-alpha"],
+      page: {
+        limit: THREAD_PAGE_SIZE,
+        returned: 2,
+        next_cursor: "alpha-before-2",
+        has_more: true,
+      },
+    };
+    const olderAlpha: SessionDetail = {
+      ...sessionDetails["session-alpha"],
+      messages: [
+        {
+          id: "alpha-0",
+          role: "user",
+          text: "Old alpha context",
+          timestamp: "2026-03-28T09:59:00.000Z",
+          model: null,
+          cost_usd: null,
+          query_id: 0,
+          session_id: "session-alpha",
+          error: false,
+        },
+      ],
+      orphan_executions: [],
+      page: {
+        limit: THREAD_PAGE_SIZE,
+        returned: 1,
+        next_cursor: null,
+        has_more: false,
+      },
+    };
+
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      if (
+        method === "GET" &&
+        url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-alpha")
+      ) {
+        const parsed = new URL(url, "http://localhost");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              parsed.searchParams.get("before") === "alpha-before-2"
+                ? olderAlpha
+                : latestAlpha,
+            ),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (!defaultFetch) {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderSessionsPage();
+
+    let log = await screen.findByRole("log");
+    expect(await within(log).findByText("Everything shipped correctly.")).toBeInTheDocument();
+    Object.defineProperties(log, {
+      scrollHeight: { configurable: true, value: 1600 },
+      clientHeight: { configurable: true, value: 520 },
+      scrollTop: { configurable: true, value: 260, writable: true },
+    });
+    fireEvent.scroll(log);
+
+    expect(await within(log).findByText("Old alpha context")).toBeInTheDocument();
+    const olderFetchCount = () =>
+      vi.mocked(global.fetch).mock.calls.filter(([input]) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (!url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-alpha")) {
+          return false;
+        }
+        const parsed = new URL(url, "http://localhost");
+        return parsed.searchParams.get("before") === "alpha-before-2";
+      }).length;
+    expect(olderFetchCount()).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: /Beta sync/i }));
+    expect(
+      await within(await screen.findByRole("log")).findByText("Here is the beta summary."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Alpha conversation/i }));
+    log = await screen.findByRole("log");
+    expect(await within(log).findByText("Old alpha context")).toBeInTheDocument();
+    expect(olderFetchCount()).toBe(1);
+  }, 10_000);
+
+  it("shows chat loading while a regular session detail is being fetched", async () => {
+    currentQueryString = "agent=ATLAS&session=session-alpha";
+    currentSearchParams = new URLSearchParams(currentQueryString);
+    const defaultFetch = vi.mocked(global.fetch).getMockImplementation();
+    let resolveDetail: (response: Response) => void = () => undefined;
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (
+        (init?.method ?? "GET") === "GET" &&
+        url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-alpha")
+      ) {
+        return new Promise<Response>((resolve) => {
+          resolveDetail = resolve;
+        });
+      }
+      if (!defaultFetch) {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderSessionsPage();
+
+    expect(
+      await screen.findByRole("status", { name: /Loading conversation/i }),
+    ).toBeInTheDocument();
+
+    resolveDetail(
+      new Response(JSON.stringify(sessionDetails["session-alpha"]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
     expect(
       await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
     ).toBeInTheDocument();

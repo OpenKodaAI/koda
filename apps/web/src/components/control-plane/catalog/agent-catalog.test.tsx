@@ -74,6 +74,7 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
       name: "Produto",
       description: "Workspace de produto",
       color: "#4F7CFF",
+      root_path: "/workspace/product",
       agent_count: 2,
       squads: [
         {
@@ -215,6 +216,39 @@ describe("AgentCatalog organization board", () => {
               },
               created_at: "2026-03-23T00:00:00Z",
               updated_at: "2026-03-23T00:00:00Z",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/directory-roots" && method === "GET") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [{ path: "/tmp", label: "tmp" }],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/list-directory" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              path: "/tmp",
+              parent: "/",
+              items: [
+                { path: "/tmp/sample-repo", name: "sample-repo", kind: "directory" },
+                { path: "/tmp/AGENTS.md", name: "AGENTS.md", kind: "file" },
+              ],
             }),
             {
               status: 200,
@@ -499,6 +533,13 @@ describe("AgentCatalog organization board", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: /Import from folder/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/control-plane/workspaces/directory-roots",
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+    });
+    expect(await within(dialog).findByText("tmp")).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText(/Folder path/i), "/tmp/sample-repo");
     await user.click(within(dialog).getByRole("button", { name: /Scan/i }));
 
@@ -509,10 +550,12 @@ describe("AgentCatalog organization board", () => {
       expect(within(dialog).getByText(".claude/settings.json")).toBeInTheDocument();
     });
 
-    const blockedRow = within(dialog).getByText(".claude/settings.json").closest("label");
-    expect(blockedRow).not.toBeNull();
-    expect(within(blockedRow as HTMLElement).getByRole("checkbox")).toBeDisabled();
-    expect(within(dialog).getByText(/2 selected prompt source/i)).toBeInTheDocument();
+    const blockedSection = within(dialog).getByText(".claude/settings.json").closest("section");
+    expect(blockedSection).not.toBeNull();
+    expect(within(blockedSection as HTMLElement).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/koda:workspace-import:start/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/src_agents/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Use tests/i).length).toBeGreaterThan(0);
 
     await user.click(within(dialog).getByRole("button", { name: /^Import$/i }));
 
@@ -528,6 +571,44 @@ describe("AgentCatalog organization board", () => {
         }),
       );
     });
+  });
+
+  it("opens folder import when directory root quick-picks are unavailable", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+
+      if (url === "/api/control-plane/workspaces/directory-roots" && method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "405: Method Not Allowed" }), {
+            status: 405,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "Unexpected request" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: /^Criar$/i }));
+    await user.click(await screen.findByRole("menuitem", { name: /Import from folder|Importar/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /Import from folder/i })).toBeInTheDocument();
+    expect(await within(dialog).findByText("Produto")).toBeInTheDocument();
   });
 
   it("moves a agent between lanes using drag and drop", async () => {

@@ -26,11 +26,20 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDailyActivity } from "@/hooks/use-daily-activity";
 import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useSetupChecklist } from "@/hooks/use-setup-checklist";
+import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAgentStats } from "@/hooks/use-agent-stats";
 import { resolveAgentSelection } from "@/lib/agent-selection";
+import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
+import { queryKeys } from "@/lib/query/keys";
 import { cn } from "@/lib/utils";
-import type { AgentStats } from "@/lib/types";
+import type { AgentStats, ExecutionSummary } from "@/lib/types";
 
 function deriveGreetingName(operator: AuthOperator | null | undefined): string {
   const candidate =
@@ -63,7 +72,7 @@ function OverviewPageContent() {
   const {
     stats: allStats,
     loading,
-  } = useAgentStats();
+  } = useAgentStats(undefined, { recentTaskLimit: 0 });
   const { snapshot: setupChecklistSnapshot } = useSetupChecklist();
 
   const openAgentDetail = useCallback(
@@ -99,6 +108,39 @@ function OverviewPageContent() {
   );
 
   const rosterEntries = visibleEntries;
+
+  const recentExecutionsQuery = useControlPlaneQuery<
+    PaginatedListResponse<ExecutionSummary>
+  >({
+    tier: "live",
+    queryKey: queryKeys.dashboard.executions({
+      agentIds: visibleBotIds,
+      limit: 10,
+      status: "",
+      search: "",
+    }),
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    queryFn: async ({ signal }) => {
+      const response = await fetchControlPlaneDashboardJsonAllowError<
+        PaginatedListResponse<ExecutionSummary>
+      >("/executions", {
+        signal,
+        params: {
+          paged: 1,
+          agent: visibleBotIds,
+          limit: 10,
+          offset: 0,
+        },
+        fallbackError: t("overview.history.empty"),
+      });
+      return normalizePaginatedListResponse<ExecutionSummary>(response.data, 10, 0);
+    },
+  });
+
+  const recentExecutions = recentExecutionsQuery.data?.items ?? [];
 
   const historyStrings = useMemo<ExecutionHistoryStrings>(
     () => ({
@@ -353,6 +395,7 @@ function OverviewPageContent() {
             </header>
             <ExecutionHistory
               entries={rosterEntries}
+              executions={recentExecutions}
               strings={historyStrings}
               limit={10}
               onSelectAgent={openAgentDetail}

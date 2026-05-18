@@ -16,6 +16,7 @@ import {
   ChevronDown,
   FileText,
   FolderPlus,
+  FolderOpen,
   FolderSearch,
   LoaderCircle,
   Pencil,
@@ -54,6 +55,10 @@ import type {
   ControlPlaneWorkspaceSquad,
   ControlPlaneWorkspaceTree,
   WorkspaceConfigSource,
+  WorkspaceDirectoryListPayload,
+  WorkspaceDirectoryRoot,
+  WorkspaceDirectoryRootsPayload,
+  WorkspaceScanPayload,
 } from "@/lib/control-plane";
 
 const NO_WORKSPACE_KEY = "__no_workspace__";
@@ -412,22 +417,6 @@ type OrganizationFormState = {
   rootPath?: string;
 };
 
-type WorkspaceScanPayload = {
-  schema_version: string;
-  root_path: string;
-  scan_hash: string;
-  status: string;
-  summary: {
-    total_sources: number;
-    importable?: number;
-    review_required?: number;
-    blocked?: number;
-    by_tool?: Record<string, number>;
-  };
-  sources: WorkspaceConfigSource[];
-  warnings?: string[];
-};
-
 type DeleteTarget =
   | { kind: "workspace"; id: string; name: string }
   | { kind: "squad"; id: string; name: string; workspaceId: string }
@@ -585,6 +574,99 @@ function applyBatchMoveToWorkspaceTree(
   return nextTree;
 }
 
+function isPromptImportableSource(source: WorkspaceConfigSource): boolean {
+  return source.import_action === "append_workspace_prompt" && source.risk === "low";
+}
+
+function workspaceImportRiskGroup(source: WorkspaceConfigSource) {
+  if (isPromptImportableSource(source)) return "importable";
+  if (source.risk === "blocked" || source.status === "blocked") return "blocked";
+  return "review";
+}
+
+function sortWorkspaceSources(sources: WorkspaceConfigSource[]) {
+  return [...sources].sort((left, right) =>
+    `${left.tool}:${left.kind}:${left.relative_path}`.localeCompare(
+      `${right.tool}:${right.kind}:${right.relative_path}`,
+    ),
+  );
+}
+
+function buildWorkspaceImportPreview(
+  scan: WorkspaceScanPayload | null,
+  selectedSourceIds: string[],
+) {
+  const selected = new Set(selectedSourceIds);
+  const sources = sortWorkspaceSources(
+    (scan?.sources ?? []).filter(
+      (source) => selected.has(source.source_id) && isPromptImportableSource(source),
+    ),
+  );
+  const lines = [
+    `<!-- koda:workspace-import:start schema=workspace_config_scan.v1 scan_hash=${scan?.scan_hash ?? ""} -->`,
+    "",
+    "## Imported Workspace Directory Context",
+    "",
+  ];
+  if (sources.length === 0) {
+    lines.push("[no selected prompt sources]", "");
+  }
+  for (const source of sources) {
+    lines.push(
+      `### ${source.tool}: ${source.relative_path}`,
+      "",
+      `Source ID: \`${source.source_id}\``,
+      "",
+      source.content_excerpt || "[redacted preview unavailable]",
+      "",
+    );
+  }
+  lines.push("<!-- koda:workspace-import:end -->");
+  return lines.join("\n").trim();
+}
+
+function workspaceRootStatusLabel(
+  workspace: ControlPlaneWorkspace,
+  tl: (value: string, options?: Record<string, unknown>) => string,
+) {
+  if (!workspace.root_path) return tl("No root");
+  if (workspace.root_exists === false) return tl("Missing");
+  if (workspace.scan_status === "completed") return tl("Scanned");
+  if (workspace.scan_status === "stale") return tl("Stale");
+  if (workspace.scan_status === "error") return tl("Scan error");
+  return tl("Never scanned");
+}
+
+function workspaceRootStatusTone(workspace: ControlPlaneWorkspace) {
+  if (!workspace.root_path) return "bg-[var(--panel-strong)] text-[var(--text-tertiary)]";
+  if (workspace.root_exists === false || workspace.scan_status === "error") {
+    return "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]";
+  }
+  if (workspace.scan_status === "completed") {
+    return "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]";
+  }
+  return "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]";
+}
+
+function workspaceImportRootsFromTree(tree: ControlPlaneWorkspaceTree): WorkspaceDirectoryRoot[] {
+  const seen = new Set<string>();
+  const roots: WorkspaceDirectoryRoot[] = [];
+  for (const workspace of tree.items) {
+    const path = String(workspace.root_path || "").trim();
+    if (!path || seen.has(path)) {
+      continue;
+    }
+    seen.add(path);
+    roots.push({ path, label: workspace.name || path });
+  }
+  return roots;
+}
+
+function requestErrorStatus(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : null;
+}
+
 async function requestJson(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
     ...init,
@@ -592,11 +674,13 @@ async function requestJson(path: string, init: RequestInit = {}) {
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       payload && typeof payload === "object" && "error" in payload
         ? String(payload.error)
         : `Request failed with status ${response.status}`,
-    );
+    ) as Error & { status: number };
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -674,10 +758,14 @@ export function AgentCatalog({
     useState<OrganizationFormState | null>(null);
   const [workspaceImportOpen, setWorkspaceImportOpen] = useState(false);
   const [workspaceImportPath, setWorkspaceImportPath] = useState("");
+  const [workspaceImportRoots, setWorkspaceImportRoots] = useState<WorkspaceDirectoryRoot[]>([]);
+  const [workspaceImportDirectory, setWorkspaceImportDirectory] =
+    useState<WorkspaceDirectoryListPayload | null>(null);
   const [workspaceImportScan, setWorkspaceImportScan] =
     useState<WorkspaceScanPayload | null>(null);
   const [workspaceImportSelected, setWorkspaceImportSelected] = useState<string[]>([]);
   const [workspaceImportBusy, setWorkspaceImportBusy] = useState(false);
+  const [workspaceImportDirectoryBusy, setWorkspaceImportDirectoryBusy] = useState(false);
   const organizationFormPresence = useAnimatedPresence(
     organizationForm !== null,
     organizationForm,
@@ -738,6 +826,33 @@ export function AgentCatalog({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!workspaceImportOpen) {
+      return;
+    }
+    let cancelled = false;
+    requestJson("/api/control-plane/workspaces/directory-roots")
+      .then((payload) => {
+        if (cancelled) return;
+        const roots = ((payload as WorkspaceDirectoryRootsPayload).items ?? []);
+        setWorkspaceImportRoots(roots.length > 0 ? roots : workspaceImportRootsFromTree(workspaceTree));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if ([404, 405].includes(requestErrorStatus(error) ?? 0)) {
+          setWorkspaceImportRoots(workspaceImportRootsFromTree(workspaceTree));
+          return;
+        }
+        showToast(
+          error instanceof Error ? error.message : tl("Erro ao carregar raizes."),
+          "error",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast, tl, workspaceImportOpen, workspaceTree]);
 
   function normalizeCloneBase(base: string): string {
     const raw = base.toUpperCase().replace(/[^A-Z0-9]/g, "_");
@@ -1025,12 +1140,29 @@ export function AgentCatalog({
 
   function importableSourceIds(scan: WorkspaceScanPayload | null) {
     return (scan?.sources ?? [])
-      .filter(
-        (source) =>
-          source.import_action === "append_workspace_prompt" &&
-          source.risk === "low",
-      )
+      .filter(isPromptImportableSource)
       .map((source) => source.source_id);
+  }
+
+  async function handleWorkspaceImportBrowse(path: string) {
+    const cleanPath = path.trim();
+    if (!cleanPath) {
+      showToast(tl("Informe uma pasta para navegar."), "error");
+      return;
+    }
+    setWorkspaceImportDirectoryBusy(true);
+    try {
+      const directory = (await requestJson("/api/control-plane/workspaces/list-directory", {
+        method: "POST",
+        body: JSON.stringify({ path: cleanPath }),
+      })) as WorkspaceDirectoryListPayload;
+      setWorkspaceImportDirectory(directory);
+      setWorkspaceImportPath(directory.path);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : tl("Erro ao listar pasta."), "error");
+    } finally {
+      setWorkspaceImportDirectoryBusy(false);
+    }
   }
 
   async function handleWorkspaceImportScan() {
@@ -1045,6 +1177,7 @@ export function AgentCatalog({
         body: JSON.stringify({ path: workspaceImportPath.trim() }),
       })) as WorkspaceScanPayload;
       setWorkspaceImportScan(scan);
+      setWorkspaceImportPath(scan.root_path);
       setWorkspaceImportSelected(importableSourceIds(scan));
     } catch (error) {
       showToast(error instanceof Error ? error.message : tl("Erro ao escanear pasta."), "error");
@@ -1068,6 +1201,7 @@ export function AgentCatalog({
       setWorkspaceImportOpen(false);
       setWorkspaceImportScan(null);
       setWorkspaceImportSelected([]);
+      setWorkspaceImportDirectory(null);
       showToast(tl("Workspace importado com sucesso."), "success");
       router.refresh();
     } catch (error) {
@@ -1092,6 +1226,42 @@ export function AgentCatalog({
       setOrganizationBusy(false);
     }
   }
+
+  const workspaceImportGroups = useMemo(() => {
+    const groups = {
+      importable: [] as WorkspaceConfigSource[],
+      review: [] as WorkspaceConfigSource[],
+      blocked: [] as WorkspaceConfigSource[],
+    };
+    for (const source of workspaceImportScan?.sources ?? []) {
+      groups[workspaceImportRiskGroup(source)].push(source);
+    }
+    return [
+      {
+        key: "importable",
+        title: tl("Importable"),
+        tone: "success",
+        sources: sortWorkspaceSources(groups.importable),
+      },
+      {
+        key: "review",
+        title: tl("Review required"),
+        tone: "warning",
+        sources: sortWorkspaceSources(groups.review),
+      },
+      {
+        key: "blocked",
+        title: tl("Blocked"),
+        tone: "danger",
+        sources: sortWorkspaceSources(groups.blocked),
+      },
+    ];
+  }, [tl, workspaceImportScan]);
+
+  const workspaceImportPreview = useMemo(
+    () => buildWorkspaceImportPreview(workspaceImportScan, workspaceImportSelected),
+    [workspaceImportScan, workspaceImportSelected],
+  );
 
   const clearMoveFeedbackSoon = useCallback(() => {
     if (moveFeedbackTimerRef.current) {
@@ -1656,14 +1826,12 @@ export function AgentCatalog({
                 <span
                   className={cn(
                     "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-chip)] px-2 text-[0.72rem] font-medium",
-                    activeSection.workspace.root_exists
-                      ? "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
-                      : "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
+                    workspaceRootStatusTone(activeSection.workspace),
                   )}
-                  title={activeSection.workspace.root_path}
+                  title={`${activeSection.workspace.root_path} · ${activeSection.workspace.scan_status ?? "not_scanned"}`}
                 >
                   <FolderSearch className="h-3.5 w-3.5" />
-                  {activeSection.workspace.root_exists ? tl("Root") : tl("Missing")}
+                  {workspaceRootStatusLabel(activeSection.workspace, tl)}
                 </span>
               ) : null}
               {activeSection.workspace.root_path ? (
@@ -1735,6 +1903,8 @@ export function AgentCatalog({
               onCreateWorkspace={() => openWorkspaceForm("create")}
               onImportWorkspace={() => {
                 setWorkspaceImportOpen(true);
+                setWorkspaceImportPath("");
+                setWorkspaceImportDirectory(null);
                 setWorkspaceImportScan(null);
                 setWorkspaceImportSelected([]);
               }}
@@ -2135,31 +2305,133 @@ export function AgentCatalog({
                     </button>
                   </div>
 
-                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                    <div className="min-w-0 flex-1">
-                      <FormInput
-                        label={tl("Folder path")}
-                        value={workspaceImportPath}
-                        onChange={(event) => setWorkspaceImportPath(event.target.value)}
-                        placeholder="/Users/me/project"
-                      />
+                  <div className="mt-6 space-y-3">
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <div className="min-w-0 flex-1">
+                        <FormInput
+                          label={tl("Folder path")}
+                          value={workspaceImportPath}
+                          onChange={(event) => setWorkspaceImportPath(event.target.value)}
+                          placeholder="/workspace/project"
+                        />
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <ActionButton
+                          type="button"
+                          size="icon"
+                          onClick={() => void handleWorkspaceImportBrowse(workspaceImportPath)}
+                          disabled={workspaceImportDirectoryBusy || !workspaceImportPath.trim()}
+                          aria-label={tl("Browse folder")}
+                        >
+                          {workspaceImportDirectoryBusy ? (
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <FolderOpen className="h-3.5 w-3.5" />
+                          )}
+                        </ActionButton>
+                        <ActionButton
+                          type="button"
+                          onClick={() => void handleWorkspaceImportScan()}
+                          disabled={workspaceImportBusy || !workspaceImportPath.trim()}
+                          aria-label={workspaceImportBusy ? tl("Escaneando pasta") : undefined}
+                        >
+                          {workspaceImportBusy ? (
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <FolderSearch className="h-3.5 w-3.5" />
+                              <span>{tl("Scan")}</span>
+                            </>
+                          )}
+                        </ActionButton>
+                      </div>
                     </div>
-                    <ActionButton
-                      type="button"
-                      className="self-end"
-                      onClick={() => void handleWorkspaceImportScan()}
-                      disabled={workspaceImportBusy || !workspaceImportPath.trim()}
-                      aria-label={workspaceImportBusy ? tl("Escaneando pasta") : undefined}
-                    >
-                      {workspaceImportBusy ? (
-                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <>
-                        <FolderSearch className="h-3.5 w-3.5" />
-                        <span>{tl("Scan")}</span>
-                        </>
-                      )}
-                    </ActionButton>
+
+                    {workspaceImportRoots.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {workspaceImportRoots.map((root) => (
+                          <button
+                            key={root.path}
+                            type="button"
+                            className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1 text-xs text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                            onClick={() => void handleWorkspaceImportBrowse(root.path)}
+                            disabled={workspaceImportDirectoryBusy}
+                            title={root.path}
+                          >
+                            <FolderSearch className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{root.label || root.path}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {workspaceImportDirectory ? (
+                      <div className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)]">
+                        <div className="flex items-center justify-between gap-2 border-b border-[color:var(--divider-hair)] px-3 py-2">
+                          <span className="min-w-0 truncate font-mono text-[0.72rem] text-[var(--text-secondary)]">
+                            {workspaceImportDirectory.path}
+                          </span>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {workspaceImportDirectory.parent ? (
+                              <ActionButton
+                                type="button"
+                                size="icon"
+                                aria-label={tl("Parent folder")}
+                                disabled={workspaceImportDirectoryBusy}
+                                onClick={() =>
+                                  void handleWorkspaceImportBrowse(workspaceImportDirectory.parent ?? "")
+                                }
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+                              </ActionButton>
+                            ) : null}
+                            <ActionButton
+                              type="button"
+                              size="icon"
+                              aria-label={tl("Refresh folder")}
+                              disabled={workspaceImportDirectoryBusy}
+                              onClick={() =>
+                                void handleWorkspaceImportBrowse(workspaceImportDirectory.path)
+                              }
+                            >
+                              <RefreshCw
+                                className={cn(
+                                  "h-3.5 w-3.5",
+                                  workspaceImportDirectoryBusy && "animate-spin",
+                                )}
+                              />
+                            </ActionButton>
+                          </div>
+                        </div>
+                        <div className="max-h-44 overflow-auto p-1">
+                          {workspaceImportDirectory.items.length > 0 ? (
+                            workspaceImportDirectory.items.map((entry) => (
+                              <button
+                                key={entry.path}
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-[0.35rem] px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--panel-soft)] hover:text-[var(--text-primary)]"
+                                onClick={() =>
+                                  entry.kind === "directory"
+                                    ? void handleWorkspaceImportBrowse(entry.path)
+                                    : setWorkspaceImportPath(entry.path)
+                                }
+                              >
+                                {entry.kind === "directory" ? (
+                                  <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                                ) : (
+                                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                                )}
+                                <span className="min-w-0 truncate font-mono">{entry.name}</span>
+                              </button>
+                            ))
+                          ) : (
+                            <p className="px-2 py-3 text-xs text-[var(--text-tertiary)]">
+                              {tl("Nenhuma pasta visivel.")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   {workspaceImportScan ? (
@@ -2168,6 +2440,14 @@ export function AgentCatalog({
                         <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1">
                           {workspaceImportScan.summary.total_sources} {tl("sources")}
                         </span>
+                        {Object.entries(workspaceImportScan.summary.by_tool ?? {}).map(([tool, count]) => (
+                          <span
+                            key={tool}
+                            className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 py-1 uppercase"
+                          >
+                            {tool} {count}
+                          </span>
+                        ))}
                         <span className="rounded-[var(--radius-chip)] bg-[var(--tone-success-bg)] px-2 py-1 text-[var(--tone-success-text)]">
                           {workspaceImportScan.summary.importable ?? 0} {tl("importable")}
                         </span>
@@ -2179,58 +2459,103 @@ export function AgentCatalog({
                         </span>
                       </div>
 
-                      <div className="max-h-[320px] overflow-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)]">
-                        {workspaceImportScan.sources.map((source) => {
-                          const selectable =
-                            source.import_action === "append_workspace_prompt" &&
-                            source.risk === "low";
-                          const checked = workspaceImportSelected.includes(source.source_id);
-                          return (
-                            <label
-                              key={source.source_id}
-                              className="flex gap-3 border-t border-[color:var(--divider-hair)] px-3 py-3 first:border-t-0"
+                      <div className="max-h-[340px] overflow-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)]">
+                        {workspaceImportGroups.map((group) =>
+                          group.sources.length > 0 ? (
+                            <section
+                              key={group.key}
+                              className="border-t border-[color:var(--divider-hair)] first:border-t-0"
                             >
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4"
-                                checked={checked}
-                                disabled={!selectable || workspaceImportBusy}
-                                onChange={(event) =>
-                                  setWorkspaceImportSelected((current) =>
-                                    event.target.checked
-                                      ? [...current, source.source_id]
-                                      : current.filter((item) => item !== source.source_id),
-                                  )
-                                }
-                              />
-                              <span className="min-w-0 flex-1 space-y-1">
-                                <span className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-primary)]">
-                                  <span className="font-mono text-[0.75rem]">{source.relative_path}</span>
-                                  <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
-                                    {source.tool}
-                                  </span>
-                                  <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
-                                    {source.risk}
-                                  </span>
+                              <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[color:var(--divider-hair)] bg-[var(--panel)] px-3 py-2">
+                                <span className="text-xs font-semibold uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
+                                  {group.title}
                                 </span>
-                                {source.content_excerpt ? (
-                                  <span className="line-clamp-2 block text-xs text-[var(--text-tertiary)]">
-                                    {source.content_excerpt}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </label>
-                          );
-                        })}
+                                <span
+                                  className={cn(
+                                    "rounded-[var(--radius-chip)] px-1.5 py-0.5 text-[0.68rem]",
+                                    group.tone === "success" &&
+                                      "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
+                                    group.tone === "warning" &&
+                                      "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
+                                    group.tone === "danger" &&
+                                      "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
+                                  )}
+                                >
+                                  {group.sources.length}
+                                </span>
+                              </div>
+                              {group.sources.map((source) => {
+                                const selectable = isPromptImportableSource(source);
+                                const checked = workspaceImportSelected.includes(source.source_id);
+                                const body = (
+                                  <>
+                                    {selectable ? (
+                                      <input
+                                        type="checkbox"
+                                        className="mt-1 h-4 w-4"
+                                        checked={checked}
+                                        disabled={workspaceImportBusy}
+                                        onChange={(event) =>
+                                          setWorkspaceImportSelected((current) =>
+                                            event.target.checked
+                                              ? [...current, source.source_id]
+                                              : current.filter((item) => item !== source.source_id),
+                                          )
+                                        }
+                                      />
+                                    ) : null}
+                                    <span className="min-w-0 flex-1 space-y-1">
+                                      <span className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-primary)]">
+                                        <span className="font-mono text-[0.75rem]">
+                                          {source.relative_path}
+                                        </span>
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                          {source.tool}
+                                        </span>
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                          {source.kind}
+                                        </span>
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                          {source.risk}
+                                        </span>
+                                      </span>
+                                      {source.warnings?.length ? (
+                                        <span className="block text-xs text-[var(--tone-warning-text)]">
+                                          {source.warnings.join(" · ")}
+                                        </span>
+                                      ) : null}
+                                      {source.content_excerpt ? (
+                                        <span className="line-clamp-2 block text-xs text-[var(--text-tertiary)]">
+                                          {source.content_excerpt}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </>
+                                );
+                                return selectable ? (
+                                  <label
+                                    key={source.source_id}
+                                    className="flex gap-3 border-t border-[color:var(--divider-hair)] px-3 py-3 first:border-t-0"
+                                  >
+                                    {body}
+                                  </label>
+                                ) : (
+                                  <div
+                                    key={source.source_id}
+                                    className="flex gap-3 border-t border-[color:var(--divider-hair)] px-3 py-3 first:border-t-0"
+                                  >
+                                    {body}
+                                  </div>
+                                );
+                              })}
+                            </section>
+                          ) : null,
+                        )}
                       </div>
 
-                      <div className="rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-3 font-mono text-[0.72rem] text-[var(--text-tertiary)]">
-                        &lt;!-- koda:workspace-import:start ... --&gt;
-                        <br />
-                        {workspaceImportSelected.length} selected prompt source(s)
-                        <br />
-                        &lt;!-- koda:workspace-import:end --&gt;
-                      </div>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-3 font-mono text-[0.72rem] leading-relaxed text-[var(--text-tertiary)]">
+                        {workspaceImportPreview}
+                      </pre>
                     </div>
                   ) : null}
 
@@ -2356,7 +2681,7 @@ export function AgentCatalog({
                               : current,
                           )
                         }
-                        placeholder="/Users/me/project"
+                        placeholder="/workspace/project"
                       />
                     ) : null}
                   </div>

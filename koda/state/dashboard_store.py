@@ -790,7 +790,7 @@ def _build_cluster_id(member_ids: list[int]) -> str:
 class DashboardStore:
     """Read/write dashboard primitives over canonical stores only."""
 
-    def get_agent_stats(self, agent_id: str) -> dict[str, Any]:
+    def get_agent_stats(self, agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
         scope = _normalize_scope(agent_id)
         task_counts = (
             _fetch_one(
@@ -848,17 +848,21 @@ class DashboardStore:
             """,
             (scope, daily_cutoff),
         )
-        recent_tasks = _fetch_all(
-            scope,
-            """
-            SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts,
-                   cost_usd, error_message, created_at, started_at, completed_at, session_id
-            FROM tasks
-            WHERE agent_id = ?
-            ORDER BY id DESC
-            LIMIT 5
-            """,
-            (scope,),
+        recent_tasks = (
+            _fetch_all(
+                scope,
+                """
+                SELECT id, user_id, chat_id, status, query_text, provider, model, work_dir, attempt, max_attempts,
+                       cost_usd, error_message, created_at, started_at, completed_at, session_id
+                FROM tasks
+                WHERE agent_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (scope, max(1, int(recent_task_limit))),
+            )
+            if recent_task_limit > 0
+            else []
         )
         return {
             "agentId": scope,
@@ -1610,14 +1614,21 @@ class DashboardStore:
             },
         }
 
-    def list_dlq(self, agent_id: str, *, limit: int = 50, retry_eligible: bool | None = None) -> list[dict[str, Any]]:
+    def list_dlq(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        retry_eligible: bool | None = None,
+    ) -> list[dict[str, Any]]:
         scope = _normalize_scope(agent_id)
         clauses = ["COALESCE(agent_id, ?) = ?"]
         params: list[Any] = [scope, scope]
         if retry_eligible is not None:
             clauses.append("retry_eligible = ?")
             params.append(1 if retry_eligible else 0)
-        params.append(max(1, int(limit)))
+        params.extend([max(1, int(limit)), max(0, int(offset))])
         return _fetch_all(
             scope,
             f"""
@@ -1626,7 +1637,7 @@ class DashboardStore:
             FROM dead_letter_queue
             WHERE {" AND ".join(clauses)}
             ORDER BY id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
             tuple(params),
         )
@@ -1666,7 +1677,7 @@ class DashboardStore:
             "daily": [{"date": str(row.get("date") or ""), "cost": _safe_float(row.get("cost"))} for row in daily],
         }
 
-    def list_schedules(self, agent_id: str) -> list[dict[str, Any]]:
+    def list_schedules(self, agent_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         scope = _normalize_scope(agent_id)
         rows = _fetch_all(
             scope,
@@ -1679,8 +1690,9 @@ class DashboardStore:
             FROM scheduled_jobs
             WHERE COALESCE(agent_id, ?) = ? AND status != 'archived'
             ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
+            LIMIT ? OFFSET ?
             """,
-            (scope, scope),
+            (scope, scope, max(1, int(limit)), max(0, int(offset))),
         )
         items: list[dict[str, Any]] = []
         for row in rows:

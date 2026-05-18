@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Bot as AgentIcon, Search } from "lucide-react";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
@@ -10,11 +10,10 @@ import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
+import { useRuntimeRooms } from "@/hooks/use-runtime-rooms";
 import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import {
-  buildRuntimeRoomRows,
   getRuntimeRowSummary,
-  matchesRuntimeRoomFilter,
   type RuntimeRoomFilter,
   type RuntimeRoomRow,
 } from "@/lib/runtime-overview-model";
@@ -28,7 +27,9 @@ import {
   PageMetricStripItem,
 } from "@/components/ui/page-primitives";
 import { AnimatedCardStatusList, type Card as StatusCard } from "@/components/ui/card-status-list";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useToast } from "@/hooks/use-toast";
+import { mergePaginatedItems } from "@/lib/pagination";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 
 function toneToStatusDot(tone: SemanticTone): StatusDotTone {
@@ -226,6 +227,7 @@ export function RuntimeOverviewScreen({
   const { showToast } = useToast();
   const { agents } = useAgentCatalog();
   const lastErrorToastRef = useRef<string | null>(null);
+  const lastRuntimeRoomsRefreshRef = useRef<number | null>(null);
   const incidentToastKeysRef = useRef<Set<string>>(new Set());
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>(initialBotIds ?? []);
   const [statusFilter, setStatusFilter] = useState<RuntimeRoomFilter>("all");
@@ -236,7 +238,31 @@ export function RuntimeOverviewScreen({
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
   );
-  const { overviews, loading, connected, error, refreshAgent } = useRuntimeOverview(selectedBotIds);
+  const {
+    overviews,
+    loading,
+    connected,
+    error,
+    refreshAgent,
+    lastUpdated,
+  } = useRuntimeOverview(selectedBotIds);
+  const runtimeRoomsQuery = useRuntimeRooms({
+    agentIds: visibleBotIds,
+    status: statusFilter,
+    search: deferredSearch,
+  });
+  const refreshRuntimeRoomsFirstPage = runtimeRoomsQuery.refreshFirstPage;
+
+  useEffect(() => {
+    if (!lastUpdated) return;
+    if (lastRuntimeRoomsRefreshRef.current === null) {
+      lastRuntimeRoomsRefreshRef.current = lastUpdated;
+      return;
+    }
+    if (lastRuntimeRoomsRefreshRef.current === lastUpdated) return;
+    lastRuntimeRoomsRefreshRef.current = lastUpdated;
+    void refreshRuntimeRoomsFirstPage().catch(() => undefined);
+  }, [lastUpdated, refreshRuntimeRoomsFirstPage]);
 
   const selectedOverviews = useMemo(() => {
     return visibleBotIds
@@ -244,27 +270,18 @@ export function RuntimeOverviewScreen({
       .filter((item): item is RuntimeOverview => Boolean(item));
   }, [overviews, visibleBotIds]);
 
-  const roomRows = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    return buildRuntimeRoomRows(selectedOverviews).filter((row) => {
-      if (!matchesRuntimeRoomFilter(row, statusFilter)) return false;
-      if (!query) return true;
-
-      const haystack = [
-        row.queryText,
-        row.queue?.query_text,
-        row.environment?.branch_name,
-        row.environment?.workspace_path,
-        getAgentLabel(row.agentId),
-        row.phase,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(query);
-    });
-  }, [deferredSearch, selectedOverviews, statusFilter]);
+  const roomRows = useMemo(
+    () =>
+      mergePaginatedItems(
+        runtimeRoomsQuery.data?.pages,
+        (row) => `${row.agentId}:${row.taskId}:${row.source}`,
+      ),
+    [runtimeRoomsQuery.data],
+  );
+  const loadMoreRuntimeRooms = useCallback(() => {
+    if (!runtimeRoomsQuery.hasNextPage || runtimeRoomsQuery.isFetchingNextPage) return;
+    void runtimeRoomsQuery.fetchNextPage();
+  }, [runtimeRoomsQuery]);
 
   const totals = useMemo(
     () => ({
@@ -306,7 +323,6 @@ export function RuntimeOverviewScreen({
       ["available", "partial"].includes(overview.availability.runtime),
   ).length;
   const attentionCount = totals.recovery + totals.cleanup + incidentEntries.length;
-  const visibleRows = roomRows.slice(0, 10);
   const runtimeStatusCards = useMemo<StatusCard[]>(() => {
     const availabilityIssues = selectedOverviews.reduce((count, overview) => {
       const availability = overview.availability;
@@ -490,7 +506,7 @@ export function RuntimeOverviewScreen({
               {t("runtime.overview.liveExecutions")}
             </h3>
             <span className="eyebrow">
-              {visibleRows.length} / {roomRows.length}
+              {roomRows.length}
             </span>
           </header>
 
@@ -498,7 +514,7 @@ export function RuntimeOverviewScreen({
             className="flex flex-col"
             data-testid="runtime-live-list"
           >
-            {visibleRows.length === 0 ? (
+            {roomRows.length === 0 ? (
               <div
                 className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
                 {...tourAnchor("runtime.empty-live")}
@@ -507,7 +523,7 @@ export function RuntimeOverviewScreen({
                 <p className="m-0">{t("runtime.overview.noExecutionsMatch")}</p>
               </div>
             ) : (
-              visibleRows.map((row, index) => (
+              roomRows.map((row, index) => (
                 <LiveRow
                   key={`${row.agentId}-${row.taskId}-${row.source}`}
                   row={row}
@@ -515,6 +531,12 @@ export function RuntimeOverviewScreen({
                 />
               ))
             )}
+            <InfiniteListFooter
+              hasMore={Boolean(runtimeRoomsQuery.hasNextPage)}
+              loading={runtimeRoomsQuery.isFetchingNextPage}
+              onLoadMore={loadMoreRuntimeRooms}
+              label={t("common.loadMore", { defaultValue: "Load more" })}
+            />
           </div>
         </section>
 

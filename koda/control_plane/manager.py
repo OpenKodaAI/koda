@@ -108,6 +108,21 @@ from koda.services.provider_auth import (
     verify_provider_local_connection,
     verify_provider_subscription_login,
 )
+from koda.services.runtime.redaction import redact_value
+from koda.services.supertonic_manager import (
+    SUPERTONIC_DEFAULT_LANGUAGE_ID,
+    SUPERTONIC_DEFAULT_MODEL_ID,
+    SUPERTONIC_DEFAULT_VOICE_ID,
+    delete_supertonic_model,
+    delete_supertonic_voice,
+    ensure_supertonic_model,
+    ensure_supertonic_voice_downloaded,
+    import_supertonic_voice_json,
+    supertonic_model_catalog_payload,
+    supertonic_model_status,
+    supertonic_voice_catalog_payload,
+    supertonic_voice_metadata,
+)
 from koda.services.tool_prompt import build_agent_tools_prompt
 from koda.services.whisper_manager import (
     KNOWN_WHISPER_VARIANTS,
@@ -184,6 +199,7 @@ from .workspace_import import (
     directory_roots_payload,
     list_directory_payload,
     read_importable_source_content,
+    record_workspace_import_metrics,
     scan_workspace_directory,
     validate_workspace_root,
     workspace_source_from_dict,
@@ -208,6 +224,21 @@ _WORKSPACE_IMPORT_BLOCK_RE = re.compile(
 )
 _WORKSPACE_IMPORT_START = "<!-- koda:workspace-import:start"
 _WORKSPACE_IMPORT_END = "<!-- koda:workspace-import:end -->"
+
+
+def _redact_workspace_import_error(exc: BaseException) -> str:
+    try:
+        text = str(redact_value(str(exc)))
+    except Exception:  # pragma: no cover - redaction must never mask scan failure handling
+        text = str(exc)
+    text = re.sub(
+        r"(?i)((?:api[_-]?key|secret|token|password|credential|private[_-]?key)\s*[:=]\s*)[^\s,;]+",
+        r"\1[REDACTED]",
+        text,
+    )
+    return text[:500] or "workspace import scan failed"
+
+
 _AGENT_DOCUMENT_LAYOUT: tuple[tuple[str, str], ...] = (
     ("identity_md", "agent_identity"),
     ("soul_md", "agent_soul"),
@@ -250,7 +281,7 @@ _ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
 _ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
 _ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
 _ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
-_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "whispercpp", "embedding"})
+_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "supertonic", "whispercpp", "embedding"})
 
 
 class _ProviderDownloadCancelled(RuntimeError):
@@ -556,6 +587,9 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "elevenlabs_default_voice": ("TTS_DEFAULT_VOICE", "string"),
         "kokoro_default_language": ("KOKORO_DEFAULT_LANGUAGE", "string"),
         "kokoro_default_voice": ("KOKORO_DEFAULT_VOICE", "string"),
+        "supertonic_default_model": ("SUPERTONIC_DEFAULT_MODEL", "string"),
+        "supertonic_default_language": ("SUPERTONIC_DEFAULT_LANGUAGE", "string"),
+        "supertonic_default_voice": ("SUPERTONIC_DEFAULT_VOICE", "string"),
         "elevenlabs_model": ("ELEVENLABS_MODEL", "string"),
         "transcript_replay_limit": ("TRANSCRIPT_REPLAY_LIMIT", "int"),
         "claude_enabled": ("CLAUDE_ENABLED", "bool"),
@@ -593,6 +627,18 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "ollama_model_small": ("OLLAMA_MODEL_SMALL", "string"),
         "ollama_model_medium": ("OLLAMA_MODEL_MEDIUM", "string"),
         "ollama_model_large": ("OLLAMA_MODEL_LARGE", "string"),
+        "openrouter_enabled": ("OPENROUTER_ENABLED", "bool"),
+        "openrouter_available_models": ("OPENROUTER_AVAILABLE_MODELS", "csv"),
+        "openrouter_default_model": ("OPENROUTER_DEFAULT_MODEL", "string"),
+        "openrouter_model_small": ("OPENROUTER_MODEL_SMALL", "string"),
+        "openrouter_model_medium": ("OPENROUTER_MODEL_MEDIUM", "string"),
+        "openrouter_model_large": ("OPENROUTER_MODEL_LARGE", "string"),
+        "openrouter_timeout": ("OPENROUTER_TIMEOUT", "int"),
+        "openrouter_first_chunk_timeout": ("OPENROUTER_FIRST_CHUNK_TIMEOUT", "int"),
+        "openrouter_api_base_url": ("OPENROUTER_API_BASE_URL", "string"),
+        "openrouter_http_referer": ("OPENROUTER_HTTP_REFERER", "string"),
+        "openrouter_app_title": ("OPENROUTER_APP_TITLE", "string"),
+        "openrouter_app_categories": ("OPENROUTER_APP_CATEGORIES", "string"),
     },
     "tools": {
         "default_agent_mode": ("DEFAULT_AGENT_MODE", "string"),
@@ -721,7 +767,9 @@ _CORE_PROVIDER_ENABLED_DEFAULTS: dict[str, bool] = {
     "gemini": False,
     "ollama": False,
     "elevenlabs": False,
+    "openrouter": False,
     "kokoro": True,
+    "supertonic": True,
     "whispercpp": True,
 }
 _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
@@ -736,6 +784,8 @@ _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
     "OPENAI_",
     "ANTHROPIC_",
     "AZURE_OPENAI_",
+    "OPENROUTER_",
+    "SUPERTONIC_",
 )
 _LOCAL_ENV_RESERVED_PREFIXES: tuple[str, ...] = tuple(
     prefix for prefix in _SHARED_ENV_RESERVED_PREFIXES if prefix != "AGENT_"
@@ -810,6 +860,9 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "models.elevenlabs_default_voice": "TTS_DEFAULT_VOICE",
     "models.kokoro_default_language": "KOKORO_DEFAULT_LANGUAGE",
     "models.kokoro_default_voice": "KOKORO_DEFAULT_VOICE",
+    "models.supertonic_default_model": "SUPERTONIC_DEFAULT_MODEL",
+    "models.supertonic_default_language": "SUPERTONIC_DEFAULT_LANGUAGE",
+    "models.supertonic_default_voice": "SUPERTONIC_DEFAULT_VOICE",
     "models.elevenlabs_model": "ELEVENLABS_MODEL",
     "models.metal_enabled": "METAL_ENABLED",
     "memory.memory_enabled": "MEMORY_ENABLED",
@@ -1946,12 +1999,16 @@ class ControlPlaneManager:
         root_path = _row_text(row, "root_path").strip()
         if not root_path:
             raise ValueError("workspace has no root_path")
-        scan_payload = self.scan_workspace_directory(
-            {
-                "path": root_path,
-                "maxDepth": payload.get("maxDepth") or payload.get("max_depth") or 8,
-            }
-        )
+        try:
+            scan_payload = self.scan_workspace_directory(
+                {
+                    "path": root_path,
+                    "maxDepth": payload.get("maxDepth") or payload.get("max_depth") or 8,
+                }
+            )
+        except Exception as exc:
+            self._persist_workspace_scan_error(str(row["id"]), root_path, exc)
+            raise
         self._persist_workspace_scan(str(row["id"]), scan_payload, status="completed")
         return {
             "workspace": next(item for item in self.list_workspaces()["items"] if item["id"] == str(row["id"])),
@@ -2014,6 +2071,7 @@ class ControlPlaneManager:
         for source_id in missing:
             result["skipped"].append({"source_id": source_id, "reason": "source_not_found"})
         self._append_workspace_import_history(str(row["id"]), scan_payload, result, selected)
+        record_workspace_import_metrics(result)
         return result
 
     def get_workspace_runtime_root_for_agent(self, agent_id: str | None) -> str | None:
@@ -2063,6 +2121,26 @@ class ControlPlaneManager:
                 now_iso(),
                 workspace_id,
             ),
+        )
+
+    def _persist_workspace_scan_error(self, workspace_id: str, root_path: str, exc: BaseException) -> None:
+        history = _row_json_list(self._workspace_row(workspace_id), "import_history_json")
+        history.append(
+            {
+                "schema_version": "workspace_import_history.v1",
+                "event": "scan_error",
+                "recorded_at": now_iso(),
+                "root_path": root_path,
+                "error": _redact_workspace_import_error(exc),
+            }
+        )
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET scan_status = ?, import_history_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            ("error", json_dump(history[-25:]), now_iso(), workspace_id),
         )
 
     def _append_workspace_import_history(
@@ -3123,6 +3201,8 @@ class ControlPlaneManager:
                 binary = _trimmed_text(env.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_BASE_URL") or "ollama")
             elif provider == "whispercpp":
                 binary = _trimmed_text(env.get("WHISPER_BIN") or os.environ.get("WHISPER_BIN") or "whisper-cli")
+            elif provider in {"kokoro", "supertonic"}:
+                binary = ""
             else:
                 binary = "claude"
             ollama_catalog_items: list[dict[str, Any]] | None = None
@@ -3152,6 +3232,18 @@ class ControlPlaneManager:
                 available_models = downloaded_models
                 if not default_model:
                     default_model = whisper_default_model
+            elif provider == "supertonic":
+                supertonic_catalog = supertonic_model_catalog_payload()
+                available_models = []
+                for raw_item in _safe_json_list(supertonic_catalog.get("items")):
+                    item = _safe_json_object(raw_item)
+                    model_id = _trimmed_text(item.get("model_id") or item.get("id"))
+                    if model_id:
+                        available_models.append(model_id)
+                if not default_model:
+                    default_model = (
+                        _trimmed_text(supertonic_catalog.get("default_model")) or SUPERTONIC_DEFAULT_MODEL_ID
+                    )
             command_present = provider_command_present(provider, base_env=env)
             providers[provider] = {
                 **definition,
@@ -3642,9 +3734,9 @@ class ControlPlaneManager:
             "validation": validation,
         }
 
-    def get_dashboard_agent_summary(self, agent_id: str) -> dict[str, Any]:
+    def get_dashboard_agent_summary(self, agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
         normalized, row = self._require_dashboard_agent(agent_id)
-        stats = self._dashboard_store().get_agent_stats(normalized)
+        stats = self._dashboard_store().get_agent_stats(normalized, recent_task_limit=recent_task_limit)
         return {
             **stats,
             "agent": self._serialize_agent_summary(
@@ -3933,21 +4025,30 @@ class ControlPlaneManager:
         agent_id: str,
         *,
         limit: int = 50,
+        offset: int = 0,
         retry_eligible: bool | None = None,
     ) -> list[dict[str, Any]]:
         normalized, _ = self._require_dashboard_agent(agent_id)
         return cast(
             list[dict[str, Any]],
-            self._dashboard_store().list_dlq(normalized, limit=limit, retry_eligible=retry_eligible),
+            self._dashboard_store().list_dlq(
+                normalized,
+                limit=limit,
+                offset=offset,
+                retry_eligible=retry_eligible,
+            ),
         )
 
     def get_dashboard_costs(self, agent_id: str, *, days: int = 30) -> dict[str, Any]:
         normalized, _ = self._require_dashboard_agent(agent_id)
         return cast(dict[str, Any], self._dashboard_store().get_costs(normalized, days=days))
 
-    def list_dashboard_schedules(self, agent_id: str) -> list[dict[str, Any]]:
+    def list_dashboard_schedules(self, agent_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         normalized, _ = self._require_dashboard_agent(agent_id)
-        return cast(list[dict[str, Any]], self._dashboard_store().list_schedules(normalized))
+        return cast(
+            list[dict[str, Any]],
+            self._dashboard_store().list_schedules(normalized, limit=limit, offset=offset),
+        )
 
     def list_dashboard_audit(
         self,
@@ -6440,6 +6541,357 @@ class ControlPlaneManager:
         return self._provider_download_job_payload(row)
 
     # ------------------------------------------------------------------
+    # Supertonic local model and voice assets. Supertonic snapshots are
+    # multi-file Hugging Face repos, while preset voice activation copies a
+    # bundled JSON style into Koda-managed storage for explicit offline use.
+    # ------------------------------------------------------------------
+
+    def get_supertonic_model_catalog(self) -> dict[str, Any]:
+        payload = supertonic_model_catalog_payload()
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            model_id = _nonempty_text(item.get("model_id") or item.get("id"))
+            try:
+                item["active_job"] = self._active_provider_download_job("supertonic", model_id) if model_id else None
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning("supertonic_model_active_job_probe_failed", model_id=model_id, error=str(exc))
+                item["active_job"] = None
+            items.append(item)
+        return {**payload, "items": items}
+
+    def _run_supertonic_model_download(self, job_id: str, model_id: str) -> None:
+        try:
+            metadata = supertonic_model_status(model_id)
+        except KeyError:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="error",
+                details={"last_error": f"unknown supertonic model: {model_id}"},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+        base_details = {
+            "model_id": _nonempty_text(metadata.get("model_id")),
+            "repo_id": _nonempty_text(metadata.get("repo_id")),
+            "title": _nonempty_text(metadata.get("title")),
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando snapshot Supertonic do Hugging Face."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="running",
+                details={**base_details, "message": "Baixando snapshot Supertonic do Hugging Face."},
+            )
+            ensure_supertonic_model(model_id, progress_callback=_on_progress)
+            final_status = supertonic_model_status(model_id)
+            bytes_on_disk = int(final_status.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": _nonempty_text(final_status.get("local_path")),
+                    "message": "Modelo Supertonic pronto.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_supertonic_model_download(self, model_id: str = SUPERTONIC_DEFAULT_MODEL_ID) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        try:
+            status = supertonic_model_status(normalized)
+        except KeyError as exc:
+            raise ValueError(f"unknown supertonic model: {model_id}") from exc
+
+        active = self._active_provider_download_job("supertonic", normalized)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        if bool(status.get("downloaded")):
+            bytes_on_disk = int(status.get("bytes") or 0)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=normalized,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "model_id": normalized,
+                    "repo_id": _nonempty_text(status.get("repo_id")),
+                    "title": _nonempty_text(status.get("title")),
+                    "local_path": _nonempty_text(status.get("local_path")),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist supertonic model download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="supertonic",
+            asset_id=normalized,
+            status="pending",
+            details={
+                "model_id": normalized,
+                "repo_id": _nonempty_text(status.get("repo_id")),
+                "title": _nonempty_text(status.get("title")),
+                "message": "Preparando download do modelo Supertonic.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_supertonic_model_download,
+            args=(job_id, normalized),
+            name=f"supertonic-model-download-{normalized}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist supertonic model download job")
+        return self._provider_download_job_payload(row)
+
+    @staticmethod
+    def _supertonic_voice_asset_id(model_id: str, voice_id: str) -> str:
+        return f"{_nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID}:{_nonempty_text(voice_id)}"
+
+    def get_supertonic_voice_catalog(self, model_id: str = "", language: str = "") -> dict[str, Any]:
+        sections = self._system_settings_sections()
+        providers_section = _safe_json_object(sections.get("providers"))
+        selected_model = (
+            _nonempty_text(model_id)
+            or _nonempty_text(providers_section.get("supertonic_default_model"))
+            or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        requested_language = (
+            _nonempty_text(language).lower()
+            or _nonempty_text(providers_section.get("supertonic_default_language")).lower()
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID
+        )
+        selected_voice = (
+            _nonempty_text(providers_section.get("supertonic_default_voice")) or SUPERTONIC_DEFAULT_VOICE_ID
+        )
+        payload = supertonic_voice_catalog_payload(model_id=selected_model, language_id=requested_language)
+        voice_metadata = supertonic_voice_metadata(selected_voice)
+        items: list[dict[str, Any]] = []
+        for raw_item in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(raw_item)
+            voice_id = _nonempty_text(item.get("voice_id"))
+            asset_id = self._supertonic_voice_asset_id(selected_model, voice_id)
+            try:
+                item["active_job"] = self._active_provider_download_job("supertonic", asset_id) if voice_id else None
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning("supertonic_voice_active_job_probe_failed", voice_id=voice_id, error=str(exc))
+                item["active_job"] = None
+            items.append(item)
+        return {
+            **payload,
+            "items": items,
+            "selected_model": selected_model,
+            "selected_language": requested_language,
+            "default_model": selected_model,
+            "default_language": SUPERTONIC_DEFAULT_LANGUAGE_ID,
+            "default_voice": selected_voice,
+            "default_voice_label": _nonempty_text(_safe_json_object(voice_metadata).get("name")),
+            "provider_connected": True,
+        }
+
+    def _run_supertonic_voice_download(self, job_id: str, voice_id: str, model_id: str) -> None:
+        asset_id = self._supertonic_voice_asset_id(model_id, voice_id)
+        metadata = supertonic_voice_metadata(voice_id)
+        if metadata is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="error",
+                details={"last_error": f"unknown supertonic voice: {voice_id}"},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+        base_details = {
+            "voice_id": _nonempty_text(metadata.get("voice_id")),
+            "voice_name": _nonempty_text(metadata.get("name")),
+            "model_id": model_id,
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Ativando voz Supertonic."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="running",
+                details={**base_details, "message": "Ativando voz Supertonic."},
+            )
+            result = ensure_supertonic_voice_downloaded(voice_id, model_id, progress_callback=_on_progress)
+            downloaded_bytes = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="completed",
+                downloaded_bytes=downloaded_bytes,
+                total_bytes=downloaded_bytes,
+                details={
+                    **base_details,
+                    "local_path": _nonempty_text(result.get("local_path")),
+                    "message": "Voz Supertonic pronta.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_supertonic_voice_download(self, voice_id: str, model_id: str = "") -> dict[str, Any]:
+        normalized_voice = _nonempty_text(voice_id)
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        metadata = supertonic_voice_metadata(normalized_voice)
+        if metadata is None:
+            raise ValueError(f"unknown supertonic voice: {voice_id}")
+        asset_id = self._supertonic_voice_asset_id(selected_model, _nonempty_text(metadata.get("voice_id")))
+
+        active = self._active_provider_download_job("supertonic", asset_id)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        existing = [
+            _safe_json_object(item)
+            for item in _safe_json_list(self.get_supertonic_voice_catalog(selected_model).get("items"))
+        ]
+        current = next(
+            (
+                item
+                for item in existing
+                if _nonempty_text(item.get("voice_id")) == _nonempty_text(metadata.get("voice_id"))
+            ),
+            {},
+        )
+        if bool(current.get("downloaded")):
+            bytes_on_disk = int(current.get("bytes") or 0)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "voice_id": _nonempty_text(metadata.get("voice_id")),
+                    "voice_name": _nonempty_text(metadata.get("name")),
+                    "model_id": selected_model,
+                    "local_path": _nonempty_text(current.get("local_path")),
+                    "message": "Voz ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist supertonic voice download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="supertonic",
+            asset_id=asset_id,
+            status="pending",
+            details={
+                "voice_id": _nonempty_text(metadata.get("voice_id")),
+                "voice_name": _nonempty_text(metadata.get("name")),
+                "model_id": selected_model,
+                "message": "Preparando voz Supertonic.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_supertonic_voice_download,
+            args=(job_id, _nonempty_text(metadata.get("voice_id")), selected_model),
+            name=f"supertonic-voice-download-{asset_id}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist supertonic voice download job")
+        return self._provider_download_job_payload(row)
+
+    def import_supertonic_voice_asset(self, raw_bytes: bytes, *, model_id: str = "", name: str = "") -> dict[str, Any]:
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        return import_supertonic_voice_json(raw_bytes, name=name, model_id=selected_model)
+
+    # ------------------------------------------------------------------
     # Embedding model catalog & background download. Mirrors the Kokoro
     # provider download pattern (cp_provider_download_jobs row + threading)
     # but talks to the Hugging Face Hub via ``huggingface_hub.snapshot_download``
@@ -6947,6 +7399,28 @@ class ControlPlaneManager:
         if active is not None:
             raise ValueError("voice download in progress; cancel or wait before deleting")
         return delete_kokoro_voice(normalized)
+
+    def delete_supertonic_model_asset(self, model_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        active = self._active_provider_download_job("supertonic", normalized)
+        if active is not None:
+            raise ValueError("supertonic model download in progress; cancel or wait before deleting")
+        try:
+            result = delete_supertonic_model(normalized)
+            return {**result, **supertonic_model_status(normalized)}
+        except KeyError as exc:
+            raise ValueError(f"unknown supertonic model: {model_id}") from exc
+
+    def delete_supertonic_voice_asset(self, voice_id: str, model_id: str = "") -> dict[str, Any]:
+        normalized_voice = _nonempty_text(voice_id)
+        if not normalized_voice:
+            raise ValueError("voice_id is required")
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        asset_id = self._supertonic_voice_asset_id(selected_model, normalized_voice)
+        active = self._active_provider_download_job("supertonic", asset_id)
+        if active is not None:
+            raise ValueError("supertonic voice download in progress; cancel or wait before deleting")
+        return delete_supertonic_voice(normalized_voice, selected_model)
 
     def delete_whisper_model_asset(self, variant_id: str) -> dict[str, Any]:
         normalized = _nonempty_text(variant_id)
@@ -9256,7 +9730,7 @@ class ControlPlaneManager:
         command_present = bool(provider_payload.get("command_present", False))
         enabled = bool(provider_payload.get("enabled", False))
         category = str(provider_payload.get("category") or "general")
-        if category == "voice" and normalized == "kokoro":
+        if category == "voice" and normalized in {"kokoro", "supertonic"}:
             return True
         if normalized == "whispercpp" and function_id == "transcription":
             return enabled and command_present
@@ -9716,6 +10190,24 @@ class ControlPlaneManager:
                         _nonempty_text(providers_section.get("kokoro_default_voice"))
                         or _nonempty_text(os.environ.get("KOKORO_DEFAULT_VOICE"))
                         or KOKORO_DEFAULT_VOICE_ID
+                    )
+                ).get("name")
+            ),
+            "supertonic_default_model": _nonempty_text(providers_section.get("supertonic_default_model"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_MODEL"))
+            or SUPERTONIC_DEFAULT_MODEL_ID,
+            "supertonic_default_language": _nonempty_text(providers_section.get("supertonic_default_language"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_LANGUAGE"))
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID,
+            "supertonic_default_voice": _nonempty_text(providers_section.get("supertonic_default_voice"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_VOICE"))
+            or SUPERTONIC_DEFAULT_VOICE_ID,
+            "supertonic_default_voice_label": _nonempty_text(
+                _safe_json_object(
+                    supertonic_voice_metadata(
+                        _nonempty_text(providers_section.get("supertonic_default_voice"))
+                        or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_VOICE"))
+                        or SUPERTONIC_DEFAULT_VOICE_ID
                     )
                 ).get("name")
             ),
@@ -10379,6 +10871,14 @@ class ControlPlaneManager:
                 general_ui["kokoro_default_voice_label"] = voice_label
             else:
                 general_ui.pop("kokoro_default_voice_label", None)
+        if "supertonic_default_model" in models:
+            current_providers["supertonic_default_model"] = _nonempty_text(models.get("supertonic_default_model"))
+        if "supertonic_default_language" in models:
+            current_providers["supertonic_default_language"] = _nonempty_text(
+                models.get("supertonic_default_language")
+            ).lower()
+        if "supertonic_default_voice" in models:
+            current_providers["supertonic_default_voice"] = _nonempty_text(models.get("supertonic_default_voice"))
         # Apple Silicon Metal acceleration toggle. Persisted in
         # ``providers.metal_enabled`` and projected to the ``METAL_ENABLED``
         # env var by ``_apply_system_settings_to_sections`` so the runtime
@@ -10395,6 +10895,23 @@ class ControlPlaneManager:
             current_providers["kokoro_default_language"] = _nonempty_text(voice_metadata.get("language_id")).lower()
             if not _nonempty_text(general_ui.get("kokoro_default_voice_label")):
                 general_ui["kokoro_default_voice_label"] = _nonempty_text(voice_metadata.get("name"))
+        normalized_supertonic_model = (
+            _nonempty_text(current_providers.get("supertonic_default_model")) or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        if normalized_supertonic_model:
+            try:
+                supertonic_model_status(normalized_supertonic_model)
+            except KeyError as exc:
+                raise ValueError("The default Supertonic model does not exist in the official catalog.") from exc
+            current_providers["supertonic_default_model"] = normalized_supertonic_model
+        normalized_supertonic_voice = _nonempty_text(current_providers.get("supertonic_default_voice"))
+        if normalized_supertonic_voice:
+            voice_metadata = supertonic_voice_metadata(normalized_supertonic_voice)
+            if voice_metadata is None:
+                raise ValueError("The default Supertonic voice does not exist in the official catalog.")
+            current_providers["supertonic_default_voice"] = _nonempty_text(voice_metadata.get("voice_id"))
+            if not _nonempty_text(current_providers.get("supertonic_default_language")):
+                current_providers["supertonic_default_language"] = SUPERTONIC_DEFAULT_LANGUAGE_ID
         functional_defaults_requested = _normalize_functional_model_defaults(models.get("functional_defaults"))
         if functional_defaults_requested:
             current_providers["functional_defaults"] = functional_defaults_requested
@@ -10473,6 +10990,8 @@ class ControlPlaneManager:
             audio_model = _nonempty_text(audio_default.get("model_id"))
             if audio_provider == "elevenlabs" and audio_model:
                 current_providers["elevenlabs_model"] = audio_model
+            if audio_provider == "supertonic" and audio_model:
+                current_providers["supertonic_default_model"] = audio_model
         elif "functional_defaults" in current_providers:
             current_providers.pop("functional_defaults", None)
 
@@ -11501,6 +12020,8 @@ class ControlPlaneManager:
         audio_model = _trimmed_text(audio_default.get("model_id"))
         if audio_provider == "elevenlabs" and audio_model:
             env["ELEVENLABS_MODEL"] = audio_model
+        if audio_provider == "supertonic" and audio_model:
+            env["SUPERTONIC_DEFAULT_MODEL"] = audio_model
         if audio_provider == "elevenlabs" and not _nonempty_text(env.get("ELEVENLABS_API_KEY")):
             # Provider connection secrets are stripped from the persisted snapshot.
             # Rehydrate the selected audio provider key only in process_env so
@@ -11535,10 +12056,29 @@ class ControlPlaneManager:
             or _nonempty_text(env.get("KOKORO_DEFAULT_LANGUAGE"))
             or KOKORO_DEFAULT_LANGUAGE_ID
         )
+        supertonic_default_model = (
+            _nonempty_text(providers_section.get("supertonic_default_model"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_MODEL"))
+            or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        supertonic_default_voice = (
+            _nonempty_text(providers_section.get("supertonic_default_voice"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_VOICE"))
+            or SUPERTONIC_DEFAULT_VOICE_ID
+        )
+        env["SUPERTONIC_DEFAULT_MODEL"] = supertonic_default_model
+        env["SUPERTONIC_DEFAULT_VOICE"] = supertonic_default_voice
+        env["SUPERTONIC_DEFAULT_LANGUAGE"] = (
+            _nonempty_text(providers_section.get("supertonic_default_language"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_LANGUAGE"))
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID
+        )
         if elevenlabs_default_voice and (
             audio_provider == "elevenlabs" or (elevenlabs_ready and not elevenlabs_enabled)
         ):
             env["TTS_DEFAULT_VOICE"] = elevenlabs_default_voice
+        elif audio_provider == "supertonic":
+            env["TTS_DEFAULT_VOICE"] = supertonic_default_voice
         else:
             env["TTS_DEFAULT_VOICE"] = kokoro_default_voice
         try:
@@ -12236,6 +12776,7 @@ class ControlPlaneManager:
             or key.startswith("GEMINI_")
             or key.startswith("OPENAI_")
             or key.startswith("ANTHROPIC_")
+            or key.startswith("OPENROUTER_")
             or key.startswith("PROVIDER_")
             or key
             in {

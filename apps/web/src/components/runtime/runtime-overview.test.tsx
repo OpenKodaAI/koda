@@ -25,6 +25,10 @@ vi.mock("@/hooks/use-runtime-overview", () => ({
   useRuntimeOverview: vi.fn(),
 }));
 
+vi.mock("@/hooks/use-runtime-rooms", () => ({
+  useRuntimeRooms: vi.fn(),
+}));
+
 function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
   return {
     agentId: "ATLAS",
@@ -75,6 +79,7 @@ function overview(overrides: Partial<RuntimeOverview>): RuntimeOverview {
 describe("RuntimeOverviewScreen", () => {
   it("renders a compact pulse board with live executions and agents", async () => {
     const { useRuntimeOverview } = await import("@/hooks/use-runtime-overview");
+    const { useRuntimeRooms } = await import("@/hooks/use-runtime-rooms");
     vi.mocked(useRuntimeOverview).mockReturnValue({
       overviews: {
         ATLAS: overview({}),
@@ -86,6 +91,40 @@ describe("RuntimeOverviewScreen", () => {
       refreshAgent: vi.fn(),
       lastUpdated: Date.now(),
     });
+    vi.mocked(useRuntimeRooms).mockReturnValue({
+      data: {
+        pages: [
+          {
+            items: [
+              {
+                agentId: "ATLAS",
+                taskId: 12,
+                queryText: "Revisar onboarding do ambiente",
+                source: "environment",
+                status: "active",
+                phase: "running",
+                updatedAt: "2026-03-19T00:05:00.000Z",
+                environment: overview({}).environments[0] ?? null,
+                queue: overview({}).queues[0] ?? null,
+              },
+            ],
+            page: {
+              limit: 25,
+              offset: 0,
+              returned: 1,
+              next_offset: null,
+              has_more: false,
+              total: null,
+            },
+          },
+        ],
+        pageParams: [0],
+      },
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      refreshFirstPage: vi.fn(),
+    } as never);
 
     const { RuntimeOverviewScreen } = await import("@/components/runtime/runtime-overview");
     const queryClient = new QueryClient({

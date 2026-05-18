@@ -1324,9 +1324,7 @@ async def _handle_set_workdir(params: dict, ctx: ToolContext) -> AgentToolResult
         )
 
     allowed_roots = [
-        str(root)
-        for root in (ctx.runtime_workspace_path, ctx.source_root_path)
-        if str(root or "").strip()
+        str(root) for root in (ctx.runtime_workspace_path, ctx.source_root_path) if str(root or "").strip()
     ]
     if allowed_roots and not _path_is_within_any_root(validation.path, allowed_roots):
         _audit_blocked("agent_set_workdir", "outside_workspace_roots", user_id=ctx.user_id)

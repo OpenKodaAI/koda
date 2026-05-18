@@ -1,8 +1,8 @@
 "use client";
 
 
-import { useMemo, useState } from "react";
-import { keepPreviousData } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { DatabaseZap, ShieldCheck } from "lucide-react";
 import { DLQTable } from "@/components/dlq/dlq-table";
 import { ErrorDetail } from "@/components/dlq/error-detail";
@@ -10,7 +10,7 @@ import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { DLQDataLoading } from "@/components/layout/route-loading";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ErrorState } from "@/components/ui/async-feedback";
-import { useControlPlaneQuery } from "@/hooks/use-app-query";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import {
@@ -24,8 +24,21 @@ import {
   resolveAgentSelection,
 } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  DASHBOARD_PAGE_SIZE,
+  mergePaginatedItems,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
 import { queryKeys } from "@/lib/query/keys";
 import type { DLQEntry } from "@/lib/types";
+
+type DLQPage = PaginatedListResponse<DLQEntry> & {
+  unavailable?: boolean;
+};
+
 export default function DLQPage() {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
@@ -37,26 +50,33 @@ export default function DLQPage() {
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
-  const entriesQuery = useControlPlaneQuery<{
-    items: DLQEntry[];
-    unavailable: boolean;
-  }>({
-    tier: "live",
-    queryKey: queryKeys.dashboard.dlq({
-      agentIds: visibleBotIds,
-      retryFilter,
-      limit: 100,
-    }),
-    placeholderData: keepPreviousData,
-    notifyOnChangeProps: ["data", "error"],
-    queryFn: async ({ signal }) => {
-      const response = await fetchControlPlaneDashboardJsonAllowError<DLQEntry[]>(
+  const dlqFilters = useMemo(() => ({
+    agentIds: visibleBotIds,
+    retryFilter,
+    limit: DASHBOARD_PAGE_SIZE,
+  }), [retryFilter, visibleBotIds]);
+  const entriesQuery = useInfiniteQuery<DLQPage, Error>({
+    queryKey: queryKeys.dashboard.dlqPages(dlqFilters),
+    initialPageParam: 0,
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_offset : undefined,
+    queryFn: async ({ signal, pageParam }) => {
+      const offset = typeof pageParam === "number" ? pageParam : 0;
+      const response = await fetchControlPlaneDashboardJsonAllowError<
+        PaginatedListResponse<DLQEntry>
+      >(
         "/dlq",
         {
           signal,
           params: {
+            paged: 1,
             agent: visibleBotIds,
-            limit: 100,
+            limit: DASHBOARD_PAGE_SIZE,
+            offset,
             retryEligible:
               retryFilter === "eligible"
                 ? true
@@ -68,28 +88,42 @@ export default function DLQPage() {
         },
       );
 
-      const merged = (Array.isArray(response.data) ? response.data : [])
-        .sort(
-          (left, right) =>
-            new Date(right.failed_at).getTime() - new Date(left.failed_at).getTime()
-        );
-
+      const page = normalizePaginatedListResponse<DLQEntry>(
+        response.data,
+        DASHBOARD_PAGE_SIZE,
+        offset,
+      );
       return {
-        items: merged,
+        ...page,
+        items: [...page.items].sort(
+          (left, right) =>
+            new Date(right.failed_at).getTime() - new Date(left.failed_at).getTime(),
+        ),
         unavailable: !response.ok,
       };
     },
   });
   const stableEntriesQuery = useStableQueryData({
     data: entriesQuery.data,
-    resetKey: "dashboard:dlq",
+    resetKey: JSON.stringify(dlqFilters),
     isPending: entriesQuery.isPending,
     isFetching: entriesQuery.isFetching,
     error: entriesQuery.error,
   });
-  const entries = stableEntriesQuery.data?.items ?? [];
+  const entries = useMemo(
+    () =>
+      mergePaginatedItems(stableEntriesQuery.data?.pages, (entry) => entry.id).sort(
+        (left, right) =>
+          new Date(right.failed_at).getTime() - new Date(left.failed_at).getTime(),
+      ),
+    [stableEntriesQuery.data],
+  );
   const loading = stableEntriesQuery.initialLoading;
-  const unavailable = stableEntriesQuery.data?.unavailable ?? false;
+  const unavailable = stableEntriesQuery.data?.pages.some((page) => page.unavailable) ?? false;
+  const loadMoreEntries = useCallback(() => {
+    if (!entriesQuery.hasNextPage || entriesQuery.isFetchingNextPage) return;
+    void entriesQuery.fetchNextPage();
+  }, [entriesQuery]);
   const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
   const retryEligibleCount = entries.filter(
     (entry) => entry.retry_eligible === 1 && !entry.retried_at
@@ -199,6 +233,12 @@ export default function DLQPage() {
                   entries={entries}
                   onEntryClick={setSelectedEntry}
                   selectedEntryId={selectedEntry?.id ?? null}
+                />
+                <InfiniteListFooter
+                  hasMore={Boolean(entriesQuery.hasNextPage)}
+                  loading={entriesQuery.isFetchingNextPage}
+                  onLoadMore={loadMoreEntries}
+                  label={t("common.loadMore", { defaultValue: "Load more" })}
                 />
               </div>
             )}

@@ -11,10 +11,16 @@ import {
 } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAppTour } from "@/hooks/use-app-tour";
-import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type InfiniteData,
+  useInfiniteQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useContentStable } from "@/hooks/use-content-stable";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ChatComposer } from "@/components/sessions/chat/chat-composer";
@@ -42,6 +48,14 @@ import {
   fetchControlPlaneDashboardJsonAllowError,
   mutateControlPlaneDashboardJson,
 } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  DASHBOARD_PAGE_SIZE,
+  mergePaginatedItems,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
 import { queryKeys } from "@/lib/query/keys";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import type {
@@ -54,9 +68,16 @@ import type {
 } from "@/lib/types";
 import { cn, truncateText } from "@/lib/utils";
 
-const SESSION_FETCH_LIMIT = 200;
+const SESSION_FETCH_LIMIT = DASHBOARD_PAGE_SIZE;
 const SESSION_THREAD_PAGE_SIZE = 24;
+const CHAT_HISTORY_STALE_MS = 5 * 60 * 1000;
+const CHAT_HISTORY_GC_MS = 15 * 60 * 1000;
 const NEW_SESSION_PLACEHOLDER_ID = "__new_session__";
+const EMPTY_SESSION_DETAIL_PAGES: SessionDetail[] = [];
+
+type SessionPage = PaginatedListResponse<SessionSummary> & {
+  unavailable?: boolean;
+};
 
 function createClientSessionId() {
   const id =
@@ -178,12 +199,16 @@ function mergeSessionHistoryPages(
     orderedPages.push(latestDetail);
   }
 
-  const seen = new Set<string>();
+  const indexById = new Map<string, number>();
   const messages: SessionMessage[] = [];
   for (const page of orderedPages) {
     for (const message of page.messages) {
-      if (seen.has(message.id)) continue;
-      seen.add(message.id);
+      const existingIndex = indexById.get(message.id);
+      if (existingIndex !== undefined) {
+        messages[existingIndex] = message;
+        continue;
+      }
+      indexById.set(message.id, messages.length);
       messages.push(message);
     }
   }
@@ -236,8 +261,6 @@ function SessionsPageContent() {
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [threadScrolled, setThreadScrolled] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
-  const [olderDetailPages, setOlderDetailPages] = useState<SessionDetail[]>([]);
-  const [loadingOlderDetailPages, setLoadingOlderDetailPages] = useState(false);
   const [pendingRequest, setPendingRequest] = useState<{
     requestId: string;
     text: string;
@@ -333,52 +356,105 @@ function SessionsPageContent() {
     selectedSessionId,
   ]);
 
-  const sessionsQueryKey = queryKeys.dashboard.sessions({
+  const sessionsQueryKey = queryKeys.dashboard.sessionPages({
     search: debouncedSearch,
     limit: SESSION_FETCH_LIMIT,
   });
-
-  const sessionsQuery = useControlPlaneQuery<{
-    items: SessionSummary[];
-    unavailable: boolean;
-  }>({
-    tier: "live",
-    queryKey: sessionsQueryKey,
-    refetchInterval: 15_000,
-    notifyOnChangeProps: ["data", "error"],
-    placeholderData: keepPreviousData,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    queryFn: async ({ signal }) => {
-      const response = await fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
+  const fetchSessionsPage = useCallback(
+    async ({
+      signal,
+      offset,
+    }: {
+      signal?: AbortSignal;
+      offset: number;
+    }): Promise<SessionPage> => {
+      const response = await fetchControlPlaneDashboardJsonAllowError<
+        PaginatedListResponse<SessionSummary>
+      >(
         "/sessions",
         {
           signal,
           params: {
+            paged: 1,
             limit: SESSION_FETCH_LIMIT,
+            offset,
             search: debouncedSearch || null,
           },
           fallbackError: t("sessions.loadError"),
         },
       );
+      const page = normalizePaginatedListResponse<SessionSummary>(
+        response.data,
+        SESSION_FETCH_LIMIT,
+        offset,
+      );
       return {
-        items: Array.isArray(response.data) ? response.data : [],
-        unavailable: false,
+        ...page,
+        unavailable: !response.ok,
       };
+    },
+    [debouncedSearch, t],
+  );
+  const refreshSessionsFirstPage = useCallback(async () => {
+    try {
+      const firstPage = await fetchSessionsPage({ offset: 0 });
+      queryClient.setQueryData<InfiniteData<SessionPage, number>>(
+        sessionsQueryKey,
+        (current) => {
+          if (!current) {
+            return {
+              pages: [firstPage],
+              pageParams: [0],
+            };
+          }
+          return {
+            ...current,
+            pages: [firstPage, ...current.pages.slice(1)],
+            pageParams: current.pageParams.length > 0 ? current.pageParams : [0],
+          };
+        },
+      );
+    } catch {
+      // Background freshness should not interrupt the active chat interaction.
+    }
+  }, [fetchSessionsPage, queryClient, sessionsQueryKey]);
+
+  const sessionsQuery = useInfiniteQuery<SessionPage, Error>({
+    queryKey: sessionsQueryKey,
+    initialPageParam: 0,
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_offset : undefined,
+    queryFn: async ({ signal, pageParam }) => {
+      const offset = typeof pageParam === "number" ? pageParam : 0;
+      return fetchSessionsPage({ signal, offset });
     },
   });
 
   const stableSessionsQuery = useStableQueryData({
     data: sessionsQuery.data,
-    resetKey: "dashboard:sessions",
+    resetKey: JSON.stringify({ search: debouncedSearch, limit: SESSION_FETCH_LIMIT }),
     isPending: sessionsQuery.isPending,
     isFetching: sessionsQuery.isFetching,
     error: sessionsQuery.error,
   });
   const stableSessionsPayload = useContentStable(stableSessionsQuery.data ?? undefined);
-  const sessions = useMemo(() => stableSessionsPayload?.items ?? [], [stableSessionsPayload]);
-  const sessionsUnavailable = stableSessionsPayload?.unavailable ?? false;
+  const sessions = useMemo(
+    () =>
+      mergePaginatedItems(
+        stableSessionsPayload?.pages,
+        (session) => `${session.bot_id}:${session.session_id}`,
+      ),
+    [stableSessionsPayload],
+  );
+  const sessionsUnavailable = stableSessionsPayload?.pages.some((page) => page.unavailable) ?? false;
+  const loadMoreSessions = useCallback(() => {
+    if (!sessionsQuery.hasNextPage || sessionsQuery.isFetchingNextPage) return;
+    void sessionsQuery.fetchNextPage();
+  }, [sessionsQuery]);
   const selectedSessionSummary = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
     [selectedSessionId, sessions]
@@ -420,7 +496,7 @@ function SessionsPageContent() {
         const artifact = artifactReadyEventToExecutionArtifact(event);
         if (artifact) {
           queryClient.setQueriesData<SessionDetail>(
-            { queryKey: detailQueryBaseKey },
+            { queryKey: detailQueryKey },
             (current) => attachArtifactToSessionDetail(current, event.task_id, artifact),
           );
         }
@@ -430,11 +506,11 @@ function SessionsPageContent() {
       }
       streamInvalidateTimerRef.current = setTimeout(() => {
         streamInvalidateTimerRef.current = null;
-        void queryClient.invalidateQueries({ queryKey: detailQueryBaseKey });
-        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+        void queryClient.invalidateQueries({ queryKey: detailQueryKey });
+        void refreshSessionsFirstPage();
       }, 120);
     },
-    [queryClient, detailQueryBaseKey, sessionsQueryKey],
+    [queryClient, detailQueryKey, refreshSessionsFirstPage],
   );
 
   const streamSessionId =
@@ -489,6 +565,50 @@ function SessionsPageContent() {
   });
   const stableDetailPayload = useContentStable(stableDetailQuery.data ?? undefined);
   const activeDetail = stableDetailPayload ?? null;
+  const latestHistoryBoundaryCursor = activeDetail?.page?.next_cursor ?? null;
+  const olderDetailPagesQueryKey = useMemo(
+    () =>
+      queryKeys.dashboard.sessionOlderPages(
+        detailBotId ?? "__disabled__",
+        selectedSessionId ?? "__disabled__",
+        latestHistoryBoundaryCursor ?? "__none__",
+        SESSION_THREAD_PAGE_SIZE,
+      ),
+    [detailBotId, latestHistoryBoundaryCursor, selectedSessionId],
+  );
+  const olderDetailPagesEnabled = Boolean(
+    detailBotId && selectedSessionId && latestHistoryBoundaryCursor,
+  );
+  const olderDetailPagesQuery = useInfiniteQuery({
+    queryKey: olderDetailPagesQueryKey,
+    enabled: olderDetailPagesEnabled,
+    initialPageParam: latestHistoryBoundaryCursor ?? "",
+    staleTime: CHAT_HISTORY_STALE_MS,
+    gcTime: CHAT_HISTORY_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    queryFn: ({ pageParam, signal }) => {
+      const cursor = typeof pageParam === "string" ? pageParam : "";
+      if (!detailBotId || !selectedSessionId || !cursor) {
+        throw new Error(t("sessions.noSelection"));
+      }
+      return fetchControlPlaneDashboardJson<SessionDetail>(
+        `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
+        {
+          signal,
+          params: {
+            limit: SESSION_THREAD_PAGE_SIZE,
+            before: cursor,
+          },
+          fallbackError: t("sessions.loadError"),
+        },
+      );
+    },
+    getNextPageParam: (lastPage) => lastPage.page?.next_cursor ?? undefined,
+  });
+  const olderDetailPages = olderDetailPagesQuery.data?.pages ?? EMPTY_SESSION_DETAIL_PAGES;
   const loadedHistoryMessages = useMemo(
     () => mergeSessionHistoryPages(activeDetail, olderDetailPages),
     [activeDetail, olderDetailPages],
@@ -497,13 +617,14 @@ function SessionsPageContent() {
   const effectiveBotId =
     normalizeSelectedBotId(selectedSummary?.bot_id, availableBotIds) ?? activeBotId;
   const oldestLoadedPage = olderDetailPages[olderDetailPages.length - 1] ?? activeDetail;
-  const hasOlderMessages = oldestLoadedPage?.page?.has_more ?? false;
-  const nextHistoryCursor = oldestLoadedPage?.page?.next_cursor ?? null;
-
-  useEffect(() => {
-    setOlderDetailPages([]);
-    setLoadingOlderDetailPages(false);
-  }, [detailBotId, selectedSessionId]);
+  const hasOlderMessages = Boolean(
+    latestHistoryBoundaryCursor &&
+      (olderDetailPages.length > 0
+        ? oldestLoadedPage?.page?.has_more
+        : activeDetail?.page?.has_more),
+  );
+  const loadingOlderDetailPages = olderDetailPagesQuery.isFetchingNextPage;
+  const fetchOlderDetailPage = olderDetailPagesQuery.fetchNextPage;
 
   useEffect(() => {
     setActiveRoomDetail(null);
@@ -524,8 +645,8 @@ function SessionsPageContent() {
       current.filter((message) => message.requestId !== pendingRequest.requestId)
     );
     setPendingRequest(null);
-    void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
-  }, [activeDetail, pendingRequest, queryClient, sessionsQueryKey]);
+    void refreshSessionsFirstPage();
+  }, [activeDetail, pendingRequest, refreshSessionsFirstPage]);
 
   useEffect(() => {
     if (stableSessionsQuery.initialLoading) return;
@@ -556,43 +677,14 @@ function SessionsPageContent() {
     setComposerError(null);
     setPendingRequest(null);
     setPendingMessages([]);
-    setOlderDetailPages([]);
-    setLoadingOlderDetailPages(false);
   }, []);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!detailBotId || !selectedSessionId || !activeDetail || loadingOlderDetailPages) {
+    if (!hasOlderMessages || loadingOlderDetailPages) {
       return;
     }
-    if (!hasOlderMessages || !nextHistoryCursor) {
-      return;
-    }
-
-    setLoadingOlderDetailPages(true);
-    try {
-      const page = await fetchControlPlaneDashboardJson<SessionDetail>(
-        `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
-        {
-          params: {
-            limit: SESSION_THREAD_PAGE_SIZE,
-            before: nextHistoryCursor,
-          },
-          fallbackError: t("sessions.loadError"),
-        },
-      );
-      setOlderDetailPages((current) => [...current, page]);
-    } finally {
-      setLoadingOlderDetailPages(false);
-    }
-  }, [
-    activeDetail,
-    detailBotId,
-    hasOlderMessages,
-    loadingOlderDetailPages,
-    nextHistoryCursor,
-    selectedSessionId,
-    t,
-  ]);
+    await fetchOlderDetailPage();
+  }, [fetchOlderDetailPage, hasOlderMessages, loadingOlderDetailPages]);
 
   const handleAgentChange = useCallback(
     (agentId: string | undefined) => {
@@ -704,7 +796,7 @@ function SessionsPageContent() {
         resetThreadState();
       }
       setPendingDeleteSession(null);
-      void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+      void refreshSessionsFirstPage();
     } finally {
       setDeleteSubmitting(false);
     }
@@ -712,10 +804,9 @@ function SessionsPageContent() {
     availableBotIds,
     deleteSubmitting,
     pendingDeleteSession,
-    queryClient,
+    refreshSessionsFirstPage,
     resetThreadState,
     selectedSessionId,
-    sessionsQueryKey,
     t,
   ]);
 
@@ -825,7 +916,7 @@ function SessionsPageContent() {
         setSelectedSessionId(resolvedSessionId);
         setIsNewChatMode(false);
         setDraft("");
-        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+        void refreshSessionsFirstPage();
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim()
@@ -843,7 +934,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, queryClient, selectedSessionId, sessionsQueryKey, t]
+    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, refreshSessionsFirstPage, selectedSessionId, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -948,6 +1039,20 @@ function SessionsPageContent() {
   const contextPanelAvailable = Boolean(
     selectedRoomEntry || (!selectedRoomId && sessionArtifacts.length > 0),
   );
+  const chatDetailFetchingWithoutData = Boolean(
+    selectedSessionId &&
+      !selectedRoomId &&
+      !stableDetailQuery.hasData &&
+      detailQuery.isFetching,
+  );
+  const chatThreadLoading = useMinDurationFlag(
+    Boolean(
+      selectedSessionId &&
+        !selectedRoomId &&
+        (stableDetailQuery.initialLoading || chatDetailFetchingWithoutData),
+    ),
+    220,
+  );
 
   const tourVariant =
     stableSessionsQuery.showBlockingError || (sessionsUnavailable && sessions.length === 0)
@@ -977,6 +1082,9 @@ function SessionsPageContent() {
           search={search}
           onSearchChange={setSearch}
           loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
+          hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
+          loadingMoreSessions={sessionsQuery.isFetchingNextPage}
+          onLoadMoreSessions={loadMoreSessions}
           error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
           unavailable={sessionsUnavailable}
         />
@@ -1027,7 +1135,7 @@ function SessionsPageContent() {
           pendingMessages={visiblePendingMessages}
           orphanExecutions={activeDetail?.orphan_executions ?? []}
           showThinking={showThinking}
-          loading={Boolean(selectedSessionId && stableDetailQuery.initialLoading)}
+          loading={chatThreadLoading}
           error={stableDetailQuery.showBlockingError ? detailQuery.error?.message ?? null : null}
           agentLabel={effectiveAgentLabel}
           onRetryPending={handleRetryPendingMessage}
@@ -1115,6 +1223,9 @@ function SessionsPageContent() {
               search={search}
               onSearchChange={setSearch}
               loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
+              hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
+              loadingMoreSessions={sessionsQuery.isFetchingNextPage}
+              onLoadMoreSessions={loadMoreSessions}
               error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
               unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}

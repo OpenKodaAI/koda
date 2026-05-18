@@ -80,6 +80,8 @@ def _provider_allowed_keys(provider: str, source: Mapping[str, str]) -> frozense
         allowed.add(auth_token_key)
     if normalized == "codex":
         allowed.add("CODEX_HOME")
+    if normalized == "openrouter":
+        allowed.update({"OPENROUTER_HTTP_REFERER", "OPENROUTER_APP_TITLE", "OPENROUTER_APP_CATEGORIES"})
     return frozenset(allowed)
 
 

@@ -1,7 +1,7 @@
 """Shared OpenAI-compatible HTTP LLM runner.
 
 Plug-in surface for HTTP-only LLM providers (Perplexity, Mistral, Qwen, Kimi,
-Groq, DeepSeek, xAI). Each provider supplies a :class:`ProviderHttpProfile`
+Groq, DeepSeek, xAI, OpenRouter). Each provider supplies a :class:`ProviderHttpProfile`
 declaring its base URL, endpoints and quirks; this module owns the actual
 request/response handling, SSE streaming, error classification, capability
 probing and cost estimation. Phase 1 can pass versioned registry schemas as
@@ -47,6 +47,11 @@ _CAPABILITY_LOCK = asyncio.Lock()
 _SSE_DONE = "[DONE]"
 _DEFAULT_MAX_OUTPUT_TOKENS = 4096
 _NATIVE_TOOL_CALL_PROVIDERS = frozenset({"deepseek", "groq", "kimi", "mistral", "qwen", "xai"})
+_OPENROUTER_ATTRIBUTION_HEADERS = (
+    ("HTTP-Referer", "OPENROUTER_HTTP_REFERER"),
+    ("X-OpenRouter-Title", "OPENROUTER_APP_TITLE"),
+    ("X-OpenRouter-Categories", "OPENROUTER_APP_CATEGORIES"),
+)
 
 
 def clear_openai_compatible_capability_cache() -> None:
@@ -138,7 +143,7 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
     assert probe_url is not None  # static handled above
 
     timeout = aiohttp.ClientTimeout(total=10)
-    headers = profile.headers(api_key)
+    headers = _profile_headers(profile, api_key, env)
     try:
         async with (
             aiohttp.ClientSession(timeout=timeout) as session,
@@ -308,7 +313,7 @@ async def run_openai_compatible(
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             request_task: asyncio.Task[aiohttp.ClientResponse] = asyncio.create_task(
-                session.post(chat_url, headers=profile.headers(api_key), json=payload)
+                session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload)
             )
             if process_holder is not None:
                 process_holder["task"] = request_task
@@ -491,7 +496,7 @@ async def run_openai_compatible_streaming(
     try:
         async with (
             aiohttp.ClientSession(timeout=request_timeout) as session,
-            session.post(chat_url, headers=profile.headers(api_key), json=payload) as resp,
+            session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload) as resp,
         ):
             if process_holder is not None:
                 process_holder["task"] = asyncio.current_task()
@@ -622,6 +627,16 @@ def _resolve_base_url(profile: ProviderHttpProfile, env: dict[str, str]) -> str:
         if override:
             return override
     return profile.base_url
+
+
+def _profile_headers(profile: ProviderHttpProfile, api_key: str, env: dict[str, str]) -> dict[str, str]:
+    headers = profile.headers(api_key)
+    if profile.provider_id == "openrouter":
+        for header_name, env_key in _OPENROUTER_ATTRIBUTION_HEADERS:
+            value = str(env.get(env_key) or os.environ.get(env_key) or "").strip()
+            if value:
+                headers[header_name] = value
+    return headers
 
 
 def _looks_like_override(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
@@ -1182,11 +1197,37 @@ def _build_xai_profile() -> ProviderHttpProfile:
     )
 
 
+def _build_openrouter_profile() -> ProviderHttpProfile:
+    from koda.config import OPENROUTER_FIRST_CHUNK_TIMEOUT, OPENROUTER_TIMEOUT
+
+    return ProviderHttpProfile(
+        provider_id="openrouter",
+        base_url=os.environ.get("OPENROUTER_API_BASE_URL") or "https://openrouter.ai/api/v1",
+        chat_path="/chat/completions",
+        models_path="/models",
+        capability_probe="health_only",
+        health_path="/key",
+        first_chunk_timeout_seconds=float(OPENROUTER_FIRST_CHUNK_TIMEOUT),
+        request_timeout_seconds=float(OPENROUTER_TIMEOUT),
+        vision_models=frozenset(
+            {
+                "openrouter/auto",
+                "~openai/gpt-mini-latest",
+                "~google/gemini-flash-latest",
+                "~google/gemini-pro-latest",
+                "~anthropic/claude-sonnet-latest",
+                "~openai/gpt-latest",
+            }
+        ),
+    )
+
+
 _PROFILE_BUILDERS: dict[str, Callable[[], ProviderHttpProfile]] = {
     "deepseek": _build_deepseek_profile,
     "groq": _build_groq_profile,
     "kimi": _build_kimi_profile,
     "mistral": _build_mistral_profile,
+    "openrouter": _build_openrouter_profile,
     "perplexity": _build_perplexity_profile,
     "qwen": _build_qwen_profile,
     "xai": _build_xai_profile,

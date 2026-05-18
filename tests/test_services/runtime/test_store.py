@@ -293,7 +293,9 @@ def test_postgres_runtime_store_exposes_source_root_alias_in_environment_queries
         "id": 1,
         "base_work_dir": "/repo",
         "source_root_path": "/repo",
+        "source_root_exists": False,
     }
     assert store.get_environment_by_task(41) is not None
     assert store.list_environments()[0]["source_root_path"] == "/repo"
+    assert store.list_environments()[0]["source_root_exists"] is False
     assert all("base_work_dir AS source_root_path" in query for query in store.queries)

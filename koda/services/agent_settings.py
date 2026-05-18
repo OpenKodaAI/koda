@@ -30,6 +30,12 @@ from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_VOICE_ID,
     kokoro_voice_metadata,
 )
+from koda.services.supertonic_manager import (
+    SUPERTONIC_DEFAULT_LANGUAGE_ID,
+    SUPERTONIC_DEFAULT_MODEL_ID,
+    SUPERTONIC_DEFAULT_VOICE_ID,
+    supertonic_voice_metadata,
+)
 from koda.utils.tts import AVAILABLE_VOICES
 
 _CACHE_TTL_SECONDS = 5.0
@@ -110,6 +116,10 @@ def _inline_agent_runtime_settings(agent_id: str) -> dict[str, Any] | None:
     voice_policy_active = voice_policy_mode in {"tts", "voice_active"}
     audio_provider = _nonempty_text(audio_default.get("provider_id")).lower()
     voice_id = _nonempty_text(os.environ.get("TTS_DEFAULT_VOICE")) or TTS_DEFAULT_VOICE
+    if audio_provider == "supertonic":
+        voice_language = _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_LANGUAGE")) or SUPERTONIC_DEFAULT_LANGUAGE_ID
+    else:
+        voice_language = _nonempty_text(os.environ.get("KOKORO_DEFAULT_LANGUAGE")) or ELEVENLABS_DEFAULT_LANGUAGE
     return {
         "agent_id": agent_id.upper(),
         "default_provider": default_provider,
@@ -122,7 +132,7 @@ def _inline_agent_runtime_settings(agent_id: str) -> dict[str, Any] | None:
         "audio_model": _nonempty_text(audio_default.get("model_id")),
         "tts_voice": voice_id,
         "tts_voice_label": _voice_label_for_defaults(voice_id, provider_id=audio_provider),
-        "tts_voice_language": _nonempty_text(os.environ.get("KOKORO_DEFAULT_LANGUAGE")) or ELEVENLABS_DEFAULT_LANGUAGE,
+        "tts_voice_language": voice_language,
         "tts_enabled": _boolish(os.environ.get("TTS_ENABLED"), default=True) or voice_policy_active,
         "voice_policy": copy.deepcopy(voice_policy),
         "voice_policy_mode": voice_policy_mode,
@@ -212,6 +222,10 @@ def _voice_label_for_defaults(voice_id: str, *, provider_id: str) -> str:
         metadata = _safe_json_object(kokoro_voice_metadata(voice_id))
         if metadata:
             return _nonempty_text(metadata.get("name")) or voice_id
+    if provider_id == "supertonic":
+        metadata = _safe_json_object(supertonic_voice_metadata(voice_id))
+        if metadata:
+            return _nonempty_text(metadata.get("name")) or voice_id
     return voice_id
 
 
@@ -271,9 +285,16 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
 
     audio_selection = _safe_json_object(functional_defaults.get("audio"))
     audio_provider = _nonempty_text(audio_selection.get("provider_id")).lower() or "kokoro"
-    audio_model = _nonempty_text(audio_selection.get("model_id")) or (
-        _nonempty_text(providers_effective.get("elevenlabs_model")) if audio_provider == "elevenlabs" else "kokoro-v1"
-    )
+    audio_model = _nonempty_text(audio_selection.get("model_id"))
+    if not audio_model:
+        if audio_provider == "elevenlabs":
+            audio_model = _nonempty_text(providers_effective.get("elevenlabs_model"))
+        elif audio_provider == "supertonic":
+            audio_model = (
+                _nonempty_text(providers_effective.get("supertonic_default_model")) or SUPERTONIC_DEFAULT_MODEL_ID
+            )
+        else:
+            audio_model = "kokoro-v1"
     if audio_provider == "elevenlabs":
         voice_id = (
             _nonempty_text(providers_effective.get("elevenlabs_default_voice"))
@@ -282,6 +303,11 @@ def _effective_agent_runtime_settings(agent_id: str) -> dict[str, Any]:
         )
         voice_language = (
             _nonempty_text(providers_effective.get("elevenlabs_default_language")) or ELEVENLABS_DEFAULT_LANGUAGE
+        )
+    elif audio_provider == "supertonic":
+        voice_id = _nonempty_text(providers_effective.get("supertonic_default_voice")) or SUPERTONIC_DEFAULT_VOICE_ID
+        voice_language = (
+            _nonempty_text(providers_effective.get("supertonic_default_language")) or SUPERTONIC_DEFAULT_LANGUAGE_ID
         )
     else:
         voice_id = _nonempty_text(providers_effective.get("kokoro_default_voice")) or KOKORO_DEFAULT_VOICE_ID

@@ -112,6 +112,46 @@ async def test_dashboard_agent_stats_route_strips_nested_agent_summary() -> None
     assert "agent" not in payload
 
 
+@pytest.mark.asyncio
+async def test_dashboard_executions_route_supports_deep_paginated_offsets() -> None:
+    request = _Request(query={"paged": "1", "limit": "2", "offset": "1200"})
+    manager = MagicMock()
+    manager.list_agents.return_value = [{"id": "AGENT_A"}]
+    rows = [
+        {"bot_id": "AGENT_A", "task_id": 1201},
+        {"bot_id": "AGENT_A", "task_id": 1202},
+        {"bot_id": "AGENT_A", "task_id": 1203},
+    ]
+
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch(
+            "koda.control_plane.api.list_dashboard_execution_summaries",
+            return_value=rows,
+        ) as list_executions,
+    ):
+        response = await control_plane_api.list_dashboard_executions_route(request)
+
+    payload = json.loads(response.text)
+    list_executions.assert_called_once_with(
+        agent_ids=["AGENT_A"],
+        status=None,
+        search=None,
+        session_id=None,
+        limit=3,
+        offset=1200,
+    )
+    assert payload["items"] == rows[:2]
+    assert payload["page"] == {
+        "limit": 2,
+        "offset": 1200,
+        "returned": 2,
+        "next_offset": 1202,
+        "has_more": True,
+        "total": None,
+    }
+
+
 def test_serialize_execution_summary_exposes_feedback_and_provenance() -> None:
     row = {
         "id": 77,

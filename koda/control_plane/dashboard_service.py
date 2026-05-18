@@ -573,7 +573,7 @@ def get_dashboard_execution_sandbox_doctor(agent_id: str, task_id: int) -> dict[
     return build_sandbox_doctor_payload(agent_id=normalized, task_id=task_id, task=row)
 
 
-def _build_stats(agent_id: str) -> dict[str, Any]:
+def _build_stats(agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
     agent_rows = _fetch_all(
         """
         SELECT status, COUNT(*) AS count
@@ -621,7 +621,18 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
         (agent_id, (_now_utc() - timedelta(days=30)).date()),
         agent_ids=[agent_id],
     )
-    recent_tasks = [_serialize_task(task) for task in _fetch_task_rows(agent_ids=[agent_id], limit=5, offset=0)]
+    recent_tasks = (
+        [
+            _serialize_task(task)
+            for task in _fetch_task_rows(
+                agent_ids=[agent_id],
+                limit=max(1, int(recent_task_limit)),
+                offset=0,
+            )
+        ]
+        if recent_task_limit > 0
+        else []
+    )
     return {
         "agentId": agent_id,
         "totalTasks": sum(task_counts.values()),
@@ -644,13 +655,17 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
     }
 
 
-def list_dashboard_agent_summaries(agent_ids: list[str] | None = None) -> list[dict[str, Any]]:
-    return [_build_stats(agent_id) for agent_id in _resolve_agent_ids(agent_ids)]
+def list_dashboard_agent_summaries(
+    agent_ids: list[str] | None = None,
+    *,
+    recent_task_limit: int = 5,
+) -> list[dict[str, Any]]:
+    return [_build_stats(agent_id, recent_task_limit=recent_task_limit) for agent_id in _resolve_agent_ids(agent_ids)]
 
 
-def get_dashboard_agent_stats(agent_id: str) -> dict[str, Any]:
+def get_dashboard_agent_stats(agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
     normalized = _normalize_agent_id(agent_id)
-    return _build_stats(normalized)
+    return _build_stats(normalized, recent_task_limit=recent_task_limit)
 
 
 def _session_rows(agent_id: str) -> list[dict[str, Any]]:
@@ -915,6 +930,7 @@ def list_dashboard_dlq(
     *,
     agent_ids: list[str],
     limit: int = 50,
+    offset: int = 0,
     retry_eligible: bool | None = None,
 ) -> list[dict[str, Any]]:
     resolved_agent_ids = _compact_agent_ids(agent_ids)
@@ -925,7 +941,7 @@ def list_dashboard_dlq(
     if retry_eligible is not None:
         clauses.append("retry_eligible = ?")
         params.append(1 if retry_eligible else 0)
-    params.append(max(1, int(limit)))
+    params.extend([max(1, int(limit)), max(0, int(offset))])
     rows = _fetch_all(
         f"""
         SELECT id, task_id, user_id, chat_id, agent_id, pod_name, query_text, model, error_message, error_class,
@@ -933,7 +949,7 @@ def list_dashboard_dlq(
           FROM dead_letter_queue
          WHERE {" AND ".join(clauses)}
       ORDER BY failed_at DESC, id DESC
-         LIMIT ?
+         LIMIT ? OFFSET ?
         """,
         tuple(params),
         agent_ids=resolved_agent_ids,
@@ -962,7 +978,12 @@ def list_dashboard_dlq(
     ]
 
 
-def list_dashboard_schedules(agent_ids: list[str] | None = None) -> list[dict[str, Any]]:
+def list_dashboard_schedules(
+    agent_ids: list[str] | None = None,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     resolved = _resolve_agent_ids(agent_ids)
     if not resolved:
         return []
@@ -976,8 +997,9 @@ def list_dashboard_schedules(agent_ids: list[str] | None = None) -> list[dict[st
           FROM scheduled_jobs
          WHERE agent_id IN ({_placeholders(len(resolved))})
       ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
+         LIMIT ? OFFSET ?
         """,
-        tuple(resolved),
+        tuple([*resolved, max(1, int(limit)), max(0, int(offset))]),
         agent_ids=resolved,
     )
     items: list[dict[str, Any]] = []

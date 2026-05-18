@@ -441,6 +441,11 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
     bundle?.task?.current_phase || bundle?.environment?.current_phase || bundle?.task?.status,
   );
   const currentStatus = String(bundle?.task?.status || bundle?.environment?.status || "queued");
+  const sourceRootPath =
+    bundle?.environment?.source_root_path || bundle?.environment?.base_work_dir || "";
+  const sourceRootMissing =
+    Boolean(bundle?.environment?.source_root_path) &&
+    bundle?.environment?.source_root_exists === false;
   const heartbeatAt =
     bundle?.environment?.last_heartbeat_at ||
     bundle?.task?.last_heartbeat_at ||
@@ -753,8 +758,23 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
               </SharedDetailGrid>
 
               <SharedDetailBlock title="Source root" monospace>
-                {bundle.environment?.source_root_path || bundle.environment?.base_work_dir || "—"}
+                {sourceRootPath || "—"}
               </SharedDetailBlock>
+
+              {sourceRootMissing ? (
+                <div
+                  className="flex items-start gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--tone-warning-text)]"
+                  role="status"
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {t("runtime.room.sourceRootMissing", {
+                      defaultValue:
+                        "Source root is unavailable. The task workspace remains available.",
+                    })}
+                  </span>
+                </div>
+              ) : null}
 
               <SharedDetailBlock title={t("runtime.room.workspace")} monospace>
                 {bundle.environment?.workspace_path || "—"}

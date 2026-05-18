@@ -1,4 +1,4 @@
-"""Sentinel tests for CoreProviderDefinition catalog (especially the 7 HTTP providers)."""
+"""Sentinel tests for CoreProviderDefinition catalog (especially HTTP providers)."""
 
 import pytest
 
@@ -12,6 +12,7 @@ _HTTP_OPENAI_COMPATIBLE_PROVIDERS = (
     "groq",
     "deepseek",
     "xai",
+    "openrouter",
 )
 
 
@@ -27,7 +28,7 @@ def test_provider_uses_openai_compatible_runtime_adapter(provider_id):
 
 @pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
 def test_provider_supports_only_api_key(provider_id):
-    """None of the 7 new providers expose OAuth/subscription auth for API access."""
+    """None of the HTTP providers expose OAuth/subscription auth for API access."""
     assert CORE_PROVIDER_CATALOG[provider_id].supported_auth_modes == ("api_key",)
 
 
@@ -75,6 +76,11 @@ def test_groq_supports_vision():
 def test_deepseek_no_vision_support():
     """DeepSeek V3/R1 are text-only as of Q1 2026."""
     assert CORE_PROVIDER_CATALOG["deepseek"].supports_images is False
+
+
+def test_openrouter_supports_long_context_and_images():
+    assert CORE_PROVIDER_CATALOG["openrouter"].supports_long_context is True
+    assert CORE_PROVIDER_CATALOG["openrouter"].supports_images is True
 
 
 def test_existing_providers_still_present():

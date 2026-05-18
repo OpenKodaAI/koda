@@ -23,6 +23,7 @@ import {
   PROVIDER_ICON_COMPONENTS,
   PROVIDER_ACCENTS,
   COLORED_BRAND_LOGO_PROVIDERS,
+  providerGlyphColor,
   providerDisplayName,
 } from "@/components/control-plane/shared/provider-brand";
 import { AnimatePresence, motion } from "framer-motion";
@@ -65,6 +66,8 @@ function providerDescription(providerId: string, title: string) {
   if (providerId === "groq") return "Inferência via LPU";
   if (providerId === "deepseek") return "DeepSeek V4 e Reasoner";
   if (providerId === "xai") return "Grok 4 e variantes";
+  if (providerId === "openrouter") return "Roteamento multi-provider";
+  if (providerId === "supertonic") return "Voz local offline";
   return title;
 }
 
@@ -128,7 +131,7 @@ function ProviderLogo({
         <span
           className={`block ${iconClass}`}
           style={{
-            backgroundColor: active ? accentColor : "rgb(255 255 255)",
+            backgroundColor: providerGlyphColor(providerId, active),
             WebkitMaskImage: `url(${logo})`,
             maskImage: `url(${logo})`,
             WebkitMaskRepeat: "no-repeat",

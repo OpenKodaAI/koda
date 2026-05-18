@@ -18,7 +18,9 @@ from koda.services.openai_compatible_runner import (
     _extract_message_text,
     _extract_tool_calls,
     _normalize_usage,
+    _profile_headers,
     clear_openai_compatible_capability_cache,
+    get_provider_profile,
 )
 from koda.services.provider_http_profile import ProviderHttpProfile
 from koda.services.provider_runtime import ProviderCapabilities
@@ -520,3 +522,26 @@ class TestProviderHttpProfile:
         headers = mistral_profile.headers("sk-key-abc")
         assert headers["Authorization"] == "Bearer sk-key-abc"
         assert headers["Content-Type"] == "application/json"
+
+    def test_openrouter_profile_urls_match_docs(self):
+        profile = get_provider_profile("openrouter")
+
+        assert profile.chat_url() == "https://openrouter.ai/api/v1/chat/completions"
+        assert profile.models_url() == "https://openrouter.ai/api/v1/models"
+        assert profile.health_url() == "https://openrouter.ai/api/v1/key"
+        assert profile.capability_probe == "health_only"
+
+    def test_openrouter_headers_include_optional_attribution(self):
+        profile = get_provider_profile("openrouter")
+        env = {
+            "OPENROUTER_HTTP_REFERER": "https://koda.example",
+            "OPENROUTER_APP_TITLE": "Koda",
+            "OPENROUTER_APP_CATEGORIES": "cli-agent,personal-agent",
+        }
+
+        headers = _profile_headers(profile, "sk-or-v1-test", env)
+
+        assert headers["Authorization"] == "Bearer sk-or-v1-test"
+        assert headers["HTTP-Referer"] == "https://koda.example"
+        assert headers["X-OpenRouter-Title"] == "Koda"
+        assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"

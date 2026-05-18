@@ -53,6 +53,7 @@ def test_models_without_effort_return_none() -> None:
     assert get_model_effort_capability("xai", "grok-3") is None
     assert get_model_effort_capability("claude", "claude-haiku-4-5-20251001") is None
     assert get_model_effort_capability("gemini", "gemini-2.5-pro") is None
+    assert get_model_effort_capability("openrouter", "openrouter/auto") is None
 
 
 def test_unknown_models_return_none() -> None:
@@ -92,3 +93,13 @@ def test_codex_image_catalog_includes_gpt_image_2() -> None:
 
     assert image["function_id"] == "image"
     assert image["title"] == "GPT Image 2"
+
+
+def test_openrouter_catalog_includes_curated_models_without_effort() -> None:
+    catalog = resolve_provider_function_model_catalog("openrouter")
+    auto = next(item for item in catalog if item["model_id"] == "openrouter/auto")
+    flash = next(item for item in catalog if item["model_id"] == "~google/gemini-flash-latest")
+
+    assert auto["title"] == "OpenRouter Auto"
+    assert flash["title"] == "Google Gemini Flash Latest"
+    assert "effort_kind" not in auto

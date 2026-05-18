@@ -3,7 +3,7 @@
 import { memo, useMemo } from "react";
 import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import type { AgentDisplay } from "@/lib/agent-constants";
-import type { AgentStats, Task } from "@/lib/types";
+import type { AgentStats, ExecutionSummary, Task } from "@/lib/types";
 import { truncateText } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -28,6 +28,7 @@ export interface ExecutionHistoryStrings {
 
 interface ExecutionHistoryProps {
   entries: ExecutionHistoryEntry[];
+  executions?: ExecutionSummary[];
   strings: ExecutionHistoryStrings;
   limit?: number;
   onSelectAgent?: (agentId: string) => void;
@@ -50,9 +51,11 @@ const STATUS_TONE: Record<ExecutionHistoryStatus, string> = {
   queued: "var(--tone-warning-dot)",
 };
 
+type HistoryTask = Pick<Task, "id" | "query_text" | "status" | "created_at" | "started_at" | "completed_at">;
+
 interface Row {
   agent: AgentDisplay;
-  task: Task;
+  task: HistoryTask;
   status: ExecutionHistoryStatus;
   sortValue: number;
 }
@@ -75,7 +78,7 @@ function formatCompactRelative(iso: string | null | undefined): string | null {
   return `${Math.floor(months / 12)}y ago`;
 }
 
-function resolveTaskStatus(task: Task): ExecutionHistoryStatus {
+function resolveTaskStatus(task: HistoryTask): ExecutionHistoryStatus {
   switch (task.status) {
     case "completed":
     case "failed":
@@ -88,7 +91,7 @@ function resolveTaskStatus(task: Task): ExecutionHistoryStatus {
   }
 }
 
-function taskTimestamp(task: Task): number {
+function taskTimestamp(task: HistoryTask): number {
   const source = task.completed_at ?? task.started_at ?? task.created_at;
   if (!source) return 0;
   const t = new Date(source).getTime();
@@ -97,6 +100,7 @@ function taskTimestamp(task: Task): number {
 
 function ExecutionHistoryComponent({
   entries,
+  executions,
   strings,
   limit = 10,
   onSelectAgent,
@@ -104,6 +108,35 @@ function ExecutionHistoryComponent({
 }: ExecutionHistoryProps) {
   const { tl } = useAppI18n();
   const rows = useMemo<Row[]>(() => {
+    const agentById = new Map(entries.map((entry) => [entry.agent.id, entry.agent]));
+    if (executions) {
+      return executions
+        .map((execution) => {
+          const agent = agentById.get(execution.bot_id);
+          if (!agent) return null;
+          const task = {
+            id: execution.task_id,
+            query_text: execution.query_text,
+            status: execution.status,
+            created_at: execution.created_at,
+            started_at: execution.started_at,
+            completed_at: execution.completed_at,
+          };
+          return {
+            agent,
+            task,
+            status: resolveTaskStatus(task),
+            sortValue: taskTimestamp(task),
+          };
+        })
+        .filter((row): row is Row => Boolean(row))
+        .sort((a, b) => {
+          if (b.sortValue !== a.sortValue) return b.sortValue - a.sortValue;
+          return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+        })
+        .slice(0, limit);
+    }
+
     const all: Row[] = [];
     for (const entry of entries) {
       const tasks = entry.stats?.recentTasks ?? [];
@@ -121,7 +154,7 @@ function ExecutionHistoryComponent({
       return STATUS_RANK[a.status] - STATUS_RANK[b.status];
     });
     return all.slice(0, limit);
-  }, [entries, limit]);
+  }, [entries, executions, limit]);
 
   if (rows.length === 0) {
     return (
@@ -208,6 +241,7 @@ function arePropsEqual(prev: ExecutionHistoryProps, next: ExecutionHistoryProps)
   if (prev.limit !== next.limit) return false;
   if (prev.onSelectAgent !== next.onSelectAgent) return false;
   if (prev.strings !== next.strings) return false;
+  if (prev.executions !== next.executions) return false;
   if (prev.entries.length !== next.entries.length) return false;
   for (let i = 0; i < prev.entries.length; i += 1) {
     const a = prev.entries[i]!;

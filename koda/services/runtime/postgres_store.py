@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 from koda.config import AGENT_ID
@@ -97,6 +98,19 @@ def _json_list_column(value: Any) -> list[Any]:
 def _row_with_metadata(row: dict[str, Any]) -> dict[str, Any]:
     payload = dict(row)
     payload["metadata"] = _json_dict_column(payload.pop("metadata_json", None))
+    return payload
+
+
+def _with_source_root_exists(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    payload = dict(row)
+    source_root = str(payload.get("source_root_path") or payload.get("base_work_dir") or "").strip()
+    if source_root:
+        payload["source_root_path"] = source_root
+        payload["source_root_exists"] = Path(source_root).is_dir()
+    else:
+        payload["source_root_exists"] = None
     return payload
 
 
@@ -1351,7 +1365,7 @@ class PostgresRuntimeStore:
         )
 
     def list_environments(self) -> list[dict[str, Any]]:
-        return self._fetch_all(
+        rows = self._fetch_all(
             """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
                    status, current_phase, workspace_path, runtime_dir, base_work_dir,
@@ -1367,10 +1381,12 @@ class PostgresRuntimeStore:
             """,
             (self._agent_scope,),
         )
+        return [cast(dict[str, Any], _with_source_root_exists(row)) for row in rows]
 
     def get_environment(self, env_id: int) -> dict[str, Any] | None:
-        return self._fetch_one(
-            """
+        return _with_source_root_exists(
+            self._fetch_one(
+                """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
                    status, current_phase, workspace_path, runtime_dir, base_work_dir,
                    base_work_dir AS source_root_path, branch_name,
@@ -1382,12 +1398,14 @@ class PostgresRuntimeStore:
             FROM runtime_environments
             WHERE agent_id = ? AND id = ?
             """,
-            (self._agent_scope, env_id),
+                (self._agent_scope, env_id),
+            )
         )
 
     def get_environment_by_task(self, task_id: int) -> dict[str, Any] | None:
-        return self._fetch_one(
-            """
+        return _with_source_root_exists(
+            self._fetch_one(
+                """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
                    status, current_phase, workspace_path, runtime_dir, base_work_dir,
                    base_work_dir AS source_root_path, branch_name,
@@ -1399,7 +1417,8 @@ class PostgresRuntimeStore:
             FROM runtime_environments
             WHERE agent_id = ? AND task_id = ?
             """,
-            (self._agent_scope, task_id),
+                (self._agent_scope, task_id),
+            )
         )
 
     def get_task_runtime(self, task_id: int) -> dict[str, Any] | None:

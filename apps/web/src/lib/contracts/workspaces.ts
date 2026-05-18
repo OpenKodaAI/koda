@@ -48,6 +48,70 @@ export const workspaceImportConfigBodySchema = z.object({
   max_depth: z.number().int().min(1).max(24).optional(),
 });
 
+export const workspaceDirectoryRootSchema = z.object({
+  path: safeText(4000),
+  label: safeText(4000).optional(),
+});
+
+export const workspaceDirectoryEntrySchema = z.object({
+  path: safeText(4000),
+  name: safeText(4000),
+  kind: z.enum(["directory", "file"]),
+});
+
+export const workspaceScanSourceSchema = z.object({
+  source_id: safeText(256),
+  tool: safeText(80),
+  kind: safeText(80),
+  relative_path: safeText(4000),
+  absolute_path: safeText(4000).optional(),
+  scope: safeText(4000).optional(),
+  name: safeText(4000).optional(),
+  description: safeText(8000).optional(),
+  confidence: safeText(80).optional(),
+  risk: safeText(80).optional(),
+  status: safeText(80).optional(),
+  import_action: safeText(120).optional(),
+  warnings: z.array(safeText(1000)).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  content_excerpt: safeContent(20_000).optional(),
+});
+
+export const workspaceScanPayloadSchema = z.object({
+  schema_version: z.literal("workspace_config_scan.v1"),
+  root_path: safeText(4000),
+  root_kind: safeText(120).optional(),
+  scan_hash: safeText(256),
+  status: safeText(120),
+  summary: z.object({
+    total_sources: z.number().int().min(0),
+    by_kind: z.record(z.string(), z.number().int().min(0)).optional(),
+    by_tool: z.record(z.string(), z.number().int().min(0)).optional(),
+    by_risk: z.record(z.string(), z.number().int().min(0)).optional(),
+    review_required: z.number().int().min(0).optional(),
+    blocked: z.number().int().min(0).optional(),
+    importable: z.number().int().min(0).optional(),
+    truncated: z.boolean().optional(),
+  }),
+  sources: z.array(workspaceScanSourceSchema),
+  warnings: z.array(safeText(1000)).optional(),
+  limits: z
+    .object({
+      max_depth: z.number().int().min(1).optional(),
+      max_entries: z.number().int().min(1).optional(),
+      max_file_bytes: z.number().int().min(1).optional(),
+      max_total_bytes: z.number().int().min(1).optional(),
+    })
+    .optional(),
+});
+
+export const workspaceImportResultSchema = z.object({
+  applied: z.array(z.record(z.string(), z.unknown())),
+  skipped: z.array(z.record(z.string(), z.unknown())),
+  conflicts: z.array(z.record(z.string(), z.unknown())),
+  message: safeText(1000).optional(),
+});
+
 /*  Registration                                                       */
 
 // POST /workspaces

@@ -8,7 +8,7 @@ providers are exercised against the real API and which are mocked, so a
 green run with everything mocked can never silently masquerade as full
 coverage.
 
-Local providers (Whisper.cpp, Kokoro, Ollama, MLX, LlamaCpp) are detected
+Local providers (Whisper.cpp, Kokoro, Supertonic, Ollama, MLX, LlamaCpp) are detected
 by binary/file presence, not env vars.
 """
 
@@ -33,6 +33,7 @@ _CLOUD_PROVIDERS: dict[str, str] = {
     "kimi": "KIMI_API_KEY",
     "qwen": "QWEN_API_KEY",
     "xai": "XAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
 }
 
@@ -86,6 +87,16 @@ def _detect_local() -> tuple[frozenset[str], frozenset[str]]:
             real.add("kokoro")
         except Exception:
             missing.add("kokoro")
+
+    try:
+        import supertonic  # noqa: F401
+
+        from koda.services.supertonic_manager import supertonic_root
+
+        supertonic_root()
+        real.add("supertonic")
+    except Exception:
+        missing.add("supertonic")
 
     # Local LLM runtimes are detected by binary or env var.
     if shutil.which("ollama") or os.environ.get("OLLAMA_HOST"):

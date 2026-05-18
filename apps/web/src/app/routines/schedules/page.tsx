@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { keepPreviousData } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Clock3, DatabaseZap, History, Plus } from "lucide-react";
 import {
   CronTable,
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/page-primitives";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import {
   RoutineEditor,
   type RoutineFormPayload,
@@ -29,12 +30,19 @@ import { ConfirmationDialog } from "@/components/control-plane/shared/confirmati
 import { Drawer } from "@/components/ui/drawer";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useToast } from "@/hooks/use-toast";
-import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useContentStable } from "@/hooks/use-content-stable";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { BackgroundRefreshIndicator } from "@/components/ui/async-feedback";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  DASHBOARD_PAGE_SIZE,
+  mergePaginatedItems,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
 import { queryKeys } from "@/lib/query/keys";
 import type { CronJob, ScheduleDetail, ScheduleRun } from "@/lib/types";
 import {
@@ -56,6 +64,10 @@ type ScheduleEditDraft = {
   model: string;
   notificationMode: string;
   verificationMode: string;
+};
+
+type SchedulePage = PaginatedListResponse<CronJob> & {
+  unavailable?: boolean;
 };
 
 function getRoutineTitle(job: CronJob | null): string {
@@ -207,6 +219,7 @@ export default function SchedulesPage() {
   const [executionDrawerJob, setExecutionDrawerJob] = useState<CronJob | null>(null);
   const [executionDrawerDetail, setExecutionDrawerDetail] = useState<ScheduleDetail | null>(null);
   const [executionDrawerLoading, setExecutionDrawerLoading] = useState(false);
+  const [executionDrawerLoadingMore, setExecutionDrawerLoadingMore] = useState(false);
   const [executionDrawerError, setExecutionDrawerError] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ScheduleEditDraft | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -290,33 +303,48 @@ export default function SchedulesPage() {
   );
   const selectionLabel = formatAgentSelectionLabel(visibleBotIds, agents);
 
-  const schedulesQuery = useControlPlaneQuery<{
-    items: CronJob[];
-    unavailable: boolean;
-  }>({
-    tier: "live",
-    queryKey: queryKeys.dashboard.routineSchedules(),
-    placeholderData: keepPreviousData,
+  const scheduleFilters = useMemo(() => ({
+    agentIds: visibleBotIds,
+    limit: DASHBOARD_PAGE_SIZE,
+  }), [visibleBotIds]);
+  const schedulesQuery = useInfiniteQuery<SchedulePage, Error>({
+    queryKey: queryKeys.dashboard.routineSchedulePages(scheduleFilters),
+    initialPageParam: 0,
+    enabled: agents.length > 0,
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    notifyOnChangeProps: ["data", "error"],
-    queryFn: async ({ signal }) => {
-      const response = await fetchControlPlaneDashboardJsonAllowError<CronJob[]>("/schedules", {
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_offset : undefined,
+    queryFn: async ({ signal, pageParam }) => {
+      const offset = typeof pageParam === "number" ? pageParam : 0;
+      const response = await fetchControlPlaneDashboardJsonAllowError<PaginatedListResponse<CronJob>>("/schedules", {
         signal,
+        params: {
+          paged: 1,
+          agent: visibleBotIds,
+          limit: DASHBOARD_PAGE_SIZE,
+          offset,
+        },
         fallbackError: t("schedules.page.unavailableDescription", {
           defaultValue: "Unable to load canonical schedules.",
         }),
       });
+      const page = normalizePaginatedListResponse<CronJob>(
+        response.data,
+        DASHBOARD_PAGE_SIZE,
+        offset,
+      );
       return {
-        items: Array.isArray(response.data) ? response.data : [],
+        ...page,
         unavailable: !response.ok,
       };
     },
   });
   const stableSchedulesQuery = useStableQueryData({
     data: schedulesQuery.data,
-    resetKey: "dashboard:routines:schedules",
+    resetKey: JSON.stringify(scheduleFilters),
     isPending: schedulesQuery.isPending,
     isFetching: schedulesQuery.isFetching,
     error: schedulesQuery.error,
@@ -325,20 +353,28 @@ export default function SchedulesPage() {
   const loading = stableSchedulesQuery.initialLoading;
   const refreshing = stableSchedulesQuery.refreshing;
   const unavailable =
-    stableSchedulesPayload?.unavailable ?? Boolean(schedulesQuery.error);
+    stableSchedulesPayload?.pages.some((page) => page.unavailable) ?? Boolean(schedulesQuery.error);
+  const scheduleItems = useMemo(
+    () => mergePaginatedItems(stableSchedulesPayload?.pages, (job) => job.id),
+    [stableSchedulesPayload],
+  );
+  const loadMoreSchedules = useCallback(() => {
+    if (!schedulesQuery.hasNextPage || schedulesQuery.isFetchingNextPage) return;
+    void schedulesQuery.fetchNextPage();
+  }, [schedulesQuery]);
   const jobsByAgent = useMemo(() => {
     const results: Record<string, CronJob[]> = {};
     for (const agent of agents) {
       results[agent.id] = [];
     }
-    for (const job of stableSchedulesPayload?.items ?? []) {
+    for (const job of scheduleItems) {
       if (!job.bot_id || !results[job.bot_id]) {
         continue;
       }
       results[job.bot_id].push(job);
     }
     return results;
-  }, [agents, stableSchedulesPayload]);
+  }, [agents, scheduleItems]);
 
   async function loadDetail(job: CronJob, actionKey?: ScheduleTableActionKey) {
     if (!job.bot_id) return;
@@ -367,15 +403,26 @@ export default function SchedulesPage() {
     }
   }
 
-  async function loadExecutionHistory(job: CronJob) {
+  async function loadExecutionHistory(job: CronJob, offset = 0) {
     if (!job.bot_id) return;
+    const loadingMore = offset > 0;
     setExecutionDrawerJob(job);
-    setExecutionDrawerDetail(null);
+    if (!loadingMore) {
+      setExecutionDrawerDetail(null);
+    }
     setExecutionDrawerError(null);
-    setExecutionDrawerLoading(true);
-    setTableActionState(job.id, "executions", "pending");
+    setExecutionDrawerLoading(!loadingMore);
+    setExecutionDrawerLoadingMore(loadingMore);
+    if (!loadingMore) {
+      setTableActionState(job.id, "executions", "pending");
+    }
     try {
-      const response = await fetch(`/api/runtime/agents/${job.bot_id}/schedules/${job.id}`, {
+      const params = new URLSearchParams({
+        run_limit: "25",
+        run_offset: String(offset),
+        event_limit: "50",
+      });
+      const response = await fetch(`/api/runtime/agents/${job.bot_id}/schedules/${job.id}?${params}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as ScheduleDetail | { error?: string };
@@ -386,15 +433,36 @@ export default function SchedulesPage() {
             : "Unable to load schedule executions",
         );
       }
-      setExecutionDrawerDetail(payload as ScheduleDetail);
-      setTableActionState(job.id, "executions", "success");
+      const detail = payload as ScheduleDetail;
+      setExecutionDrawerDetail((current) => {
+        if (!loadingMore || !current) return detail;
+        const seen = new Set(current.runs.map((run) => run.id));
+        return {
+          ...detail,
+          events: current.events,
+          runs: [
+            ...current.runs,
+            ...detail.runs.filter((run) => {
+              if (seen.has(run.id)) return false;
+              seen.add(run.id);
+              return true;
+            }),
+          ],
+        };
+      });
+      if (!loadingMore) {
+        setTableActionState(job.id, "executions", "success");
+      }
     } catch (error) {
       setExecutionDrawerError(
         error instanceof Error ? error.message : "Unable to load schedule executions",
       );
-      setTableActionState(job.id, "executions", "error");
+      if (!loadingMore) {
+        setTableActionState(job.id, "executions", "error");
+      }
     } finally {
       setExecutionDrawerLoading(false);
+      setExecutionDrawerLoadingMore(false);
     }
   }
 
@@ -708,6 +776,12 @@ export default function SchedulesPage() {
                 onRun={(job) => void runAction(job, "run", "run")}
                 onLifecycleAction={(job, action) => void runAction(job, action, "lifecycle")}
               />
+              <InfiniteListFooter
+                hasMore={Boolean(schedulesQuery.hasNextPage)}
+                loading={schedulesQuery.isFetchingNextPage}
+                onLoadMore={loadMoreSchedules}
+                label={t("common.loadMore", { defaultValue: "Load more" })}
+              />
             </section>
           )}
         </>
@@ -739,13 +813,19 @@ export default function SchedulesPage() {
         job={executionDrawerJob}
         detail={executionDrawerDetail}
         loading={executionDrawerLoading}
+        loadingMore={executionDrawerLoadingMore}
         error={executionDrawerError}
+        onLoadMore={() => {
+          if (!executionDrawerJob || !executionDrawerDetail?.run_page?.next_offset) return;
+          void loadExecutionHistory(executionDrawerJob, executionDrawerDetail.run_page.next_offset);
+        }}
         onOpenChange={(open) => {
           if (!open) {
             setExecutionDrawerJob(null);
             setExecutionDrawerDetail(null);
             setExecutionDrawerError(null);
             setExecutionDrawerLoading(false);
+            setExecutionDrawerLoadingMore(false);
           }
         }}
       />
@@ -774,14 +854,18 @@ function RoutineExecutionsDrawer({
   job,
   detail,
   loading,
+  loadingMore,
   error,
+  onLoadMore,
   onOpenChange,
 }: {
   open: boolean;
   job: CronJob | null;
   detail: ScheduleDetail | null;
   loading: boolean;
+  loadingMore: boolean;
   error: string | null;
+  onLoadMore: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useAppI18n();
@@ -851,6 +935,12 @@ function RoutineExecutionsDrawer({
             {runs.map((run) => (
               <RoutineExecutionRow key={run.id} run={run} />
             ))}
+            <InfiniteListFooter
+              hasMore={Boolean(detail?.run_page?.has_more)}
+              loading={loadingMore}
+              onLoadMore={onLoadMore}
+              label={t("common.loadMore", { defaultValue: "Load more" })}
+            />
           </div>
         )}
       </div>

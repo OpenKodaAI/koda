@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from aiohttp import ClientConnectionResetError, ContentTypeError, web
+from aiohttp.multipart import BodyPartReader
 
 from koda.logging_config import get_logger
 from koda.services.http_client import inspect_url
@@ -51,6 +52,7 @@ _CLIENT_DISCONNECT_ERRORS = (
     ConnectionAbortedError,
     ConnectionResetError,
 )
+_MAX_DASHBOARD_PAGE_OFFSET = 100_000
 
 
 def _manager() -> Any:
@@ -94,6 +96,27 @@ def _bounded_int(raw_value: str | None, *, name: str, default: int, minimum: int
     if value < minimum or value > maximum:
         raise ValueError(f"invalid {name}")
     return value
+
+
+def _wants_paginated_response(request: web.Request) -> bool:
+    raw = str(request.query.get("paged") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _paginated_list_payload(items: list[Any], *, limit: int, offset: int) -> dict[str, Any]:
+    page_items = items[:limit]
+    has_more = len(items) > limit
+    return {
+        "items": page_items,
+        "page": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(page_items),
+            "next_offset": offset + len(page_items) if has_more else None,
+            "has_more": has_more,
+            "total": None,
+        },
+    }
 
 
 def _clip_preview_text(value: Any, *, limit: int) -> str | None:
@@ -1905,7 +1928,14 @@ async def get_dashboard_squad_thread_route(request: web.Request) -> web.Response
 
 async def list_dashboard_agent_summaries_route(request: web.Request) -> web.Response:
     try:
-        items = list_dashboard_agent_summaries(_query_agent_ids(request) or None)
+        recent_task_limit = _bounded_int(
+            request.query.get("recentTaskLimit") or request.query.get("recent_task_limit"),
+            name="recentTaskLimit",
+            default=5,
+            minimum=0,
+            maximum=25,
+        )
+        items = list_dashboard_agent_summaries(_query_agent_ids(request) or None, recent_task_limit=recent_task_limit)
         catalog = {str(item["id"]): item for item in _manager().list_agents()}
         return web.json_response(
             [
@@ -1922,7 +1952,19 @@ async def list_dashboard_agent_summaries_route(request: web.Request) -> web.Resp
 
 async def get_dashboard_agent_stats_route(request: web.Request) -> web.Response:
     try:
-        payload = dict(_manager().get_dashboard_agent_summary(request.match_info["agent_id"]))
+        recent_task_limit = _bounded_int(
+            request.query.get("recentTaskLimit") or request.query.get("recent_task_limit"),
+            name="recentTaskLimit",
+            default=5,
+            minimum=0,
+            maximum=25,
+        )
+        payload = dict(
+            _manager().get_dashboard_agent_summary(
+                request.match_info["agent_id"],
+                recent_task_limit=recent_task_limit,
+            )
+        )
     except RuntimeError as exc:
         return _service_unavailable(exc)
     payload.pop("agent", None)
@@ -1931,25 +1973,43 @@ async def get_dashboard_agent_stats_route(request: web.Request) -> web.Response:
 
 async def get_dashboard_agent_summary_route(request: web.Request) -> web.Response:
     try:
-        return web.json_response(_manager().get_dashboard_agent_summary(request.match_info["agent_id"]))
+        recent_task_limit = _bounded_int(
+            request.query.get("recentTaskLimit") or request.query.get("recent_task_limit"),
+            name="recentTaskLimit",
+            default=5,
+            minimum=0,
+            maximum=25,
+        )
+        return web.json_response(
+            _manager().get_dashboard_agent_summary(
+                request.match_info["agent_id"],
+                recent_task_limit=recent_task_limit,
+            )
+        )
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
 
 async def list_dashboard_agent_executions_route(request: web.Request) -> web.Response:
     try:
-        limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
-        offset = _bounded_int(request.query.get("offset"), name="offset", default=0, minimum=0)
-        return web.json_response(
-            _manager().list_dashboard_executions(
-                request.match_info["agent_id"],
-                status=request.query.get("status") or None,
-                search=request.query.get("search") or None,
-                session_id=request.query.get("sessionId") or request.query.get("session_id") or None,
-                limit=limit,
-                offset=offset,
-            )
+        paged = _wants_paginated_response(request)
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+        offset = _bounded_int(
+            request.query.get("offset"),
+            name="offset",
+            default=0,
+            minimum=0,
+            maximum=_MAX_DASHBOARD_PAGE_OFFSET,
         )
+        items = _manager().list_dashboard_executions(
+            request.match_info["agent_id"],
+            status=request.query.get("status") or None,
+            search=request.query.get("search") or None,
+            session_id=request.query.get("sessionId") or request.query.get("session_id") or None,
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+        )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -1958,19 +2018,25 @@ async def list_dashboard_executions_route(request: web.Request) -> web.Response:
     agent_ids = _query_agent_ids(request)
     if not agent_ids:
         agent_ids = [item["id"] for item in _manager().list_agents()]
-    limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
-    offset = _bounded_int(request.query.get("offset"), name="offset", default=0, minimum=0)
+    paged = _wants_paginated_response(request)
+    limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+    offset = _bounded_int(
+        request.query.get("offset"),
+        name="offset",
+        default=0,
+        minimum=0,
+        maximum=_MAX_DASHBOARD_PAGE_OFFSET,
+    )
     try:
-        return web.json_response(
-            list_dashboard_execution_summaries(
-                agent_ids=agent_ids,
-                status=request.query.get("status") or None,
-                search=request.query.get("search") or None,
-                session_id=request.query.get("sessionId") or None,
-                limit=limit,
-                offset=offset,
-            )
+        items = list_dashboard_execution_summaries(
+            agent_ids=agent_ids,
+            status=request.query.get("status") or None,
+            search=request.query.get("search") or None,
+            session_id=request.query.get("sessionId") or None,
+            limit=limit + 1 if paged else limit,
+            offset=offset,
         )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -2052,16 +2118,22 @@ async def get_dashboard_link_preview_route(request: web.Request) -> web.Response
 
 async def list_dashboard_agent_sessions_route(request: web.Request) -> web.Response:
     try:
-        limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
-        offset = _bounded_int(request.query.get("offset"), name="offset", default=0, minimum=0)
-        return web.json_response(
-            _manager().list_dashboard_sessions(
-                request.match_info["agent_id"],
-                limit=limit,
-                offset=offset,
-                search=request.query.get("search") or None,
-            )
+        paged = _wants_paginated_response(request)
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+        offset = _bounded_int(
+            request.query.get("offset"),
+            name="offset",
+            default=0,
+            minimum=0,
+            maximum=_MAX_DASHBOARD_PAGE_OFFSET,
         )
+        items = _manager().list_dashboard_sessions(
+            request.match_info["agent_id"],
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+            search=request.query.get("search") or None,
+        )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -2070,17 +2142,23 @@ async def list_dashboard_sessions_route(request: web.Request) -> web.Response:
     agent_ids = _query_agent_ids(request)
     if not agent_ids:
         agent_ids = [item["id"] for item in _manager().list_agents()]
-    limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
-    offset = _bounded_int(request.query.get("offset"), name="offset", default=0, minimum=0)
+    paged = _wants_paginated_response(request)
+    limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+    offset = _bounded_int(
+        request.query.get("offset"),
+        name="offset",
+        default=0,
+        minimum=0,
+        maximum=_MAX_DASHBOARD_PAGE_OFFSET,
+    )
     try:
-        return web.json_response(
-            _manager().list_dashboard_session_summaries(
-                agent_ids=agent_ids,
-                limit=limit,
-                offset=offset,
-                search=request.query.get("search") or None,
-            )
+        items = _manager().list_dashboard_session_summaries(
+            agent_ids=agent_ids,
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+            search=request.query.get("search") or None,
         )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -2702,14 +2780,22 @@ async def post_dashboard_approval_route(request: web.Request) -> web.Response:
 
 async def list_dashboard_agent_dlq_route(request: web.Request) -> web.Response:
     try:
-        limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
-        return web.json_response(
-            _manager().list_dashboard_dlq(
-                request.match_info["agent_id"],
-                limit=limit,
-                retry_eligible=_query_bool(request, "retryEligible"),
-            )
+        paged = _wants_paginated_response(request)
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+        offset = _bounded_int(
+            request.query.get("offset"),
+            name="offset",
+            default=0,
+            minimum=0,
+            maximum=_MAX_DASHBOARD_PAGE_OFFSET,
         )
+        items = _manager().list_dashboard_dlq(
+            request.match_info["agent_id"],
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+            retry_eligible=_query_bool(request, "retryEligible"),
+        )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -2718,15 +2804,23 @@ async def list_dashboard_dlq_route(request: web.Request) -> web.Response:
     agent_ids = _query_agent_ids(request)
     if not agent_ids:
         agent_ids = [item["id"] for item in _manager().list_agents()]
-    limit = _bounded_int(request.query.get("limit"), name="limit", default=50)
+    paged = _wants_paginated_response(request)
+    limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+    offset = _bounded_int(
+        request.query.get("offset"),
+        name="offset",
+        default=0,
+        minimum=0,
+        maximum=_MAX_DASHBOARD_PAGE_OFFSET,
+    )
     try:
-        return web.json_response(
-            list_dashboard_dlq(
-                agent_ids=agent_ids,
-                limit=limit,
-                retry_eligible=_query_bool(request, "retryEligible"),
-            )
+        items = list_dashboard_dlq(
+            agent_ids=agent_ids,
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+            retry_eligible=_query_bool(request, "retryEligible"),
         )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -2761,14 +2855,42 @@ async def get_dashboard_agent_costs_route(request: web.Request) -> web.Response:
 
 async def list_dashboard_schedules_route(request: web.Request) -> web.Response:
     try:
-        return web.json_response(list_dashboard_schedules(_query_agent_ids(request) or None))
+        paged = _wants_paginated_response(request)
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+        offset = _bounded_int(
+            request.query.get("offset"),
+            name="offset",
+            default=0,
+            minimum=0,
+            maximum=_MAX_DASHBOARD_PAGE_OFFSET,
+        )
+        items = list_dashboard_schedules(
+            _query_agent_ids(request) or None,
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+        )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
 
 async def list_dashboard_agent_schedules_route(request: web.Request) -> web.Response:
     try:
-        return web.json_response(_manager().list_dashboard_schedules(request.match_info["agent_id"]))
+        paged = _wants_paginated_response(request)
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=200)
+        offset = _bounded_int(
+            request.query.get("offset"),
+            name="offset",
+            default=0,
+            minimum=0,
+            maximum=_MAX_DASHBOARD_PAGE_OFFSET,
+        )
+        items = _manager().list_dashboard_schedules(
+            request.match_info["agent_id"],
+            limit=limit + 1 if paged else limit,
+            offset=offset,
+        )
+        return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:
         return _service_unavailable(exc)
 
@@ -3886,6 +4008,63 @@ async def start_kokoro_voice_download(request: web.Request) -> web.Response:
     return web.json_response(payload, status=202)
 
 
+async def get_supertonic_models(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    payload = await asyncio.get_event_loop().run_in_executor(
+        None,
+        manager.get_supertonic_model_catalog,
+    )
+    return web.json_response(payload)
+
+
+async def start_supertonic_model_download(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    model_id = request.match_info["model_id"]
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.start_supertonic_model_download(model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload, status=202)
+
+
+async def get_supertonic_voices(request: web.Request) -> web.Response:
+    import asyncio
+
+    model_id = request.rel_url.query.get("model_id", "")
+    language = request.rel_url.query.get("language", "")
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.get_supertonic_voice_catalog(model_id=model_id, language=language),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def start_supertonic_voice_download(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    model_id = request.rel_url.query.get("model_id", "")
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.start_supertonic_voice_download(request.match_info["voice_id"], model_id=model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload, status=202)
+
+
 async def get_embedding_models(request: web.Request) -> web.Response:
     """Curated embedding-model catalog with installation status + active job."""
     import asyncio
@@ -4066,6 +4245,76 @@ async def delete_kokoro_voice(request: web.Request) -> web.Response:
         lambda: manager.delete_kokoro_voice_asset(request.match_info["voice_id"]),
     )
     return web.json_response(payload)
+
+
+async def delete_supertonic_model(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.delete_supertonic_model_asset(request.match_info["model_id"]),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def delete_supertonic_voice(request: web.Request) -> web.Response:
+    import asyncio
+
+    manager = _manager()
+    model_id = request.rel_url.query.get("model_id", "")
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.delete_supertonic_voice_asset(request.match_info["voice_id"], model_id=model_id),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def import_supertonic_voice(request: web.Request) -> web.Response:
+    import asyncio
+
+    reader = await request.multipart()
+    raw_file = b""
+    model_id = ""
+    name = ""
+    async for raw_field in reader:
+        if not isinstance(raw_field, BodyPartReader):
+            continue
+        field = raw_field
+        if field.name == "file":
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = await field.read_chunk()
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 1_100_000:
+                    return web.json_response({"error": "Supertonic voice JSON is too large"}, status=400)
+                chunks.append(chunk)
+            raw_file = b"".join(chunks)
+        elif field.name == "model_id":
+            model_id = (await field.text()).strip()
+        elif field.name == "name":
+            name = (await field.text()).strip()
+    if not raw_file:
+        return web.json_response({"error": "file is required"}, status=400)
+
+    manager = _manager()
+    try:
+        payload = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: manager.import_supertonic_voice_asset(raw_file, model_id=model_id, name=name),
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload, status=201)
 
 
 async def delete_whisper_model(request: web.Request) -> web.Response:
@@ -4844,6 +5093,20 @@ def setup_control_plane_routes(app: web.Application) -> None:
         "/api/control-plane/providers/kokoro/model/download",
         start_kokoro_model_download,
     )
+    app.router.add_get("/api/control-plane/providers/supertonic/models", get_supertonic_models)
+    app.router.add_post(
+        "/api/control-plane/providers/supertonic/models/{model_id}/download",
+        start_supertonic_model_download,
+    )
+    app.router.add_get("/api/control-plane/providers/supertonic/voices", get_supertonic_voices)
+    app.router.add_post(
+        "/api/control-plane/providers/supertonic/voices/{voice_id}/download",
+        start_supertonic_voice_download,
+    )
+    app.router.add_post(
+        "/api/control-plane/providers/supertonic/voices/import",
+        import_supertonic_voice,
+    )
     app.router.add_get(
         "/api/control-plane/providers/embedding/models",
         get_embedding_models,
@@ -4873,6 +5136,14 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_delete(
         "/api/control-plane/providers/kokoro/voices/{voice_id}",
         delete_kokoro_voice,
+    )
+    app.router.add_delete(
+        "/api/control-plane/providers/supertonic/models/{model_id}",
+        delete_supertonic_model,
+    )
+    app.router.add_delete(
+        "/api/control-plane/providers/supertonic/voices/{voice_id}",
+        delete_supertonic_voice,
     )
     app.router.add_delete(
         "/api/control-plane/providers/whispercpp/models/{variant_id}",

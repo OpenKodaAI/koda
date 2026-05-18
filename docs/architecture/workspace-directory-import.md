@@ -8,6 +8,9 @@ Koda workspaces can optionally point at a physical source root. The root is used
 - A rooted workspace stores `root_path`, `root_kind`, `scan_status`, `last_scanned_at`, `scan_hash`, `config_sources_json`, and `import_history_json` on `cp_workspaces`.
 - Scans emit `workspace_config_scan.v1`.
 - The scanner validates the root with `realpath`, blocks sensitive directories, ignores heavy folders, skips `.env` and key material, avoids symlink escapes, caps depth/entries/bytes, redacts secret-like values, and never executes commands.
+- The scanner walks the tree for discovery only and reads file contents only when the relative path matches a known Codex, Claude, Cursor, MCP, Koda skill, memory, or soul convention. Plain project files outside those patterns are not opened.
+- Invalid JSON/TOML/YAML/MDC metadata remains visible as a finding with a redacted `parse.invalid_*` warning. Invalid MCP files do not create enabled candidates.
+- Mutating rescans set `scan_status: error` and append a redacted history item when the root cannot be scanned, while preserving the last valid `config_sources_json`.
 - Imports require explicit `selectedSourceIds`.
 - Prompt imports are written into a replaceable block delimited by:
 
@@ -24,6 +27,12 @@ Low-risk instruction and rule files can be appended to the workspace prompt bloc
 
 Detected source records include `source_id`, `tool`, `kind`, `relative_path`, `scope`, `name`, `description`, `confidence`, `risk`, `status`, `import_action`, `warnings`, `metadata`, and `content_excerpt`.
 
+## Detected Patterns
+
+Koda detects `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/**/*.md`, `.cursor/rules/**/*.mdc`, `.cursorrules`, `.mcp.json`, `.cursor/mcp.json`, `.mcp/**`, `.claude/settings*.json`, `.claude/agents/**/*.md`, `.codex/agents/**/*.toml`, `.codex/config.toml`, `.agents/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, `koda-skill.yaml`, `plugin.yaml`, `plugin.yml`, `MEMORY.md`, `SOUL.md`, `.agents/memory*`, and `.agents/soul*`.
+
+Low-risk prompt imports are limited to static instruction/rule sources. MCP, hooks, settings, agents, skills, memory, and soul files require review or are blocked depending on execution risk.
+
 ## Runtime Semantics
 
 When a linked agent starts work, the queue manager resolves the source directory in this order: existing runtime workdir, explicit schedule/child-run/retry workdir, workspace root, session/user workdir, then `DEFAULT_WORK_DIR`.
@@ -31,6 +40,7 @@ When a linked agent starts work, the queue manager resolves the source directory
 Runtime responses expose:
 
 - `source_root_path`: the safe source root alias for `base_work_dir`.
+- `source_root_exists`: whether the source root still exists on the local filesystem when the runtime response is serialized.
 - `workspace_path`: the effective task workspace where mutable execution happens.
 
 The `agent_set_workdir` tool is additionally constrained to the active runtime workspace and source workspace root. A path outside those roots is blocked even if generic workdir validation would accept it.

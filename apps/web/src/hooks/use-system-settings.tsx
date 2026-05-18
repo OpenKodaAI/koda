@@ -30,6 +30,8 @@ import type {
   ProviderDownloadJob,
   OllamaModelCatalog,
   ProviderLoginSession,
+  SupertonicModelCatalog,
+  SupertonicVoiceCatalog,
 } from "@/lib/control-plane";
 import { requestJson } from "@/lib/http-client";
 import {
@@ -109,6 +111,11 @@ type KokoroVoiceCatalogCacheEntry = {
   data: KokoroVoiceCatalog;
 };
 
+type SupertonicVoiceCatalogCacheEntry = {
+  expiresAt: number;
+  data: SupertonicVoiceCatalog;
+};
+
 export type KokoroModelStatus = {
   downloaded: boolean;
   bytes: number;
@@ -117,6 +124,8 @@ export type KokoroModelStatus = {
   version: string;
   active_job?: ProviderDownloadJob | null;
 };
+
+export type SupertonicModelStatus = SupertonicModelCatalog["items"][number];
 
 export type WhisperVariantStatus = {
   variant_id: string;
@@ -190,8 +199,13 @@ type SystemSettingsContextValue = {
   kokoroVoiceCatalog: KokoroVoiceCatalog;
   kokoroVoicesLoading: boolean;
   kokoroModelStatus: KokoroModelStatus | null;
+  supertonicVoiceCatalog: SupertonicVoiceCatalog;
+  supertonicVoicesLoading: boolean;
+  supertonicModelCatalog: SupertonicModelCatalog | null;
+  supertonicModelsLoading: boolean;
   whisperCatalog: WhisperCatalog | null;
   isDownloadingKokoroAsset: (assetKey: string) => boolean;
+  isDownloadingSupertonicAsset: (assetKey: string) => boolean;
   isDownloadingWhisperVariant: (variantId: string) => boolean;
   ollamaModelCatalog: OllamaModelCatalog;
   ollamaModelsLoading: boolean;
@@ -211,12 +225,23 @@ type SystemSettingsContextValue = {
   loadElevenLabsVoices: (language?: string, options?: { force?: boolean }) => Promise<ElevenLabsVoiceCatalog>;
   loadKokoroVoices: (language?: string, options?: { force?: boolean }) => Promise<KokoroVoiceCatalog>;
   loadKokoroModelStatus: (options?: { force?: boolean }) => Promise<KokoroModelStatus>;
+  loadSupertonicModels: (options?: { force?: boolean }) => Promise<SupertonicModelCatalog>;
+  loadSupertonicVoices: (
+    modelId?: string,
+    language?: string,
+    options?: { force?: boolean },
+  ) => Promise<SupertonicVoiceCatalog>;
   loadWhisperCatalog: (options?: { force?: boolean }) => Promise<WhisperCatalog>;
   downloadKokoroVoice: (voiceId: string) => Promise<void>;
   downloadKokoroModel: () => Promise<void>;
+  downloadSupertonicModel: (modelId: string) => Promise<void>;
+  downloadSupertonicVoice: (voiceId: string, modelId?: string) => Promise<void>;
+  importSupertonicVoice: (file: File, options?: { modelId?: string; name?: string }) => Promise<void>;
   downloadWhisperModel: (variantId: string) => Promise<void>;
   deleteKokoroModelAsset: () => Promise<void>;
   deleteKokoroVoiceAsset: (voiceId: string) => Promise<void>;
+  deleteSupertonicModelAsset: (modelId: string) => Promise<void>;
+  deleteSupertonicVoiceAsset: (voiceId: string, modelId?: string) => Promise<void>;
   deleteWhisperVariantAsset: (variantId: string) => Promise<void>;
   connectProviderLocal: (providerId: string) => Promise<void>;
   loadOllamaModels: (options?: { force?: boolean }) => Promise<OllamaModelCatalog>;
@@ -284,6 +309,32 @@ const EMPTY_KOKORO_VOICE_CATALOG: KokoroVoiceCatalog = {
   provider_connected: true,
 };
 
+const EMPTY_SUPERTONIC_MODEL_CATALOG: SupertonicModelCatalog = {
+  items: [],
+  default_model: "supertonic-3",
+  models_dir: "",
+  asset_root: "",
+  acceleration: {
+    mode: "cpu_onnx",
+    label: "CPU ONNX oficial",
+    providers: ["CPUExecutionProvider"],
+  },
+};
+
+const EMPTY_SUPERTONIC_VOICE_CATALOG: SupertonicVoiceCatalog = {
+  items: [],
+  available_languages: [],
+  selected_model: "supertonic-3",
+  selected_language: "pt",
+  default_model: "supertonic-3",
+  default_language: "pt",
+  default_voice: "F1",
+  default_voice_label: "F1",
+  downloaded_voice_ids: [],
+  provider_connected: true,
+  acceleration: EMPTY_SUPERTONIC_MODEL_CATALOG.acceleration,
+};
+
 const EMPTY_WHISPER_CATALOG: WhisperCatalog = {
   items: [],
   default_variant: "",
@@ -325,6 +376,37 @@ function normalizeKokoroVoiceCatalogPayload(
       ? (source.available_languages as KokoroVoiceCatalog["available_languages"])
       : [],
     selected_language: String(source.selected_language ?? selectedLanguage ?? ""),
+    downloaded_voice_ids: Array.isArray(source.downloaded_voice_ids)
+      ? (source.downloaded_voice_ids as string[])
+      : [],
+    provider_connected: source.provider_connected !== false,
+  };
+}
+
+function normalizeSupertonicModelCatalogPayload(payload: unknown): SupertonicModelCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_SUPERTONIC_MODEL_CATALOG,
+    ...(source as Partial<SupertonicModelCatalog>),
+    items: Array.isArray(source.items) ? (source.items as SupertonicModelCatalog["items"]) : [],
+  };
+}
+
+function normalizeSupertonicVoiceCatalogPayload(
+  payload: unknown,
+  selectedModel = "supertonic-3",
+  selectedLanguage = "pt",
+): SupertonicVoiceCatalog {
+  const source = isPlainRecord(payload) ? payload : {};
+  return {
+    ...EMPTY_SUPERTONIC_VOICE_CATALOG,
+    ...(source as Partial<SupertonicVoiceCatalog>),
+    items: Array.isArray(source.items) ? (source.items as SupertonicVoiceCatalog["items"]) : [],
+    available_languages: Array.isArray(source.available_languages)
+      ? (source.available_languages as SupertonicVoiceCatalog["available_languages"])
+      : [],
+    selected_model: String(source.selected_model ?? selectedModel ?? "supertonic-3"),
+    selected_language: String(source.selected_language ?? selectedLanguage ?? "pt"),
     downloaded_voice_ids: Array.isArray(source.downloaded_voice_ids)
       ? (source.downloaded_voice_ids as string[])
       : [],
@@ -634,6 +716,12 @@ export function SystemSettingsProvider({
   const [kokoroVoiceCatalog, setKokoroVoiceCatalog] = useState<KokoroVoiceCatalog>(EMPTY_KOKORO_VOICE_CATALOG);
   const [kokoroVoicesLoading, setKokoroVoicesLoading] = useState(false);
   const [kokoroModelStatus, setKokoroModelStatus] = useState<KokoroModelStatus | null>(null);
+  const [supertonicVoiceCatalog, setSupertonicVoiceCatalog] = useState<SupertonicVoiceCatalog>(
+    EMPTY_SUPERTONIC_VOICE_CATALOG,
+  );
+  const [supertonicVoicesLoading, setSupertonicVoicesLoading] = useState(false);
+  const [supertonicModelCatalog, setSupertonicModelCatalog] = useState<SupertonicModelCatalog | null>(null);
+  const [supertonicModelsLoading, setSupertonicModelsLoading] = useState(false);
   const [whisperCatalog, setWhisperCatalog] = useState<WhisperCatalog | null>(null);
   const downloadJob = useDownloadJob();
   const [ollamaModelCatalog, setOllamaModelCatalog] = useState<OllamaModelCatalog>(EMPTY_OLLAMA_MODEL_CATALOG);
@@ -648,6 +736,7 @@ export function SystemSettingsProvider({
   >({});
   const elevenlabsVoiceCacheRef = useRef<Record<string, VoiceCatalogCacheEntry>>({});
   const kokoroVoiceCacheRef = useRef<Record<string, KokoroVoiceCatalogCacheEntry>>({});
+  const supertonicVoiceCacheRef = useRef<Record<string, SupertonicVoiceCatalogCacheEntry>>({});
   const ollamaModelCacheRef = useRef<Record<string, OllamaModelCatalogCacheEntry>>({});
   const providerConnectionDraftsRef = useRef(providerConnectionDrafts);
   providerConnectionDraftsRef.current = providerConnectionDrafts;
@@ -684,6 +773,8 @@ export function SystemSettingsProvider({
     setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
       setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
       setKokoroModelStatus(null);
+      setSupertonicVoiceCatalog(EMPTY_SUPERTONIC_VOICE_CATALOG);
+      setSupertonicModelCatalog(null);
       setWhisperCatalog(null);
       setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
       setIntegrationConnections(buildIntegrationConnectionMap(coreIntegrations));
@@ -691,6 +782,7 @@ export function SystemSettingsProvider({
       integrationVerificationInFlightRef.current = {};
       elevenlabsVoiceCacheRef.current = {};
       kokoroVoiceCacheRef.current = {};
+      supertonicVoiceCacheRef.current = {};
       ollamaModelCacheRef.current = {};
   }, [coreIntegrations, settings]);
 
@@ -947,6 +1039,65 @@ export function SystemSettingsProvider({
       }
     },
     [draft.values.models.kokoro_default_language],
+  );
+
+  const loadSupertonicModels = useCallback(
+    async (options?: { force?: boolean }): Promise<SupertonicModelCatalog> => {
+      void options;
+      setSupertonicModelsLoading(true);
+      try {
+        const payload = normalizeSupertonicModelCatalogPayload(
+          await requestJson<SupertonicModelCatalog | null>("/api/control-plane/providers/supertonic/models"),
+        );
+        setSupertonicModelCatalog(payload);
+        return payload;
+      } finally {
+        setSupertonicModelsLoading(false);
+      }
+    },
+    [],
+  );
+
+  const loadSupertonicVoices = useCallback(
+    async (modelId?: string, language?: string, options?: { force?: boolean }) => {
+      const selectedModel = String(
+        modelId ?? draft.values.models.supertonic_default_model ?? "supertonic-3",
+      ).trim();
+      const selectedLanguage = String(
+        language ?? draft.values.models.supertonic_default_language ?? "pt",
+      ).trim().toLowerCase();
+      const cacheIdentity = `${selectedModel || "supertonic-3"}:${selectedLanguage || "pt"}`;
+      const cached = supertonicVoiceCacheRef.current[cacheIdentity];
+      const now = Date.now();
+      if (!options?.force && cached && cached.expiresAt > now) {
+        setSupertonicVoiceCatalog(cached.data);
+        return cached.data;
+      }
+
+      setSupertonicVoicesLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (selectedModel) params.set("model_id", selectedModel);
+        if (selectedLanguage) params.set("language", selectedLanguage);
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const payload = normalizeSupertonicVoiceCatalogPayload(
+          await requestJson<SupertonicVoiceCatalog | null>(
+            `/api/control-plane/providers/supertonic/voices${query}`,
+          ),
+          selectedModel,
+          selectedLanguage,
+        );
+        supertonicVoiceCacheRef.current[cacheIdentity] = {
+          expiresAt: now + 5 * 60 * 1000,
+          data: payload,
+        };
+        setSupertonicVoiceCatalog(payload);
+        return payload;
+      } finally {
+        setSupertonicVoicesLoading(false);
+      }
+    },
+    [draft.values.models.supertonic_default_language, draft.values.models.supertonic_default_model],
   );
 
   const loadOllamaModels = useCallback(
@@ -1981,7 +2132,8 @@ export function SystemSettingsProvider({
   );
 
   const loadKokoroModelStatus = useCallback(
-    async (_options?: { force?: boolean }): Promise<KokoroModelStatus> => {
+    async (options?: { force?: boolean }): Promise<KokoroModelStatus> => {
+      void options;
       const payload = await requestJson<KokoroModelStatus>("/api/control-plane/providers/kokoro/model");
       setKokoroModelStatus(payload);
       return payload;
@@ -1990,7 +2142,8 @@ export function SystemSettingsProvider({
   );
 
   const loadWhisperCatalog = useCallback(
-    async (_options?: { force?: boolean }): Promise<WhisperCatalog> => {
+    async (options?: { force?: boolean }): Promise<WhisperCatalog> => {
+      void options;
       const payload = normalizeWhisperCatalogPayload(
         await requestJson<WhisperCatalog | null>("/api/control-plane/providers/whispercpp/models"),
       );
@@ -2038,6 +2191,118 @@ export function SystemSettingsProvider({
     });
   }, [downloadJob, loadKokoroModelStatus, tl]);
 
+  const downloadSupertonicModel = useCallback(
+    async (modelId: string) => {
+      const normalized = String(modelId || "supertonic-3").trim();
+      const model = supertonicModelCatalog?.items.find((item) => item.model_id === normalized);
+      const label = model?.title || `Supertonic ${normalized}`;
+      await downloadJob.start({
+        providerId: "supertonic",
+        assetKey: normalized,
+        startEndpoint: `/api/control-plane/providers/supertonic/models/${encodeURIComponent(normalized)}/download`,
+        toastTitle: tl("Baixando {{label}}", { label }),
+        successMessage: tl("{{label}} pronto.", { label }),
+        onComplete: async () => {
+          await loadSupertonicModels({ force: true });
+          supertonicVoiceCacheRef.current = {};
+          await loadSupertonicVoices(
+            draft.values.models.supertonic_default_model || normalized,
+            draft.values.models.supertonic_default_language || "pt",
+            { force: true },
+          );
+        },
+      });
+    },
+    [
+      downloadJob,
+      draft.values.models.supertonic_default_language,
+      draft.values.models.supertonic_default_model,
+      loadSupertonicModels,
+      loadSupertonicVoices,
+      supertonicModelCatalog,
+      tl,
+    ],
+  );
+
+  const downloadSupertonicVoice = useCallback(
+    async (voiceId: string, modelId?: string) => {
+      const normalized = String(voiceId).trim();
+      const selectedModel = String(modelId || draft.values.models.supertonic_default_model || "supertonic-3").trim();
+      const metadata = supertonicVoiceCatalog.items.find((voice) => voice.voice_id === normalized);
+      const voiceName = metadata?.name || normalized;
+      const assetKey = `${selectedModel}:${normalized}`;
+      await downloadJob.start({
+        providerId: "supertonic",
+        assetKey,
+        startEndpoint: `/api/control-plane/providers/supertonic/voices/${encodeURIComponent(normalized)}/download?model_id=${encodeURIComponent(selectedModel)}`,
+        toastTitle: tl("Baixando voz Supertonic · {{voice}}", { voice: voiceName }),
+        successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+        onComplete: async () => {
+          supertonicVoiceCacheRef.current = {};
+          await loadSupertonicVoices(
+            selectedModel,
+            draft.values.models.supertonic_default_language || "pt",
+            { force: true },
+          );
+        },
+      });
+    },
+    [
+      downloadJob,
+      draft.values.models.supertonic_default_language,
+      draft.values.models.supertonic_default_model,
+      loadSupertonicVoices,
+      supertonicVoiceCatalog.items,
+      tl,
+    ],
+  );
+
+  const importSupertonicVoice = useCallback(
+    async (file: File, options?: { modelId?: string; name?: string }) => {
+      const selectedModel = String(
+        options?.modelId || draft.values.models.supertonic_default_model || "supertonic-3",
+      ).trim();
+      await runAction(
+        "provider:supertonic:import-voice",
+        async () => {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("model_id", selectedModel);
+          if (options?.name) form.append("name", options.name);
+          const res = await fetch("/api/control-plane/providers/supertonic/voices/import", {
+            method: "POST",
+            credentials: "same-origin",
+            body: form,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `import failed (${res.status})`);
+          }
+          return (await res.json()) as { voice_id?: string; name?: string };
+        },
+        {
+          successMessage: tl("Voz Supertonic importada."),
+          errorMessage: tl("Não foi possível importar a voz Supertonic."),
+          onSuccess: async () => {
+            supertonicVoiceCacheRef.current = {};
+            await loadSupertonicVoices(
+              selectedModel,
+              draft.values.models.supertonic_default_language || "pt",
+              { force: true },
+            );
+          },
+        },
+      );
+    },
+    [
+      draft.values.models.supertonic_default_language,
+      draft.values.models.supertonic_default_model,
+      loadSupertonicVoices,
+      runAction,
+      tl,
+    ],
+  );
+
   const downloadWhisperModel = useCallback(
     async (variantId: string) => {
       const normalized = String(variantId).trim();
@@ -2059,6 +2324,11 @@ export function SystemSettingsProvider({
 
   const isDownloadingKokoroAsset = useCallback(
     (assetKey: string) => downloadJob.isActive("kokoro", String(assetKey).trim().toLowerCase()),
+    [downloadJob],
+  );
+
+  const isDownloadingSupertonicAsset = useCallback(
+    (assetKey: string) => downloadJob.isActive("supertonic", String(assetKey).trim()),
     [downloadJob],
   );
 
@@ -2126,6 +2396,88 @@ export function SystemSettingsProvider({
       );
     },
     [draft.values.models.kokoro_default_language, loadKokoroVoices, runAction, tl],
+  );
+
+  const deleteSupertonicModelAsset = useCallback(
+    async (modelId: string) => {
+      const normalized = String(modelId || "supertonic-3").trim();
+      await runAction(
+        `provider:supertonic:delete-model:${normalized}`,
+        async () => {
+          const res = await fetch(
+            `/api/control-plane/providers/supertonic/models/${encodeURIComponent(normalized)}`,
+            { method: "DELETE", credentials: "same-origin" },
+          );
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `delete failed (${res.status})`);
+          }
+          return (await res.json()) as { bytes_freed?: number; removed?: boolean };
+        },
+        {
+          successMessage: tl("Modelo Supertonic removido."),
+          errorMessage: tl("Não foi possível remover o modelo Supertonic."),
+          onSuccess: async () => {
+            await loadSupertonicModels({ force: true });
+            supertonicVoiceCacheRef.current = {};
+            await loadSupertonicVoices(
+              draft.values.models.supertonic_default_model || normalized,
+              draft.values.models.supertonic_default_language || "pt",
+              { force: true },
+            );
+          },
+        },
+      );
+    },
+    [
+      draft.values.models.supertonic_default_language,
+      draft.values.models.supertonic_default_model,
+      loadSupertonicModels,
+      loadSupertonicVoices,
+      runAction,
+      tl,
+    ],
+  );
+
+  const deleteSupertonicVoiceAsset = useCallback(
+    async (voiceId: string, modelId?: string) => {
+      const normalized = String(voiceId).trim();
+      if (!normalized) return;
+      const selectedModel = String(modelId || draft.values.models.supertonic_default_model || "supertonic-3").trim();
+      await runAction(
+        `provider:supertonic:delete-voice:${selectedModel}:${normalized}`,
+        async () => {
+          const res = await fetch(
+            `/api/control-plane/providers/supertonic/voices/${encodeURIComponent(normalized)}?model_id=${encodeURIComponent(selectedModel)}`,
+            { method: "DELETE", credentials: "same-origin" },
+          );
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `delete failed (${res.status})`);
+          }
+          return (await res.json()) as { bytes_freed?: number; removed?: boolean };
+        },
+        {
+          successMessage: tl("Voz Supertonic removida."),
+          errorMessage: tl("Não foi possível remover a voz Supertonic."),
+          onSuccess: async () => {
+            supertonicVoiceCacheRef.current = {};
+            await loadSupertonicVoices(
+              selectedModel,
+              draft.values.models.supertonic_default_language || "pt",
+              { force: true },
+            );
+          },
+        },
+      );
+    },
+    [
+      draft.values.models.supertonic_default_language,
+      draft.values.models.supertonic_default_model,
+      loadSupertonicVoices,
+      runAction,
+      tl,
+    ],
   );
 
   const deleteWhisperVariantAsset = useCallback(
@@ -2258,10 +2610,13 @@ export function SystemSettingsProvider({
         setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
         setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
         setKokoroModelStatus(null);
+        setSupertonicVoiceCatalog(EMPTY_SUPERTONIC_VOICE_CATALOG);
+        setSupertonicModelCatalog(null);
         setWhisperCatalog(null);
         setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
         elevenlabsVoiceCacheRef.current = {};
         kokoroVoiceCacheRef.current = {};
+        supertonicVoiceCacheRef.current = {};
         ollamaModelCacheRef.current = {};
         clearSectionErrors();
         return refreshed;
@@ -2279,10 +2634,13 @@ export function SystemSettingsProvider({
     setElevenlabsVoiceCatalog(EMPTY_ELEVENLABS_VOICE_CATALOG);
     setKokoroVoiceCatalog(EMPTY_KOKORO_VOICE_CATALOG);
     setKokoroModelStatus(null);
+    setSupertonicVoiceCatalog(EMPTY_SUPERTONIC_VOICE_CATALOG);
+    setSupertonicModelCatalog(null);
     setWhisperCatalog(null);
     setOllamaModelCatalog(EMPTY_OLLAMA_MODEL_CATALOG);
     elevenlabsVoiceCacheRef.current = {};
     kokoroVoiceCacheRef.current = {};
+    supertonicVoiceCacheRef.current = {};
     ollamaModelCacheRef.current = {};
   }, [baseline]);
 
@@ -2339,8 +2697,13 @@ export function SystemSettingsProvider({
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
     kokoroModelStatus,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
     whisperCatalog,
     isDownloadingKokoroAsset,
+    isDownloadingSupertonicAsset,
     isDownloadingWhisperVariant,
     ollamaModelCatalog,
     ollamaModelsLoading,
@@ -2355,12 +2718,19 @@ export function SystemSettingsProvider({
     loadElevenLabsVoices,
     loadKokoroVoices,
     loadKokoroModelStatus,
+    loadSupertonicModels,
+    loadSupertonicVoices,
     loadWhisperCatalog,
     downloadKokoroVoice,
     downloadKokoroModel,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
     downloadWhisperModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     loadOllamaModels,
     isProviderActionPending,
@@ -2409,8 +2779,13 @@ export function SystemSettingsProvider({
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
     kokoroModelStatus,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
     whisperCatalog,
     isDownloadingKokoroAsset,
+    isDownloadingSupertonicAsset,
     isDownloadingWhisperVariant,
     ollamaModelCatalog,
     ollamaModelsLoading,
@@ -2425,12 +2800,19 @@ export function SystemSettingsProvider({
     loadElevenLabsVoices,
     loadKokoroVoices,
     loadKokoroModelStatus,
+    loadSupertonicModels,
+    loadSupertonicVoices,
     loadWhisperCatalog,
     downloadKokoroVoice,
     downloadKokoroModel,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
     downloadWhisperModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     loadOllamaModels,
     isProviderActionPending,

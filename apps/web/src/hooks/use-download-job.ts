@@ -24,7 +24,7 @@ export type ProviderDownloadJob = {
   completed_at?: string;
 };
 
-export type ProviderId = "kokoro" | "whispercpp" | "embedding";
+export type ProviderId = "kokoro" | "supertonic" | "whispercpp" | "embedding";
 
 type StartParams = {
   providerId: ProviderId;

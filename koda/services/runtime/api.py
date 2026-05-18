@@ -247,23 +247,57 @@ async def _runtime_environments(request: web.Request) -> web.Response:
     return web.json_response({"items": get_runtime_controller().store.list_environments()})
 
 
-def _schedule_detail_payload(job_id: int) -> dict[str, object] | None:
+def _page_payload(items: list[object], *, limit: int, offset: int) -> dict[str, object]:
+    page_items = items[:limit]
+    has_more = len(items) > limit
+    return {
+        "items": page_items,
+        "page": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(page_items),
+            "next_offset": offset + len(page_items) if has_more else None,
+            "has_more": has_more,
+            "total": None,
+        },
+    }
+
+
+def _schedule_detail_payload(
+    job_id: int,
+    *,
+    run_limit: int = 25,
+    run_offset: int = 0,
+    event_limit: int = 50,
+) -> dict[str, object] | None:
     from koda.services import scheduled_jobs
 
-    detail = scheduled_jobs.get_job_detail(job_id, None, run_limit=25, event_limit=100)
+    detail = scheduled_jobs.get_job_detail(
+        job_id,
+        None,
+        run_limit=run_limit + 1,
+        run_offset=run_offset,
+        event_limit=event_limit,
+    )
     if not detail:
         return None
-    runs = [scheduled_jobs.serialize_run(run) for run in detail["runs"]]
+    run_page = _page_payload(
+        [scheduled_jobs.serialize_run(run) for run in detail["runs"]],
+        limit=run_limit,
+        offset=run_offset,
+    )
+    runs = cast(list[dict[str, object]], run_page["items"])
     latest_task_runtime = None
     for run in runs:
         task_id = run.get("task_id")
-        if task_id:
+        if isinstance(task_id, str | int) and task_id:
             latest_task_runtime = get_runtime_controller().store.get_task_runtime(int(task_id))
             if latest_task_runtime:
                 break
     return {
         "job": scheduled_jobs.serialize_job(detail["job"]),
         "runs": runs,
+        "run_page": run_page["page"],
         "events": detail["events"],
         "latest_task_runtime": latest_task_runtime,
     }
@@ -289,7 +323,21 @@ async def _runtime_schedule_detail(request: web.Request) -> web.Response:
     if auth:
         return auth
     job_id = int(request.match_info["job_id"])
-    payload = _schedule_detail_payload(job_id)
+    run_limit = _parse_positive_int(request.query.get("run_limit"), name="run_limit", default=25, maximum=100)
+    run_offset = _parse_positive_int(
+        request.query.get("run_offset") or request.query.get("offset"),
+        name="run_offset",
+        default=0,
+        minimum=0,
+        maximum=100_000,
+    )
+    event_limit = _parse_positive_int(request.query.get("event_limit"), name="event_limit", default=50, maximum=100)
+    payload = _schedule_detail_payload(
+        job_id,
+        run_limit=run_limit,
+        run_offset=run_offset,
+        event_limit=event_limit,
+    )
     if payload is None:
         return web.json_response({"error": "schedule job not found"}, status=404)
     return web.json_response(payload)

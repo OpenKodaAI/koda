@@ -32,7 +32,18 @@ async function login(page: Page) {
   );
   await page.getByRole("button", { name: /sign in|entrar|login/i }).click();
   const loginResponse = await loginResponsePromise;
-  expect(loginResponse.ok(), await loginResponse.text()).toBe(true);
+  if (!loginResponse.ok()) {
+    const responseText = await loginResponse.text().catch(() => "<unavailable>");
+    const responseSnippet = responseText.length > 500 ? `${responseText.slice(0, 500)}...` : responseText;
+    throw new Error(
+      [
+        `E2E login failed for ${E2E_EMAIL} with HTTP ${loginResponse.status()}.`,
+        `Response: ${responseSnippet || "<empty>"}.`,
+        "Run against a disposable seeded stack, or set KODA_E2E_EMAIL/KODA_E2E_PASSWORD to the seeded owner credentials before running Playwright.",
+        "The password is intentionally not printed.",
+      ].join(" "),
+    );
+  }
   await page
     .waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 5_000 })
     .catch(async () => {

@@ -3,7 +3,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, useCallback, useMemo } from "react";
-import { keepPreviousData } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Workflow } from "lucide-react";
 import { ExecutionTable } from "@/components/executions/execution-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
@@ -17,6 +17,7 @@ import {
   PageSearchField,
 } from "@/components/ui/page-primitives";
 import { SoftTabs } from "@/components/ui/soft-tabs";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -28,6 +29,14 @@ import {
   fetchControlPlaneDashboardJson,
   fetchControlPlaneDashboardJsonAllowError,
 } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  DASHBOARD_PAGE_SIZE,
+  mergePaginatedItems,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
 import { queryKeys } from "@/lib/query/keys";
 import type { ExecutionDetail, ExecutionSummary } from "@/lib/types";
 import { formatCost, formatDuration } from "@/lib/utils";
@@ -48,6 +57,10 @@ const ExecutionDetailModal = dynamic(
   { loading: () => null },
 );
 
+type ExecutionPage = PaginatedListResponse<ExecutionSummary> & {
+  unavailable?: boolean;
+};
+
 export default function ExecutionsPage() {
   const { t, language } = useAppI18n();
   const { agents } = useAgentCatalog();
@@ -62,49 +75,52 @@ export default function ExecutionsPage() {
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds]
   );
-  const executionsQuery = useControlPlaneQuery<{
-    items: ExecutionSummary[];
-    unavailable: boolean;
-  }>({
-    tier: "live",
-    queryKey: queryKeys.dashboard.executions({
-      agentIds: visibleBotIds,
-      status: statusFilter,
-      search: debouncedSearch,
-      limit: 100,
-    }),
-    refetchInterval: (query) => {
-      const items = query.state.data?.items ?? [];
-      const hasActive = items.some((e) =>
-        ["running", "queued", "retrying"].includes(e.status),
-      );
-      return hasActive ? 10_000 : 45_000;
-    },
-    placeholderData: keepPreviousData,
-    notifyOnChangeProps: ["data", "error"],
-    queryFn: async ({ signal }) => {
-      const response = await fetchControlPlaneDashboardJsonAllowError<ExecutionSummary[]>(
+  const executionFilters = useMemo(() => ({
+    agentIds: visibleBotIds,
+    status: statusFilter,
+    search: debouncedSearch,
+    limit: DASHBOARD_PAGE_SIZE,
+  }), [debouncedSearch, statusFilter, visibleBotIds]);
+  const executionsQuery = useInfiniteQuery<ExecutionPage, Error>({
+    queryKey: queryKeys.dashboard.executionPages(executionFilters),
+    initialPageParam: 0,
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_offset : undefined,
+    queryFn: async ({ signal, pageParam }) => {
+      const offset = typeof pageParam === "number" ? pageParam : 0;
+      const response = await fetchControlPlaneDashboardJsonAllowError<
+        PaginatedListResponse<ExecutionSummary>
+      >(
         "/executions",
         {
           signal,
           params: {
+            paged: 1,
             agent: visibleBotIds,
             status: statusFilter || null,
             search: debouncedSearch || null,
-            limit: 100,
+            limit: DASHBOARD_PAGE_SIZE,
+            offset,
           },
           fallbackError: t("executions.page.loadError"),
         },
       );
 
-      const merged = Array.isArray(response.data)
-        ? [...response.data].sort(
-            (left, right) =>
-              new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
-          )
-        : [];
+      const page = normalizePaginatedListResponse<ExecutionSummary>(
+        response.data,
+        DASHBOARD_PAGE_SIZE,
+        offset,
+      );
       return {
-        items: merged,
+        ...page,
+        items: [...page.items].sort(
+          (left, right) =>
+            new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+        ),
         unavailable: !response.ok,
       };
     },
@@ -112,17 +128,28 @@ export default function ExecutionsPage() {
 
   const stableExecutionsQuery = useStableQueryData({
     data: executionsQuery.data,
-    resetKey: "dashboard:executions",
+    resetKey: JSON.stringify(executionFilters),
     isPending: executionsQuery.isPending,
     isFetching: executionsQuery.isFetching,
     error: executionsQuery.error,
   });
   const executions = useMemo(
-    () => stableExecutionsQuery.data?.items ?? [],
+    () =>
+      mergePaginatedItems(
+        stableExecutionsQuery.data?.pages,
+        (execution) => `${execution.bot_id}:${execution.task_id}`,
+      ).sort(
+        (left, right) =>
+          new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+      ),
     [stableExecutionsQuery.data]
   );
-  const unavailable = stableExecutionsQuery.data?.unavailable ?? false;
+  const unavailable = stableExecutionsQuery.data?.pages.some((page) => page.unavailable) ?? false;
   const loading = stableExecutionsQuery.initialLoading;
+  const loadMoreExecutions = useCallback(() => {
+    if (!executionsQuery.hasNextPage || executionsQuery.isFetchingNextPage) return;
+    void executionsQuery.fetchNextPage();
+  }, [executionsQuery]);
 
   const detailQuery = useControlPlaneQuery<ExecutionDetail>({
     tier: "live",
@@ -298,6 +325,12 @@ export default function ExecutionsPage() {
               executions={executions}
               onExecutionClick={setSelectedExecution}
               selectedExecutionId={selectedExecution?.task_id ?? null}
+            />
+            <InfiniteListFooter
+              hasMore={Boolean(executionsQuery.hasNextPage)}
+              loading={executionsQuery.isFetchingNextPage}
+              onLoadMore={loadMoreExecutions}
+              label={t("common.loadMore", { defaultValue: "Load more" })}
             />
           </div>
         )}

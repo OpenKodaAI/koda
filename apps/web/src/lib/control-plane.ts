@@ -76,6 +76,61 @@ export type WorkspaceScanSummary = {
   truncated?: boolean;
 };
 
+export type WorkspaceDirectoryRoot = {
+  path: string;
+  label?: string;
+};
+
+export type WorkspaceDirectoryEntry = {
+  path: string;
+  name: string;
+  kind: "directory" | "file" | string;
+};
+
+export type WorkspaceDirectoryRootsPayload = {
+  items: WorkspaceDirectoryRoot[];
+};
+
+export type WorkspaceDirectoryListPayload = {
+  path: string;
+  parent?: string | null;
+  items: WorkspaceDirectoryEntry[];
+};
+
+export type WorkspaceScanPayload = {
+  schema_version: string;
+  root_path: string;
+  root_kind?: string;
+  scan_hash: string;
+  status: string;
+  summary: WorkspaceScanSummary;
+  sources: WorkspaceConfigSource[];
+  warnings?: string[];
+  limits?: {
+    max_depth?: number;
+    max_entries?: number;
+    max_file_bytes?: number;
+    max_total_bytes?: number;
+  };
+};
+
+export type WorkspaceImportResult = {
+  applied: Array<Record<string, unknown>>;
+  skipped: Array<Record<string, unknown>>;
+  conflicts: Array<Record<string, unknown>>;
+  message?: string;
+};
+
+export type WorkspaceImportHistoryItem = {
+  schema_version?: string;
+  imported_at?: string;
+  recorded_at?: string;
+  event?: string;
+  scan_hash?: string;
+  selected_source_ids?: string[];
+  result?: WorkspaceImportResult | Record<string, unknown>;
+};
+
 export type WorkspaceRuntimeDefaults = {
   source_root_path?: string | null;
   task_execution_mode?: string;
@@ -97,7 +152,7 @@ export type ControlPlaneWorkspace = {
   detected_sources?: WorkspaceConfigSource[];
   scan_summary?: WorkspaceScanSummary;
   runtime_defaults?: WorkspaceRuntimeDefaults;
-  import_history?: Array<Record<string, unknown>>;
+  import_history?: WorkspaceImportHistoryItem[];
   agent_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;
@@ -293,6 +348,72 @@ export type KokoroVoiceCatalog = {
   provider_connected: boolean;
 };
 
+export type SupertonicAccelerationStatus = {
+  mode: "cpu_onnx" | "coreml_experimental" | string;
+  label: string;
+  providers: string[];
+  available_providers?: string[];
+  coreml_available?: boolean;
+  metal_enabled?: boolean;
+  apple_silicon?: boolean;
+};
+
+export type SupertonicModelOption = {
+  model_id: string;
+  id?: string;
+  title: string;
+  repo_id: string;
+  description: string;
+  revision?: string;
+  languages?: number;
+  legacy?: boolean;
+  default?: boolean;
+  downloaded: boolean;
+  local_path: string;
+  bytes?: number;
+  active_job?: ProviderDownloadJob | null;
+};
+
+export type SupertonicModelCatalog = {
+  items: SupertonicModelOption[];
+  default_model: string;
+  models_dir: string;
+  asset_root: string;
+  acceleration?: SupertonicAccelerationStatus;
+};
+
+export type SupertonicVoiceOption = {
+  voice_id: string;
+  name: string;
+  gender: string;
+  kind: "preset" | "custom" | string;
+  description: string;
+  model_id: string;
+  language_id: string;
+  language_label: string;
+  downloaded: boolean;
+  local_path: string;
+  bytes?: number;
+  active_job?: ProviderDownloadJob | null;
+};
+
+export type SupertonicVoiceCatalog = {
+  items: SupertonicVoiceOption[];
+  available_languages: Array<{
+    id: string;
+    label: string;
+  }>;
+  selected_model: string;
+  selected_language: string;
+  default_model: string;
+  default_language: string;
+  default_voice: string;
+  default_voice_label?: string;
+  downloaded_voice_ids: string[];
+  provider_connected: boolean;
+  acceleration?: SupertonicAccelerationStatus;
+};
+
 export type ProviderDownloadJob = {
   id: string;
   provider_id: string;
@@ -445,6 +566,10 @@ export type GeneralSystemSettings = {
       kokoro_default_language: string;
       kokoro_default_voice: string;
       kokoro_default_voice_label: string;
+      supertonic_default_model?: string;
+      supertonic_default_language?: string;
+      supertonic_default_voice?: string;
+      supertonic_default_voice_label?: string;
       /**
        * Apple Silicon Metal acceleration toggle. When false, the
        * Metal-capable runtimes (llama.cpp, MLX) are gated off at the

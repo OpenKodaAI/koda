@@ -62,6 +62,28 @@ def test_llm_subprocess_env_includes_provider_credentials_from_process_env(monke
     assert env["GOOGLE_CLOUD_PROJECT"] == "control-plane"
 
 
+def test_openrouter_llm_subprocess_env_keeps_attribution_headers_only_for_openrouter():
+    env = build_llm_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/tmp/home",
+            "OPENROUTER_AUTH_MODE": "api_key",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
+            "OPENROUTER_HTTP_REFERER": "https://koda.example",
+            "OPENROUTER_APP_TITLE": "Koda",
+            "OPENROUTER_APP_CATEGORIES": "cli-agent,personal-agent",
+            "OPENAI_API_KEY": "openai-secret",
+        },
+        provider="openrouter",
+    )
+
+    assert env["OPENROUTER_API_KEY"] == "sk-or-v1-test"
+    assert env["OPENROUTER_HTTP_REFERER"] == "https://koda.example"
+    assert env["OPENROUTER_APP_TITLE"] == "Koda"
+    assert env["OPENROUTER_APP_CATEGORIES"] == "cli-agent,personal-agent"
+    assert "OPENAI_API_KEY" not in env
+
+
 def test_tool_subprocess_env_keeps_only_safe_base_env_plus_explicit_overrides():
     env = build_tool_subprocess_env(
         {

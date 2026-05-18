@@ -54,6 +54,8 @@ type ThreadItem =
   | { kind: "separator"; label: string; key: string }
   | { kind: "orphan"; execution: ExecutionSummary; key: string };
 
+const TOP_LOAD_THRESHOLD_PX = 320;
+
 function formatDayLabel(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value);
@@ -128,6 +130,21 @@ function ChatThreadImpl({
     return result;
   }, [messages, pendingMessages, orphanExecutions]);
 
+  const triggerLoadOlder = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !hasOlder || loadingOlder || !onLoadOlder || loadOlderLockRef.current) {
+      return;
+    }
+    loadOlderLockRef.current = true;
+    prependAnchorRef.current = {
+      scrollHeight: viewport.scrollHeight,
+      scrollTop: viewport.scrollTop,
+    };
+    void Promise.resolve(onLoadOlder()).finally(() => {
+      loadOlderLockRef.current = false;
+    });
+  }, [hasOlder, loadingOlder, onLoadOlder]);
+
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -144,19 +161,23 @@ function ChatThreadImpl({
       onScrollStateChange?.(nextScrolledPastTop);
     }
 
-    if (viewport.scrollTop <= 120 && hasOlder && !loadingOlder && onLoadOlder && !loadOlderLockRef.current) {
-      loadOlderLockRef.current = true;
-      prependAnchorRef.current = {
-        scrollHeight: viewport.scrollHeight,
-        scrollTop: viewport.scrollTop,
-      };
-      void onLoadOlder();
+    if (viewport.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
     }
-  }, [hasOlder, loadingOlder, onLoadOlder, onScrollStateChange]);
+  }, [onScrollStateChange, triggerLoadOlder]);
 
   useEffect(() => {
     if (!loadingOlder) loadOlderLockRef.current = false;
   }, [loadingOlder]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || items.length === 0) return;
+    if (viewport.clientHeight <= 0) return;
+    if (viewport.scrollHeight <= viewport.clientHeight + TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
+    }
+  }, [items.length, triggerLoadOlder]);
 
   const bindFooterElement = useCallback((footerElement: HTMLDivElement | null) => {
     footerResizeObserverRef.current?.disconnect();
@@ -208,6 +229,7 @@ function ChatThreadImpl({
 
   const hasConversation = items.length > 0;
   const showNewIndicator = showJumpToBottom && hasConversation;
+  const loadingLabel = t("chat.thread.loading", { defaultValue: "Loading conversation" });
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)]">
@@ -217,18 +239,33 @@ function ChatThreadImpl({
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
+        aria-busy={loading || loadingOlder ? true : undefined}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         {loading && !hasConversation ? (
-          <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-6 pt-8 pb-8 lg:px-10">
+          <div
+            role="status"
+            aria-label={loadingLabel}
+            className="mx-auto flex w-full max-w-[960px] flex-col gap-5 px-6 pt-8 pb-8 lg:px-10"
+          >
+            <div className="flex justify-center pb-1">
+              <LoaderCircle className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" strokeWidth={2} aria-hidden />
+            </div>
             {Array.from({ length: 3 }).map((_, index) => (
               <div
                 key={index}
                 className={cn(
-                  "h-16 w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]",
+                  "grid w-full animate-pulse grid-cols-[2.5rem_minmax(0,1fr)] gap-3 rounded-[var(--radius-panel-sm)] px-2 py-1.5",
                   index % 2 === 1 && "ml-auto max-w-[70%]",
                 )}
-              />
+              >
+                <span className="h-9 w-9 rounded-[0.65rem] bg-[var(--panel-soft)]" aria-hidden />
+                <span className="flex min-w-0 flex-col gap-2 pt-0.5" aria-hidden>
+                  <span className="h-3 w-32 rounded-full bg-[var(--panel-soft)]" />
+                  <span className="h-3 w-full max-w-[34rem] rounded-full bg-[var(--panel-soft)]" />
+                  <span className="h-3 w-2/3 rounded-full bg-[var(--panel-soft)]" />
+                </span>
+              </div>
             ))}
           </div>
         ) : error && !hasConversation ? (
@@ -262,6 +299,17 @@ function ChatThreadImpl({
           </div>
         ) : (
           <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-6 pt-8 pb-8 lg:px-10">
+            {loading ? (
+              <div className="sticky top-3 z-10 flex justify-center">
+                <span
+                  role="status"
+                  aria-label={loadingLabel}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--divider-hair)] bg-[var(--panel)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] backdrop-blur"
+                >
+                  <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden />
+                </span>
+              </div>
+            ) : null}
             {loadingOlder ? (
               <div className="flex justify-center">
                 <LoaderCircle

@@ -32,10 +32,11 @@ test.describe("workspace directory import", () => {
     await expect(dialog.getByText(/claude/i).first()).toBeVisible();
     await expect(dialog.getByText(/cursor/i)).toBeVisible();
     await expect(dialog.getByText(/blocked/i)).toBeVisible();
+    await expect(dialog.getByText(/koda:workspace-import:start/i)).toBeVisible();
 
     await expect(
-      dialog.locator("label", { hasText: ".claude/settings.json" }).getByRole("checkbox"),
-    ).toBeDisabled();
+      dialog.locator("section", { hasText: /Blocked|Bloqueado/i }).locator("input[type='checkbox']"),
+    ).toHaveCount(0);
 
     await dialog.getByRole("button", { name: /^Import$|^Importar$/i }).click();
     await expect(dialog).toHaveCount(0, { timeout: 15_000 });

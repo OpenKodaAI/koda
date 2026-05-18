@@ -315,6 +315,14 @@ export interface ScheduleEvent {
 export interface ScheduleDetail {
   job: CronJob;
   runs: ScheduleRun[];
+  run_page?: {
+    limit: number;
+    offset: number;
+    returned: number;
+    next_offset: number | null;
+    has_more: boolean;
+    total?: number | null;
+  };
   events: ScheduleEvent[];
   latest_task_runtime?: Record<string, unknown> | null;
 }

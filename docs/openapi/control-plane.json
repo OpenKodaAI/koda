@@ -17,6 +17,402 @@
         "type": "http",
         "scheme": "bearer"
       }
+    },
+    "schemas": {
+      "WorkspaceDirectoryRoot": {
+        "type": "object",
+        "required": [
+          "path",
+          "label"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceDirectoryEntry": {
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "directory",
+              "file"
+            ]
+          }
+        }
+      },
+      "WorkspaceDirectoryRoots": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDirectoryRoot"
+            }
+          }
+        }
+      },
+      "WorkspaceDirectoryListing": {
+        "type": "object",
+        "required": [
+          "path",
+          "items"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDirectoryEntry"
+            }
+          }
+        }
+      },
+      "WorkspaceScanSource": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "tool",
+          "kind",
+          "relative_path",
+          "scope",
+          "name",
+          "description",
+          "confidence",
+          "risk",
+          "status",
+          "import_action",
+          "warnings",
+          "metadata",
+          "content_excerpt"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "absolute_path": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "low",
+              "review",
+              "high",
+              "blocked"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "import_action": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "content_excerpt": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceScanSummary": {
+        "type": "object",
+        "required": [
+          "total_sources",
+          "by_kind",
+          "by_tool",
+          "by_risk",
+          "review_required",
+          "blocked",
+          "importable",
+          "truncated"
+        ],
+        "properties": {
+          "total_sources": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "by_kind": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_tool": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_risk": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "review_required": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "importable": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkspaceScanResult": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "root_path",
+          "root_kind",
+          "scan_hash",
+          "status",
+          "summary",
+          "sources",
+          "warnings",
+          "limits"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "workspace_config_scan.v1"
+          },
+          "root_path": {
+            "type": "string"
+          },
+          "root_kind": {
+            "type": "string"
+          },
+          "scan_hash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "error"
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/WorkspaceScanSummary"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScanSource"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_depth": {
+                "type": "integer"
+              },
+              "max_entries": {
+                "type": "integer"
+              },
+              "max_file_bytes": {
+                "type": "integer"
+              },
+              "max_total_bytes": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "WorkspaceImportRequest": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "selectedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24
+          }
+        }
+      },
+      "WorkspaceImportResult": {
+        "type": "object",
+        "required": [
+          "applied",
+          "skipped",
+          "conflicts"
+        ],
+        "properties": {
+          "applied": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceImportHistoryItem": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "imported_at": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "scan_hash": {
+            "type": "string"
+          },
+          "selected_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "result": {
+            "$ref": "#/components/schemas/WorkspaceImportResult"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceRuntimeDefaults": {
+        "type": "object",
+        "properties": {
+          "source_root_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_execution_mode": {
+            "type": "string"
+          },
+          "isolation_mode": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "security": [
@@ -533,6 +929,193 @@
         }
       }
     },
+    "/api/control-plane/providers/supertonic/models": {
+      "get": {
+        "summary": "List Supertonic local models",
+        "responses": {
+          "200": {
+            "description": "Supertonic model catalog with local download status, bytes on disk, active download jobs, and acceleration metadata."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/models/{model_id}/download": {
+      "post": {
+        "summary": "Download a Supertonic model snapshot",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Provider download job for the requested Supertonic model."
+          },
+          "400": {
+            "description": "Unknown model id or invalid request."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/models/{model_id}": {
+      "delete": {
+        "summary": "Delete a downloaded Supertonic model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated Supertonic model status after deleting local assets."
+          },
+          "400": {
+            "description": "Model download is active or the model id is invalid."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices": {
+      "get": {
+        "summary": "List Supertonic preset and custom voices",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supertonic voice catalog with preset/custom metadata, selected model/language, local download status, and active jobs."
+          },
+          "400": {
+            "description": "Invalid model id or language."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/{voice_id}/download": {
+      "post": {
+        "summary": "Activate a Supertonic voice locally",
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Provider download job for copying the selected Supertonic voice style into Koda-managed storage."
+          },
+          "400": {
+            "description": "Unknown voice, missing model snapshot, or invalid request."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/{voice_id}": {
+      "delete": {
+        "summary": "Delete a managed Supertonic voice",
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete result for a preset voice copy or imported custom voice JSON."
+          },
+          "400": {
+            "description": "Voice download is active or the request is invalid."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/import": {
+      "post": {
+        "summary": "Import a Supertonic Voice Builder JSON file",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "model_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Imported custom voice metadata."
+          },
+          "400": {
+            "description": "Missing file, oversized upload, invalid JSON, or invalid voice style payload."
+          }
+        }
+      }
+    },
     "/api/control-plane/connections/defaults/{connection_key}/verify": {
       "post": {
         "summary": "Verify a canonical default connection",
@@ -578,7 +1161,14 @@
         "summary": "List safe workspace directory roots",
         "responses": {
           "200": {
-            "description": "Candidate local roots the operator can browse from the workspace import flow."
+            "description": "Candidate local roots the operator can browse from the workspace import flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDirectoryRoots"
+                }
+              }
+            }
           }
         }
       }
@@ -606,7 +1196,14 @@
         },
         "responses": {
           "200": {
-            "description": "Directory entries after root validation, symlink escape checks, and ignored-folder filtering."
+            "description": "Directory entries after root validation, symlink escape checks, and ignored-folder filtering.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDirectoryListing"
+                }
+              }
+            }
           }
         }
       }
@@ -639,7 +1236,14 @@
         },
         "responses": {
           "200": {
-            "description": "workspace_config_scan.v1 preview with detected sources, redacted excerpts, risk labels, blocked execution findings, and scan hash. The operation is non-mutating."
+            "description": "workspace_config_scan.v1 preview with detected sources, redacted excerpts, risk labels, blocked execution findings, and scan hash. The operation is non-mutating.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceScanResult"
+                }
+              }
+            }
           }
         }
       }
@@ -652,34 +1256,38 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "path"
-                ],
-                "properties": {
-                  "path": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "selectedSourceIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/WorkspaceImportRequest"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Created workspace, scan preview, and import result. Only explicitly selected safe sources are applied."
+          "201": {
+            "description": "Created workspace, scan preview, and import result. Only explicitly selected safe sources are applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workspace",
+                    "scan",
+                    "import_result"
+                  ],
+                  "properties": {
+                    "workspace": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "scan": {
+                      "$ref": "#/components/schemas/WorkspaceScanResult"
+                    },
+                    "import_result": {
+                      "$ref": "#/components/schemas/WorkspaceImportResult"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -716,7 +1324,27 @@
         },
         "responses": {
           "200": {
-            "description": "Updated workspace scan metadata and workspace_config_scan.v1 payload."
+            "description": "Updated workspace scan metadata and workspace_config_scan.v1 payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workspace",
+                    "scan"
+                  ],
+                  "properties": {
+                    "workspace": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "scan": {
+                      "$ref": "#/components/schemas/WorkspaceScanResult"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -757,7 +1385,14 @@
         },
         "responses": {
           "200": {
-            "description": "Import result with applied prompt blocks, paused agent drafts, disabled MCP candidates, skipped review-only sources, and conflicts."
+            "description": "Import result with applied prompt blocks, paused agent drafts, disabled MCP candidates, skipped review-only sources, and conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceImportResult"
+                }
+              }
+            }
           }
         }
       }

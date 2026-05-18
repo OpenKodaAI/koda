@@ -253,6 +253,39 @@ def test_provider_catalog_uses_detected_ollama_models_when_live_catalog_is_empty
     )
 
 
+def test_openrouter_catalog_merges_curated_and_detected_models(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._resolve_ollama_connection_inputs = (  # type: ignore[attr-defined]
+        lambda env=None: ("api_key", "https://ollama.com", "sk-ollama-cloud")
+    )
+    manager._fetch_ollama_model_catalog = lambda **kwargs: {  # type: ignore[attr-defined]
+        "items": [],
+        "cached": False,
+        "provider_connected": False,
+        "base_url": "https://ollama.com",
+        "auth_mode": "api_key",
+    }
+    manager._provider_detected_model_ids = (  # type: ignore[attr-defined]
+        lambda provider_id: ["vendor/custom-model"] if provider_id == "openrouter" else []
+    )
+    monkeypatch.setattr(manager_mod, "provider_command_present", lambda provider_id, base_env=None: True)
+
+    catalog = manager_mod.ControlPlaneManager._provider_catalog_from_env(manager, {})
+    openrouter = catalog["providers"]["openrouter"]
+
+    assert "openrouter/auto" in openrouter["available_models"]
+    assert "~google/gemini-flash-latest" in openrouter["available_models"]
+    assert "vendor/custom-model" in openrouter["available_models"]
+    assert any(
+        item["provider_id"] == "openrouter"
+        and item["model_id"] == "vendor/custom-model"
+        and item["function_id"] == "general"
+        for item in openrouter["functional_models"]
+    )
+
+
 def test_function_model_catalog_skips_hidden_standalone_providers():
     catalog = _build_provider_catalog()
 

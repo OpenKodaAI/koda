@@ -37,6 +37,25 @@ const ASSET_LABEL_RESOLVERS: Record<
       successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
     };
   },
+  supertonic: (job, tl) => {
+    const details = {
+      ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
+      ...(job as ProviderDownloadJob & Record<string, unknown>),
+    };
+    const modelId = String(details.model_id ?? job.asset_id);
+    const voiceName = String(details.voice_name ?? "");
+    if (voiceName) {
+      return {
+        toastTitle: tl("Baixando voz Supertonic · {{voice}}", { voice: voiceName }),
+        successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+      };
+    }
+    const label = String(details.title ?? `Supertonic ${modelId}`);
+    return {
+      toastTitle: tl("Baixando {{label}}", { label }),
+      successMessage: tl("{{label}} pronto.", { label }),
+    };
+  },
   whispercpp: (job, tl) => {
     const details = {
       ...((job.details as Record<string, unknown> | null | undefined) ?? {}),

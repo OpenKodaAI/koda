@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDown,
@@ -17,6 +17,7 @@ import {
   Server,
   Trash2,
   Unplug,
+  Upload,
 } from "lucide-react";
 
 /**
@@ -92,6 +93,8 @@ export function providerLabel(providerId: string) {
   if (providerId === "groq") return "Groq";
   if (providerId === "deepseek") return "DeepSeek";
   if (providerId === "xai") return "xAI Grok";
+  if (providerId === "openrouter") return "OpenRouter";
+  if (providerId === "supertonic") return "Supertonic";
   return providerId;
 }
 
@@ -126,6 +129,11 @@ export function providerOrder(category: string) {
   return 4;
 }
 
+function SelectLoadingSpinner({ loading }: { loading: boolean }) {
+  if (!loading) return null;
+  return <InlineSpinner className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />;
+}
+
 export type ProviderOption = ReturnType<typeof useSystemSettings>["providerOptions"][number];
 
 export function providerDescription(providerId: string, category: string) {
@@ -136,6 +144,9 @@ export function providerDescription(providerId: string, category: string) {
   if (providerId === "ollama") return "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.";
   if (providerId === "whispercpp") {
     return "Transcrição local via whisper.cpp, com modelos baixados sob demanda.";
+  }
+  if (providerId === "supertonic") {
+    return "Voz local/offline via Supertonic, com modelos ONNX e vozes importadas sob demanda.";
   }
   if (providerId === "perplexity") {
     return "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.";
@@ -157,6 +168,9 @@ export function providerDescription(providerId: string, category: string) {
   }
   if (providerId === "xai") {
     return "Grok 4, Grok 3 e variantes mini/fast da xAI. Visão via grok-2-vision.";
+  }
+  if (providerId === "openrouter") {
+    return "Roteamento OpenRouter para centenas de modelos via API Key, com catálogo dinâmico e aliases curados.";
   }
   if (category === "voice") return "Provider multimodal focado em voz e áudio.";
   if (category === "media") return "Provider multimídia disponível para fluxos especializados.";
@@ -190,6 +204,9 @@ export function providerLoginCopy(providerId: string) {
   }
   if (providerId === "xai") {
     return "Cole sua API key obtida em console.x.ai.";
+  }
+  if (providerId === "openrouter") {
+    return "Cole sua API key obtida em openrouter.ai/settings/keys.";
   }
   return "Use o login oficial do Gemini CLI com sua conta Google.";
 }
@@ -374,17 +391,29 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
     kokoroModelStatus,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
     whisperCatalog,
     isDownloadingKokoroAsset,
+    isDownloadingSupertonicAsset,
     isDownloadingWhisperVariant,
     loadKokoroVoices,
     loadKokoroModelStatus,
+    loadSupertonicModels,
+    loadSupertonicVoices,
     loadWhisperCatalog,
     downloadKokoroVoice,
     downloadKokoroModel,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
     downloadWhisperModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     ollamaModelCatalog,
     ollamaModelsLoading,
@@ -440,6 +469,18 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   const kokoroModelDownloading = isDownloadingKokoroAsset("model");
   const kokoroSelectedVoice = kokoroVoiceCatalog.items.find(
     (voice) => voice.voice_id === kokoroDefaultVoice,
+  );
+  const supertonicModel = draft.values.models.supertonic_default_model || "supertonic-3";
+  const supertonicLanguage = draft.values.models.supertonic_default_language || "pt";
+  const supertonicDefaultVoice = draft.values.models.supertonic_default_voice || "F1";
+  const supertonicAssetKey = `${supertonicModel}:${supertonicDefaultVoice}`;
+  const supertonicVoiceDownloading = isDownloadingSupertonicAsset(supertonicAssetKey);
+  const supertonicModelDownloading = isDownloadingSupertonicAsset(supertonicModel);
+  const supertonicSelectedModel = supertonicModelCatalog?.items.find(
+    (item) => item.model_id === supertonicModel,
+  );
+  const supertonicSelectedVoice = supertonicVoiceCatalog.items.find(
+    (voice) => voice.voice_id === supertonicDefaultVoice,
   );
   const loginPending = Boolean(
     loginSession && ["pending", "awaiting_browser"].includes(loginSession.status),
@@ -508,6 +549,14 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     void loadKokoroVoices(kokoroLanguage);
     void loadKokoroModelStatus();
   }, [isOpen, kokoroLanguage, loadKokoroVoices, loadKokoroModelStatus, provider.id]);
+
+  useEffect(() => {
+    if (provider.id !== "supertonic" || !isOpen) {
+      return;
+    }
+    void loadSupertonicModels();
+    void loadSupertonicVoices(supertonicModel, supertonicLanguage);
+  }, [isOpen, loadSupertonicModels, loadSupertonicVoices, provider.id, supertonicLanguage, supertonicModel]);
 
   useEffect(() => {
     if (provider.id !== "whispercpp" || !isOpen) {
@@ -585,6 +634,23 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     downloadKokoroModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    supertonicModel,
+    supertonicLanguage,
+    supertonicDefaultVoice,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
+    supertonicVoiceDownloading,
+    supertonicModelDownloading,
+    supertonicSelectedModel,
+    supertonicSelectedVoice,
+    loadSupertonicVoices,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     whisperCatalog,
     isDownloadingWhisperVariant,
@@ -864,6 +930,23 @@ export function ProviderAuthPanel({
     downloadKokoroModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    supertonicModel,
+    supertonicLanguage,
+    supertonicDefaultVoice,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
+    supertonicVoiceDownloading,
+    supertonicModelDownloading,
+    supertonicSelectedModel,
+    supertonicSelectedVoice,
+    loadSupertonicVoices,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     whisperCatalog,
     isDownloadingWhisperVariant,
@@ -877,6 +960,27 @@ export function ProviderAuthPanel({
   } = ui;
   const loginCode = loginSession?.user_code?.trim() || "";
   const codeCopied = Boolean(loginCode) && copiedCode === loginCode;
+  const supertonicImportInputRef = useRef<HTMLInputElement | null>(null);
+  const supertonicAccelerationLabel =
+    supertonicVoiceCatalog.acceleration?.label || supertonicModelCatalog?.acceleration?.label || "CPU ONNX oficial";
+  const kokoroLanguageOptions =
+    kokoroVoiceCatalog.available_languages.length > 0
+      ? kokoroVoiceCatalog.available_languages
+      : [{ id: kokoroLanguage || "pt-br", label: kokoroLanguage || "pt-br" }];
+  const kokoroHasSelectedVoice = kokoroVoiceCatalog.items.some(
+    (voice) => voice.voice_id === kokoroDefaultVoice,
+  );
+  const supertonicModelOptions = supertonicModelCatalog?.items || [];
+  const supertonicHasSelectedModel = supertonicModelOptions.some(
+    (model) => model.model_id === supertonicModel,
+  );
+  const supertonicLanguageOptions =
+    supertonicVoiceCatalog.available_languages.length > 0
+      ? supertonicVoiceCatalog.available_languages
+      : [{ id: supertonicLanguage || "pt", label: supertonicLanguage || "pt" }];
+  const supertonicHasSelectedVoice = supertonicVoiceCatalog.items.some(
+    (voice) => voice.voice_id === supertonicDefaultVoice,
+  );
   const shouldShowClaudeCodeInput =
     provider.id === "claude" &&
     Boolean(loginSession?.session_id) &&
@@ -975,35 +1079,34 @@ export function ProviderAuthPanel({
             </div>
           </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <FieldShell
-            label={tl("Idioma")}
-            description={tl("Define o idioma padrão e filtra a lista de vozes.")}
-          >
-            <Select
-              value={kokoroLanguage}
-              onValueChange={(nextLanguage) => {
-                setField("models", {
-                  ...draft.values.models,
-                  kokoro_default_language: nextLanguage,
-                  kokoro_default_voice: "",
-                  kokoro_default_voice_label: "",
-                });
-                void loadKokoroVoices(nextLanguage, { force: true });
-              }}
+          <div className="grid gap-3 md:grid-cols-2">
+            <FieldShell
+              label={tl("Idioma")}
+              description={tl("Define o idioma padrão e filtra a lista de vozes.")}
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {kokoroVoiceCatalog.available_languages.map((language) => (
-                  <SelectItem key={language.id} value={language.id}>
-                    {tl(language.label)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldShell>
+              <Select
+                value={kokoroLanguage}
+                onValueChange={(nextLanguage) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    kokoro_default_language: nextLanguage,
+                  });
+                  void loadKokoroVoices(nextLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={kokoroVoicesLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={kokoroVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {kokoroLanguageOptions.map((language) => (
+                    <SelectItem key={language.id} value={language.id}>
+                      {tl(language.label)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
 
           <FieldShell
             label="Voz"
@@ -1014,7 +1117,7 @@ export function ProviderAuthPanel({
             }
           >
             <Select
-              value={kokoroDefaultVoice === "" ? SELECT_ALL_VALUE : kokoroDefaultVoice}
+              value={kokoroDefaultVoice || "pf_dora"}
               disabled={kokoroVoicesLoading}
               onValueChange={(value) => {
                 const nextVoiceId = value === SELECT_ALL_VALUE ? "" : value;
@@ -1028,19 +1131,16 @@ export function ProviderAuthPanel({
                 });
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-busy={kokoroVoicesLoading || undefined}>
                 <SelectValue
                   placeholder={
                     kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"
                   }
                 />
+                <SelectLoadingSpinner loading={kokoroVoicesLoading} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={SELECT_ALL_VALUE}>
-                  {kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"}
-                </SelectItem>
-                {kokoroDefaultVoice &&
-                !kokoroVoiceCatalog.items.some((voice) => voice.voice_id === kokoroDefaultVoice) ? (
+                {kokoroDefaultVoice && !kokoroHasSelectedVoice ? (
                   <SelectItem value={kokoroDefaultVoice}>
                     {kokoroDefaultVoiceLabel || kokoroDefaultVoice}
                   </SelectItem>
@@ -1100,7 +1200,241 @@ export function ProviderAuthPanel({
             </span>
           </div>
 
-        </div>
+          </div>
+        </>
+      ) : provider.id === "supertonic" ? (
+        <>
+          <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
+            <span className="text-[var(--text-secondary)]">
+              {tl("Modelo Supertonic")}
+            </span>
+            {supertonicSelectedModel?.downloaded ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <Check className="h-3 w-3" strokeWidth={1.75} />
+                  {tl("Disponível")}
+                </span>
+                <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                  {formatAssetBytes(supertonicSelectedModel.bytes)}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {tl("Download inicial via Hugging Face.")}
+              </span>
+            )}
+            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+              {tl(supertonicAccelerationLabel)}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <AsyncActionButton
+                type="button"
+                variant={supertonicSelectedModel?.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={supertonicModelDownloading}
+                loadingLabel={tl("Baixando")}
+                icon={ArrowDown}
+                disabled={Boolean(supertonicSelectedModel?.downloaded) || supertonicModelDownloading}
+                onClick={() => {
+                  void downloadSupertonicModel(supertonicModel);
+                }}
+                className="rounded-full px-3.5"
+              >
+                {supertonicSelectedModel?.downloaded ? tl("Modelo baixado") : tl("Baixar modelo")}
+              </AsyncActionButton>
+              {supertonicSelectedModel?.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={supertonicModelDownloading}
+                  onClick={() => {
+                    void deleteSupertonicModelAsset(supertonicModel);
+                  }}
+                  className="rounded-full px-3.5"
+                  loadingLabel={tl("Removendo")}
+                >
+                  {tl("Remover")}
+                </AsyncActionButton>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <FieldShell label={tl("Modelo")} description={tl("Seleciona o snapshot local usado na síntese.")}>
+              <Select
+                value={supertonicModel}
+                disabled={supertonicModelsLoading}
+                onValueChange={(nextModel) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_model: nextModel,
+                    supertonic_default_voice: "F1",
+                  });
+                  void loadSupertonicVoices(nextModel, supertonicLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicModelsLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={supertonicModelsLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {!supertonicHasSelectedModel ? (
+                    <SelectItem value={supertonicModel}>{supertonicModel}</SelectItem>
+                  ) : null}
+                  {supertonicModelOptions.map((model) => (
+                    <SelectItem key={model.model_id} value={model.model_id}>
+                      {`${model.title}${model.downloaded ? ` · ${tl("baixado")}` : ""}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell label={tl("Idioma")} description={tl("Define o idioma padrão para a fala local.")}>
+              <Select
+                value={supertonicLanguage}
+                onValueChange={(nextLanguage) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_language: nextLanguage,
+                  });
+                  void loadSupertonicVoices(supertonicModel, nextLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicVoicesLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={supertonicVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {supertonicLanguageOptions.map((language) => (
+                    <SelectItem key={language.id} value={language.id}>
+                      {tl(language.label)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell
+              label="Voz"
+              description={
+                supertonicVoicesLoading
+                  ? "Carregando vozes Supertonic..."
+                  : "Escolha presets oficiais ou vozes importadas do Voice Builder."
+              }
+            >
+              <Select
+                value={supertonicDefaultVoice || "F1"}
+                disabled={supertonicVoicesLoading}
+                onValueChange={(nextVoiceId) => {
+                  const selectedVoice = supertonicVoiceCatalog.items.find(
+                    (voice) => voice.voice_id === nextVoiceId,
+                  );
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_voice: nextVoiceId,
+                    supertonic_default_voice_label: selectedVoice?.name || nextVoiceId,
+                  });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicVoicesLoading || undefined}>
+                  <SelectValue placeholder={tl("Selecione a voz padrão")} />
+                  <SelectLoadingSpinner loading={supertonicVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {supertonicDefaultVoice && !supertonicHasSelectedVoice ? (
+                    <SelectItem value={supertonicDefaultVoice}>{supertonicDefaultVoice}</SelectItem>
+                  ) : null}
+                  {supertonicVoiceCatalog.items.map((voice) => (
+                    <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                      {`${voice.name} · ${voice.kind === "custom" ? tl("custom") : tl("preset")}${
+                        voice.downloaded ? ` · ${tl("baixada")}` : ""
+                      }`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell label={tl("Voz custom")} description={tl("Importa JSON local do Voice Builder.")}>
+              <input
+                ref={supertonicImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (!file) return;
+                  void importSupertonicVoice(file, { modelId: supertonicModel });
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => supertonicImportInputRef.current?.click()}
+                className="gap-2 rounded-full px-3.5"
+              >
+                <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+                {tl("Importar JSON")}
+              </Button>
+            </FieldShell>
+
+            <div className="md:col-span-2 flex flex-wrap items-center gap-3 px-1">
+              <AsyncActionButton
+                type="button"
+                variant={supertonicSelectedVoice?.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={supertonicVoiceDownloading}
+                loadingLabel={tl("Baixando")}
+                status={supertonicVoiceDownloading ? "pending" : "idle"}
+                icon={ArrowDown}
+                disabled={!supertonicDefaultVoice || Boolean(supertonicSelectedVoice?.downloaded)}
+                onClick={() => {
+                  if (!supertonicDefaultVoice) return;
+                  void downloadSupertonicVoice(supertonicDefaultVoice, supertonicModel);
+                }}
+                className="rounded-full px-3.5"
+              >
+                {supertonicSelectedVoice?.downloaded ? tl("Voz baixada") : tl("Baixar voz")}
+              </AsyncActionButton>
+              {supertonicSelectedVoice?.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={!supertonicDefaultVoice || supertonicVoiceDownloading}
+                  onClick={() => {
+                    if (!supertonicDefaultVoice) return;
+                    void deleteSupertonicVoiceAsset(supertonicDefaultVoice, supertonicModel);
+                  }}
+                  loadingLabel={tl("Removendo")}
+                  className="rounded-full px-3.5"
+                >
+                  {tl("Remover")}
+                </AsyncActionButton>
+              ) : null}
+              <span className="text-sm text-[var(--text-secondary)]">
+                {supertonicSelectedVoice
+                  ? `${tl(supertonicSelectedVoice.language_label)} · ${
+                      supertonicSelectedVoice.gender === "female"
+                        ? tl("Feminina")
+                        : supertonicSelectedVoice.gender === "male"
+                          ? tl("Masculina")
+                          : tl("Custom")
+                    }${
+                      supertonicSelectedVoice.downloaded && Number(supertonicSelectedVoice.bytes ?? 0) > 0
+                        ? ` · ${formatAssetBytes(supertonicSelectedVoice.bytes)}`
+                        : ""
+                    }`
+                  : tl("Selecione uma voz para ativar localmente.")}
+              </span>
+            </div>
+          </div>
         </>
       ) : supportsAnyAuth ? (
         <>

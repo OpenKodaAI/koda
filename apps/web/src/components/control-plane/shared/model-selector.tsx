@@ -30,6 +30,7 @@ import {
   PROVIDER_ICON_COMPONENTS,
   PROVIDER_DISPLAY_NAMES as PROVIDER_DISPLAY,
   COLORED_BRAND_LOGO_PROVIDERS,
+  providerGlyphColor,
 } from "./provider-brand";
 
 /*  Inline provider logo                                               */
@@ -80,7 +81,7 @@ function ProviderIcon({
       style={{
         width: size,
         height: size,
-        backgroundColor: "rgb(255 255 255 / 0.85)",
+        backgroundColor: providerGlyphColor(providerId),
         WebkitMaskImage: `url(${logo})`,
         maskImage: `url(${logo})`,
         WebkitMaskRepeat: "no-repeat",
