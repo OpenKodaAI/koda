@@ -32,7 +32,7 @@ prost = "0.13"
 prost-types = "0.13"
 protoc-bin-vendored = "3.1"
 sha2 = "0.11"
-tokio = { version = "1.44", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.52", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-postgres = "0.7"
 tonic = { version = "0.12", features = ["transport", "tls"] }
