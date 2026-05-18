@@ -675,6 +675,7 @@ class QueryContext:
     runtime_env_id: int | None = None
     runtime_classification: str = "light"
     runtime_environment_kind: str = "dev_worktree"
+    source_root_path: str | None = None
     prompt_budget: dict[str, Any] | None = None
     asset_refs: list[dict[str, Any]] = field(default_factory=list)
     skill_matches: list[Any] = field(default_factory=list)
@@ -2346,6 +2347,32 @@ def _control_plane_prompt_for_agent(agent_id: str) -> str | None:
         return None
 
 
+def _control_plane_workspace_root_for_agent(agent_id: str | None) -> str | None:
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return get_control_plane_manager().get_workspace_runtime_root_for_agent(normalized)
+    except Exception:
+        log.debug("control_plane_workspace_root_lookup_failed", agent_id=normalized, exc_info=True)
+        return None
+
+
+def _resolve_task_source_work_dir(item: QueueItem, context: Any, *, strict: bool = False) -> tuple[str, str | None]:
+    explicit = item.scheduled_work_dir
+    workspace_root = None if explicit else _control_plane_workspace_root_for_agent(item.executing_agent_id or AGENT_ID)
+    candidate = explicit or workspace_root or context.user_data.get("work_dir") or DEFAULT_WORK_DIR
+    resolved = _validate_work_dir(candidate, strict=strict)
+    source_root = workspace_root if workspace_root and resolved != item.runtime_work_dir else None
+    if explicit:
+        source_root = resolved
+    elif workspace_root:
+        source_root = workspace_root
+    return resolved, source_root
+
+
 async def _squad_thread_runtime_defaults(thread_id: str) -> tuple[int, int]:
     """Best-effort owner/chat defaults for bus-dispatched squad turns."""
     try:
@@ -2777,11 +2804,11 @@ async def _prepare_query_context(
     if context.user_data["total_cost"] >= MAX_TOTAL_BUDGET_USD:
         raise BudgetExceeded(f"Cumulative budget of ${MAX_TOTAL_BUDGET_USD:.2f} reached. Use /resetcost to reset.")
 
-    work_dir = _validate_work_dir(
-        item.runtime_work_dir or item.scheduled_work_dir or context.user_data["work_dir"],
-        strict=item.is_scheduled_run,
-    )
+    source_base_dir, source_root_path = _resolve_task_source_work_dir(item, context, strict=item.is_scheduled_run)
+    work_dir = _validate_work_dir(item.runtime_work_dir or source_base_dir, strict=item.is_scheduled_run)
     context.user_data["work_dir"] = work_dir
+    if source_root_path:
+        context.user_data["source_root_path"] = source_root_path
     task_kind = classify_task_kind(item.query_text)
     project_key = Path(work_dir).name.lower()
     environment = ""
@@ -3624,6 +3651,7 @@ async def _prepare_query_context(
         runtime_env_id=None,
         runtime_classification="light",
         runtime_environment_kind="dev_worktree",
+        source_root_path=source_root_path,
         prompt_budget=prompt_budget,
         asset_refs=asset_refs,
         skill_matches=_resolved_skill_matches,
@@ -4628,6 +4656,8 @@ async def _run_agent_loop(
             bot=context.bot,
             application=getattr(context, "application", None),
             context_governance=ctx.context_governance,
+            source_root_path=ctx.source_root_path or context.user_data.get("source_root_path"),
+            runtime_workspace_path=ctx.work_dir if ctx.runtime_env_id is not None else None,
         )
 
         from koda.services import audit, metrics
@@ -7409,6 +7439,8 @@ async def _execute_single_task(
                         task_info.runtime_env_id = int(existing_env["id"])
                         task_info.runtime_work_dir = str(existing_env["workspace_path"])
                         item.runtime_work_dir = str(existing_env["workspace_path"])
+                        if existing_env.get("base_work_dir"):
+                            context.user_data["source_root_path"] = str(existing_env["base_work_dir"])
                         task_info.runtime_classification = str(existing_env.get("classification") or "light")
                         task_info.runtime_environment_kind = str(existing_env.get("environment_kind") or "dev_worktree")
                         heartbeat_task = asyncio.create_task(
@@ -7430,10 +7462,13 @@ async def _execute_single_task(
                             await runtime_capacity.enter_async_context(_heavy_task_semaphore)
                         if classification.environment_kind == "dev_worktree_browser":
                             await runtime_capacity.enter_async_context(_browser_task_semaphore)
-                        base_work_dir = _validate_work_dir(
-                            item.scheduled_work_dir or context.user_data.get("work_dir"),
+                        base_work_dir, source_root_path = _resolve_task_source_work_dir(
+                            item,
+                            context,
                             strict=item.is_scheduled_run,
                         )
+                        if source_root_path:
+                            context.user_data["source_root_path"] = source_root_path
                         env = await runtime.provision_environment(
                             task_id=task_id,
                             user_id=user_id,

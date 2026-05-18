@@ -297,6 +297,8 @@ class ToolContext:
     bot: Any | None = None
     application: Any | None = None
     context_governance: dict[str, Any] | None = None
+    source_root_path: str | None = None
+    runtime_workspace_path: str | None = None
 
 
 def parse_agent_commands(text: str) -> tuple[list[AgentToolCall], str]:
@@ -1321,12 +1323,36 @@ async def _handle_set_workdir(params: dict, ctx: ToolContext) -> AgentToolResult
             output=validation.reason or "Directory does not exist.",
         )
 
+    allowed_roots = [
+        str(root)
+        for root in (ctx.runtime_workspace_path, ctx.source_root_path)
+        if str(root or "").strip()
+    ]
+    if allowed_roots and not _path_is_within_any_root(validation.path, allowed_roots):
+        _audit_blocked("agent_set_workdir", "outside_workspace_roots", user_id=ctx.user_id)
+        return AgentToolResult(
+            tool="agent_set_workdir",
+            success=False,
+            output="Working directory must stay inside the active runtime workspace or workspace root.",
+        )
+
     ctx.user_data["work_dir"] = validation.path
     return AgentToolResult(
         tool="agent_set_workdir",
         success=True,
         output=f"Working directory changed to: {validation.path}",
     )
+
+
+def _path_is_within_any_root(path: str, roots: list[str]) -> bool:
+    import os
+
+    resolved = os.path.realpath(os.path.expanduser(path))
+    for root in roots:
+        root_resolved = os.path.realpath(os.path.expanduser(root))
+        if resolved == root_resolved or resolved.startswith(root_resolved + os.sep):
+            return True
+    return False
 
 
 async def _handle_get_status(params: dict, ctx: ToolContext) -> AgentToolResult:

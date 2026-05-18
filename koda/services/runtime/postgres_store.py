@@ -1354,7 +1354,8 @@ class PostgresRuntimeStore:
         return self._fetch_all(
             """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
-                   status, current_phase, workspace_path, runtime_dir, base_work_dir, branch_name,
+                   status, current_phase, workspace_path, runtime_dir, base_work_dir,
+                   base_work_dir AS source_root_path, branch_name,
                    created_worktree, worktree_mode, is_pinned, checkpoint_status, checkpoint_path, parent_env_id,
                    lineage_root_env_id, source_checkpoint_id, recovery_state, revision,
                    browser_transport, display_id, vnc_port, novnc_port,
@@ -1371,7 +1372,8 @@ class PostgresRuntimeStore:
         return self._fetch_one(
             """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
-                   status, current_phase, workspace_path, runtime_dir, base_work_dir, branch_name,
+                   status, current_phase, workspace_path, runtime_dir, base_work_dir,
+                   base_work_dir AS source_root_path, branch_name,
                    created_worktree, worktree_mode, is_pinned, checkpoint_status, checkpoint_path, parent_env_id,
                    lineage_root_env_id, source_checkpoint_id, recovery_state, revision,
                    browser_transport, display_id, vnc_port, novnc_port,
@@ -1387,7 +1389,8 @@ class PostgresRuntimeStore:
         return self._fetch_one(
             """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
-                   status, current_phase, workspace_path, runtime_dir, base_work_dir, branch_name,
+                   status, current_phase, workspace_path, runtime_dir, base_work_dir,
+                   base_work_dir AS source_root_path, branch_name,
                    created_worktree, worktree_mode, is_pinned, checkpoint_status, checkpoint_path, parent_env_id,
                    lineage_root_env_id, source_checkpoint_id, recovery_state, revision,
                    browser_transport, display_id, vnc_port, novnc_port,
@@ -1561,7 +1564,8 @@ class PostgresRuntimeStore:
         return self._fetch_all(
             """
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, current_phase,
-                   status, workspace_path, runtime_dir, base_work_dir, branch_name, created_worktree,
+                   status, workspace_path, runtime_dir, base_work_dir,
+                   base_work_dir AS source_root_path, branch_name, created_worktree,
                    checkpoint_status, checkpoint_path, parent_env_id, source_checkpoint_id, recovery_state,
                    revision, pause_state, process_pid, process_pgid, browser_scope_id, last_heartbeat_at
             FROM runtime_environments

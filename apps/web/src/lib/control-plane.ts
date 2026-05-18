@@ -47,10 +47,57 @@ export type ControlPlaneWorkspaceSquad = {
   updated_at: string;
 };
 
+export type WorkspaceConfigSource = {
+  source_id: string;
+  kind: string;
+  tool: string;
+  relative_path: string;
+  absolute_path?: string;
+  scope?: string;
+  name?: string;
+  description?: string;
+  confidence?: string;
+  risk?: "low" | "review" | "high" | "blocked" | string;
+  status?: string;
+  import_action?: string;
+  warnings?: string[];
+  metadata?: Record<string, unknown>;
+  content_excerpt?: string;
+};
+
+export type WorkspaceScanSummary = {
+  total_sources: number;
+  by_kind?: Record<string, number>;
+  by_tool?: Record<string, number>;
+  by_risk?: Record<string, number>;
+  review_required?: number;
+  blocked?: number;
+  importable?: number;
+  truncated?: boolean;
+};
+
+export type WorkspaceRuntimeDefaults = {
+  source_root_path?: string | null;
+  task_execution_mode?: string;
+  isolation_mode?: string;
+};
+
 export type ControlPlaneWorkspace = {
   id: string;
   name: string;
   description: string;
+  color?: string;
+  root_path?: string | null;
+  root_exists?: boolean;
+  root_kind?: string;
+  root_trust_state?: "logical_only" | "trusted" | "missing" | "blocked" | "unknown" | string;
+  scan_status?: "not_scanned" | "stale" | "completed" | "error" | string;
+  last_scanned_at?: string | null;
+  scan_hash?: string;
+  detected_sources?: WorkspaceConfigSource[];
+  scan_summary?: WorkspaceScanSummary;
+  runtime_defaults?: WorkspaceRuntimeDefaults;
+  import_history?: Array<Record<string, unknown>>;
   agent_count: number;
   spec?: WorkspaceSpec;
   documents?: ScopePromptDocuments;

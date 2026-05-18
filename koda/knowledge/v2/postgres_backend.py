@@ -3471,6 +3471,25 @@ class KnowledgeV2PostgresBackend:
                            ADD COLUMN IF NOT EXISTS profile_photo_updated_at TEXT NOT NULL DEFAULT ''""",
                 ),
             ),
+            _Migration(
+                "044_workspace_directory_import",
+                (
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS root_path TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS root_kind TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS scan_status TEXT NOT NULL DEFAULT 'not_scanned'""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS last_scanned_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS scan_hash TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS config_sources_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."cp_workspaces"
+                           ADD COLUMN IF NOT EXISTS import_history_json TEXT NOT NULL DEFAULT '[]'""",
+                ),
+            ),
         )
 
     async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:

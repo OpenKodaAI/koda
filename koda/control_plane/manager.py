@@ -179,6 +179,15 @@ from .settings import (
     ROOT_DIR,
     looks_like_secret_key,
 )
+from .workspace_import import (
+    WORKSPACE_SCAN_SCHEMA_VERSION,
+    directory_roots_payload,
+    list_directory_payload,
+    read_importable_source_content,
+    scan_workspace_directory,
+    validate_workspace_root,
+    workspace_source_from_dict,
+)
 
 log = get_logger(__name__)
 
@@ -193,6 +202,12 @@ _LOWERCASE_FILE_SAFE_RE = re.compile(r"[^a-z0-9_-]+")
 _STATUS_VALUES = frozenset({"active", "paused", "archived"})
 _SCOPE_VALUES = frozenset({"agent", "global"})
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_WORKSPACE_IMPORT_BLOCK_RE = re.compile(
+    r"\n?<!-- koda:workspace-import:start\b.*?<!-- koda:workspace-import:end -->\n?",
+    re.DOTALL,
+)
+_WORKSPACE_IMPORT_START = "<!-- koda:workspace-import:start"
+_WORKSPACE_IMPORT_END = "<!-- koda:workspace-import:end -->"
 _AGENT_DOCUMENT_LAYOUT: tuple[tuple[str, str], ...] = (
     ("identity_md", "agent_identity"),
     ("soul_md", "agent_soul"),
@@ -1054,6 +1069,52 @@ def _row_json(row: Any, column: str) -> dict[str, Any]:
     return _safe_json_object(json_load(raw or "{}", {}))
 
 
+def _row_json_list(row: Any, column: str) -> list[Any]:
+    raw = row.get(column) if hasattr(row, "get") else None
+    loaded = json_load(raw or "[]", [])
+    return loaded if isinstance(loaded, list) else []
+
+
+def _row_text(row: Any, column: str, default: str = "") -> str:
+    if not _row_has_column(row, column):
+        return default
+    value = row.get(column) if hasattr(row, "get") else None
+    return str(value or default)
+
+
+def _workspace_scan_sources(scan_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = scan_payload.get("sources")
+    return [item for item in sources if isinstance(item, dict)] if isinstance(sources, list) else []
+
+
+def _workspace_scan_summary(scan_payload: dict[str, Any]) -> dict[str, Any]:
+    summary = scan_payload.get("summary")
+    if isinstance(summary, dict):
+        return dict(summary)
+    sources = _workspace_scan_sources(scan_payload)
+    by_kind: dict[str, int] = {}
+    by_tool: dict[str, int] = {}
+    by_risk: dict[str, int] = {}
+    for source in sources:
+        kind = str(source.get("kind") or "unknown")
+        tool = str(source.get("tool") or "generic")
+        risk = str(source.get("risk") or "review")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        by_tool[tool] = by_tool.get(tool, 0) + 1
+        by_risk[risk] = by_risk.get(risk, 0) + 1
+    return {
+        "total_sources": len(sources),
+        "by_kind": by_kind,
+        "by_tool": by_tool,
+        "by_risk": by_risk,
+        "review_required": sum(1 for source in sources if str(source.get("risk") or "") in {"review", "high"}),
+        "blocked": sum(1 for source in sources if str(source.get("risk") or "") == "blocked"),
+        "importable": sum(
+            1 for source in sources if str(source.get("import_action") or "") == "append_workspace_prompt"
+        ),
+    }
+
+
 def _user_selectable_provider_ids(provider_catalog: dict[str, Any]) -> list[str]:
     return [
         provider_id
@@ -1551,12 +1612,40 @@ class ControlPlaneManager:
             _row_json(row, "spec_json"),
             _row_json(row, "documents_json"),
         )
+        root_path = _row_text(row, "root_path").strip() or None
+        root_exists = bool(root_path and Path(root_path).is_dir())
+        scan_payload = _row_json(row, "config_sources_json") if _row_has_column(row, "config_sources_json") else {}
+        root_kind = _row_text(row, "root_kind", "local_path" if root_path else "").strip()
+        scan_status = _row_text(row, "scan_status", "not_scanned").strip() or "not_scanned"
+        if root_path is None:
+            root_trust_state = "logical_only"
+        elif root_exists:
+            root_trust_state = "trusted"
+        else:
+            root_trust_state = "missing"
         return {
             "id": str(row["id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
             "spec": {},
             "documents": documents,
+            "root_path": root_path,
+            "root_exists": root_exists,
+            "root_kind": root_kind or ("local_path" if root_path else ""),
+            "root_trust_state": root_trust_state,
+            "scan_status": scan_status,
+            "last_scanned_at": _row_text(row, "last_scanned_at").strip() or None,
+            "scan_hash": _row_text(row, "scan_hash"),
+            "detected_sources": _workspace_scan_sources(scan_payload),
+            "scan_summary": _workspace_scan_summary(scan_payload),
+            "runtime_defaults": {
+                "source_root_path": root_path,
+                "task_execution_mode": "runtime_worktree_or_copy" if root_path else "session_default",
+                "isolation_mode": "worktree_or_copy",
+            },
+            "import_history": _row_json_list(row, "import_history_json")
+            if _row_has_column(row, "import_history_json")
+            else [],
             "agent_count": agent_count,
             "squads": squads or [],
             "virtual_buckets": {
@@ -1748,19 +1837,33 @@ class ControlPlaneManager:
             raise ValueError("workspace name is required")
         workspace_id = self._next_workspace_entity_id("cp_workspaces", str(payload.get("id") or name))
         now = now_iso()
+        root_path = None
+        root_kind = ""
+        scan_status = "not_scanned"
+        if "root_path" in payload and str(payload.get("root_path") or "").strip():
+            root_path = str(validate_workspace_root(str(payload.get("root_path") or "")))
+            root_kind = "local_path"
+            scan_status = "stale"
         execute(
             """
-            INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO cp_workspaces (
+                id, name, description, root_path, root_kind, scan_status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
                 name,
                 str(payload.get("description") or "").strip(),
+                root_path,
+                root_kind,
+                scan_status,
                 now,
                 now,
             ),
         )
+        if root_path and bool(payload.get("scan_on_save")):
+            self.rescan_workspace(workspace_id, {})
         return next(item for item in self.list_workspaces()["items"] if item["id"] == workspace_id)
 
     def update_workspace(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1769,20 +1872,355 @@ class ControlPlaneManager:
         name = str(payload.get("name") or row["name"]).strip()
         if not name:
             raise ValueError("workspace name is required")
+        current_root = _row_text(row, "root_path").strip() or None
+        root_path = current_root
+        root_kind = _row_text(row, "root_kind")
+        scan_status = _row_text(row, "scan_status", "not_scanned") or "not_scanned"
+        root_changed = False
+        if "root_path" in payload:
+            raw_root = str(payload.get("root_path") or "").strip()
+            root_path = str(validate_workspace_root(raw_root)) if raw_root else None
+            root_kind = "local_path" if root_path else ""
+            scan_status = "stale" if root_path else "not_scanned"
+            root_changed = root_path != current_root
         execute(
             """
             UPDATE cp_workspaces
-            SET name = ?, description = ?, updated_at = ?
+            SET name = ?, description = ?, root_path = ?, root_kind = ?, scan_status = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else row["description"] or "").strip(),
+                root_path,
+                root_kind,
+                scan_status,
                 now_iso(),
                 str(row["id"]),
             ),
         )
+        if root_changed and root_path and bool(payload.get("scan_on_save")):
+            self.rescan_workspace(str(row["id"]), {})
         return next(item for item in self.list_workspaces()["items"] if item["id"] == str(row["id"]))
+
+    def list_workspace_directory_roots(self) -> dict[str, Any]:
+        return directory_roots_payload()
+
+    def list_workspace_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        return list_directory_payload(path)
+
+    def scan_workspace_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        max_depth = int(payload.get("maxDepth") or payload.get("max_depth") or 8)
+        return scan_workspace_directory(path, max_depth=max_depth).to_dict()
+
+    def import_workspace_from_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        scan_payload = self.scan_workspace_directory(payload)
+        name = str(payload.get("name") or Path(scan_payload["root_path"]).name or "Imported workspace").strip()
+        workspace = self.create_workspace(
+            {
+                "name": name,
+                "description": str(payload.get("description") or "").strip(),
+                "root_path": scan_payload["root_path"],
+            }
+        )
+        workspace_id = str(workspace["id"])
+        self._persist_workspace_scan(workspace_id, scan_payload, status="completed")
+        selected = self._selected_source_ids(payload)
+        import_result: dict[str, Any] = {"applied": [], "skipped": [], "conflicts": []}
+        if selected:
+            import_result = self.import_workspace_config(workspace_id, {"selectedSourceIds": selected})
+        refreshed = next(item for item in self.list_workspaces()["items"] if item["id"] == workspace_id)
+        return {"workspace": refreshed, "scan": scan_payload, "import_result": import_result}
+
+    def rescan_workspace(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._workspace_row(workspace_id)
+        root_path = _row_text(row, "root_path").strip()
+        if not root_path:
+            raise ValueError("workspace has no root_path")
+        scan_payload = self.scan_workspace_directory(
+            {
+                "path": root_path,
+                "maxDepth": payload.get("maxDepth") or payload.get("max_depth") or 8,
+            }
+        )
+        self._persist_workspace_scan(str(row["id"]), scan_payload, status="completed")
+        return {
+            "workspace": next(item for item in self.list_workspaces()["items"] if item["id"] == str(row["id"])),
+            "scan": scan_payload,
+        }
+
+    def import_workspace_config(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._workspace_row(workspace_id)
+        if bool(payload.get("rescan")):
+            scan_payload = self.rescan_workspace(workspace_id, payload)["scan"]
+            row = self._workspace_row(workspace_id)
+        else:
+            scan_payload = _row_json(row, "config_sources_json")
+        if not scan_payload:
+            root_path = _row_text(row, "root_path").strip()
+            if not root_path:
+                raise ValueError("workspace has no scan metadata and no root_path")
+            scan_payload = self.rescan_workspace(workspace_id, payload)["scan"]
+            row = self._workspace_row(workspace_id)
+
+        selected = self._selected_source_ids(payload)
+        if not selected:
+            return {"applied": [], "skipped": [], "conflicts": [], "message": "no selected sources"}
+
+        sources = [workspace_source_from_dict(item) for item in _workspace_scan_sources(scan_payload)]
+        selected_sources = [source for source in sources if source.source_id in selected]
+        selected_source_ids = {source.source_id for source in selected_sources}
+        missing = sorted(set(selected) - selected_source_ids)
+
+        result: dict[str, Any] = {"applied": [], "skipped": [], "conflicts": []}
+        root_path = _row_text(row, "root_path").strip() or str(scan_payload.get("root_path") or "")
+        prompt_sources = [
+            source
+            for source in selected_sources
+            if source.import_action == "append_workspace_prompt" and source.risk == "low"
+        ]
+        if prompt_sources:
+            self._apply_workspace_prompt_import(str(row["id"]), root_path, scan_payload, prompt_sources)
+            result["applied"].append({"action": "workspace_prompt", "count": len(prompt_sources)})
+
+        for source in selected_sources:
+            if source in prompt_sources:
+                continue
+            if source.import_action == "create_agent_draft" and source.risk in {"review", "low"}:
+                created = self._apply_workspace_agent_import(str(row["id"]), root_path, source)
+                result["applied" if created.get("created") else "conflicts"].append(created)
+            elif source.import_action == "mcp_review":
+                mcp_candidates = self._apply_workspace_mcp_candidates(str(row["id"]), source)
+                result["applied"].extend(mcp_candidates)
+                if not mcp_candidates:
+                    result["skipped"].append({"source_id": source.source_id, "reason": "no safe MCP server shape"})
+            else:
+                result["skipped"].append(
+                    {
+                        "source_id": source.source_id,
+                        "relative_path": source.relative_path,
+                        "reason": "review_required_or_blocked",
+                    }
+                )
+        for source_id in missing:
+            result["skipped"].append({"source_id": source_id, "reason": "source_not_found"})
+        self._append_workspace_import_history(str(row["id"]), scan_payload, result, selected)
+        return result
+
+    def get_workspace_runtime_root_for_agent(self, agent_id: str | None) -> str | None:
+        normalized = _normalize_agent_id(agent_id or "") if str(agent_id or "").strip() else None
+        if not normalized:
+            return None
+        row = fetch_one(
+            """
+            SELECT w.root_path
+            FROM cp_agent_definitions a
+            JOIN cp_workspaces w ON w.id = a.workspace_id
+            WHERE a.id = ?
+            """,
+            (normalized,),
+        )
+        root_path = str((row or {}).get("root_path") or "").strip()
+        if not root_path:
+            return None
+        try:
+            return str(validate_workspace_root(root_path))
+        except ValueError:
+            return None
+
+    def _selected_source_ids(self, payload: dict[str, Any]) -> list[str]:
+        raw = payload.get("selectedSourceIds", payload.get("selected_source_ids", []))
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise ValueError("selectedSourceIds must be a list")
+        return [str(item) for item in raw if str(item or "").strip()]
+
+    def _persist_workspace_scan(self, workspace_id: str, scan_payload: dict[str, Any], *, status: str) -> None:
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET root_path = ?, root_kind = ?, scan_status = ?, last_scanned_at = ?,
+                scan_hash = ?, config_sources_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(scan_payload.get("root_path") or ""),
+                str(scan_payload.get("root_kind") or "local_path"),
+                status,
+                now_iso(),
+                str(scan_payload.get("scan_hash") or ""),
+                json_dump(scan_payload),
+                now_iso(),
+                workspace_id,
+            ),
+        )
+
+    def _append_workspace_import_history(
+        self,
+        workspace_id: str,
+        scan_payload: dict[str, Any],
+        result: dict[str, Any],
+        selected_source_ids: list[str],
+    ) -> None:
+        row = self._workspace_row(workspace_id)
+        history = _row_json_list(row, "import_history_json")
+        history.append(
+            {
+                "schema_version": "workspace_import_history.v1",
+                "imported_at": now_iso(),
+                "scan_hash": scan_payload.get("scan_hash"),
+                "selected_source_ids": selected_source_ids,
+                "result": result,
+            }
+        )
+        execute(
+            "UPDATE cp_workspaces SET import_history_json = ?, updated_at = ? WHERE id = ?",
+            (json_dump(history[-25:]), now_iso(), workspace_id),
+        )
+
+    def _apply_workspace_prompt_import(
+        self,
+        workspace_id: str,
+        root_path: str,
+        scan_payload: dict[str, Any],
+        sources: list[Any],
+    ) -> None:
+        row = self._workspace_row(workspace_id)
+        documents = resolve_scope_documents(
+            "workspace",
+            _row_json(row, "spec_json"),
+            _row_json(row, "documents_json"),
+        )
+        current = str(documents.get("system_prompt_md") or "")
+        body_parts = [
+            (
+                f"{_WORKSPACE_IMPORT_START} schema={WORKSPACE_SCAN_SCHEMA_VERSION} "
+                f"scan_hash={scan_payload.get('scan_hash', '')} -->"
+            ),
+            "",
+            "## Imported Workspace Directory Context",
+            "",
+        ]
+        for source in sources:
+            content = read_importable_source_content(root_path, source)
+            if not content:
+                continue
+            body_parts.extend(
+                [
+                    f"### {source.tool}: {source.relative_path}",
+                    "",
+                    f"Source ID: `{source.source_id}`",
+                    "",
+                    content,
+                    "",
+                ]
+            )
+        body_parts.append(_WORKSPACE_IMPORT_END)
+        block = "\n".join(body_parts).strip()
+        cleaned = _WORKSPACE_IMPORT_BLOCK_RE.sub("\n", current).strip()
+        documents["system_prompt_md"] = f"{cleaned}\n\n{block}".strip() if cleaned else block
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET spec_json = ?, documents_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (json_dump({}), json_dump(documents), now_iso(), workspace_id),
+        )
+
+    def _apply_workspace_agent_import(self, workspace_id: str, root_path: str, source: Any) -> dict[str, Any]:
+        base_name = source.name or Path(source.relative_path).stem
+        agent_id = _normalize_agent_id(f"IMPORTED_{workspace_id}_{base_name}")[:64].strip("_")
+        if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (agent_id,)) is not None:
+            return {
+                "created": False,
+                "action": "agent_draft",
+                "agent_id": agent_id,
+                "source_id": source.source_id,
+                "reason": "agent_exists",
+            }
+        agent = self.create_agent(
+            {
+                "id": agent_id,
+                "display_name": base_name,
+                "status": "paused",
+                "organization": {"workspace_id": workspace_id, "squad_id": None},
+                "metadata": {
+                    "imported_from": {
+                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                        "source_id": source.source_id,
+                        "tool": source.tool,
+                        "relative_path": source.relative_path,
+                        "risk": source.risk,
+                    }
+                },
+            }
+        )
+        prompt = read_importable_source_content(root_path, source)
+        if prompt:
+            self.upsert_document(agent_id, "system_prompt_md", {"content_md": prompt})
+        return {
+            "created": True,
+            "action": "agent_draft",
+            "agent_id": agent.get("id", agent_id),
+            "source_id": source.source_id,
+        }
+
+    def _apply_workspace_mcp_candidates(self, workspace_id: str, source: Any) -> list[dict[str, Any]]:
+        created: list[dict[str, Any]] = []
+        servers = source.metadata.get("servers") if isinstance(source.metadata, dict) else []
+        if not isinstance(servers, list):
+            return created
+        for server in servers:
+            if not isinstance(server, dict):
+                continue
+            name = str(server.get("name") or "").strip()
+            if not name:
+                continue
+            server_key = _slug(f"imported_{workspace_id}_{name}")
+            command = [str(server.get("command") or ""), *[str(item) for item in server.get("args") or []]]
+            command = [item for item in command if item]
+            payload = {
+                "display_name": name,
+                "description": f"Imported disabled MCP candidate from {source.relative_path}",
+                "transport_type": "stdio" if command else "sse" if server.get("url") else "stdio",
+                "transport_kind": "remote" if server.get("url") else "local",
+                "command": command,
+                "remote_url": str(server.get("url") or "") or None,
+                "env_schema": [
+                    {"key": str(key), "label": str(key), "required": False} for key in server.get("env_keys") or []
+                ],
+                "enabled": False,
+                "default_policy": "always_ask",
+                "metadata": {
+                    "imported_from": {
+                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                        "workspace_id": workspace_id,
+                        "source_id": source.source_id,
+                        "relative_path": source.relative_path,
+                    },
+                    "review_required": True,
+                },
+            }
+            entry = self.upsert_mcp_catalog_entry(server_key, payload)
+            created.append(
+                {
+                    "action": "mcp_candidate",
+                    "server_key": entry["server_key"],
+                    "source_id": source.source_id,
+                }
+            )
+        return created
 
     def delete_workspace(self, workspace_id: str) -> bool:
         self.ensure_seeded()
@@ -8704,7 +9142,7 @@ class ControlPlaneManager:
     def _general_review_warnings(self, values: dict[str, Any]) -> list[str]:
         warnings: list[str] = []
         models = _safe_json_object(values.get("models"))
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             str(key): _safe_json_object(value)
             for key, value in _safe_json_object(values.get("provider_connections")).items()
         }
@@ -9360,7 +9798,7 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
@@ -9899,7 +10337,7 @@ class ControlPlaneManager:
 
         provider_catalog = self.get_core_providers()
         enabled_providers = normalize_string_list(models.get("providers_enabled"))
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS

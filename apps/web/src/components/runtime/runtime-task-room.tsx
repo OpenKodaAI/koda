@@ -752,6 +752,10 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                 />
               </SharedDetailGrid>
 
+              <SharedDetailBlock title="Source root" monospace>
+                {bundle.environment?.source_root_path || bundle.environment?.base_work_dir || "—"}
+              </SharedDetailBlock>
+
               <SharedDetailBlock title={t("runtime.room.workspace")} monospace>
                 {bundle.environment?.workspace_path || "—"}
               </SharedDetailBlock>

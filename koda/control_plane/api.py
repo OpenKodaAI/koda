@@ -755,6 +755,25 @@ async def create_workspace(request: web.Request) -> web.Response:
     return web.json_response(_manager().create_workspace(payload), status=201)
 
 
+async def list_workspace_directory_roots(request: web.Request) -> web.Response:
+    return web.json_response(_manager().list_workspace_directory_roots())
+
+
+async def list_workspace_directory(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().list_workspace_directory(payload))
+
+
+async def scan_workspace_directory_route(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().scan_workspace_directory(payload))
+
+
+async def import_workspace_from_directory_route(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().import_workspace_from_directory(payload), status=201)
+
+
 async def patch_workspace(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     return web.json_response(_manager().update_workspace(request.match_info["workspace_id"], payload))
@@ -763,6 +782,16 @@ async def patch_workspace(request: web.Request) -> web.Response:
 async def delete_workspace(request: web.Request) -> web.Response:
     _manager().delete_workspace(request.match_info["workspace_id"])
     return web.json_response({"ok": True})
+
+
+async def rescan_workspace_route(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().rescan_workspace(request.match_info["workspace_id"], payload))
+
+
+async def import_workspace_config_route(request: web.Request) -> web.Response:
+    payload = await _json_payload(request)
+    return web.json_response(_manager().import_workspace_config(request.match_info["workspace_id"], payload))
 
 
 async def create_squad(request: web.Request) -> web.Response:
@@ -4698,8 +4727,14 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_delete("/api/control-plane/agents/{agent_id}", delete_agent)
     app.router.add_get("/api/control-plane/workspaces", list_workspaces)
     app.router.add_post("/api/control-plane/workspaces", create_workspace)
+    app.router.add_get("/api/control-plane/workspaces/directory-roots", list_workspace_directory_roots)
+    app.router.add_post("/api/control-plane/workspaces/list-directory", list_workspace_directory)
+    app.router.add_post("/api/control-plane/workspaces/scan-directory", scan_workspace_directory_route)
+    app.router.add_post("/api/control-plane/workspaces/import", import_workspace_from_directory_route)
     app.router.add_patch("/api/control-plane/workspaces/{workspace_id}", patch_workspace)
     app.router.add_delete("/api/control-plane/workspaces/{workspace_id}", delete_workspace)
+    app.router.add_post("/api/control-plane/workspaces/{workspace_id}/rescan", rescan_workspace_route)
+    app.router.add_post("/api/control-plane/workspaces/{workspace_id}/import-config", import_workspace_config_route)
     app.router.add_post("/api/control-plane/workspaces/{workspace_id}/squads", create_squad)
     app.router.add_patch("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}", patch_squad)
     app.router.add_delete("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}", delete_squad)
