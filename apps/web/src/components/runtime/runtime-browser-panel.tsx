@@ -219,7 +219,7 @@ export function RuntimeBrowserPanel({
 
     rfbRef.current?.disconnect?.();
     if (payload.relay_novnc_path && viewportRef.current) {
-      const rfbModule = await import("@novnc/novnc/lib/rfb.js");
+      const rfbModule = await import("@novnc/novnc");
       const RFB = rfbModule.default;
       const rfb = new RFB(
         viewportRef.current,
