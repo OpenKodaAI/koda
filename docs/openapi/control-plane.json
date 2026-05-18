@@ -573,6 +573,195 @@
         }
       }
     },
+    "/api/control-plane/workspaces/directory-roots": {
+      "get": {
+        "summary": "List safe workspace directory roots",
+        "responses": {
+          "200": {
+            "description": "Candidate local roots the operator can browse from the workspace import flow."
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/list-directory": {
+      "post": {
+        "summary": "List a safe local directory",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Directory entries after root validation, symlink escape checks, and ignored-folder filtering."
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/scan-directory": {
+      "post": {
+        "summary": "Scan a workspace directory for importable config",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "workspace_config_scan.v1 preview with detected sources, redacted excerpts, risk labels, blocked execution findings, and scan hash. The operation is non-mutating."
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/import": {
+      "post": {
+        "summary": "Create a workspace from a scanned folder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "selectedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created workspace, scan preview, and import result. Only explicitly selected safe sources are applied."
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/{workspace_id}/rescan": {
+      "post": {
+        "summary": "Rescan an existing workspace root",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated workspace scan metadata and workspace_config_scan.v1 payload."
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/{workspace_id}/import-config": {
+      "post": {
+        "summary": "Apply selected workspace config sources",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "selectedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rescan": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import result with applied prompt blocks, paused agent drafts, disabled MCP candidates, skipped review-only sources, and conflicts."
+          }
+        }
+      }
+    },
     "/api/control-plane/agents": {
       "get": {
         "summary": "List agents",

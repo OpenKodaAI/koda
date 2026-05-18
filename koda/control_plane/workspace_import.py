@@ -76,9 +76,9 @@ SKIP_FILE_PATTERNS = (
 )
 
 SECRET_RE = re.compile(
-    r"(?i)\b(api[_-]?key|secret|token|password|credential|private[_-]?key)\b"
-    r"(\s*[:=]\s*)"
-    r"([\"']?)[A-Za-z0-9_./+=\-]{8,}\3"
+    r"(?i)([\"']?)"
+    r"([A-Za-z0-9_.-]*(?:api[_-]?key|secret|token|password|credential|private[_-]?key)[A-Za-z0-9_.-]*)"
+    r"\1(\s*[:=]\s*)([\"']?)[^\s\"',}]+(\4)"
 )
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -505,6 +505,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
         ]
     if name in {".mcp.json", "mcp.json"} or rel == ".cursor/mcp.json" or rel.startswith(".mcp/"):
         metadata = _parse_mcp_metadata(text)
+        safe_excerpt = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
         return [
             _source(
                 root,
@@ -516,7 +517,7 @@ def _detect_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceSca
                 risk="review",
                 import_action="mcp_review",
                 metadata=metadata,
-                text=text,
+                text=safe_excerpt,
             )
         ]
     if rel.startswith(".claude/agents/") and name.endswith(".md"):
@@ -774,7 +775,11 @@ def _clip(value: str, limit: int) -> str:
 
 
 def _redact_text(value: str) -> str:
-    return SECRET_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", value)
+    return SECRET_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}{match.group(1)}{match.group(3)}"
+        f"{match.group(4)}[REDACTED]{match.group(5)}",
+        value,
+    )
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:

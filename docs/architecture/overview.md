@@ -74,6 +74,9 @@ For Phase 1 runtime contracts, continue with
 [ToolRegistry And Native Tools](tool-registry-native-tools.md).
 For local extensibility contracts, continue with
 [KodaSkill Plugin SDK](koda-skill-plugin-sdk.md).
+For importing existing project-level Codex, Claude, Cursor, MCP, and skill
+configuration into a workspace, continue with
+[Workspace Directory Config Import](workspace-directory-import.md).
 For quality gates and deterministic evals, continue with
 [Evals, Trajectory Export, And Release Quality](evals-release-quality.md).
 For Phase 6 channel identity and first-run readiness, continue with

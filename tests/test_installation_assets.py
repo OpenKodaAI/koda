@@ -906,7 +906,7 @@ def test_embedding_download_client_is_packaged_for_fresh_installs() -> None:
     runtime_dependencies = project["project"]["dependencies"]
     lock_text = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    assert "huggingface-hub>=0.36.0,<1.0" in runtime_dependencies
+    assert "huggingface-hub>=1.14.0,<2.0" in runtime_dependencies
     assert 'name = "huggingface-hub"' in lock_text
 
 

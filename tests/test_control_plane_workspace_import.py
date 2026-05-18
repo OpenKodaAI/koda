@@ -56,6 +56,36 @@ def test_workspace_scanner_detects_sources_redacts_and_blocks_hooks(tmp_path: Pa
     agents = next(source for source in scan["sources"] if source["relative_path"] == "AGENTS.md")
     assert "[REDACTED]" in agents["content_excerpt"]
     assert scan["scan_hash"]
+    mcp_source = next(source for source in scan["sources"] if source["relative_path"] == ".mcp.json")
+    assert mcp_source["metadata"]["servers"][0]["env_keys"] == ["LINEAR_API_KEY"]
+    assert "LINEAR_API_KEY" in mcp_source["content_excerpt"]
+    assert '"x"' not in mcp_source["content_excerpt"]
+    assert '"x"' not in json.dumps(mcp_source["metadata"])
+
+
+def test_workspace_scanner_handles_invalid_files_ignored_dirs_and_stable_hash(tmp_path: Path) -> None:
+    (tmp_path / ".codex" / "agents").mkdir(parents=True)
+    (tmp_path / ".codex" / "agents" / "bad.toml").write_text("name = [", encoding="utf-8")
+    (tmp_path / ".cursor" / "rules").mkdir(parents=True)
+    (tmp_path / ".cursor" / "rules" / "bad.mdc").write_text(
+        "---\n: nope\n---\nBody",
+        encoding="utf-8",
+    )
+    (tmp_path / ".mcp.json").write_text("{not-json", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "AGENTS.md").write_text("ignored", encoding="utf-8")
+
+    first = scan_workspace_directory(str(tmp_path)).to_dict()
+    second = scan_workspace_directory(str(tmp_path)).to_dict()
+    truncated = scan_workspace_directory(str(tmp_path), max_entries=1).to_dict()
+
+    rels = {source["relative_path"] for source in first["sources"]}
+    assert ".codex/agents/bad.toml" in rels
+    assert ".cursor/rules/bad.mdc" in rels
+    assert ".mcp.json" in rels
+    assert "node_modules/AGENTS.md" not in rels
+    assert first["scan_hash"] == second["scan_hash"]
+    assert truncated["summary"]["truncated"] is True
 
 
 class _WorkspaceMemDB:

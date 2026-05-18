@@ -12,6 +12,7 @@ Runbooks for self-hosting Koda after the local or VPS stack is installed.
 | [HITL approvals](hitl-approval-runbook.md) | Before changing approval decisions, pending approval storage, or dashboard approval UX |
 | [Sandbox doctor](sandbox-doctor-runbook.md) | Before changing sandbox policy, doctor checks, MCP isolation, mounts, env, browser, or egress behavior |
 | [Skills and plugins](skills-plugin-runbook.md) | Before scanning, installing, uninstalling, rolling back, or troubleshooting local skill packages |
+| [Workspace directory import](workspace-directory-import-runbook.md) | Before importing Codex, Claude, Cursor, MCP, or skill config from a local project folder |
 | [Evals and release quality](evals-release-runbook.md) | Before creating evals from runs, exporting trajectories, or closing release-quality gates |
 | [Channel gateway](channel-gateway-runbook.md) | Before connecting Telegram, approving senders, debugging identity denials, or rotating channel access |
 | [Onboarding readiness](onboarding-readiness-runbook.md) | Before claiming clean-install readiness, first-use UX completeness, or OSS setup maturity |
