@@ -31,7 +31,7 @@ from koda.agent_contract import (
     resolve_feature_filtered_tools,
     serialize_connection_profile,
 )
-from koda.config import SHARED_PLATFORM_PROMPT, STATE_BACKEND
+from koda.config import AGENT_ID, SHARED_PLATFORM_PROMPT, STATE_BACKEND
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
 from koda.knowledge.config import (
     KNOWLEDGE_V2_EMBEDDING_DIMENSION,
@@ -1186,6 +1186,47 @@ def _downloaded_whisper_catalog_models(payload: dict[str, Any]) -> tuple[list[di
     default_variant = _nonempty_text(payload.get("default_variant"))
     default_model = default_variant if default_variant in downloaded else (downloaded[0] if downloaded else "")
     return items, downloaded, default_model
+
+
+def _provider_command_availability_issues(provider_catalog: dict[str, Any]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    for provider, raw_payload in _safe_json_object(provider_catalog.get("providers")).items():
+        payload = _safe_json_object(raw_payload)
+        if not bool(payload.get("enabled")):
+            continue
+        category = str(payload.get("category") or "general")
+        if category == "infra" or bool(payload.get("command_present")):
+            continue
+        message = f"provider '{provider}' is enabled but its runtime command is not available"
+        if category == "general":
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return errors, warnings
+
+
+def _runtime_endpoint_payload_for_port(port: int) -> dict[str, Any]:
+    return {
+        "health_port": port,
+        "health_url": f"http://127.0.0.1:{port}/health",
+        "runtime_base_url": f"http://127.0.0.1:{port}",
+    }
+
+
+def _runtime_health_port_from_endpoint(endpoint: dict[str, Any]) -> int:
+    raw_port = endpoint.get("health_port")
+    if raw_port not in (None, ""):
+        with contextlib.suppress(TypeError, ValueError):
+            return int(str(raw_port))
+    raw_url = str(endpoint.get("health_url") or endpoint.get("runtime_base_url") or "").strip()
+    if raw_url:
+        with contextlib.suppress(ValueError):
+            parsed = urllib.parse.urlparse(raw_url)
+            parsed_port = parsed.port
+            if parsed_port:
+                return int(parsed_port)
+    return 0
 
 
 def _stringify_env_value(value: Any) -> str:
@@ -3955,6 +3996,48 @@ class ControlPlaneManager:
             return str(payload["error"])
         return f"runtime request failed with status {exc.code}"
 
+    def _post_runtime_session_message(
+        self,
+        *,
+        agent_id: str,
+        runtime_base_url: str,
+        runtime_token: str,
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        def build_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                f"{runtime_base_url}/api/runtime/sessions/messages",
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Runtime-Token": runtime_token,
+                    "User-Agent": "koda/control-plane",
+                },
+                method="POST",
+            )
+
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(build_request(), timeout=20) as response:
+                    return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
+            except urllib.error.HTTPError as exc:
+                message = self._runtime_http_error_message(exc)
+                if exc.code in {502, 503, 504} and attempt == 0:
+                    self._wake_dashboard_runtime(agent_id)
+                    self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
+                    continue
+                if 400 <= exc.code < 500:
+                    raise ValueError(f"runtime rejected dashboard message: {message}") from exc
+                raise RuntimeError(message) from exc
+            except urllib.error.URLError as exc:
+                if attempt == 0:
+                    self._wake_dashboard_runtime(agent_id)
+                    if self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token):
+                        continue
+                raise RuntimeError(f"runtime is unavailable for agent {agent_id}") from exc
+
+        raise RuntimeError(f"runtime is unavailable for agent {agent_id}")
+
     def send_dashboard_session_message(
         self,
         agent_id: str,
@@ -3986,39 +4069,102 @@ class ControlPlaneManager:
         if session_id:
             request_payload["session_id"] = str(session_id).strip()
 
-        def build_request() -> urllib.request.Request:
-            return urllib.request.Request(
-                f"{runtime_base_url}/api/runtime/sessions/messages",
-                data=json.dumps(request_payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Runtime-Token": runtime_token,
-                    "User-Agent": "koda/control-plane",
-                },
-                method="POST",
+        return self._post_runtime_session_message(
+            agent_id=normalized,
+            runtime_base_url=runtime_base_url,
+            runtime_token=runtime_token,
+            request_payload=request_payload,
+        )
+
+    def send_dashboard_squad_message(
+        self,
+        agent_id: str,
+        *,
+        text: str,
+        squad_thread_id: str,
+        session_id: str | None = None,
+        squad_task_id: str | None = None,
+        parent_message_id: str | None = None,
+        delegation_chain: list[str] | None = None,
+        delegation_request_id: str | None = None,
+        delegation_origin_agent_id: str | None = None,
+        telegram_message_thread_id: int | None = None,
+        user_id: int | None = None,
+        chat_id: int | None = None,
+    ) -> dict[str, Any]:
+        normalized, agent_row = self._require_dashboard_agent(agent_id)
+        payload_text = str(text or "").strip()
+        if not payload_text:
+            raise ValueError("text is required")
+        thread_id = str(squad_thread_id or "").strip()
+        if not thread_id:
+            raise ValueError("squad_thread_id is required")
+        agent_status = (
+            str(agent_row["status"] or "").strip().lower()
+            if _row_has_column(agent_row, "status")
+            else str(_safe_json_object(agent_row).get("status") or "").strip().lower()
+        )
+        if agent_status and agent_status != "active":
+            raise ValueError(f"agent {normalized} is {agent_status}; activate it before sending messages")
+
+        runtime_access = self.get_runtime_access(normalized, capability="mutate")
+        runtime_base_url = str(runtime_access.get("runtime_base_url") or "").rstrip("/")
+        runtime_token = str(runtime_access.get("runtime_request_token") or "").strip()
+        if not runtime_base_url:
+            raise RuntimeError("runtime base URL is unavailable for this agent")
+        if not runtime_token:
+            raise RuntimeError("runtime token is not configured for this agent")
+
+        session_seed = f"{thread_id}:{normalized}:{squad_task_id or parent_message_id or uuid4().hex}"
+        resolved_session_id = (
+            str(session_id or "").strip() or f"squad-{hashlib.sha256(session_seed.encode()).hexdigest()[:24]}"
+        )
+        request_payload: dict[str, Any] = {
+            "text": payload_text,
+            "session_id": resolved_session_id,
+            "squad": {
+                "thread_id": thread_id,
+                "target_agent_id": normalized,
+                "squad_task_id": str(squad_task_id).strip() if squad_task_id else None,
+                "parent_message_id": str(parent_message_id).strip() if parent_message_id else None,
+                "delegation_chain": list(delegation_chain or []),
+                "delegation_request_id": str(delegation_request_id).strip() if delegation_request_id else None,
+                "delegation_origin_agent_id": str(delegation_origin_agent_id).strip()
+                if delegation_origin_agent_id
+                else None,
+                "telegram_message_thread_id": telegram_message_thread_id,
+                "user_id": user_id,
+                "chat_id": chat_id,
+            },
+        }
+
+        try:
+            return self._post_runtime_session_message(
+                agent_id=normalized,
+                runtime_base_url=runtime_base_url,
+                runtime_token=runtime_token,
+                request_payload=request_payload,
             )
-
-        for attempt in range(2):
-            try:
-                with urllib.request.urlopen(build_request(), timeout=20) as response:
-                    return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
-            except urllib.error.HTTPError as exc:
-                message = self._runtime_http_error_message(exc)
-                if exc.code in {502, 503, 504} and attempt == 0:
-                    self._wake_dashboard_runtime(normalized)
-                    self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
-                    continue
-                if 400 <= exc.code < 500:
-                    raise ValueError(f"runtime rejected dashboard message: {message}") from exc
-                raise RuntimeError(message) from exc
-            except urllib.error.URLError as exc:
-                if attempt == 0:
-                    self._wake_dashboard_runtime(normalized)
-                    if self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token):
-                        continue
-                raise RuntimeError(f"runtime is unavailable for agent {normalized}") from exc
-
-        raise RuntimeError(f"runtime is unavailable for agent {normalized}")
+        except ValueError as exc:
+            carrier_agent_id = str(AGENT_ID or "").strip().upper()
+            if "invalid runtime token" not in str(exc) or not carrier_agent_id or carrier_agent_id == normalized:
+                raise
+            carrier_access = self.get_runtime_access(carrier_agent_id, capability="mutate")
+            carrier_base_url = str(carrier_access.get("runtime_base_url") or "").rstrip("/")
+            carrier_token = str(carrier_access.get("runtime_request_token") or "").strip()
+            if not carrier_base_url or not carrier_token:
+                raise
+            log.warning(
+                "dashboard_squad_runtime_carrier_fallback",
+                target_agent_id=normalized,
+                carrier_agent_id=carrier_agent_id,
+            )
+            return self._post_runtime_session_message(
+                agent_id=carrier_agent_id,
+                runtime_base_url=carrier_base_url,
+                runtime_token=carrier_token,
+                request_payload=request_payload,
+            )
 
     def list_dashboard_dlq(
         self,
@@ -8288,13 +8434,7 @@ class ControlPlaneManager:
                 )
 
         provider_catalog = _safe_json_object(validation.get("provider_catalog"))
-        provider_errors = [
-            f"provider '{provider}' is enabled but its runtime command is not available"
-            for provider, payload in _safe_json_object(provider_catalog.get("providers")).items()
-            if bool(_safe_json_object(payload).get("enabled"))
-            and str(_safe_json_object(payload).get("category") or "general") != "infra"
-            and not bool(_safe_json_object(payload).get("command_present"))
-        ]
+        provider_errors, provider_warnings = _provider_command_availability_issues(provider_catalog)
         resource_warnings: list[str] = []
         resource_errors: list[str] = []
         shared_env = _safe_json_object(access_effective.get("shared_env"))
@@ -8351,6 +8491,7 @@ class ControlPlaneManager:
         result = {
             **validation,
             "provider_errors": provider_errors,
+            "provider_warnings": provider_warnings,
             "provenance_warnings": provenance_warnings,
             "resource_warnings": resource_warnings,
             "resource_errors": resource_errors,
@@ -8383,6 +8524,7 @@ class ControlPlaneManager:
         result["prompt_preview"] = runtime_prompt_preview
         result["warnings"] = [
             *validation["warnings"],
+            *provider_warnings,
             *provenance_warnings,
             *resource_warnings,
             *runtime_access_warnings,
@@ -9141,12 +9283,51 @@ class ControlPlaneManager:
 
         emit(AuditEvent(event_type=event_type, agent_id=agent_id, task_id=task_id, details=details))
 
+    def _used_runtime_health_ports(self, *, exclude_agent_id: str = "") -> set[int]:
+        excluded = _normalize_agent_id(exclude_agent_id) if exclude_agent_id else ""
+        used: set[int] = set()
+        for row in fetch_all("SELECT id, runtime_endpoint_json FROM cp_agent_definitions ORDER BY id ASC"):
+            row_agent_id = _normalize_agent_id(str(row["id"]))
+            if excluded and row_agent_id == excluded:
+                continue
+            port = _runtime_health_port_from_endpoint(
+                _safe_json_object(json_load(str(row["runtime_endpoint_json"] or "{}"), {}))
+            )
+            if port > 0:
+                used.add(port)
+        return used
+
+    def _normalize_runtime_endpoint_for_agent(
+        self,
+        agent_id: str,
+        runtime_endpoint: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        primary_agent = _normalize_agent_id(os.environ.get("AGENT_ID") or AGENT_ID or "KODA")
+        endpoint = dict(_safe_json_object(runtime_endpoint))
+        requested_port = _runtime_health_port_from_endpoint(endpoint)
+        default_port = 8080 if normalized == primary_agent else 8081
+        used_ports = self._used_runtime_health_ports(exclude_agent_id=normalized)
+        resolved_port = requested_port if requested_port > 0 else default_port
+        if normalized == primary_agent:
+            endpoint.update(_runtime_endpoint_payload_for_port(resolved_port))
+            return endpoint
+        if resolved_port in used_ports:
+            resolved_port = default_port
+            while resolved_port in used_ports:
+                resolved_port += 1
+        endpoint.update(_runtime_endpoint_payload_for_port(resolved_port))
+        return endpoint
+
     def create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = _normalize_agent_id(str(payload.get("id") or ""))
         display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
         storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
         appearance = _safe_json_object(payload.get("appearance"))
-        runtime_endpoint = _safe_json_object(payload.get("runtime_endpoint"))
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
+            agent_id,
+            _safe_json_object(payload.get("runtime_endpoint")),
+        )
         metadata = _safe_json_object(payload.get("metadata"))
         status = _normalize_status(str(payload.get("status") or "paused"))
         workspace_id, squad_id = self._resolve_agent_organization(
@@ -9185,6 +9366,7 @@ class ControlPlaneManager:
         runtime_endpoint = _safe_json_object(payload.get("runtime_endpoint")) or json_load(
             current["runtime_endpoint_json"], {}
         )
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(normalized, runtime_endpoint)
         metadata = json_load(current["metadata_json"], {})
         metadata.update(_safe_json_object(payload.get("metadata")))
         storage_namespace = str(payload.get("storage_namespace") or current["storage_namespace"])
@@ -11828,7 +12010,14 @@ class ControlPlaneManager:
             "health_url": f"http://127.0.0.1:{health_port}/health",
             "runtime_base_url": f"http://127.0.0.1:{health_port}",
         }
-        runtime_endpoint.update(_safe_json_object(json_load(agent_row["runtime_endpoint_json"], {})))
+        stored_runtime_endpoint = _safe_json_object(json_load(agent_row["runtime_endpoint_json"], {}))
+        runtime_endpoint.update(stored_runtime_endpoint)
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(normalized, runtime_endpoint)
+        if runtime_endpoint != stored_runtime_endpoint:
+            execute(
+                "UPDATE cp_agent_definitions SET runtime_endpoint_json = ?, updated_at = ? WHERE id = ?",
+                (json_dump(runtime_endpoint), now_iso(), normalized),
+            )
         # Post-update: re-read health_port in case runtime_endpoint_json overrode it, then
         # propagate to process_env so the spawned worker binds the same port the supervisor
         # expects to poll for liveness/idle checks. Without this the worker falls back to
@@ -12386,6 +12575,7 @@ class ControlPlaneManager:
                     "health_url": f"http://127.0.0.1:{health_port}/health",
                     "runtime_base_url": f"http://127.0.0.1:{health_port}",
                 }
+                runtime_endpoint = self._normalize_runtime_endpoint_for_agent(agent_id, runtime_endpoint)
                 self.create_agent(
                     {
                         "id": agent_id,

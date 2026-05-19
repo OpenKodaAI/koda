@@ -663,6 +663,7 @@ function MemoryPageContent() {
   const showError = showMap && !!error && !data;
   const showInitialLoading = showMap && loading && !data;
   const showCanvas = showMap && data && data.stats.total_memories > 0;
+  const showMapBusy = refreshing || (loading && Boolean(data));
 
   const controlsRow = (
     <div className="flex flex-wrap items-center gap-2">
@@ -750,9 +751,10 @@ function MemoryPageContent() {
             size="sm"
             onClick={() => void fetchData()}
             aria-label={t("memory.map.refreshAria", { defaultValue: "Atualizar" })}
+            aria-busy={showMapBusy || undefined}
           >
             <RefreshCcw
-              className={cn("icon-xs", refreshing && "animate-spin")}
+              className={cn("icon-xs", showMapBusy && "animate-spin")}
               strokeWidth={1.75}
             />
           </Button>

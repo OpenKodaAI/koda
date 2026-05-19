@@ -115,6 +115,7 @@ from koda.utils.artifacts import (
 from koda.utils.command_helpers import (
     ensure_canonical_session_id,
     get_provider_model,
+    init_user_data,
     normalize_provider,
     sync_user_data_with_runtime_settings,
     tts_enabled_for_session,
@@ -2262,6 +2263,7 @@ async def enqueue_squad_agent_task(
     from koda.services import audit
 
     context = build_runtime_context(application, user_id, bot_override=bot_override)
+    init_user_data(context.user_data, user_id=user_id)
     provider = context.user_data.get("provider")
     model = get_provider_model(context.user_data, provider)
     task_id = create_task(
@@ -6519,6 +6521,12 @@ def _render_existing_squad_task_request(task: Any) -> str:
         f"Task request [{task.kind}] {task.id}",
         f"Assigned to: {task.assigned_agent_id or 'unassigned'}",
         "",
+        "Execution role:",
+        "- You are the assigned worker for this task, not the squad coordinator.",
+        "- The coordinator has already delegated the work. Do not spawn, delegate, or ask others to do this task.",
+        "- Treat prior thread context as context only; your responsibility is the Objective below.",
+        "- Return only your own concrete task_result for this assigned objective.",
+        "",
         "Objective:",
         str(task.description or "").strip(),
     ]
@@ -6531,7 +6539,7 @@ def _render_existing_squad_task_request(task: Any) -> str:
     lines.extend(
         [
             "",
-            "Return a concrete task_result in this thread using only visible squad context.",
+            "Return a concrete task_result in this thread using visible squad context and without progress narration.",
         ]
     )
     return "\n".join(lines)
@@ -6691,7 +6699,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
     try:
-        from koda.squads import get_squad_task_store, get_squad_thread_store
+        from koda.squads import dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
 
         thread_store = get_squad_thread_store()
         task_store = get_squad_task_store()
@@ -6703,42 +6711,76 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
         if thread.coordinator_agent_id == executing_agent:
             return
-        open_tasks = await task_store.list_tasks(
-            thread_id=ctx.squad_thread_id,
-            status=["pending", "claimed", "in_progress", "blocked"],
-            limit=1,
-        )
+        open_tasks = []
+        for attempt in range(4):
+            open_tasks = await task_store.list_tasks(
+                thread_id=ctx.squad_thread_id,
+                status=["pending", "claimed", "in_progress", "blocked"],
+                limit=1,
+            )
+            if not open_tasks:
+                break
+            if attempt < 3:
+                await asyncio.sleep(0.5)
         if open_tasks:
             return
+        synthesis_parent_id = ctx.parent_message_id
+        synthesis_idempotency_key = (
+            f"squad_synthesis:{ctx.squad_thread_id}:{synthesis_parent_id}:{thread.coordinator_agent_id}"
+        )
+        visible_results: list[str] = []
+        confirmed_results: list[str] = []
+        with contextlib.suppress(Exception):
+            history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
+            for message in history:
+                raw_metadata = message.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+                if metadata.get("idempotency_key") == synthesis_idempotency_key:
+                    return
+            for message in reversed(history):
+                if message.get("type") != "task_result":
+                    continue
+                raw_metadata = message.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+                if metadata.get("parent_message_id") != ctx.parent_message_id:
+                    continue
+                task_id = str(metadata.get("squad_task_id") or "").strip()
+                if not task_id:
+                    continue
+                agent = str(message.get("from") or "agent").strip() or "agent"
+                content = str(message.get("content") or "").strip()
+                if content:
+                    visible_results.append(f"{agent} / {task_id}:\n{content[:1500]}")
+                    first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
+                    if first_line:
+                        confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
+        if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
+            visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
+            first_line = next((line.strip() for line in response_text.splitlines() if line.strip()), "")
+            if first_line:
+                confirmed_results.append(f"- {executing_agent} / {ctx.squad_task_id}: {first_line[:500]}")
+        visible_results_block = "\n\n".join(visible_results)
+        confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         synthesis_query = (
             "Todos os task_result abertos deste ciclo já foram recebidos. "
-            "Sintetize a entrega final para o usuário usando apenas resultados visíveis no thread. "
-            f"Último resultado ({executing_agent}): {response_text[:1200]}"
+            "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
+            "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
+            "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
+            "não os traduza, normalize ou parafraseie. "
+            "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
+            "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
+            f"Resultados confirmados:\n{confirmed_results_block}\n\n"
+            f"Resultados visíveis deste ciclo:\n{visible_results_block}"
         )
-        app = getattr(context, "application", None)
-        chat_id = int(thread.telegram_chat_id or 0)
-        if app is not None and chat_id:
-            await enqueue_squad_agent_task(
-                application=app,
-                user_id=user_id or int(thread.owner_user_id or 0),
-                chat_id=chat_id,
-                query_text=synthesis_query,
-                executing_agent_id=thread.coordinator_agent_id,
-                squad_thread_id=ctx.squad_thread_id,
-                parent_message_id=squad_message_id or ctx.parent_message_id,
-                delegation_chain=[executing_agent],
-                telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
-                bot_override=getattr(context, "bot", None),
-            )
-            return
-        from koda.agents import get_message_bus
-
-        await get_message_bus().send(
-            from_agent=executing_agent,
-            to_agent=thread.coordinator_agent_id,
-            content=synthesis_query,
+        await dispatch_squad_turn(
+            target_agent_id=thread.coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=squad_message_id or ctx.parent_message_id,
             metadata={
                 "kind": "task_result",
+                "from_agent": executing_agent,
                 "thread_id": ctx.squad_thread_id,
                 "squad_id": thread.squad_id,
                 "parent_message_id": squad_message_id or ctx.parent_message_id,
@@ -6746,6 +6788,8 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
                 "user_id": user_id or thread.owner_user_id,
                 "chat_id": thread.telegram_chat_id or 0,
+                "delivery_intent": "final_synthesis",
+                "idempotency_key": synthesis_idempotency_key,
                 "payload": {
                     "task_id": ctx.squad_task_id,
                     "status": "ok",
@@ -6753,6 +6797,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                     "artifact_ids": artifact_ids,
                 },
             },
+            application=getattr(context, "application", None),
+            user_id=user_id or int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=[executing_agent],
+            delegation_request_id=synthesis_idempotency_key,
+            delegation_origin_agent_id=executing_agent,
+            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+            bot_override=getattr(context, "bot", None),
         )
     except Exception:
         log.exception(

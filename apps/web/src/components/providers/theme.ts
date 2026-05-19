@@ -61,7 +61,15 @@ export function buildThemeBootstrapScript({
 
   function readCookie(name) {
     var cookieName = name + "=";
-    var entries = document.cookie ? document.cookie.split("; ") : [];
+    var rawCookie = "";
+
+    try {
+      rawCookie = document.cookie || "";
+    } catch (error) {
+      return null;
+    }
+
+    var entries = rawCookie ? rawCookie.split("; ") : [];
 
     for (var index = 0; index < entries.length; index += 1) {
       var entry = entries[index];

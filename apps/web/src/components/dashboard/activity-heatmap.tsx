@@ -5,6 +5,7 @@ import type { DailyActivityResult } from "@/hooks/use-daily-activity";
 import { SoftTabs, type SoftTabItem } from "@/components/ui/soft-tabs";
 import { cn } from "@/lib/utils";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { ACTIVITY_HEATMAP_COLORS } from "@/lib/activity-palette";
 
 export interface ActivityHeatmapStat {
   label: string;
@@ -25,14 +26,6 @@ interface ActivityHeatmapProps {
   scopeSlot?: ReactNode;
   legend?: { less: string; more: string };
 }
-
-const ACTIVITY_COLORS: Record<number, string> = {
-  0: "var(--panel-soft)",
-  1: "#0e4429",
-  2: "#006d32",
-  3: "#26a641",
-  4: "#39d353",
-};
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -92,7 +85,7 @@ function ActivityHeatmapComponent({
                   key={step}
                   className="h-[10px] w-[10px] rounded-[3px] border border-[var(--divider-hair)]"
                   style={{
-                    background: ACTIVITY_COLORS[step],
+                    background: ACTIVITY_HEATMAP_COLORS[step],
                   }}
                 />
               ))}
@@ -139,7 +132,7 @@ function ActivityHeatmapComponent({
             {weeks.map((week, colIdx) => (
               <div key={`col-${colIdx}`} role="row" className="flex flex-col gap-[5px]">
                 {week.map((cell, rowIdx) => {
-                  const background = ACTIVITY_COLORS[cell.intensity] ?? ACTIVITY_COLORS[0];
+                  const background = ACTIVITY_HEATMAP_COLORS[cell.intensity] ?? ACTIVITY_HEATMAP_COLORS[0];
                   const tooltip = tooltipTemplate
                     ? tooltipTemplate(cell)
                     : cell.count > 0

@@ -2,8 +2,6 @@ import "server-only";
 
 import { ControlPlaneRequestError, getControlPlaneAgents } from "@/lib/control-plane";
 
-let didWarnAgentCatalogUnavailable = false;
-
 function isControlPlaneFetchFailure(error: unknown) {
   return (
     error instanceof ControlPlaneRequestError ||
@@ -27,12 +25,6 @@ export async function getCachedAgentDisplays() {
       throw error;
     }
 
-    if (!didWarnAgentCatalogUnavailable) {
-      didWarnAgentCatalogUnavailable = true;
-      console.warn("bot_catalog_cache_unavailable", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
     return [];
   }
 }

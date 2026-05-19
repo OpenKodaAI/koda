@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from koda.squads.delivery import SquadMemberProfile
     from koda.squads.semantic_router import SemanticRoutingResult
 
 _MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z][A-Za-z0-9_-]*)")
@@ -50,6 +51,7 @@ def select_targets(
     capability_hints: dict[str, str] | None = None,
     semantic_result: SemanticRoutingResult | None = None,
     explicit_mention_agent_ids: Iterable[str] | None = None,
+    member_profiles: Iterable[SquadMemberProfile] | None = None,
 ) -> list[str]:
     """Decide which squad members should be notified about ``text``.
 
@@ -73,6 +75,14 @@ def select_targets(
             agent_id for agent_id in semantic_result.top_agents(include_coordinator=False) if agent_id in participants
         ]
         if semantic_targets:
+            if member_profiles is not None:
+                from koda.squads.delivery import rank_targets_for_delivery
+
+                return rank_targets_for_delivery(
+                    semantic_targets,
+                    member_profiles=member_profiles,
+                    semantic_result=semantic_result,
+                )
             return semantic_targets
     _ = capability_hints
     if coordinator_agent_id and coordinator_agent_id in participants:

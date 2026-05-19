@@ -14,6 +14,8 @@ import { createPortal } from "react-dom";
 import {
   CheckCheck,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   FolderPlus,
   FolderOpen,
@@ -47,6 +49,7 @@ import {
   useEscapeToClose,
 } from "@/hooks/use-animated-presence";
 import { useToast } from "@/hooks/use-toast";
+import { useUrlSyncedSearch } from "@/hooks/use-url-synced-search";
 import { cn } from "@/lib/utils";
 import type {
   ControlPlaneAgentSummary,
@@ -64,6 +67,13 @@ import type {
 const NO_WORKSPACE_KEY = "__no_workspace__";
 const NO_SQUAD_KEY = "__no_squad__";
 const MIN_WORKSPACE_LANES = 3;
+
+export function getAgentBoardLaneWidth(laneCount: number): string {
+  if (laneCount <= 1) return "min(100%, 22rem)";
+  if (laneCount === 2) return "clamp(17rem, calc((100% - 1rem) / 2), 22rem)";
+  if (laneCount === 3) return "clamp(17rem, calc((100% - 2rem) / 3), 22rem)";
+  return "clamp(16rem, 72vw, 22rem)";
+}
 
 /*  WorkspaceSelectorDropdown                                         */
 
@@ -752,7 +762,9 @@ export function AgentCatalog({
 
   const { createAgent: createAgentViaHook } = useCreateAgent();
 
-  const [search, setSearch] = useState("");
+  const searchState = useUrlSyncedSearch({ debounceMs: 180 });
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
   const [duplicatingBotId, setDuplicatingBotId] = useState<string | null>(null);
   const [organizationForm, setOrganizationForm] =
     useState<OrganizationFormState | null>(null);
@@ -922,7 +934,7 @@ export function AgentCatalog({
     };
   }, [catalogAgents, workspaceTree.items]);
 
-  const searchQuery = normalizeSearchValue(search);
+  const searchQuery = normalizeSearchValue(searchState.debouncedValue);
 
   const filteredAgents = useMemo(
     () => catalogAgents.filter((agent) => matchesAgentSearch(agent, searchQuery)),
@@ -1814,6 +1826,9 @@ export function AgentCatalog({
               onChange={setSearch}
               placeholder={tl("Buscar por nome, ID, workspace ou squad...")}
               ariaLabel={tl("Buscar bots por nome, ID, workspace ou squad")}
+              loading={searchState.isSearching}
+              loadingLabel={tl("Buscando agentes")}
+              clearLabel={tl("Limpar busca")}
             />
           </div>
 
@@ -2060,52 +2075,48 @@ export function AgentCatalog({
               })()
             ) : (
               <div className="flex min-h-0 flex-1 flex-col space-y-2">
-                {activeSection.lanes.length > 3 ? (
-                  <div className="flex shrink-0 items-center justify-end gap-2">
+                <div className="agent-board-lane-carousel min-h-0 flex-1">
+                  {activeSection.lanes.length > 3 ? (
+                    <>
                     <ActionButton
                       type="button"
                       size="icon"
+                      className="agent-board-lane-nav agent-board-lane-nav--prev"
                       aria-label={tl("Mostrar squads anteriores de {{section}}", { section: activeSection.title })}
                       onClick={() => scrollLaneRail(activeSection.key, -1)}
                     >
-                      ←
+                      <ChevronLeft className="h-4 w-4" strokeWidth={1.8} aria-hidden />
                     </ActionButton>
                     <ActionButton
                       type="button"
                       size="icon"
+                      className="agent-board-lane-nav agent-board-lane-nav--next"
                       aria-label={tl("Mostrar mais squads de {{section}}", { section: activeSection.title })}
                       onClick={() => scrollLaneRail(activeSection.key, 1)}
                     >
-                      →
+                      <ChevronRight className="h-4 w-4" strokeWidth={1.8} aria-hidden />
                     </ActionButton>
-                  </div>
-                ) : null}
+                    </>
+                  ) : null}
 
-                <div
-                  ref={(node) => {
-                    laneRailRefs.current[activeSection.key] = node;
-                  }}
-                  data-testid={`lane-rail-${activeSection.key}`}
-                  onMouseDown={(event) =>
-                    handleLaneRailMouseDown(event, activeSection.key)
-                  }
-                    className={`catalog-lane-rail flex min-h-0 flex-1 items-stretch gap-4 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory ${
-                      laneRailDraggingKey === activeSection.key
-                        ? "catalog-lane-rail--dragging"
-                        : ""
-                    }`}
-                    {...tourAnchor("catalog.lanes")}
-                  >
+                  <div
+                    ref={(node) => {
+                      laneRailRefs.current[activeSection.key] = node;
+                    }}
+                    data-testid={`lane-rail-${activeSection.key}`}
+                    onMouseDown={(event) =>
+                      handleLaneRailMouseDown(event, activeSection.key)
+                    }
+                      className={`catalog-lane-rail flex min-h-0 flex-1 items-stretch gap-4 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory ${
+                        laneRailDraggingKey === activeSection.key
+                          ? "catalog-lane-rail--dragging"
+                          : ""
+                      }`}
+                      {...tourAnchor("catalog.lanes")}
+                    >
                   {activeSection.lanes.map((lane) => {
                     const isDropTarget = dropTargetKey === lane.key;
-                    const laneWidth =
-                      activeSection.lanes.length === 1
-                        ? "100%"
-                        : activeSection.lanes.length === 2
-                          ? "calc((100% - 1rem) / 2)"
-                          : activeSection.lanes.length === 3
-                            ? "calc((100% - 2rem) / 3)"
-                            : "clamp(18.5rem, 88vw, 30rem)";
+                    const laneWidth = getAgentBoardLaneWidth(activeSection.lanes.length);
 
                     return (
                       <section
@@ -2254,6 +2265,7 @@ export function AgentCatalog({
                       </section>
                     );
                   })}
+                  </div>
                 </div>
               </div>
             )}

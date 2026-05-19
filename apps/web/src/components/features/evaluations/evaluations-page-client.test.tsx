@@ -194,12 +194,12 @@ describe("EvaluationsPageClient", () => {
     expect(await screen.findByText("Eval cases")).toBeInTheDocument();
     expect(screen.getAllByText("Tool regression smoke").length).toBeGreaterThan(0);
     expect(screen.getByText("Release quality")).toBeInTheDocument();
-    expect(screen.getByText("Eval readiness")).toBeInTheDocument();
+    expect(screen.getByText("Case readiness")).toBeInTheDocument();
     expect(screen.getByText("1/1 cases ready")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Runs" }));
     expect(await screen.findByText("Run detail")).toBeInTheDocument();
-    expect(screen.getByText("Eval run health")).toBeInTheDocument();
+    expect(screen.getByText("Suite health")).toBeInTheDocument();
     expect(screen.getByText("policy changed")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Release" }));

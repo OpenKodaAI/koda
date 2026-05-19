@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useSyncExternalStore } from "react";
 import { Check } from "lucide-react";
+import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/browser-storage";
 import { cn } from "@/lib/utils";
 
 export interface AvatarOption {
@@ -116,7 +117,7 @@ export function getAvatarOption(avatarId: string | null | undefined) {
 
 export function readStoredOperatorAvatar() {
   if (typeof window === "undefined") return avatarOptions[0].id;
-  return getAvatarOption(window.localStorage.getItem(OPERATOR_AVATAR_STORAGE_KEY)).id;
+  return getAvatarOption(safeLocalStorageGet(OPERATOR_AVATAR_STORAGE_KEY)).id;
 }
 
 function getServerOperatorAvatarSnapshot() {
@@ -137,7 +138,7 @@ function subscribeToStoredOperatorAvatar(onStoreChange: () => void) {
 export function writeStoredOperatorAvatar(avatarId: string) {
   if (typeof window === "undefined") return getAvatarOption(avatarId).id;
   const normalized = getAvatarOption(avatarId).id;
-  window.localStorage.setItem(OPERATOR_AVATAR_STORAGE_KEY, normalized);
+  safeLocalStorageSet(OPERATOR_AVATAR_STORAGE_KEY, normalized);
   window.dispatchEvent(new CustomEvent(OPERATOR_AVATAR_CHANGED_EVENT, { detail: { avatarId: normalized } }));
   return normalized;
 }

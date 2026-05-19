@@ -132,7 +132,7 @@ export function ExecutionTable({
   return (
     <div className="overflow-hidden rounded-[var(--radius-shell)] border border-[color:var(--border-subtle)] bg-[var(--panel)]">
       {/* Desktop */}
-      <div className="hidden overflow-x-auto overflow-y-hidden overscroll-x-contain md:block">
+      <div className="hidden overflow-x-auto overscroll-x-contain md:block">
         <div className="min-w-[960px]">
           {/* Column header */}
           <div
@@ -165,7 +165,7 @@ export function ExecutionTable({
           </div>
 
           {/* Rows */}
-          <div className="flex flex-col">
+          <div className="flex max-h-[620px] min-h-[280px] flex-col overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-25rem)]">
             {loading &&
               Array.from({ length: 5 }).map((_, i) => (
                 <SkeletonDesktopRow key={i} cols={cols} />
@@ -269,7 +269,7 @@ export function ExecutionTable({
       </div>
 
       {/* Mobile */}
-      <div className="flex flex-col md:hidden">
+      <div className="flex max-h-[calc(100vh-21rem)] min-h-[320px] flex-col overflow-y-auto overscroll-contain md:hidden">
         {loading &&
           Array.from({ length: 4 }).map((_, i) => (
             <MobileSkeletonCard key={i} />

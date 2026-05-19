@@ -1,9 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { SessionArtifactRail } from "@/components/sessions/context/session-artifact-rail";
+import { ToastProvider } from "@/hooks/use-toast";
 import type { RoomEntry } from "@/hooks/use-rooms";
 import type { SessionDetail, SessionSummary } from "@/lib/types";
 
@@ -106,10 +109,128 @@ const room: RoomEntry = {
 };
 
 function renderRail(ui: ReactNode) {
-  return render(<I18nProvider initialLanguage="en-US">{ui}</I18nProvider>);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider initialLanguage="en-US">
+        <ToastProvider>
+          <AgentCatalogProvider
+            initialAgents={[
+              {
+                id: "ATLAS",
+                label: "ATLAS",
+                color: "#ff5a5a",
+                colorRgb: "255, 90, 90",
+                initials: "AT",
+                status: "active",
+                model: "Claude Sonnet",
+              },
+              {
+                id: "SAGE",
+                label: "Sage",
+                color: "#5b8cff",
+                colorRgb: "91, 140, 255",
+                initials: "SA",
+                status: "active",
+                model: "Claude Sonnet",
+              },
+              {
+                id: "NOVA",
+                label: "Nova",
+                color: "#56c271",
+                colorRgb: "86, 194, 113",
+                initials: "NO",
+                status: "active",
+                model: "Claude Sonnet",
+              },
+            ]}
+          >
+            {ui}
+          </AgentCatalogProvider>
+        </ToastProvider>
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
 }
 
 describe("SessionArtifactRail", () => {
+  beforeEach(() => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/control-plane/dashboard/squads/threads/room-1")) {
+        return new Response(
+          JSON.stringify({
+            thread: {
+              id: "room-1",
+              workspaceId: "workspace-1",
+              squadId: "DEMO_SQUAD",
+              title: "Smoke test room",
+              status: "open",
+              ownerUserId: 1,
+              coordinatorAgentId: "ATLAS",
+              currentOwnerAgentId: null,
+              telegramChatId: null,
+              telegramMessageThreadId: null,
+              budgetUsdCap: null,
+              costUsdAccum: "0",
+              photoUrl: null,
+              metadata: {},
+              createdAt: "2026-03-28T10:00:00.000Z",
+              updatedAt: "2026-03-28T10:05:00.000Z",
+            },
+            coordinatorAgentId: "ATLAS",
+            participants: [
+              {
+                agentId: "ATLAS",
+                role: "coordinator",
+                joinedAt: "2026-03-28T10:00:00.000Z",
+                leftAt: null,
+              },
+              {
+                agentId: "SAGE",
+                role: "worker",
+                joinedAt: "2026-03-28T10:00:00.000Z",
+                leftAt: null,
+              },
+              {
+                agentId: "NOVA",
+                role: "worker",
+                joinedAt: "2026-03-28T10:00:00.000Z",
+                leftAt: null,
+              },
+            ],
+            recentMessages: [],
+            page: { limit: 32, returned: 0, nextCursor: null, hasMore: false },
+            activeTasks: [],
+            artifacts: [],
+            openTaskCount: 0,
+            doneTaskCount: 0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.includes("/api/control-plane/agents")) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              { id: "ATLAS", status: "active" },
+              { id: "SAGE", status: "active" },
+              { id: "NOVA", status: "active" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("does not render a conversation panel when there are no files", () => {
     renderRail(
       <SessionArtifactRail
@@ -138,23 +259,22 @@ describe("SessionArtifactRail", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("renders room context without inventing files", () => {
-    const onOpenRoomSettings = vi.fn();
+  it("renders full room details inline without a settings drawer button", async () => {
     renderRail(
       <SessionArtifactRail
         detail={null}
         summary={null}
         room={room}
-        onOpenRoomSettings={onOpenRoomSettings}
       />,
     );
 
-    expect(screen.getByText("Room")).toBeInTheDocument();
-    expect(screen.getByText("Smoke test room")).toBeInTheDocument();
-    expect(screen.getByText("3 agents")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Smoke test room")).toBeInTheDocument();
+    expect(screen.getByText("3 members")).toBeInTheDocument();
+    expect(screen.queryByText("Thread ID")).not.toBeInTheDocument();
+    expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.queryByText("Files")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /room settings/i }));
-    expect(onOpenRoomSettings).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /room settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /collapse panel/i })).not.toBeInTheDocument();
   });
 
   it("renders room reply obligations from backend-shaped thread messages", () => {

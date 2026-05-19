@@ -10,7 +10,7 @@ import {
   type UIEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, LoaderCircle, Plus, Search } from "lucide-react";
 import { AgentGlyph } from "@/components/ui/agent-glyph";
@@ -18,6 +18,7 @@ import { AgentGlyphGroup } from "@/components/ui/agent-glyph-group";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useCreateAgent } from "@/hooks/use-create-agent";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   resolveAgentSelection,
   toggleAgentSelection,
@@ -91,14 +92,16 @@ export function AgentSwitcher({
   } | null>(null);
 
   const normalizedSearch = search.trim();
+  const debouncedSearch = useDebouncedValue(normalizedSearch, 180);
   const agentPagesQuery = useInfiniteQuery({
-    queryKey: ["control-plane", "agents", "switcher", normalizedSearch],
+    queryKey: ["control-plane", "agents", "switcher", debouncedSearch],
     queryFn: ({ pageParam }) =>
-      fetchAgentSwitcherPage(normalizedSearch, Number(pageParam)),
+      fetchAgentSwitcherPage(debouncedSearch, Number(pageParam)),
     initialPageParam: 0,
     enabled: open,
     staleTime: 10_000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
     getNextPageParam: (lastPage) =>
       lastPage.has_more && lastPage.items.length > 0
         ? lastPage.offset + lastPage.items.length
@@ -162,10 +165,17 @@ export function AgentSwitcher({
 
   const visibleAgents = useMemo(
     () =>
-      agentPagesQuery.data
+      agentPagesQuery.data && normalizedSearch === debouncedSearch && !agentPagesQuery.isPlaceholderData
         ? pagedAgents
         : filteredCatalogAgents.slice(0, AGENT_SWITCHER_PAGE_SIZE),
-    [agentPagesQuery.data, filteredCatalogAgents, pagedAgents],
+    [
+      agentPagesQuery.data,
+      agentPagesQuery.isPlaceholderData,
+      debouncedSearch,
+      filteredCatalogAgents,
+      normalizedSearch,
+      pagedAgents,
+    ],
   );
 
   const firstPage = agentPagesQuery.data?.pages[0];

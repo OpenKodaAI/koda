@@ -459,11 +459,14 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
     snapshot.process_env["PATH"] = "/snapshot/bin"  # snapshot tries to override
     snapshot.process_env["AGENT_ID"] = "AGENT_E"
     snapshot.process_env["POSTGRES_URL"] = "postgres://stale"
+    snapshot.process_env["INTER_AGENT_BUS_BACKEND"] = "memory"
 
     parent_env = {
         "PATH": "/usr/bin:/usr/local/bin",
         "HOME": "/workspace/koda",
         "POSTGRES_URL": "postgres://live",
+        "INTER_AGENT_BUS_BACKEND": "postgres",
+        "SQUAD_BUS_LISTEN_ENABLED": "false",
         "DANGEROUS_LEAK": "should-not-forward",
     }
     with patch.dict(os.environ, parent_env, clear=False):
@@ -477,6 +480,8 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
     assert env["AGENT_ID"] == "AGENT_E"
     # System-critical infra env is forced from parent regardless of snapshot.
     assert env["POSTGRES_URL"] == "postgres://live"
+    assert env["INTER_AGENT_BUS_BACKEND"] == "postgres"
+    assert env["SQUAD_BUS_LISTEN_ENABLED"] == "false"
     # Non-whitelisted host env never leaks.
     assert "DANGEROUS_LEAK" not in env
     # Boot guard so the worker boots in agent mode.

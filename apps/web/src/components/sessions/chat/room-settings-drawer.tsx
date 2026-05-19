@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import {
@@ -16,12 +15,12 @@ import {
   Archive,
   Check,
   ChevronDown,
-  Copy,
   Crown,
   Eye,
   LoaderCircle,
   MessageSquare,
   Pause,
+  PencilLine,
   Play,
   Plus,
   UserMinus,
@@ -41,6 +40,7 @@ import { RoomPhotoEditor } from "@/components/sessions/chat/room-photo-editor";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
+import { useToast } from "@/hooks/use-toast";
 import {
   fetchControlPlaneDashboardJson,
   mutateControlPlaneDashboardJson,
@@ -56,6 +56,16 @@ interface RoomSettingsDrawerProps {
   threadId: string;
   /** Notified when the user archives the room from settings. */
   onArchived?: () => void;
+}
+
+interface RoomSettingsPanelProps {
+  threadId: string;
+  enabled?: boolean;
+  /** Notified when the user archives the room from settings. */
+  onArchived?: () => void;
+  onClose?: () => void;
+  variant?: "drawer" | "rail";
+  className?: string;
 }
 
 interface AgentRow {
@@ -93,14 +103,44 @@ export function RoomSettingsDrawer({
   onArchived,
 }: RoomSettingsDrawerProps) {
   const { t } = useAppI18n();
+
+  return (
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      modal
+      title={t("sessions.room.settings.title", { defaultValue: "Info" })}
+      width="min(460px, 92vw)"
+    >
+      <RoomSettingsPanel
+        threadId={threadId}
+        enabled={open}
+        onArchived={onArchived}
+        onClose={() => onOpenChange(false)}
+      />
+    </Drawer>
+  );
+}
+
+export function RoomSettingsPanel({
+  threadId,
+  enabled = true,
+  onArchived,
+  onClose,
+  variant = "drawer",
+  className,
+}: RoomSettingsPanelProps) {
+  const { t } = useAppI18n();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const { agents } = useAgentCatalog();
+  const inline = variant === "rail";
 
   const detailQuery = useControlPlaneQuery<SquadThreadOverviewResponse>({
     tier: "live",
     queryKey: queryKeys.dashboard.squadThread(threadId),
-    enabled: open,
-    refetchInterval: open ? 15_000 : false,
+    enabled,
+    refetchInterval: enabled ? 15_000 : false,
     notifyOnChangeProps: ["data", "error"],
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
@@ -128,7 +168,7 @@ export function RoomSettingsDrawer({
     queryKey: queryKeys.controlPlane.agents(),
     queryFn: () =>
       requestJson<{ items?: AgentRow[] }>("/api/control-plane/agents"),
-    enabled: open,
+    enabled,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
@@ -173,42 +213,37 @@ export function RoomSettingsDrawer({
 
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [photoDraft, setPhotoDraft] = useState("");
+  const [titleDirty, setTitleDirty] = useState(false);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [savingMeta, setSavingMeta] = useState(false);
-  const [bannerError, setBannerError] = useState<string | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archivingPending, setArchivingPending] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [pendingMutation, setPendingMutation] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState(false);
-  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Seed editable drafts each time we enter edit mode or the detail loads.
+  // Keep the inline title in sync with server data unless the user is actively
+  // editing it. This avoids clobbering typed text during background refreshes.
   useEffect(() => {
-    if (!open) return;
+    if (!enabled) return;
     if (!detail) return;
+    if (titleDirty) return;
     setTitleDraft(detail.thread.title || "");
-    setPhotoDraft(detail.thread.photoUrl || "");
-  }, [detail, open]);
+  }, [detail, enabled, titleDirty]);
 
-  // Reset transient state when the drawer closes.
   useEffect(() => {
-    if (open) return;
+    setPhotoPreviewUrl(null);
+  }, [detail?.thread.photoUrl]);
+
+  // Reset transient state when the panel becomes inactive.
+  useEffect(() => {
+    if (enabled) return;
     setEditing(false);
-    setBannerError(null);
+    setTitleDirty(false);
+    setPhotoPreviewUrl(null);
     setArchiveOpen(false);
     setShowAddPicker(false);
-    setCopiedId(false);
-    if (copyResetRef.current) {
-      clearTimeout(copyResetRef.current);
-      copyResetRef.current = null;
-    }
-  }, [open]);
-
-  useEffect(() => () => {
-    if (copyResetRef.current) clearTimeout(copyResetRef.current);
-  }, []);
+  }, [enabled]);
 
   const invalidateThread = useCallback(() => {
     void queryClient.invalidateQueries({
@@ -225,19 +260,24 @@ export function RoomSettingsDrawer({
     });
   }, [queryClient, threadId]);
 
-  const handleSaveMetadata = useCallback(async () => {
-    if (savingMeta) return;
+  const showRequestError = useCallback(
+    (error: unknown, fallback = "Unknown error") => {
+      showToast(error instanceof Error && error.message.trim() ? error.message : fallback, "error");
+    },
+    [showToast],
+  );
+
+  const handleSaveTitle = useCallback(async () => {
+    if (savingMeta || !detail) return;
     const nextTitle = titleDraft.trim();
     const currentTitle = (detail?.thread.title ?? "").trim();
     const titleChanged = nextTitle && nextTitle !== currentTitle;
     if (!titleChanged) {
-      // Photo edits persist on upload (their own POST); rename is the only
-      // payload this batch save still needs to handle.
-      setEditing(false);
+      setTitleDraft(currentTitle);
+      setTitleDirty(false);
       return;
     }
     setSavingMeta(true);
-    setBannerError(null);
     try {
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "PATCH",
@@ -247,26 +287,43 @@ export function RoomSettingsDrawer({
         }),
       });
       invalidateThread();
-      setEditing(false);
+      setTitleDraft(nextTitle);
+      setTitleDirty(false);
     } catch (err) {
-      setBannerError(err instanceof Error ? err.message : "Unknown error");
+      showRequestError(err);
     } finally {
       setSavingMeta(false);
     }
   }, [
-    detail?.thread.title,
+    detail,
     invalidateThread,
     savingMeta,
+    showRequestError,
     t,
     threadId,
     titleDraft,
   ]);
 
+  const handleTitleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.currentTarget.blur();
+        return;
+      }
+      if (event.key === "Escape") {
+        setTitleDraft((detail?.thread.title ?? "").trim());
+        setTitleDirty(false);
+        event.currentTarget.blur();
+      }
+    },
+    [detail?.thread.title],
+  );
+
   const handleSetRole = useCallback(
     async (agentId: string, nextRole: ParticipantRole) => {
       if (pendingMutation) return;
       setPendingMutation(`role:${agentId}`);
-      setBannerError(null);
       try {
         await mutateControlPlaneDashboardJson(
           `/squads/threads/${threadId}/participants/${encodeURIComponent(agentId)}`,
@@ -280,19 +337,18 @@ export function RoomSettingsDrawer({
         );
         invalidateThread();
       } catch (err) {
-        setBannerError(err instanceof Error ? err.message : "Unknown error");
+        showRequestError(err);
       } finally {
         setPendingMutation(null);
       }
     },
-    [invalidateThread, pendingMutation, t, threadId],
+    [invalidateThread, pendingMutation, showRequestError, t, threadId],
   );
 
   const handleRemove = useCallback(
     async (agentId: string) => {
       if (pendingMutation) return;
       setPendingMutation(`remove:${agentId}`);
-      setBannerError(null);
       try {
         await mutateControlPlaneDashboardJson(
           `/squads/threads/${threadId}/participants/${encodeURIComponent(agentId)}`,
@@ -305,19 +361,18 @@ export function RoomSettingsDrawer({
         );
         invalidateThread();
       } catch (err) {
-        setBannerError(err instanceof Error ? err.message : "Unknown error");
+        showRequestError(err);
       } finally {
         setPendingMutation(null);
       }
     },
-    [invalidateThread, pendingMutation, t, threadId],
+    [invalidateThread, pendingMutation, showRequestError, t, threadId],
   );
 
   const handleAdd = useCallback(
     async (agentId: string) => {
       if (pendingMutation) return;
       setPendingMutation(`add:${agentId}`);
-      setBannerError(null);
       try {
         await mutateControlPlaneDashboardJson(
           `/squads/threads/${threadId}/participants`,
@@ -332,18 +387,17 @@ export function RoomSettingsDrawer({
         invalidateThread();
         setShowAddPicker(false);
       } catch (err) {
-        setBannerError(err instanceof Error ? err.message : "Unknown error");
+        showRequestError(err);
       } finally {
         setPendingMutation(null);
       }
     },
-    [invalidateThread, pendingMutation, t, threadId],
+    [invalidateThread, pendingMutation, showRequestError, t, threadId],
   );
 
   const handleArchive = useCallback(async () => {
     if (archivingPending) return;
     setArchivingPending(true);
-    setBannerError(null);
     try {
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "DELETE",
@@ -354,29 +408,29 @@ export function RoomSettingsDrawer({
       invalidateThread();
       setArchiveOpen(false);
       onArchived?.();
-      onOpenChange(false);
+      onClose?.();
     } catch (err) {
-      setBannerError(err instanceof Error ? err.message : "Unknown error");
+      showRequestError(err);
     } finally {
       setArchivingPending(false);
     }
-  }, [archivingPending, invalidateThread, onArchived, onOpenChange, t, threadId]);
+  }, [archivingPending, invalidateThread, onArchived, onClose, showRequestError, t, threadId]);
 
   const status = detail?.thread.status;
   const isPaused = status === "paused";
   const handleTogglePause = useCallback(async () => {
     if (!detail || pausing) return;
     if (status !== "open" && status !== "paused") {
-      setBannerError(
+      showToast(
         t("sessions.room.settings.pauseUnavailable", {
           defaultValue: "Pause is only available for active rooms.",
         }),
+        "warning",
       );
       return;
     }
     const nextStatus = isPaused ? "open" : "paused";
     setPausing(true);
-    setBannerError(null);
     try {
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "PATCH",
@@ -387,24 +441,14 @@ export function RoomSettingsDrawer({
       });
       invalidateThread();
     } catch (err) {
-      setBannerError(err instanceof Error ? err.message : "Unknown error");
+      showRequestError(err);
     } finally {
       setPausing(false);
     }
-  }, [detail, invalidateThread, isPaused, pausing, status, t, threadId]);
-
-  const handleCopyId = useCallback(() => {
-    if (!detail) return;
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(detail.thread.id).then(() => {
-      setCopiedId(true);
-      if (copyResetRef.current) clearTimeout(copyResetRef.current);
-      copyResetRef.current = setTimeout(() => setCopiedId(false), 1500);
-    });
-  }, [detail]);
+  }, [detail, invalidateThread, isPaused, pausing, showRequestError, showToast, status, t, threadId]);
 
   const displayTitle = detail?.thread.title || "";
-  const photoUrl = detail?.thread.photoUrl || "";
+  const photoUrl = photoPreviewUrl ?? detail?.thread.photoUrl ?? "";
   const memberCount = participants.length;
 
   const memberLabel = useMemo(() => {
@@ -424,112 +468,133 @@ export function RoomSettingsDrawer({
     });
   }, [memberCount, t]);
 
+  if (!detail && detailQuery.isPending) {
+    return (
+      <RoomSettingsSkeleton
+        inline={inline}
+        className={className}
+      />
+    );
+  }
+
   return (
     <>
-      <Drawer
-        open={open}
-        onOpenChange={onOpenChange}
-        modal
-        title={t("sessions.room.settings.title", { defaultValue: "Info" })}
-        width="min(460px, 92vw)"
+      <div
+        className={cn(
+          "flex min-h-0 flex-col",
+          inline && "h-full overflow-y-auto px-4 py-4",
+          className,
+        )}
       >
-        {/* Edit / Done toggle pinned to the top of the body so it tracks the
-          * Telegram pattern of an Edit action sitting next to the title. */}
-        <div className="flex items-center justify-end px-4 pt-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (editing) {
-                void handleSaveMetadata();
-              } else {
-                setEditing(true);
-              }
-            }}
-            disabled={savingMeta || !detail}
-            data-state={editing ? "open" : "closed"}
-            aria-label={
-              savingMeta
-                ? t("sessions.room.settings.saving", { defaultValue: "Saving" })
-                : undefined
-            }
-            className="h-7 px-2 text-[0.8125rem]"
-          >
-            {savingMeta ? (
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} aria-hidden />
-            ) : editing ? (
-              t("sessions.room.settings.done", { defaultValue: "Done" })
-            ) : (
-              t("sessions.room.settings.edit", { defaultValue: "Edit" })
-            )}
-          </Button>
-        </div>
-
-        {bannerError ? (
-          <div className="mx-4 mt-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--tone-danger-text)]">
-            {bannerError}
-          </div>
-        ) : null}
-
         {/* Hero */}
-        <section className="flex flex-col items-center gap-2.5 px-4 pb-4 pt-2">
-          {editing ? (
-            <RoomPhotoEditor
-              threadId={threadId}
-              currentPhotoUrl={photoDraft.trim() || photoUrl}
-              background={deriveAvatarColor(detail?.thread.id ?? threadId)}
-              initials={deriveInitials(titleDraft)}
-              onUploaded={({ photoUrl: nextUrl }) => {
-                setPhotoDraft(nextUrl);
-                invalidateThread();
-              }}
-              onRemoved={() => {
-                setPhotoDraft("");
-                invalidateThread();
-              }}
-            />
-          ) : (
-            <RoomAvatar
-              url={photoUrl}
-              seed={detail?.thread.id ?? threadId}
-              initials={deriveInitials(displayTitle)}
-            />
+        <section
+          className={cn(
+            "flex gap-3",
+            inline
+              ? "items-center border-b border-[color:var(--divider-hair)] px-0 pb-3 pt-0"
+              : "flex-col items-center px-4 pb-4 pt-3",
           )}
-          {editing ? (
-            <input
-              type="text"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              maxLength={200}
-              placeholder={t("sessions.room.settings.namePlaceholder", {
-                defaultValue: "Room name",
-              })}
-              className="h-8 w-full max-w-[18rem] rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-center text-[var(--font-size-sm)] font-medium text-[var(--text-primary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] focus:border-[color:var(--border-strong)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--border-strong)]"
-            />
-          ) : (
-            <h2 className="m-0 max-w-[22rem] truncate text-center text-[1.125rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {displayTitle ||
-                t("sessions.room.untitled", {
-                  defaultValue: "Untitled room",
+        >
+          <RoomPhotoEditor
+            threadId={threadId}
+            currentPhotoUrl={photoUrl}
+            background={deriveAvatarColor(detail?.thread.id ?? threadId)}
+            initials={deriveInitials(titleDraft || displayTitle)}
+            size={inline ? "compact" : "default"}
+            onUploaded={({ photoUrl: nextUrl }) => {
+              setPhotoPreviewUrl(nextUrl);
+              invalidateThread();
+            }}
+            onRemoved={() => {
+              setPhotoPreviewUrl("");
+              invalidateThread();
+            }}
+          />
+          <div
+            className={cn(
+              "flex min-w-0 flex-col",
+              inline ? "flex-1 items-start gap-0.5" : "w-full items-center gap-2",
+            )}
+          >
+            <div
+              className={cn(
+                "relative min-w-0",
+                inline ? "w-full" : "w-full max-w-[22rem]",
+              )}
+            >
+              <input
+                type="text"
+                value={titleDraft}
+                onChange={(event) => {
+                  setTitleDraft(event.target.value);
+                  setTitleDirty(true);
+                }}
+                onBlur={() => void handleSaveTitle()}
+                onKeyDown={handleTitleKeyDown}
+                disabled={!detail || savingMeta}
+                maxLength={200}
+                aria-label={t("sessions.room.settings.nameLabel", {
+                  defaultValue: "Room name",
                 })}
-            </h2>
-          )}
-          <p className="m-0 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-            {memberLabel}
-          </p>
+                placeholder={t("sessions.room.settings.namePlaceholder", {
+                  defaultValue: "Room name",
+                })}
+                className={cn(
+                  "h-8 w-full truncate rounded-[var(--radius-input)] border border-transparent bg-transparent px-2.5 pr-8 font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)] outline-none",
+                  "transition-[border-color,background-color,box-shadow] duration-[140ms] ease-[var(--ease-out-quart)]",
+                  "hover:border-[color:var(--border-subtle)] hover:bg-[var(--panel-soft)]",
+                  "focus:border-[color:var(--border-strong)] focus:bg-[var(--panel-soft)] focus:shadow-[0_0_0_1px_var(--border-strong)]",
+                  "disabled:cursor-wait disabled:opacity-80",
+                  inline
+                    ? "text-left text-[0.9375rem] leading-5"
+                    : "text-center text-[1.0625rem]",
+                )}
+              />
+              <span
+                aria-hidden
+                className={cn(
+                  "pointer-events-none absolute top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]",
+                  inline ? "right-2" : "right-3",
+                )}
+              >
+                {savingMeta ? (
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                ) : (
+                  <PencilLine className="h-3.5 w-3.5 opacity-70" strokeWidth={1.75} />
+                )}
+              </span>
+            </div>
+            <p
+              className={cn(
+                "m-0 text-[var(--text-tertiary)]",
+                inline ? "text-left text-[0.75rem]" : "text-center text-[0.8125rem]",
+              )}
+            >
+              {memberLabel}
+            </p>
+          </div>
         </section>
 
-        {/* 3-action grid (Telegram-style: Message / Pause / Archive) */}
-        <section className="grid grid-cols-3 gap-1.5 px-4 pb-3">
+        {/* Room actions */}
+        <section
+          className={cn(
+            "gap-1.5 pb-3",
+            inline
+              ? "flex border-b border-[color:var(--divider-hair)] px-0 py-2.5"
+              : "grid grid-cols-3 px-4",
+          )}
+        >
+          {!inline ? (
+            <ActionTile
+              icon={<MessageSquare className="h-4 w-4" strokeWidth={1.75} />}
+              label={t("sessions.room.settings.action.message", {
+                defaultValue: "Message",
+              })}
+              onClick={onClose}
+            />
+          ) : null}
           <ActionTile
-            icon={<MessageSquare className="h-4 w-4" strokeWidth={1.75} />}
-            label={t("sessions.room.settings.action.message", {
-              defaultValue: "Message",
-            })}
-            onClick={() => onOpenChange(false)}
-          />
-          <ActionTile
+            variant={inline ? "compact" : "tile"}
             icon={
               isPaused ? (
                 <Play className="h-4 w-4" strokeWidth={1.75} />
@@ -550,6 +615,7 @@ export function RoomSettingsDrawer({
             onClick={() => void handleTogglePause()}
           />
           <ActionTile
+            variant={inline ? "compact" : "tile"}
             icon={<Archive className="h-4 w-4" strokeWidth={1.75} />}
             label={t("sessions.room.settings.action.archive", {
               defaultValue: "Archive",
@@ -559,47 +625,20 @@ export function RoomSettingsDrawer({
           />
         </section>
 
-        {/* Thread ID card */}
-        <section className="px-4 pb-2.5">
-          <div className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)]">
-            <div className="flex items-center gap-3 px-3 py-2.5">
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                  {t("sessions.room.settings.threadIdLabel", {
-                    defaultValue: "Thread ID",
-                  })}
-                </span>
-                <span className="truncate font-mono text-[0.75rem] text-[var(--text-primary)]">
-                  {detail?.thread.id ?? threadId}
-                </span>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleCopyId}
-                aria-label={t("sessions.room.settings.copyId", {
-                  defaultValue: "Copy thread ID",
-                })}
-                className="h-7 w-7 px-0 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                {copiedId ? (
-                  <Check
-                    className="h-3.5 w-3.5 text-[var(--accent)]"
-                    strokeWidth={2}
-                  />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
-                )}
-              </Button>
-            </div>
-          </div>
-        </section>
-
         {/* Members card */}
-        <section className="px-4 pb-4">
-          <div className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)]">
-            <header className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1.5">
+        <section className={cn(inline ? "px-0 pb-0 pt-3" : "px-4 pb-4")}>
+          <div
+            className={cn(
+              !inline &&
+                "overflow-hidden rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)]",
+            )}
+          >
+            <header
+              className={cn(
+                "flex items-center justify-between gap-2 pb-1.5",
+                inline ? "px-0 pt-0" : "px-3 pt-2.5",
+              )}
+            >
               <span className="flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
                 <Users className="h-3 w-3" strokeWidth={1.75} aria-hidden />
                 {t("sessions.room.settings.members.eyebrow", {
@@ -609,6 +648,26 @@ export function RoomSettingsDrawer({
               <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
                 {participants.length}
               </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditing((current) => !current);
+                  setShowAddPicker(false);
+                }}
+                disabled={!detail || Boolean(pendingMutation)}
+                className={cn(
+                  "ml-auto h-6 px-1.5 text-[0.6875rem] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                  !inline && "h-7 px-2",
+                )}
+              >
+                {editing
+                  ? t("sessions.room.settings.done", { defaultValue: "Done" })
+                  : t("sessions.room.settings.manage", {
+                      defaultValue: "Manage",
+                    })}
+              </Button>
             </header>
             <ul className="flex flex-col">
               {participants.map((participant, index) => {
@@ -621,7 +680,9 @@ export function RoomSettingsDrawer({
                   <li
                     key={participant.agentId}
                     className={cn(
-                      "flex items-center gap-2.5 px-3 py-2",
+                      "flex items-center gap-2.5",
+                      inline ? "py-1.5" : "py-2",
+                      inline ? "px-0" : "px-3",
                       index !== 0 && "border-t border-[color:var(--divider-hair)]",
                     )}
                   >
@@ -629,10 +690,15 @@ export function RoomSettingsDrawer({
                       agentId={participant.agentId}
                       color={meta.color}
                       shape="orb"
-                      className="h-7 w-7 shrink-0"
+                      className={cn("shrink-0", inline ? "h-6 w-6" : "h-7 w-7")}
                     />
                     <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="flex items-center gap-1.5 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                      <span
+                        className={cn(
+                          "flex items-center gap-1.5 truncate font-medium text-[var(--text-primary)]",
+                          inline ? "text-[0.78125rem]" : "text-[0.8125rem]",
+                        )}
+                      >
                         {meta.label}
                         {isCoordinator ? (
                           <Crown
@@ -645,14 +711,19 @@ export function RoomSettingsDrawer({
                           />
                         ) : null}
                         {agentPaused ? (
-                          <span className="ml-1 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                          <span className="ml-1 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
                             {t("sessions.room.create.pausedBadge", {
                               defaultValue: "paused",
                             })}
                           </span>
                         ) : null}
                       </span>
-                      <span className="truncate text-[0.71875rem] text-[var(--text-tertiary)]">
+                      <span
+                        className={cn(
+                          "truncate text-[var(--text-tertiary)]",
+                          inline ? "text-[0.6875rem]" : "text-[0.71875rem]",
+                        )}
+                      >
                         {role}
                       </span>
                     </div>
@@ -734,35 +805,31 @@ export function RoomSettingsDrawer({
                       })}
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddPicker(true)}
-                      className={cn(
-                        "flex w-full items-center gap-2.5 px-3 py-2.5 text-left",
-                        "text-[var(--text-primary)] transition-colors duration-[120ms]",
-                        "hover:bg-[var(--surface-hover)]",
-                        "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
-                      )}
-                    >
-                      <span
-                        aria-hidden
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel-strong)] text-[var(--text-secondary)]"
+                    <div className={cn("py-2", inline ? "px-0" : "px-3")}>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddPicker(true)}
+                        className={cn(
+                          "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-transparent px-2.5",
+                          "text-[0.75rem] font-medium tracking-[-0.005em] text-[var(--text-secondary)]",
+                          "transition-[background-color,border-color,color] duration-[120ms] ease-[var(--ease-out-quart)]",
+                          "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+                          "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+                        )}
                       >
-                        <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-                      </span>
-                      <span className="text-[0.8125rem] font-medium tracking-[-0.005em]">
+                        <Plus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                         {t("sessions.room.settings.addMember", {
                           defaultValue: "Add member",
                         })}
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                   )}
                 </li>
               ) : null}
             </ul>
           </div>
         </section>
-      </Drawer>
+      </div>
 
       <ConfirmationDialog
         open={archiveOpen}
@@ -792,36 +859,64 @@ export function RoomSettingsDrawer({
   );
 }
 
-function RoomAvatar({
-  url,
-  seed,
-  initials,
+function RoomSettingsSkeleton({
+  inline,
+  className,
 }: {
-  url: string;
-  seed: string;
-  initials: string;
+  inline: boolean;
+  className?: string;
 }) {
-  const [imgError, setImgError] = useState(false);
-  const showImage = Boolean(url) && !imgError;
   return (
     <div
-      className="relative h-20 w-20 overflow-hidden rounded-full"
-      style={{ background: deriveAvatarColor(seed) }}
-    >
-      {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt=""
-          className="h-full w-full object-cover"
-          referrerPolicy="no-referrer"
-          onError={() => setImgError(true)}
-        />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center font-mono text-[1.25rem] font-medium text-[color:rgba(255,255,255,0.85)]">
-          {initials}
-        </span>
+      className={cn(
+        "flex min-h-0 flex-col",
+        inline && "h-full overflow-y-auto px-4 py-4",
+        className,
       )}
+    >
+      <section
+        aria-label="Loading room settings"
+        className={cn(
+          "flex gap-3 border-b border-[color:var(--divider-hair)] px-0 pb-3 pt-0",
+          inline ? "items-center" : "flex-col items-center px-4 pt-3",
+        )}
+      >
+        <div
+          className={cn(
+            "animate-pulse rounded-full bg-[var(--panel-strong)]",
+            inline ? "h-14 w-14" : "h-20 w-20",
+          )}
+        />
+        <div
+          className={cn(
+            "flex min-w-0 flex-col gap-2",
+            inline ? "flex-1" : "w-full max-w-[22rem] items-center",
+          )}
+        >
+          <div
+            className={cn(
+              "h-6 animate-pulse rounded-[var(--radius-input)] bg-[var(--panel-strong)]",
+              inline ? "w-4/5" : "w-2/3",
+            )}
+          />
+          <div
+            className={cn(
+              "h-3 animate-pulse rounded-full bg-[var(--panel-soft)]",
+              inline ? "w-24" : "w-20",
+            )}
+          />
+        </div>
+      </section>
+      <section className="border-b border-[color:var(--divider-hair)] py-2.5">
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="h-8 animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]" />
+          <div className="h-8 animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]" />
+        </div>
+      </section>
+      <section className="space-y-3 py-3">
+        <div className="h-3 w-20 animate-pulse rounded-full bg-[var(--panel-strong)]" />
+        <div className="h-4 w-full animate-pulse rounded-full bg-[var(--panel-soft)]" />
+      </section>
     </div>
   );
 }
@@ -833,6 +928,7 @@ function ActionTile({
   busy = false,
   disabled = false,
   tone = "primary",
+  variant = "tile",
 }: {
   icon: React.ReactNode;
   label: string;
@@ -840,32 +936,50 @@ function ActionTile({
   busy?: boolean;
   disabled?: boolean;
   tone?: "primary" | "danger";
+  variant?: "tile" | "compact";
 }) {
+  const compact = variant === "compact";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled || busy}
       className={cn(
-        "group flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[var(--radius-panel-sm)]",
-        "border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-2.5 text-[0.75rem] font-medium",
         "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
-        "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[color:var(--border-subtle)] disabled:hover:bg-[var(--panel-soft)]",
-        tone === "danger"
+        compact
+          ? "inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-transparent bg-transparent px-2 text-[0.75rem] font-medium"
+          : "group flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-2.5 text-[0.75rem] font-medium hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
+        compact && tone === "danger"
+          ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)]"
+          : null,
+        compact && tone !== "danger"
+          ? "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+          : null,
+        !compact && tone === "danger"
           ? "text-[var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]"
-          : "text-[var(--text-primary)]",
+          : null,
+        !compact && tone !== "danger" ? "text-[var(--text-primary)]" : null,
+        compact
+          ? "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+          : "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[color:var(--border-subtle)] disabled:hover:bg-[var(--panel-soft)]",
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "inline-flex h-7 w-7 items-center justify-center rounded-full",
           "transition-[background-color,color] duration-[120ms]",
-          tone === "danger"
+          compact
+            ? "inline-flex h-4 w-4 items-center justify-center"
+            : "inline-flex h-7 w-7 items-center justify-center rounded-full",
+          compact && tone === "danger" ? "text-current" : null,
+          compact && tone !== "danger" ? "text-current" : null,
+          !compact && tone === "danger"
             ? "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-dot)]"
-            : "bg-[var(--panel-strong)] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]",
+            : null,
+          !compact && tone !== "danger"
+            ? "bg-[var(--panel-strong)] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+            : null,
         )}
       >
         {busy ? (
@@ -874,7 +988,7 @@ function ActionTile({
           icon
         )}
       </span>
-      <span className="tracking-[-0.005em]">{label}</span>
+      <span className="truncate tracking-[-0.005em]">{label}</span>
     </button>
   );
 }

@@ -38,8 +38,246 @@ const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "auth/register-owner",
 ]);
 
+const UPSTREAM_UNAVAILABLE_HEADER = "X-Koda-Upstream-Unavailable";
+const UPSTREAM_UNAVAILABLE_MESSAGE = "Control plane upstream is unavailable";
+
 function isPublicControlPlanePath(path: string[]) {
   return PUBLIC_CONTROL_PLANE_PATHS.has(path.join("/"));
+}
+
+function readPositiveInt(searchParams: URLSearchParams, name: string, fallback: number) {
+  const value = Number(searchParams.get(name));
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function readNonNegativeInt(searchParams: URLSearchParams, name: string, fallback: number) {
+  const value = Number(searchParams.get(name));
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+function emptyPaginatedPayload(request: NextRequest) {
+  const limit = readPositiveInt(request.nextUrl.searchParams, "limit", 50);
+  const offset = readNonNegativeInt(request.nextUrl.searchParams, "offset", 0);
+
+  return {
+    items: [],
+    page: {
+      limit,
+      offset,
+      returned: 0,
+      next_offset: null,
+      has_more: false,
+      total: null,
+    },
+    unavailable: true,
+    error: UPSTREAM_UNAVAILABLE_MESSAGE,
+  };
+}
+
+function emptyCollectionPayload() {
+  return {
+    items: [],
+    count: 0,
+    available: false,
+    unavailable: true,
+    error: UPSTREAM_UNAVAILABLE_MESSAGE,
+  };
+}
+
+function emptyAgentStatsPayload(agentId: string) {
+  return {
+    agentId,
+    totalTasks: 0,
+    activeTasks: 0,
+    completedTasks: 0,
+    failedTasks: 0,
+    queuedTasks: 0,
+    totalQueries: 0,
+    totalCost: 0,
+    todayCost: 0,
+    dbExists: false,
+    recentTasks: [],
+    dailyCosts: [],
+    unavailable: true,
+    error: UPSTREAM_UNAVAILABLE_MESSAGE,
+  };
+}
+
+function emptyCostInsightsPayload(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  return {
+    overview: {
+      total_cost_usd: 0,
+      today_cost_usd: 0,
+      resolved_conversations: 0,
+      unresolved_conversations: 0,
+      avg_cost_per_resolved_conversation: 0,
+      median_cost_per_resolved_conversation: 0,
+      unresolved_cost_usd: 0,
+      total_queries: 0,
+      total_executions: 0,
+      top_model: null,
+      top_agent: null,
+      top_task_type: null,
+    },
+    comparison: {
+      previous_total_cost_usd: 0,
+      total_delta_pct: null,
+      previous_avg_cost_per_resolved_conversation: 0,
+      avg_cost_per_resolved_delta_pct: null,
+      previous_today_cost_usd: null,
+      today_delta_pct: null,
+      previous_resolved_conversations: 0,
+    },
+    peak_bucket: null,
+    time_series: [],
+    by_agent: [],
+    by_model: [],
+    by_task_type: [],
+    resolved_conversations: [],
+    conversation_rows: [],
+    available_models: [],
+    available_task_types: [],
+    applied_filters: {
+      agent_id: "all",
+      agent_ids: searchParams.getAll("agent"),
+      period: searchParams.get("period") ?? "30d",
+      from: null,
+      to: null,
+      model: searchParams.get("model"),
+      task_type: searchParams.get("taskType"),
+      group_by: searchParams.get("groupBy") ?? "auto",
+    },
+    unavailable: true,
+    error: UPSTREAM_UNAVAILABLE_MESSAGE,
+  };
+}
+
+function emptyOnboardingStatusPayload() {
+  return {
+    status: "unavailable",
+    control_plane: {
+      ready: false,
+      reason: UPSTREAM_UNAVAILABLE_MESSAGE,
+    },
+    storage: {
+      database: { ready: false, reason: UPSTREAM_UNAVAILABLE_MESSAGE },
+      object_storage: { ready: false, reason: UPSTREAM_UNAVAILABLE_MESSAGE },
+    },
+    providers: [],
+    agents: [],
+    system: {
+      owner_name: "",
+      owner_email: "",
+      owner_github: "",
+      default_provider: "",
+      allowed_user_ids: [],
+    },
+    steps: {
+      provider_configured: false,
+      access_configured: false,
+      agent_ready: false,
+      storage_ready: false,
+      onboarding_complete: false,
+    },
+    unavailable: true,
+    error: UPSTREAM_UNAVAILABLE_MESSAGE,
+  };
+}
+
+function emptyOnboardingReadinessPayload() {
+  return {
+    schema_version: "onboarding_readiness.v1",
+    status: "pending",
+    primary_agent_id: "",
+    generated_at: "",
+    checks: [],
+    summary: {
+      passed: 0,
+      warning: 0,
+      failed: 0,
+      pending: 0,
+    },
+    actions: [],
+    unavailable: true,
+    error: {
+      code: "UPSTREAM_UNAVAILABLE",
+      category: "dependency_unavailable",
+      message: UPSTREAM_UNAVAILABLE_MESSAGE,
+      retryable: true,
+      user_action: "",
+    },
+  };
+}
+
+function unavailableReadPayload(path: string[], request: NextRequest): unknown | null {
+  if (request.method !== "GET") {
+    return null;
+  }
+
+  const joined = path.join("/");
+  if (joined === "onboarding/status") {
+    return emptyOnboardingStatusPayload();
+  }
+  if (joined === "onboarding/readiness") {
+    return emptyOnboardingReadinessPayload();
+  }
+
+  if (path[0] !== "dashboard") {
+    return null;
+  }
+
+  const dashboardPath = path.slice(1);
+  const [area, second, third] = dashboardPath;
+
+  if (area === "agents" && second === "summary") {
+    return [];
+  }
+  if (area === "agents" && second && third === "stats") {
+    return emptyAgentStatsPayload(second);
+  }
+  if (
+    area === "agents" &&
+    second &&
+    ["executions", "sessions", "dlq", "schedules", "cron", "audit"].includes(third ?? "") &&
+    dashboardPath.length === 3
+  ) {
+    return emptyPaginatedPayload(request);
+  }
+  if (area === "agents" && second && third === "costs") {
+    return emptyCostInsightsPayload(request);
+  }
+
+  if (["executions", "sessions", "dlq", "schedules", "cron"].includes(area ?? "")) {
+    return emptyPaginatedPayload(request);
+  }
+  if (area === "costs") {
+    return emptyCostInsightsPayload(request);
+  }
+
+  if (area === "squads" && second === "overview") {
+    return emptyCollectionPayload();
+  }
+  if (area === "squads" && second && ["threads", "activity", "metrics"].includes(third ?? "")) {
+    return emptyCollectionPayload();
+  }
+
+  return null;
+}
+
+function unavailableReadResponse(path: string[], request: NextRequest) {
+  const payload = unavailableReadPayload(path, request);
+  if (payload === null) {
+    return null;
+  }
+
+  return NextResponse.json(payload, {
+    status: 200,
+    headers: {
+      "Cache-Control": "no-store",
+      [UPSTREAM_UNAVAILABLE_HEADER]: "1",
+    },
+  });
 }
 
 function unauthorizedResponse() {
@@ -175,7 +413,18 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
       },
     );
   } catch (error) {
-    return jsonErrorResponse(error, "Control plane upstream is unavailable");
+    const fallback = unavailableReadResponse(path, request);
+    if (fallback) {
+      return fallback;
+    }
+    return jsonErrorResponse(error, UPSTREAM_UNAVAILABLE_MESSAGE);
+  }
+
+  if (response.status === 503) {
+    const fallback = unavailableReadResponse(path, request);
+    if (fallback) {
+      return fallback;
+    }
   }
 
   const headers = new Headers();

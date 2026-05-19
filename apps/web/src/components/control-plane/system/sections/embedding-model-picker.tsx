@@ -90,12 +90,6 @@ async function fetchEmbeddingCatalog(): Promise<CatalogPayload> {
       (parsed && typeof parsed === "object" && "error" in (parsed as Record<string, unknown>)
         ? String((parsed as Record<string, unknown>).error || "")
         : "") || text.slice(0, 200);
-     
-    console.error("embedding catalog load failed", {
-      status: res.status,
-      contentType: res.headers.get("content-type"),
-      body: text.slice(0, 500),
-    });
     throw new Error(errorText || `HTTP ${res.status}`);
   }
   if (
@@ -103,8 +97,6 @@ async function fetchEmbeddingCatalog(): Promise<CatalogPayload> {
     typeof parsed !== "object" ||
     !Array.isArray((parsed as Record<string, unknown>).items)
   ) {
-     
-    console.error("embedding catalog malformed payload", { body: text.slice(0, 500) });
     throw new Error("embedding.catalog.malformed");
   }
   return parsed as CatalogPayload;

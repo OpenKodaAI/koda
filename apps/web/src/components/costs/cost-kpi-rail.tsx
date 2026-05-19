@@ -5,7 +5,7 @@ import { PageMetricStrip, PageMetricStripItem } from "@/components/ui/page-primi
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getAgentLabel } from "@/lib/agent-constants";
 import type { CostComparison, CostOverview, CostPeakBucket } from "@/lib/types";
-import { cn, formatCost } from "@/lib/utils";
+import { formatCost } from "@/lib/utils";
 
 interface CostKpiRailProps {
   overview: CostOverview;
@@ -55,7 +55,7 @@ export function CostKpiRail({ overview, comparison, peakBucket, className }: Cos
     : t("costs.page.noPeak", { defaultValue: "No highlighted peak in the period" });
 
   return (
-    <PageMetricStrip className={cn(className)}>
+    <PageMetricStrip className={className}>
       <PageMetricStripItem
         label={t("costs.kpis.totalPeriod")}
         value={formatCost(overview.total_cost_usd)}

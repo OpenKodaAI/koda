@@ -2,8 +2,8 @@
 
 This module deliberately uses the same local embedding model selected for
 memory. It never downloads weights and it never falls back to lexical/hash
-vectors for routing decisions: if the real model is unavailable, callers get a
-closed, coordinator-only degradation signal.
+vectors for semantic routing decisions. Higher-level coordinator code may still
+degrade to capability-based delegation when embeddings are unavailable.
 """
 
 from __future__ import annotations
@@ -157,6 +157,11 @@ def capability_positive_text(summary: CapabilitySummary) -> str:
             f"primary_outcomes: {'; '.join(summary.primary_outcomes)}" if summary.primary_outcomes else "",
             f"delegate_when: {summary.delegate_when}" if summary.delegate_when else "",
             f"tool_categories: {', '.join(summary.tool_categories)}" if summary.tool_categories else "",
+            f"allowed_tools: {', '.join(summary.allowed_tool_ids[:12])}" if summary.allowed_tool_ids else "",
+            f"integrations: {', '.join(summary.integration_ids)}" if summary.integration_ids else "",
+            f"preferred_model: {summary.preferred_provider}/{summary.preferred_model}"
+            if summary.preferred_provider or summary.preferred_model
+            else "",
         ]
         if part
     )
@@ -177,6 +182,14 @@ def _summary_to_payload(summary: CapabilitySummary) -> dict[str, Any]:
         "delegate_when": summary.delegate_when,
         "do_not_delegate": summary.do_not_delegate,
         "is_coordinator": summary.is_coordinator,
+        "allowed_tool_ids": list(summary.allowed_tool_ids),
+        "integration_ids": list(summary.integration_ids),
+        "preferred_provider": summary.preferred_provider,
+        "preferred_model": summary.preferred_model,
+        "cost_weight": summary.cost_weight,
+        "load_score": summary.load_score,
+        "quality_score": summary.quality_score,
+        "recent_success_rate": summary.recent_success_rate,
     }
 
 
@@ -323,8 +336,10 @@ class SquadSemanticRouter:
         has_coordinator: bool,
         reply_to_agent_id: str | None = None,
     ) -> bool:
-        if not has_coordinator or not text.strip() or not semantic_result.available:
+        if not has_coordinator or not text.strip():
             return False
+        if not semantic_result.available:
+            return True
         if reply_to_agent_id and not semantic_result.top_agents(include_coordinator=False, limit=1):
             return False
         return bool(semantic_result.top_agents(include_coordinator=False, limit=1))

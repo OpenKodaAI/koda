@@ -1,9 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { UiForm, type UiFormBlock } from "@/components/sessions/chat/generative/blocks/ui-form";
+import { ToastNotification } from "@/components/ui/toast-notification";
+import { ToastProvider } from "@/hooks/use-toast";
 
 vi.mock("@/lib/control-plane-dashboard", () => ({
   mutateControlPlaneDashboardJson: vi.fn(),
@@ -39,7 +41,10 @@ function renderForm(block: UiFormBlock = baseBlock) {
   return render(
     <QueryClientProvider client={client}>
       <I18nProvider initialLanguage="en-US">
-        <UiForm block={block} agentId="ATLAS" sessionId="sess-1" />
+        <ToastProvider>
+          <UiForm block={block} agentId="ATLAS" sessionId="sess-1" />
+          <ToastNotification />
+        </ToastProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -109,6 +114,22 @@ describe("UiForm", () => {
 
     // Only one outbound request despite two clicks.
     expect(mutateControlPlaneDashboardJson).toHaveBeenCalledTimes(1);
-    resolve({ ok: true });
+    await act(async () => {
+      resolve({ ok: true });
+    });
+  });
+
+  it("shows submit request failures via toast", async () => {
+    (mutateControlPlaneDashboardJson as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Submit endpoint unavailable"),
+    );
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(screen.getByLabelText(/Name/i), "Ryan");
+    await user.click(screen.getByRole("button", { name: /Submit/i }));
+
+    expect(await screen.findByText("Submit endpoint unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Unable to submit")).not.toBeInTheDocument();
   });
 });

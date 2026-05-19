@@ -63,8 +63,11 @@ export function createSSEStream(
               MAX_INTERVAL_MS
             );
           }
-        } catch (error) {
-          console.error("SSE poll error:", error);
+        } catch {
+          currentInterval = Math.min(
+            currentInterval * BACKOFF_MULTIPLIER,
+            MAX_INTERVAL_MS
+          );
         }
 
         if (!cancelled) {

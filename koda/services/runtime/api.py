@@ -1486,7 +1486,63 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
     if not text:
         return web.json_response({"error": "text is required"}, status=400)
 
-    session_id = str(payload.get("session_id") or "").strip() or f"session-{uuid4().hex}"
+    squad_payload_raw = payload.get("squad")
+    squad_payload = squad_payload_raw if isinstance(squad_payload_raw, dict) else None
+    session_id = str(payload.get("session_id") or "").strip()
+    if not session_id and squad_payload is not None:
+        squad_thread_id = str(squad_payload.get("thread_id") or squad_payload.get("squad_thread_id") or "").strip()
+        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
+        squad_task_id = str(squad_payload.get("squad_task_id") or "").strip()
+        seed = f"{squad_thread_id}:{target_agent_id}:{squad_task_id or uuid4().hex}".encode()
+        session_id = f"squad-{hashlib.sha256(seed).hexdigest()[:24]}"
+    session_id = session_id or f"session-{uuid4().hex}"
+
+    if squad_payload is not None:
+        squad_thread_id = str(squad_payload.get("thread_id") or squad_payload.get("squad_thread_id") or "").strip()
+        if not squad_thread_id:
+            return web.json_response({"error": "squad.thread_id is required"}, status=400)
+
+        def optional_int(value: Any) -> int | None:
+            try:
+                return int(value) if value is not None and str(value).strip() else None
+            except (TypeError, ValueError):
+                return None
+
+        explicit_user_id = optional_int(squad_payload.get("user_id"))
+        explicit_chat_id = optional_int(squad_payload.get("chat_id") or squad_payload.get("telegram_chat_id"))
+        user_id = explicit_user_id or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
+        chat_id = explicit_chat_id or -_dashboard_actor_id(namespace="squad-chat", session_id=session_id)
+        chain_raw = squad_payload.get("delegation_chain")
+        delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
+        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
+
+        from koda.services.queue_manager import enqueue_squad_agent_task
+
+        task_id = await enqueue_squad_agent_task(
+            application=application,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=text,
+            executing_agent_id=target_agent_id,
+            squad_thread_id=squad_thread_id,
+            squad_task_id=str(squad_payload.get("squad_task_id") or "").strip() or None,
+            parent_message_id=str(squad_payload.get("parent_message_id") or "").strip() or None,
+            delegation_chain=delegation_chain,
+            delegation_request_id=str(squad_payload.get("delegation_request_id") or "").strip() or None,
+            delegation_origin_agent_id=str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None,
+            telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
+            bot_override=_SilentRuntimeBot(),
+        )
+        return web.json_response(
+            {
+                "accepted": True,
+                "session_id": session_id,
+                "task_id": task_id,
+                "squad_thread_id": squad_thread_id,
+            },
+            status=202,
+        )
+
     user_id = _dashboard_actor_id(namespace="dashboard-user", session_id=session_id)
     chat_id = -_dashboard_actor_id(namespace="dashboard-chat", session_id=session_id)
 

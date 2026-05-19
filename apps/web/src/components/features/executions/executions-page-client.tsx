@@ -2,8 +2,8 @@
 
 
 import dynamic from "next/dynamic";
-import { useState, useCallback, useMemo } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Workflow } from "lucide-react";
 import { ExecutionTable } from "@/components/executions/execution-table";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
@@ -20,9 +20,9 @@ import { SoftTabs } from "@/components/ui/soft-tabs";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
+import { useUrlSyncedSearch } from "@/hooks/use-url-synced-search";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import {
@@ -67,9 +67,11 @@ export default function ExecutionsPage() {
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const [selectedExecution, setSelectedExecution] = useState<ExecutionSummary | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
-  const [search, setSearch] = useState("");
   const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
-  const debouncedSearch = useDebouncedValue(search.trim(), 260);
+  const searchState = useUrlSyncedSearch({ debounceMs: 260 });
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
+  const debouncedSearch = searchState.debouncedValue;
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
@@ -88,6 +90,7 @@ export default function ExecutionsPage() {
     gcTime: DASHBOARD_CACHE_GC_MS,
     retry: 1,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
     getNextPageParam: (lastPage) =>
       lastPage.page.has_more ? lastPage.page.next_offset : undefined,
     queryFn: async ({ signal, pageParam }) => {
@@ -205,9 +208,8 @@ export default function ExecutionsPage() {
     setSelectedBotIds(agentIds);
   }, [clearSelection]);
   const handleSearchChange = useCallback((value: string) => {
-    clearSelection();
     setSearch(value);
-  }, [clearSelection]);
+  }, [setSearch]);
   const handleStatusFilterChange = useCallback((value: string) => {
     clearSelection();
     setStatusFilter(value);
@@ -229,6 +231,23 @@ export default function ExecutionsPage() {
   const refreshExecutions = useCallback(() => {
     void executionsQuery.refetch();
   }, [executionsQuery]);
+  const searchLoading =
+    searchState.isSearching ||
+    (executionsQuery.isFetching &&
+      !executionsQuery.isFetchingNextPage &&
+      search.trim() === debouncedSearch);
+
+  useEffect(() => {
+    if (!selectedExecution || executionsQuery.isFetching) return;
+    const stillVisible = executions.some(
+      (execution) =>
+        execution.bot_id === selectedExecution.bot_id &&
+        execution.task_id === selectedExecution.task_id,
+    );
+    if (stillVisible) return;
+    const frame = window.requestAnimationFrame(() => clearSelection());
+    return () => window.cancelAnimationFrame(frame);
+  }, [clearSelection, executions, executionsQuery.isFetching, selectedExecution]);
 
   const showInitialSkeleton = useMinDurationFlag(loading && executions.length === 0, 350);
   if (showInitialSkeleton) {
@@ -264,6 +283,9 @@ export default function ExecutionsPage() {
               value={search}
               onChange={handleSearchChange}
               placeholder={t("executions.searchPlaceholder")}
+              loading={searchLoading}
+              loadingLabel={t("executions.searching", { defaultValue: "Searching executions" })}
+              clearLabel={t("common.clear", { defaultValue: "Clear" })}
             />
           </div>
           <div className="w-full md:w-auto md:shrink-0" {...tourAnchor("executions.status-filters")}>

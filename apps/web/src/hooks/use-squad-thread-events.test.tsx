@@ -50,6 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -104,6 +105,58 @@ describe("useSquadThreadEvents", () => {
       source.emit("error", undefined);
     });
     expect(result.current).toBe("error");
+  });
+
+  it("reconnects with explicit backoff after an error", () => {
+    vi.useFakeTimers();
+    const onEvent = vi.fn();
+    const { result } = renderHook(() =>
+      useSquadThreadEvents({ threadId: "abc-thread", onEvent }),
+    );
+    const source = MockEventSource.instances[0];
+
+    act(() => {
+      source.emit("error", undefined);
+    });
+    expect(result.current).toBe("error");
+    expect(source.closed).toBe(true);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1_999);
+    });
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(result.current).toBe("connecting");
+  });
+
+  it("keeps the same connection when the callback identity changes", () => {
+    const firstOnEvent = vi.fn();
+    const secondOnEvent = vi.fn();
+    const { rerender } = renderHook(
+      ({ onEvent }) => useSquadThreadEvents({ threadId: "abc-thread", onEvent }),
+      { initialProps: { onEvent: firstOnEvent } },
+    );
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    rerender({ onEvent: secondOnEvent });
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    const payload: SquadThreadEvent = {
+      thread_id: "abc-thread",
+      event_type: "message_added",
+      data: { message_id: 9 },
+    };
+    act(() => {
+      MockEventSource.instances[0].emit("message_added", payload);
+    });
+
+    expect(firstOnEvent).not.toHaveBeenCalled();
+    expect(secondOnEvent).toHaveBeenCalledWith(payload);
   });
 
   it("does not open a stream when disabled", () => {

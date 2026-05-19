@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ToastProvider } from "@/hooks/use-toast";
-import { AgentCatalog } from "@/components/control-plane/catalog/agent-catalog";
+import {
+  AgentCatalog,
+  getAgentBoardLaneWidth,
+} from "@/components/control-plane/catalog/agent-catalog";
 import type {
   ControlPlaneAgentSummary,
   ControlPlaneCoreProviders,
@@ -152,14 +155,24 @@ const agents: ControlPlaneAgentSummary[] = [
   }),
 ];
 
-function renderCatalog() {
+function setLocation(path: string) {
+  window.history.replaceState(null, "", path);
+}
+
+function renderCatalog({
+  catalogAgents = agents,
+  workspaces = workspaceTree,
+}: {
+  catalogAgents?: ControlPlaneAgentSummary[];
+  workspaces?: ControlPlaneWorkspaceTree;
+} = {}) {
   return render(
     <I18nProvider initialLanguage="pt-BR">
       <ToastProvider>
         <AgentCatalog
-          agents={agents}
+          agents={catalogAgents}
           coreProviders={coreProviders}
-          workspaces={workspaceTree}
+          workspaces={workspaces}
         />
       </ToastProvider>
     </I18nProvider>,
@@ -181,6 +194,7 @@ describe("AgentCatalog organization board", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
+    setLocation("/control-plane/catalog");
     refreshMock.mockReset();
     pushMock.mockReset();
     globalThis.fetch = vi.fn().mockImplementation((input, init) => {
@@ -667,6 +681,79 @@ describe("AgentCatalog organization board", () => {
       "data-testid",
       "lane-workspace-product-no-squad",
     );
+  });
+
+  it("uses compact squad lane widths instead of stretching lanes across the board", () => {
+    expect(getAgentBoardLaneWidth(1)).toBe("min(100%, 22rem)");
+    expect(getAgentBoardLaneWidth(2)).toBe("clamp(17rem, calc((100% - 1rem) / 2), 22rem)");
+    expect(getAgentBoardLaneWidth(3)).toBe("clamp(17rem, calc((100% - 2rem) / 3), 22rem)");
+    expect(getAgentBoardLaneWidth(4)).toBe("clamp(16rem, 72vw, 22rem)");
+  });
+
+  it("renders centered carousel controls with chevron icons for wide squad rails", () => {
+    const manySquadTree: ControlPlaneWorkspaceTree = {
+      ...workspaceTree,
+      items: workspaceTree.items.map((workspace) =>
+        workspace.id === "workspace-product"
+          ? {
+              ...workspace,
+              agent_count: 5,
+              squads: [
+                workspace.squads[0],
+                {
+                  id: "squad-growth",
+                  workspace_id: workspace.id,
+                  name: "Growth",
+                  description: "Squad de crescimento",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+                {
+                  id: "squad-reliability",
+                  workspace_id: workspace.id,
+                  name: "Reliability",
+                  description: "Squad de confiabilidade",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+                {
+                  id: "squad-ops",
+                  workspace_id: workspace.id,
+                  name: "Ops",
+                  description: "Squad de operacoes",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+              ],
+              virtual_buckets: {
+                no_squad: {
+                  id: null,
+                  label: "Sem squad",
+                  agent_count: 1,
+                },
+              },
+            }
+          : workspace,
+      ),
+      total_agent_count: 7,
+    };
+
+    renderCatalog({ workspaces: manySquadTree });
+
+    const previous = screen.getByRole("button", {
+      name: /Mostrar times anteriores de Produto/i,
+    });
+    const next = screen.getByRole("button", {
+      name: /Mostrar mais times de Produto/i,
+    });
+
+    expect(previous).toHaveClass("agent-board-lane-nav", "agent-board-lane-nav--prev");
+    expect(next).toHaveClass("agent-board-lane-nav", "agent-board-lane-nav--next");
+    expect(previous.querySelector("svg")).toBeInTheDocument();
+    expect(next.querySelector("svg")).toBeInTheDocument();
   });
 
   it("allows dragging the squad rail horizontally with the mouse", () => {

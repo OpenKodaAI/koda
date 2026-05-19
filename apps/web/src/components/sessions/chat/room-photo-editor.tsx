@@ -9,9 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { Camera, ImageOff, Loader2, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Camera, ImageOff, Loader2, RotateCcw, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const IDLE_PX = 80;
@@ -22,6 +23,7 @@ const OUTPUT_QUALITY = 0.88;
 interface RoomPhotoEditorProps {
   threadId: string;
   currentPhotoUrl: string | null;
+  size?: "default" | "compact";
   /** Solid background applied behind the initials when no image is set. */
   background: string;
   /** Two-letter (or "·") initials displayed when no photo is set. */
@@ -41,12 +43,14 @@ interface LoadedImage {
 export function RoomPhotoEditor({
   threadId,
   currentPhotoUrl,
+  size = "default",
   background,
   initials,
   onUploaded,
   onRemoved,
 }: RoomPhotoEditorProps) {
   const { t } = useAppI18n();
+  const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [picked, setPicked] = useState<LoadedImage | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -244,11 +248,11 @@ export function RoomPhotoEditor({
       setPicked(null);
       onUploaded({ photoUrl: data.photoUrl, photoHash: data.photoHash });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      showToast(err instanceof Error ? err.message : "Upload failed", "error");
     } finally {
       setBusy(false);
     }
-  }, [busy, offset, onUploaded, picked, threadId, zoom]);
+  }, [busy, offset, onUploaded, picked, showToast, threadId, zoom]);
 
   const handleRemove = useCallback(
     async (event?: React.MouseEvent) => {
@@ -266,22 +270,23 @@ export function RoomPhotoEditor({
         }
         onRemoved();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Remove failed");
+        showToast(err instanceof Error ? err.message : "Remove failed", "error");
       } finally {
         setRemoving(false);
       }
     },
-    [onRemoved, removing, threadId],
+    [onRemoved, removing, showToast, threadId],
   );
 
   const isCropping = picked !== null;
-  const sizePx = isCropping ? CROP_PX : IDLE_PX;
+  const idleSizePx = size === "compact" ? 56 : IDLE_PX;
+  const sizePx = isCropping ? CROP_PX : idleSizePx;
   const showImage = !isCropping && Boolean(currentPhotoUrl) && !imgError;
   const showRemoveBadge =
     !isCropping && Boolean(currentPhotoUrl) && !busy;
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className={cn("flex flex-col items-center", isCropping ? "gap-3" : "gap-0")}>
       <input
         ref={fileInputRef}
         type="file"
@@ -406,7 +411,7 @@ export function RoomPhotoEditor({
             {removing ? (
               <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} aria-hidden />
             ) : (
-              <Trash2 className="h-3 w-3" strokeWidth={1.75} aria-hidden />
+              <X className="h-3 w-3" strokeWidth={2} aria-hidden />
             )}
           </button>
         ) : null}

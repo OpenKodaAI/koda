@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { AgentGlyph } from "@/components/ui/agent-glyph";
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 
 export interface RoomAgentMentionMeta {
@@ -83,23 +83,28 @@ export function RoomAgentMentionBadge({
   onRemove?: (mention: RoomAgentMentionMeta) => void;
   className?: string;
 }) {
+  const accentColor = mention.color?.trim() || null;
+  const accentStyle = accentColor
+    ? ({
+        "--agent-mention-bg": `color-mix(in srgb, ${accentColor} 14%, transparent)`,
+        "--agent-mention-border": `color-mix(in srgb, ${accentColor} 28%, var(--border-subtle))`,
+        "--agent-mention-text": `color-mix(in srgb, ${accentColor} 74%, var(--text-primary))`,
+      } as CSSProperties)
+    : undefined;
   return (
     <span
       className={cn(
-        "inline-flex h-6 max-w-[14rem] items-center gap-1.5 align-middle",
-        "rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)]",
-        "px-1.5 text-[0.75rem] font-medium leading-none text-[var(--tone-info-dot)] shadow-[var(--shadow-xs)]",
+        "inline-flex h-6 max-w-[14rem] items-center gap-1 align-middle",
+        "rounded-[var(--radius-pill)] border shadow-[var(--shadow-xs)]",
+        accentColor
+          ? "border-[color:var(--agent-mention-border)] bg-[var(--agent-mention-bg)] text-[var(--agent-mention-text)]"
+          : "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--tone-info-dot)]",
+        "px-2 text-[0.75rem] font-medium leading-none",
         className,
       )}
       data-agent-mention={mention.id}
+      style={accentStyle}
     >
-      <AgentGlyph
-        agentId={mention.id}
-        color={mention.color ?? "#A7ADB4"}
-        shape="orb"
-        variant="list"
-        className="h-3.5 w-3.5 shrink-0"
-      />
       <span className="min-w-0 truncate tracking-[-0.005em]">@{mention.label}</span>
       {onRemove ? (
         <button

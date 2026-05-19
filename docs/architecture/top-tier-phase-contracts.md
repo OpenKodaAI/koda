@@ -68,6 +68,24 @@ Phase 3 contract artifacts:
 - [Subagent Task And Context Governance](subagent-context-governance.md)
 - [Subagent Task Runbook](../operations/subagent-task-runbook.md)
 
+Phase 3 squad delivery contract:
+
+- `squad_delivery.v1` is the canonical envelope for persistent Squad Room
+  collaboration. It captures delivery state (`received`, `routed`,
+  `coordinating`, `delegated`, `waiting_for_replies`, `synthesizing`,
+  `completed`, `blocked`, `timed_out`, `failed`), route source, selected
+  agents, participant suitability profiles, task ids, reply obligation ids,
+  child-run ids, final-response strategy, and audit events.
+- `Squad Room` collaboration is persistent and transcript-visible; ephemeral
+  `Delegate Task`/`task` child runs remain isolated helper executions.
+- Routing precedence must be explicit mentions, reply obligations, coordinator
+  engine, semantic capability routing, proposal arbitration, coordinator
+  fallback, then deterministic fallback. Channel identity gates remain
+  fail-closed before room routing.
+- RunGraph must classify squad delivery events as agent request/reply,
+  reply-obligation, child-run, timeout/dead-letter, or coordinator synthesis
+  nodes so the final answer can be audited from visible work only.
+
 Phase 4 contract artifacts:
 
 - [KodaSkill And Plugin SDK](koda-skill-plugin-sdk.md)

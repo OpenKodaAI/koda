@@ -1505,7 +1505,8 @@ export function RuntimeFilesPanel({
             <div className="runtime-files-project-search__field">
               <Search className="h-3.5 w-3.5 shrink-0" />
               <input
-                type="search"
+                type="text"
+                role="searchbox"
                 value={projectSearchQuery}
                 onChange={(event) => {
                   setProjectSearchQuery(event.target.value);
@@ -1514,6 +1515,7 @@ export function RuntimeFilesPanel({
                 onFocus={() => setProjectSearchOpen(true)}
                 placeholder={t("runtime.files.projectSearchPlaceholder")}
                 aria-label={t("runtime.files.projectSearch")}
+                className="search-input--custom-clear"
               />
               {projectSearchLoading ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" /> : null}
               {projectSearchQuery ? (

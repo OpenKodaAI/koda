@@ -199,6 +199,15 @@ def _trimmed(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _is_local_whispercpp_model_reference(function_id: str, provider_id: str, model_id: str) -> bool:
+    if function_id != "transcription" or provider_id != "whispercpp":
+        return False
+    normalized = _trimmed(model_id)
+    if not normalized or normalized == "whisper-cpp-local":
+        return False
+    return normalized.endswith(".bin") or "/" in normalized or "\\" in normalized
+
+
 def _slugify_identifier(value: Any) -> str:
     text = _trimmed(value).lower()
     if not text:
@@ -1278,7 +1287,11 @@ def validate_agent_spec(
                 (str(item.get("provider_id")).lower(), _trimmed(item.get("model_id")))
                 for item in function_model_options.get(function_id, [])
             }
-            if known_options and (provider_id, model_id) not in known_options:
+            if (
+                known_options
+                and (provider_id, model_id) not in known_options
+                and not _is_local_whispercpp_model_reference(function_id, provider_id, model_id)
+            ):
                 errors.append(
                     "model_policy.functional_defaults."
                     f"{function_id} references unknown model '{model_id}' "

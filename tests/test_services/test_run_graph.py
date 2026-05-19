@@ -134,7 +134,15 @@ def test_build_run_graph_from_flat_trace_runtime_events_and_redaction() -> None:
             "event_type": "provider.dependency_timeout",
             "severity": "error",
             "payload": {"provider": "codex", "status": "failed"},
-        }
+        },
+        {
+            "id": 2,
+            "task_id": 42,
+            "attempt": 2,
+            "event_type": "routing_decision",
+            "severity": "info",
+            "payload": {"schema_version": "squad_delivery.v1", "targets": ["FE"]},
+        },
     ]
 
     graph = build_run_graph_from_trace(agent_id="KODA", task_id=42, trace=trace, runtime_events=runtime_events)
@@ -149,6 +157,7 @@ def test_build_run_graph_from_flat_trace_runtime_events_and_redaction() -> None:
     assert "tool_result" in node_types
     assert "retry_scheduled" in node_types
     assert "dependency_call" in node_types
+    assert "agent_request" in node_types
     assert "cost" in node_types
     assert "sk-live-secret" not in encoded
     assert "abcdefghijklmnopqrstuvwxyz123456" not in encoded

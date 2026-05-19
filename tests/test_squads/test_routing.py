@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from koda.squads.capabilities import CapabilitySummary
+from koda.squads.delivery import build_member_profiles
 from koda.squads.routing import extract_mentions, select_targets
 from koda.squads.semantic_router import SemanticAgentScore, SemanticRoutingResult
 
@@ -195,6 +197,23 @@ def test_select_targets_capability_fallback_when_no_coordinator() -> None:
         semantic_result=_semantic_result("BE"),
     )
     assert targets == ["BE"]
+
+
+def test_select_targets_uses_member_profiles_to_break_semantic_ties() -> None:
+    profiles = build_member_profiles(
+        [
+            CapabilitySummary(agent_id="FE_SLOW", display_name="Slow", role="Frontend", load_score=0.95),
+            CapabilitySummary(agent_id="FE_FAST", display_name="Fast", role="Frontend", quality_score=0.9),
+        ]
+    )
+    targets = select_targets(
+        "please implement the frontend",
+        participant_agent_ids=["FE_SLOW", "FE_FAST"],
+        semantic_result=_semantic_result("FE_SLOW", "FE_FAST"),
+        member_profiles=profiles,
+    )
+
+    assert targets == ["FE_FAST", "FE_SLOW"]
 
 
 def test_select_targets_skips_coordinator_not_in_participants() -> None:

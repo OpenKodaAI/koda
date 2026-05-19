@@ -12,6 +12,7 @@ import {
   useEscapeToClose,
 } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useToast } from "@/hooks/use-toast";
 import { mutateControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { requestJson } from "@/lib/http-client";
 import { queryKeys } from "@/lib/query/keys";
@@ -41,6 +42,7 @@ interface CreateRoomResponse {
 
 export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) {
   const { t } = useAppI18n();
+  const { showToast } = useToast();
   const { agents } = useAgentCatalog();
   const queryClient = useQueryClient();
   const presence = useAnimatedPresence(open, null, { duration: 200 });
@@ -164,11 +166,11 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      setError(message);
+      showToast(message, "error");
     } finally {
       setSubmitting(false);
     }
-  }, [name, onCreated, queryClient, selectedIds, t]);
+  }, [name, onCreated, queryClient, selectedIds, showToast, t]);
 
   if (!presence.shouldRender) return null;
   if (typeof document === "undefined") return null;

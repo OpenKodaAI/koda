@@ -207,6 +207,19 @@ def test_explicit_mention_stays_fast_path() -> None:
     )
 
 
+def test_supervisor_still_runs_when_semantic_router_is_unavailable() -> None:
+    assert should_use_coordinator_engine(
+        "Planejem uma entrega integrada com frontend, backend e QA",
+        participant_agent_ids=["PM", "FE", "BE", "QA"],
+        coordinator_agent_id="PM",
+        semantic_result=SemanticRoutingResult(
+            available=False,
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            reason="embedding model unavailable",
+        ),
+    )
+
+
 def test_landing_page_decision_creates_specialist_tasks() -> None:
     engine = SquadCoordinatorEngine(thread_store=AsyncMock(), task_store=AsyncMock())
     decision = engine.decide(
@@ -273,6 +286,57 @@ async def test_llm_planner_parses_strict_json(monkeypatch: pytest.MonkeyPatch) -
     assert decision.mode == "sequential_plan"
     assert [task.agent_id for task in decision.tasks] == ["COPY", "FE"]
     assert decision.tasks[1].depends_on == ["copy"]
+
+
+@pytest.mark.asyncio
+async def test_coordination_uses_capability_fallback_when_semantic_unavailable() -> None:
+    thread_store = AsyncMock()
+    thread_store.post_thread_message = AsyncMock(side_effect=[41, 42, 43, 44, 45])
+    thread_store.notify_event = AsyncMock()
+    task_store = AsyncMock()
+    task_store.create_task = AsyncMock(
+        side_effect=[
+            _task_descriptor("00000000-0000-0000-0000-000000000201", agent_id="COPY", kind="brief_copy"),
+            _task_descriptor("00000000-0000-0000-0000-000000000202", agent_id="FE", kind="frontend"),
+            _task_descriptor("00000000-0000-0000-0000-000000000203", agent_id="QA", kind="review"),
+        ]
+    )
+    dispatch = AsyncMock(side_effect=[1001, None, None])
+    engine = SquadCoordinatorEngine(thread_store=thread_store, task_store=task_store, planner=_StaticPlanner())
+
+    execution = await engine.coordinate_user_input(
+        text="Entregue uma landing page de fintech com copy forte, design polido e formulário",
+        thread=_thread(),
+        participants=[_participant("PM", "coordinator"), _participant("COPY"), _participant("FE"), _participant("QA")],
+        coordinator_agent_id="PM",
+        capability_hints={},
+        capability_summaries=[
+            CapabilitySummary(agent_id="PM", display_name="PM", role="Coordinator", is_coordinator=True),
+            CapabilitySummary(agent_id="COPY", display_name="Copy", role="Content"),
+            CapabilitySummary(agent_id="FE", display_name="Frontend", role="Interface"),
+            CapabilitySummary(agent_id="QA", display_name="QA", role="Quality"),
+        ],
+        semantic_result=SemanticRoutingResult(
+            available=False,
+            model_name="local-embedding",
+            reason="embedding model unavailable",
+        ),
+        dispatch=dispatch,
+        parent_message_id="msg-40",
+    )
+
+    assert execution.coordinated is True
+    assert execution.task_ids == [
+        "00000000-0000-0000-0000-000000000201",
+        "00000000-0000-0000-0000-000000000202",
+        "00000000-0000-0000-0000-000000000203",
+    ]
+    assert dispatch.await_count == 1
+    semantic_event = thread_store.post_thread_message.await_args_list[0].kwargs
+    assert semantic_event["metadata"]["event_type"] == "semantic_router_unavailable"
+    task_metadata = task_store.create_task.await_args_list[0].kwargs["metadata"]
+    assert task_metadata["schema_version"] == "squad_delivery.v1"
+    assert task_metadata["delivery_status"] == "delegated"
 
 
 @pytest.mark.asyncio
@@ -362,6 +426,9 @@ async def test_engine_persists_task_request_and_dispatches() -> None:
 
     assert execution.coordinated is True
     assert dispatched == ["COPY"]
+    task_store.claim_task.assert_awaited_once()
+    assert task_store.claim_task.await_args.kwargs["task_id"] == "00000000-0000-0000-0000-000000000101"
+    assert task_store.claim_task.await_args.kwargs["agent_id"] == "COPY"
     assert task_store.create_task.await_count == 3
     assert task_store.create_task.await_args_list[1].kwargs["depends_on"] == ["00000000-0000-0000-0000-000000000101"]
     assert task_store.create_task.await_args_list[2].kwargs["depends_on"] == ["00000000-0000-0000-0000-000000000102"]

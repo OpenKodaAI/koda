@@ -968,6 +968,119 @@ async def stream_dashboard_squad_thread_events_route(request: web.Request) -> we
     return response
 
 
+async def _watch_dashboard_squad_delivery_synthesis(
+    *,
+    thread_id: str,
+    parent_message_id: str,
+    coordinator_agent_id: str,
+    application: Any | None,
+) -> None:
+    try:
+        from koda.squads import dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        task_store = get_squad_task_store()
+        if thread_store is None or task_store is None:
+            return
+        thread = await thread_store.get_thread(thread_id)
+        if thread is None or not coordinator_agent_id:
+            return
+        for attempt in range(90):
+            open_tasks = await task_store.list_tasks(
+                thread_id=thread_id,
+                status=["pending", "claimed", "in_progress", "blocked"],
+                limit=1,
+            )
+            if not open_tasks:
+                break
+            await asyncio.sleep(2.0 if attempt > 0 else 1.0)
+        else:
+            await thread_store.post_thread_message(
+                thread_id=thread_id,
+                from_agent="system",
+                content="[synthesis_blocked] open squad tasks did not close before watcher timeout",
+                message_type="system_event",
+                metadata={
+                    "event_type": "synthesis_blocked",
+                    "parent_message_id": parent_message_id,
+                    "coordinator_agent_id": coordinator_agent_id,
+                },
+            )
+            return
+
+        synthesis_idempotency_key = f"squad_synthesis:{thread_id}:{parent_message_id}:{coordinator_agent_id}"
+        history = await thread_store.thread_history(thread_id=thread_id, limit=160)
+        for message in history:
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            if metadata.get("idempotency_key") == synthesis_idempotency_key:
+                return
+
+        visible_results: list[str] = []
+        confirmed_results: list[str] = []
+        for message in reversed(history):
+            if message.get("type") != "task_result":
+                continue
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            if metadata.get("parent_message_id") != parent_message_id:
+                continue
+            task_id = str(metadata.get("squad_task_id") or "").strip()
+            if not task_id:
+                continue
+            agent = str(message.get("from") or "agent").strip() or "agent"
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            visible_results.append(f"{agent} / {task_id}:\n{content[:1500]}")
+            first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
+            if first_line:
+                confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
+        if not visible_results:
+            return
+
+        confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
+        visible_results_block = "\n\n".join(visible_results)
+        synthesis_query = (
+            "Todos os task_result abertos deste ciclo já foram recebidos. "
+            "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
+            "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
+            "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
+            "não os traduza, normalize ou parafraseie. "
+            "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
+            "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
+            f"Resultados confirmados:\n{confirmed_results_block}\n\n"
+            f"Resultados visíveis deste ciclo:\n{visible_results_block}"
+        )
+        await dispatch_squad_turn(
+            target_agent_id=coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=parent_message_id,
+            metadata={
+                "from_agent": "squad_delivery_watcher",
+                "source": "dashboard_delivery_watcher",
+                "delivery_intent": "final_synthesis",
+                "idempotency_key": synthesis_idempotency_key,
+                "parent_message_id": parent_message_id,
+            },
+            application=application,
+            user_id=int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=["squad_delivery_watcher"],
+            delegation_request_id=synthesis_idempotency_key,
+            delegation_origin_agent_id="squad_delivery_watcher",
+            telegram_message_thread_id=thread.telegram_message_thread_id,
+        )
+    except Exception:
+        log.exception(
+            "dashboard_squad_delivery_synthesis_watch_failed",
+            thread_id=thread_id,
+            parent_message_id=parent_message_id,
+        )
+
+
 async def post_dashboard_squad_thread_message_route(request: web.Request) -> web.Response:
     if (resp := _authorize_request(request)) is not None:
         return resp
@@ -1322,20 +1435,20 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                     raise RuntimeError("coordinator unavailable")
                 engine = SquadCoordinatorEngine(thread_store=store, task_store=task_store)
 
-                async def dispatch_task(request: Any) -> str | int | None:
+                async def dispatch_task(task_request: Any) -> str | int | None:
                     result = await dispatch_squad_turn(
-                        target_agent_id=request.agent_id,
+                        target_agent_id=task_request.agent_id,
                         thread=resolved_thread,
                         thread_store=store,
-                        query_text=request.content,
+                        query_text=task_request.content,
                         parent_message_id=f"msg-{message_id}",
-                        metadata={**dict(request.metadata or {}), "from_agent": coordinator_id},
+                        metadata={**dict(task_request.metadata or {}), "from_agent": coordinator_id},
                         application=request.app.get("telegram_application"),
                         user_id=resolved_thread.owner_user_id,
                         chat_id=resolved_thread.telegram_chat_id or 0,
-                        squad_task_id=request.task_descriptor.id,
+                        squad_task_id=task_request.task_descriptor.id,
                         delegation_chain=[coordinator_id],
-                        delegation_request_id=request.request_id,
+                        delegation_request_id=task_request.request_id,
                         delegation_origin_agent_id=coordinator_id,
                         telegram_message_thread_id=resolved_thread.telegram_message_thread_id,
                     )
@@ -1373,6 +1486,14 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                         "tasks": execution.task_ids,
                         "agents": execution.dispatched_agents,
                     }
+                    asyncio.create_task(
+                        _watch_dashboard_squad_delivery_synthesis(
+                            thread_id=thread_id,
+                            parent_message_id=f"msg-{message_id}",
+                            coordinator_agent_id=coordinator_id,
+                            application=request.app.get("telegram_application"),
+                        )
+                    )
                     return web.json_response(
                         {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )

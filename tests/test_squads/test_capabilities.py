@@ -54,6 +54,12 @@ def test_build_summary_full() -> None:
                     "squad_post",
                 ],
             },
+            "model_policy": {
+                "default_provider": "codex",
+                "default_models": {"codex": "gpt-5.4-mini"},
+            },
+            "integration_policy": {"allowed_integration_ids": ["github", "linear"]},
+            "routing_profile": {"quality_score": 0.91, "cost_weight": 0.7},
         },
         display_name="Frontend Dev",
         is_coordinator=False,
@@ -70,6 +76,12 @@ def test_build_summary_full() -> None:
     assert "agent_comm" in summary.tool_categories
     # tool_categories are deduped + capped (max 6)
     assert len(summary.tool_categories) <= 6
+    assert summary.allowed_tool_ids[:2] == ["file_read", "file_write"]
+    assert summary.integration_ids == ["github", "linear"]
+    assert summary.preferred_provider == "codex"
+    assert summary.preferred_model == "gpt-5.4-mini"
+    assert summary.quality_score == 0.91
+    assert summary.cost_weight == 0.7
 
 
 def test_build_summary_truncates_long_text() -> None:
@@ -123,12 +135,15 @@ def test_format_block_includes_capability_fields() -> None:
         delegate_when="ui work",
         do_not_delegate="backend",
         tool_categories=["fileops", "browser"],
+        preferred_provider="codex",
+        preferred_model="gpt-5.4-mini",
     )
     block = format_capability_block([summary])
     assert "domains: react, tailwind" in block
     assert "delegate_when: ui work" in block
     assert "do_not_delegate: backend" in block
     assert "tools: fileops, browser" in block
+    assert "model: codex/gpt-5.4-mini" in block
 
 
 # --- cache schema validation ---

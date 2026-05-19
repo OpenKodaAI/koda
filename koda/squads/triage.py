@@ -8,6 +8,7 @@ from typing import Any
 from koda.config import SQUAD_SEMANTIC_TOP_K
 from koda.logging_config import get_logger
 from koda.squads.capabilities import CapabilitySummary
+from koda.squads.delivery import SQUAD_DELIVERY_SCHEMA_VERSION, delivery_metric
 from koda.squads.semantic_router import SemanticAgentScore, SemanticRoutingResult
 
 log = get_logger(__name__)
@@ -194,7 +195,9 @@ async def _post_awareness_event(
     proposal_agent_ids: list[str],
 ) -> int | None:
     payload = {
+        "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
         "event_type": "squad_awareness_fanout",
+        "delivery_status": "received",
         "delivery_intent": "awareness",
         "user_input_message_id": str(user_input_message_id) if user_input_message_id is not None else None,
         "channel": channel,
@@ -204,6 +207,7 @@ async def _post_awareness_event(
         "proposal_agent_ids": list(proposal_agent_ids),
         "channel_context": _safe_channel_context(channel_context),
     }
+    delivery_metric(event_type="squad_awareness_fanout", status="received", source="squad_triage")
     try:
         return int(
             await thread_store.post_thread_message(
@@ -213,7 +217,9 @@ async def _post_awareness_event(
                 message_type="system_event",
                 metadata={
                     "event_type": "squad_awareness_fanout",
+                    "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
                     "parent_message_id": str(user_input_message_id) if user_input_message_id is not None else None,
+                    "delivery_status": "received",
                     "delivery_intent": "awareness",
                     "payload": payload,
                 },
@@ -234,7 +240,9 @@ async def _post_proposal_event(
     semantic_result: SemanticRoutingResult,
 ) -> int | None:
     payload = {
+        "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
         "event_type": "contribution_proposal",
+        "delivery_status": "routed",
         "delivery_intent": "proposal",
         "user_input_message_id": str(user_input_message_id) if user_input_message_id is not None else None,
         "channel": channel,
@@ -242,6 +250,7 @@ async def _post_proposal_event(
         "semantic_model": semantic_result.model_name,
         "semantic_available": semantic_result.available,
     }
+    delivery_metric(event_type="contribution_proposal", status="routed", source="squad_triage")
     try:
         return int(
             await thread_store.post_thread_message(
@@ -251,7 +260,9 @@ async def _post_proposal_event(
                 message_type="system_event",
                 metadata={
                     "event_type": "contribution_proposal",
+                    "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
                     "parent_message_id": str(user_input_message_id) if user_input_message_id is not None else None,
+                    "delivery_status": "routed",
                     "delivery_intent": "proposal",
                     "payload": payload,
                 },

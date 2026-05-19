@@ -24,6 +24,7 @@ interface UseRoomsResult {
   rooms: RoomEntry[];
   squads: SquadOverviewItem[];
   loading: boolean;
+  refreshing: boolean;
   error: Error | null;
   available: boolean;
 }
@@ -107,12 +108,15 @@ export function useRooms(): UseRoomsResult {
   }, [squads, threadsResults]);
 
   const loading =
-    overviewQuery.isPending ||
+    stableOverview.initialLoading ||
     threadsResults.some((result) => result.isPending && squads.length > 0);
+  const refreshing =
+    stableOverview.refreshing ||
+    threadsResults.some((result) => result.isFetching && !result.isPending);
   const error =
     (overviewQuery.error as Error | null) ??
     (threadsResults.find((result) => result.error)?.error as Error | null) ??
     null;
 
-  return { rooms, squads, loading, error, available };
+  return { rooms, squads, loading, refreshing, error, available };
 }

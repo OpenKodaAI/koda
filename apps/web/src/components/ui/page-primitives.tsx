@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Search, type LucideIcon } from "lucide-react";
+import { Children, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
+import { LoaderCircle, Search, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function PageToolbar({
@@ -140,11 +140,31 @@ export function PageStatGrid({
 export function PageMetricStrip({
   children,
   className,
-}: {
+  style,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("metric-strip", className)}>{children}</div>;
+  const itemCount = Children.count(children);
+  const columns = Math.max(1, Math.min(itemCount, 4));
+  const mobileColumns = Math.max(1, Math.min(itemCount, 2));
+  const metricStyle = {
+    ...style,
+    "--metric-strip-columns": String(columns),
+    "--metric-strip-mobile-columns": String(mobileColumns),
+  } as CSSProperties;
+
+  return (
+    <div
+      className={cn("metric-strip", className)}
+      data-count={itemCount}
+      style={metricStyle}
+      {...props}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function PageMetricStripItem({
@@ -175,13 +195,13 @@ export function PageMetricStripItem({
 
   return (
     <div className={cn("metric-strip__item", className)}>
-      <span className="metric-label">{label}</span>
+      <div className="metric-strip__header">
+        <span className="metric-label">{label}</span>
+        {delta ? <span className="metric-strip__delta">{delta}</span> : null}
+      </div>
       <span className={cn("metric-value", toneClass)}>{value}</span>
       {hint ? (
-        <span className="text-[0.75rem] leading-[1.45] text-[var(--text-tertiary)]">{hint}</span>
-      ) : null}
-      {delta ? (
-        <span className="text-[0.75rem] text-[var(--text-tertiary)]">{delta}</span>
+        <span className="metric-strip__hint">{hint}</span>
       ) : null}
     </div>
   );
@@ -270,24 +290,51 @@ export function PageSearchField({
   onChange,
   placeholder,
   ariaLabel,
+  loading = false,
+  loadingLabel = "Searching",
+  clearLabel = "Clear search",
   className,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   ariaLabel?: string;
+  loading?: boolean;
+  loadingLabel?: string;
+  clearLabel?: string;
   className?: string;
 }) {
   return (
     <label className={cn("app-search w-full min-w-0 xl:w-[280px] xl:flex-none", className)}>
-      <Search className="h-4 w-4 text-[var(--text-quaternary)]" />
+      {loading ? (
+        <span role="status" aria-label={loadingLabel}>
+          <LoaderCircle
+            className="h-4 w-4 animate-spin text-[var(--text-quaternary)]"
+            aria-hidden="true"
+          />
+        </span>
+      ) : (
+        <Search className="h-4 w-4 text-[var(--text-quaternary)]" aria-hidden="true" />
+      )}
       <input
         type="text"
+        role="searchbox"
         placeholder={placeholder}
         aria-label={ariaLabel ?? placeholder}
         value={value}
+        className="search-input--custom-clear min-w-0 flex-1"
         onChange={(event) => onChange(event.target.value)}
       />
+      {value ? (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label={clearLabel}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ) : null}
     </label>
   );
 }

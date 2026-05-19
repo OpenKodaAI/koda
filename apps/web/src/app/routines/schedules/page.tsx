@@ -32,7 +32,6 @@ import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useToast } from "@/hooks/use-toast";
 import { useContentStable } from "@/hooks/use-content-stable";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
-import { BackgroundRefreshIndicator } from "@/components/ui/async-feedback";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import {
@@ -351,7 +350,6 @@ export default function SchedulesPage() {
   });
   const stableSchedulesPayload = useContentStable(stableSchedulesQuery.data ?? undefined);
   const loading = stableSchedulesQuery.initialLoading;
-  const refreshing = stableSchedulesQuery.refreshing;
   const unavailable =
     stableSchedulesPayload?.pages.some((page) => page.unavailable) ?? Boolean(schedulesQuery.error);
   const scheduleItems = useMemo(
@@ -671,10 +669,6 @@ export default function SchedulesPage() {
           />
         </div>
         <div className="flex items-center gap-2 md:ml-auto">
-          <BackgroundRefreshIndicator
-            refreshing={refreshing}
-            className="hidden sm:inline-flex"
-          />
           <Button
             type="button"
             variant="accent"

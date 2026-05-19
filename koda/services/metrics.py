@@ -134,6 +134,12 @@ SQUAD_REPLY_EVENTS = Counter(
     ["agent_id", "event_type", "status"],
 )
 
+SQUAD_DELIVERY_EVENTS = Counter(
+    "koda_squad_delivery_events_total",
+    "Squad delivery v1 lifecycle and routing events",
+    ["event_type", "status", "source"],
+)
+
 WORKSPACE_IMPORT_SCANS_TOTAL = Counter(
     "koda_workspace_import_scans_total",
     "Workspace directory import scans",

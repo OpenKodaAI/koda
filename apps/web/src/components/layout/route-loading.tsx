@@ -12,8 +12,18 @@ function SkeletonLine({
 }
 
 export function MetricStripSkeleton({ count = 4 }: { count?: number }) {
+  const columns = Math.max(1, Math.min(count, 4));
+  const mobileColumns = Math.max(1, Math.min(count, 2));
+
   return (
-    <div className="metric-strip">
+    <div
+      className="metric-strip"
+      data-count={count}
+      style={{
+        "--metric-strip-columns": String(columns),
+        "--metric-strip-mobile-columns": String(mobileColumns),
+      } as CSSProperties}
+    >
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className="metric-strip__item">
           <SkeletonLine className="mb-1 h-3 w-24 rounded" />

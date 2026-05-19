@@ -19,15 +19,18 @@ from typing import Any, Literal, Protocol
 from koda.config import (
     DEFAULT_WORK_DIR,
     INTER_AGENT_MAX_DELEGATION_DEPTH,
+    SQUAD_CLAIM_TTL_S,
     SQUAD_COORDINATOR_LLM_TIMEOUT_S,
     SQUAD_COORDINATOR_PLANNER,
     SQUAD_FANOUT_MAX_PER_TURN,
 )
 from koda.logging_config import get_logger
 from koda.squads.capabilities import CapabilitySummary
+from koda.squads.delivery import SQUAD_DELIVERY_SCHEMA_VERSION, delivery_metric
 from koda.squads.routing import extract_mentions
 from koda.squads.semantic_router import (
     CoordinationPlannerInput,
+    SemanticAgentScore,
     SemanticRoutingResult,
     SquadSemanticRouter,
     get_squad_semantic_router,
@@ -200,6 +203,8 @@ class CoordinationExecution:
     task_ids: list[str] = field(default_factory=list)
     dispatched_agents: list[str] = field(default_factory=list)
     message_ids: list[str] = field(default_factory=list)
+    delivery_status: str = "coordinating"
+    schema_version: str = SQUAD_DELIVERY_SCHEMA_VERSION
 
     @property
     def dispatched_count(self) -> int:
@@ -631,16 +636,22 @@ class SquadCoordinatorEngine:
                     },
                 },
             )
-            return CoordinationExecution(
-                coordinated=False,
-                decision=CoordinationDecision(
-                    mode="answer_self",
-                    confidence=0.5,
-                    reasoning_summary="Roteamento semântico indisponível; degradando para coordenador.",
-                    selected_agents=[coordinator_agent_id],
-                    final_response_strategy="direct",
-                ),
+            semantic_result = _capability_fallback_semantic_result(
+                summaries=summaries,
+                coordinator_agent_id=coordinator_agent_id,
+                reason=semantic_result.reason or "semantic routing unavailable",
             )
+            if not semantic_result.scores:
+                return CoordinationExecution(
+                    coordinated=False,
+                    decision=CoordinationDecision(
+                        mode="answer_self",
+                        confidence=0.5,
+                        reasoning_summary="Roteamento semântico indisponível e nenhum especialista ativo encontrado.",
+                        selected_agents=[coordinator_agent_id],
+                        final_response_strategy="direct",
+                    ),
+                )
         planner_input = self._semantic_router.build_planner_input(
             text=text,
             thread=thread,
@@ -693,6 +704,9 @@ class SquadCoordinatorEngine:
                     "coordination_task_key": task.key or task.kind,
                     "coordination_mode": decision.mode,
                     "report_via": task.report_via,
+                    "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                    "delivery_status": "waiting_for_replies" if depends_on else "delegated",
+                    "delivery_intent": "execution",
                 },
             )
             if task.key:
@@ -722,8 +736,19 @@ class SquadCoordinatorEngine:
                     "context_refs": list(task.context_refs),
                 },
                 "delivery_intent": "execution",
+                "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                "delivery_status": "waiting_for_replies" if depends_on else "delegated",
+                "squad_delivery": {
+                    "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                    "status": "waiting_for_replies" if depends_on else "delegated",
+                    "source": "coordinator_engine",
+                    "target_agent_id": task.agent_id,
+                    "task_id": task_row.id,
+                    "parent_message_id": parent_message_id,
+                    "final_response_strategy": decision.final_response_strategy,
+                },
                 "idempotency_key": idempotency_key,
-                "delivery_status": "waiting_dependencies" if depends_on else "ready",
+                "delivery_queue_status": "waiting_dependencies" if depends_on else "ready",
             }
             visible_msg = await self._thread_store.post_thread_message(
                 thread_id=thread.id,
@@ -740,6 +765,22 @@ class SquadCoordinatorEngine:
                     task_id=task_row.id,
                     agent_id=task.agent_id,
                     depends_on=depends_on,
+                )
+                task_ids.append(task_row.id)
+                pending_task_ids.append(task_row.id)
+                continue
+            try:
+                await self._task_store.claim_task(
+                    task_id=task_row.id,
+                    agent_id=task.agent_id,
+                    ttl_seconds=SQUAD_CLAIM_TTL_S,
+                )
+            except Exception:
+                log.exception(
+                    "squad_coordination_task_initial_claim_failed",
+                    thread_id=thread.id,
+                    task_id=task_row.id,
+                    agent_id=task.agent_id,
                 )
                 task_ids.append(task_row.id)
                 pending_task_ids.append(task_row.id)
@@ -769,18 +810,22 @@ class SquadCoordinatorEngine:
             thread_id=thread.id,
             event_type="coordination_dispatched",
             data={
+                "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                "delivery_status": "delegated",
                 "task_ids": task_ids,
                 "agents": dispatched_agents,
                 "mode": decision.mode,
                 "pending_task_ids": pending_task_ids,
             },
         )
+        delivery_metric(event_type="coordination_dispatched", status="delegated", source="coordinator_engine")
         return CoordinationExecution(
             coordinated=True,
             decision=decision,
             task_ids=task_ids,
             dispatched_agents=dispatched_agents,
             message_ids=dispatch_message_ids,
+            delivery_status="delegated",
         )
 
     async def _post_coordination_decision(
@@ -802,9 +847,15 @@ class SquadCoordinatorEngine:
             message_type="system_event",
             metadata={
                 "event_type": "coordination_decision",
+                "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                "delivery_status": "coordinating",
+                "delivery_intent": "execution",
                 "parent_message_id": parent_message_id,
                 "payload": {
+                    "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
                     "event_type": "coordination_decision",
+                    "delivery_status": "coordinating",
+                    "delivery_intent": "execution",
                     "data": decision.to_dict(),
                 },
                 "coordination_decision": decision.to_dict(),
@@ -813,8 +864,14 @@ class SquadCoordinatorEngine:
         await self._thread_store.notify_event(
             thread_id=thread_id,
             event_type="coordination_decision",
-            data={"message_id": message_id, "decision": decision.to_dict()},
+            data={
+                "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
+                "delivery_status": "coordinating",
+                "message_id": message_id,
+                "decision": decision.to_dict(),
+            },
         )
+        delivery_metric(event_type="coordination_decision", status="coordinating", source="coordinator_engine")
         return message_id
 
 
@@ -829,10 +886,59 @@ def _idempotency_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
 
 
+def _capability_fallback_semantic_result(
+    *,
+    summaries: list[CapabilitySummary],
+    coordinator_agent_id: str,
+    reason: str,
+) -> SemanticRoutingResult:
+    """Build a non-semantic specialist ordering when embeddings are offline."""
+
+    scores: list[SemanticAgentScore] = []
+    for index, summary in enumerate(summaries):
+        is_coordinator = summary.agent_id == coordinator_agent_id or summary.is_coordinator
+        if is_coordinator:
+            continue
+        summary_text = " ".join(
+            part
+            for part in [
+                summary.role,
+                *summary.domains[:3],
+                *summary.primary_outcomes[:3],
+                summary.delegate_when,
+            ]
+            if str(part or "").strip()
+        )
+        scores.append(
+            SemanticAgentScore(
+                agent_id=summary.agent_id,
+                score=max(0.35, 0.75 - (index * 0.03)),
+                positive_score=max(0.35, 0.75 - (index * 0.03)),
+                negative_score=0.0,
+                summary_text=summary_text or summary.display_name or summary.agent_id,
+                is_coordinator=False,
+            )
+        )
+    return SemanticRoutingResult(
+        available=True,
+        model_name="capability-fallback",
+        scores=scores,
+        reason=reason,
+        min_score=0.0,
+        top_k=max(1, len(scores)),
+    )
+
+
 def _render_task_request(*, task: CoordinationTask, source_request: str, task_id: str) -> str:
     lines = [
         f"Task request [{task.kind}] {task_id}",
         f"Assigned to: {task.agent_id}",
+        "",
+        "Execution role:",
+        "- You are the assigned worker for this task, not the squad coordinator.",
+        "- The coordinator has already delegated the work. Do not spawn, delegate, or ask others to do this task.",
+        "- Treat the source user request as context; your responsibility is the Objective below.",
+        "- Return only your own concrete task_result for this assigned objective.",
         "",
         "Source user request:",
         source_request.strip(),
@@ -851,8 +957,8 @@ def _render_task_request(*, task: CoordinationTask, source_request: str, task_id
     lines.extend(
         [
             "",
-            "Return a concrete task_result in this thread. Do not claim other agents contributed unless "
-            "their task_result is visible.",
+            "Return a concrete task_result in this thread without progress narration. Do not claim other agents "
+            "contributed unless their task_result is visible.",
         ]
     )
     return "\n".join(lines)

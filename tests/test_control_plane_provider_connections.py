@@ -63,6 +63,15 @@ def test_whisper_function_catalog_uses_only_downloaded_variants() -> None:
     assert "whisper-cpp-local" not in {item["model_id"] for item in models}
 
 
+def test_whisper_function_catalog_knows_managed_variants_without_live_catalog() -> None:
+    model_ids = {item["model_id"] for item in resolve_provider_function_model_catalog("whispercpp")}
+
+    assert "large-v3-turbo-q5_0" in model_ids
+    assert "large-v3-turbo" in model_ids
+    assert "medium-q5_0" in model_ids
+    assert "whisper-cpp-local" in model_ids
+
+
 def _make_manager(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
@@ -169,6 +178,23 @@ def test_core_provider_catalog_exposes_connection_flags():
     assert catalog["ollama"]["connection_managed"] is True
     assert catalog["claude"]["connection_managed"] is True
     assert catalog["kokoro"]["connection_managed"] is False
+
+
+def test_provider_command_availability_blocks_general_providers_only():
+    import koda.control_plane.manager as manager_mod
+
+    errors, warnings = manager_mod._provider_command_availability_issues(
+        {
+            "providers": {
+                "claude": {"enabled": True, "category": "general", "command_present": False},
+                "whispercpp": {"enabled": True, "category": "transcription", "command_present": False},
+                "security": {"enabled": True, "category": "infra", "command_present": False},
+            }
+        }
+    )
+
+    assert errors == ["provider 'claude' is enabled but its runtime command is not available"]
+    assert warnings == ["provider 'whispercpp' is enabled but its runtime command is not available"]
 
 
 def test_function_model_catalog_preserves_resolved_ollama_models():

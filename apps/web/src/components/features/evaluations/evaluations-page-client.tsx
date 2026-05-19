@@ -23,15 +23,14 @@ import {
   PageSearchField,
   PageSectionHeader,
 } from "@/components/ui/page-primitives";
-import { AnimatedCardStatusList, type Card as StatusCard } from "@/components/ui/card-status-list";
 import { SoftTabs } from "@/components/ui/soft-tabs";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { useToast, type ToastType } from "@/hooks/use-toast";
+import { useUrlSyncedSearch } from "@/hooks/use-url-synced-search";
 import {
   evalErrorMessage,
   parseEvalCases,
@@ -101,14 +100,16 @@ export default function EvaluationsPageClient({
   const { agents } = useAgentCatalog();
   const [activeAgentId, setActiveAgentId] = useState<string | undefined>(initialAgentId);
   const [view, setView] = useState<EvaluationsView>("cases");
-  const [search, setSearch] = useState("");
+  const searchState = useUrlSyncedSearch({ debounceMs: 180 });
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
   const [selectedCaseKey, setSelectedCaseKey] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [trajectoryExport, setTrajectoryExport] = useState<TrajectoryExport | null>(null);
   const [runningSuite, setRunningSuite] = useState(false);
   const [exportingTrajectory, setExportingTrajectory] = useState(false);
   const [patchingCaseKey, setPatchingCaseKey] = useState<string | null>(null);
-  const debouncedSearch = useDebouncedValue(search.trim(), 180);
+  const debouncedSearch = searchState.debouncedValue;
   const resolvedAgentId = activeAgentId ?? agents[0]?.id;
 
   const casesQuery = useControlPlaneQuery<EvalCase[]>({
@@ -209,70 +210,6 @@ export default function EvaluationsPageClient({
   );
   const latestRun = runs[0] ?? releaseQuality?.latest_eval_run ?? null;
   const latestScore = latestRun?.summary.score ?? null;
-  const latestExport = trajectoryExport ?? releaseQuality?.latest_trajectory_export ?? null;
-  const evalStatusCards = useMemo<StatusCard[]>(() => {
-    const hasRunningEval =
-      runningSuite ||
-      runs.some((run) => run.status === "running" || run.status === "queued");
-    const latestRunHasFailures = (latestRun?.summary.failed ?? 0) > 0;
-    const releaseStatus = releaseQuality?.status ?? "unknown";
-    return [
-      {
-        id: "case-readiness",
-        title: `${readyCases.length}/${cases.length} cases ready`,
-        status: cases.length === 0 || readyCases.length === 0 ? "updates-found" : "completed",
-      },
-      {
-        id: "suite-run",
-        title: latestRun
-          ? `Latest suite ${latestRun.status}`
-          : "No deterministic suite yet",
-        status: hasRunningEval
-          ? "syncing"
-          : latestRun && !latestRunHasFailures
-            ? "completed"
-            : "updates-found",
-      },
-      {
-        id: "trajectory-export",
-        title: latestExport?.redaction_applied
-          ? "Trajectory export redacted"
-          : "Trajectory export missing",
-        status: exportingTrajectory
-          ? "syncing"
-          : latestExport?.redaction_applied
-            ? "completed"
-            : "updates-found",
-      },
-      {
-        id: "release-quality",
-        title: releaseQuality
-          ? `Release quality ${releaseStatus}`
-          : "Release quality unpublished",
-        status:
-          releaseStatus === "passing" || releaseStatus === "passed"
-            ? "completed"
-            : "updates-found",
-      },
-      {
-        id: "failure-drilldown",
-        title: `${latestRun?.top_failures.length ?? releaseQuality?.top_failures.length ?? 0} top failure groups`,
-        status:
-          (latestRun?.top_failures.length ?? releaseQuality?.top_failures.length ?? 0) > 0
-            ? "updates-found"
-            : "completed",
-      },
-    ];
-  }, [
-    cases.length,
-    exportingTrajectory,
-    latestExport?.redaction_applied,
-    latestRun,
-    readyCases.length,
-    releaseQuality,
-    runningSuite,
-    runs,
-  ]);
 
   const initialLoading = stableCases.initialLoading || stableRuns.initialLoading || stableRelease.initialLoading;
   const showSkeleton = useMinDurationFlag(Boolean(resolvedAgentId) && initialLoading, 300);
@@ -371,18 +308,6 @@ export default function EvaluationsPageClient({
     }
   }, [casesQuery, notify, resolvedAgentId, tl]);
 
-  const synchronizeEvalStatus = useCallback((cardId: string) => {
-    if (cardId === "suite-run" && cases.length > 0) {
-      void runSuite();
-      return;
-    }
-    if (cardId === "trajectory-export" && selectedRun) {
-      void exportTrajectory();
-      return;
-    }
-    void refreshAll();
-  }, [cases.length, exportTrajectory, refreshAll, runSuite, selectedRun]);
-
   if (agents.length === 0) {
     return (
       <PageEmptyState
@@ -427,6 +352,9 @@ export default function EvaluationsPageClient({
             value={search}
             onChange={setSearch}
             placeholder={tl("Search eval cases")}
+            loading={searchState.isSearching}
+            loadingLabel={tl("Searching eval cases")}
+            clearLabel={tl("Clear search")}
           />
         </div>
         <SoftTabs
@@ -516,27 +444,21 @@ export default function EvaluationsPageClient({
         <CasesPanel
           cases={filteredCases}
           selectedCase={selectedCase}
-          statusCards={evalStatusCards}
           patchingCaseKey={patchingCaseKey}
           onSelectCase={(caseKey) => setSelectedCaseKey(caseKey)}
           onPatchStatus={patchCaseStatus}
-          onSynchronizeStatus={synchronizeEvalStatus}
         />
       ) : view === "runs" ? (
         <RunsPanel
           runs={runs}
           selectedRun={selectedRun}
-          statusCards={evalStatusCards}
           onSelectRun={(runId) => setSelectedRunId(runId)}
-          onSynchronizeStatus={synchronizeEvalStatus}
         />
       ) : (
         <ReleasePanel
           releaseQuality={releaseQuality}
           selectedRun={selectedRun}
           trajectoryExport={trajectoryExport}
-          statusCards={evalStatusCards}
-          onSynchronizeStatus={synchronizeEvalStatus}
         />
       )}
     </div>
@@ -703,24 +625,60 @@ function SkeletonCodePreview() {
   );
 }
 
+function EvalSidePanel({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="w-full" aria-label={title}>
+      <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] p-4 shadow-none">
+        <header className="mb-4 min-w-0">
+          {eyebrow ? (
+            <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              {eyebrow}
+            </p>
+          ) : null}
+          <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            {title}
+          </h2>
+          {description ? (
+            <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+              {description}
+            </p>
+          ) : null}
+        </header>
+
+        <div className="space-y-2.5">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 function CasesPanel({
   cases,
   selectedCase,
-  statusCards,
   patchingCaseKey,
   onSelectCase,
   onPatchStatus,
-  onSynchronizeStatus,
 }: {
   cases: EvalCase[];
   selectedCase: EvalCase | null;
-  statusCards: StatusCard[];
   patchingCaseKey: string | null;
   onSelectCase: (caseKey: string) => void;
   onPatchStatus: (caseKey: string, status: EvalCase["status"]) => void;
-  onSynchronizeStatus: (cardId: string) => void;
 }) {
   const { tl } = useAppI18n();
+  const readyCasesCount = cases.filter((item) => item.status === "ready").length;
+  const readinessTone: StatusDotTone =
+    cases.length === 0 ? "neutral" : readyCasesCount > 0 ? "success" : "warning";
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
       <section className="app-section min-w-0">
@@ -775,16 +733,18 @@ function CasesPanel({
         ) : null}
       </section>
 
-      <aside className="min-w-0 space-y-4">
-        <AnimatedCardStatusList
-          title={tl("Eval readiness")}
-          cards={statusCards}
-          sort="attention-first"
-          synchronizeLabel={tl("Sync")}
-          onSynchronize={onSynchronizeStatus}
-        />
-        <section className="app-section min-w-0">
-          <PageSectionHeader compact eyebrow="case detail" title={tl("Selected case")} />
+      <aside className="min-w-0">
+        <EvalSidePanel
+          eyebrow="eval_case.v1"
+          title={tl("Case readiness")}
+          description={tl("Readiness gates and the selected case live in one review panel.")}
+        >
+          <PanelSignal
+            tone={readinessTone}
+            label={`${readyCasesCount}/${cases.length} cases ready`}
+            meta={cases.length === 0 ? tl("No cases") : tl("Ready")}
+          />
+          <PanelMicroHeader eyebrow="case detail" title={tl("Selected case")} />
           {selectedCase ? (
             <div className="mt-3 space-y-4">
               <div>
@@ -819,7 +779,7 @@ function CasesPanel({
           ) : (
             <PageEmptyState icon={Archive} title={tl("Select an eval case")} />
           )}
-        </section>
+        </EvalSidePanel>
       </aside>
     </div>
   );
@@ -828,17 +788,18 @@ function CasesPanel({
 function RunsPanel({
   runs,
   selectedRun,
-  statusCards,
   onSelectRun,
-  onSynchronizeStatus,
 }: {
   runs: EvalRun[];
   selectedRun: EvalRun | null;
-  statusCards: StatusCard[];
   onSelectRun: (runId: string) => void;
-  onSynchronizeStatus: (cardId: string) => void;
 }) {
   const { tl } = useAppI18n();
+  const latestRun = runs[0] ?? null;
+  const latestRunHasFailures = (latestRun?.summary.failed ?? 0) > 0;
+  const activeRun = runs.some((run) => run.status === "running" || run.status === "queued");
+  const failureGroups = selectedRun?.top_failures.length ?? latestRun?.top_failures.length ?? 0;
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
       <section className="app-section min-w-0">
@@ -885,16 +846,23 @@ function RunsPanel({
         ) : null}
       </section>
 
-      <aside className="min-w-0 space-y-4">
-        <AnimatedCardStatusList
-          title={tl("Eval run health")}
-          cards={statusCards}
-          sort="attention-first"
-          synchronizeLabel={tl("Sync")}
-          onSynchronize={onSynchronizeStatus}
-        />
-        <section className="app-section min-w-0">
-          <PageSectionHeader compact eyebrow="failure drilldown" title={tl("Run detail")} />
+      <aside className="min-w-0">
+        <EvalSidePanel
+          eyebrow="eval_run.v1"
+          title={tl("Suite health")}
+          description={tl("Run score, case failures and failure groups share this review panel.")}
+        >
+          <PanelSignal
+            tone={activeRun ? "info" : latestRun && !latestRunHasFailures ? "success" : "warning"}
+            label={latestRun ? `Latest suite ${latestRun.status}` : tl("No deterministic suite yet")}
+            meta={latestRun ? formatRelativeTime(latestRun.completed_at ?? latestRun.created_at ?? latestRun.started_at) : tl("Pending")}
+          />
+          <PanelSignal
+            tone={failureGroups > 0 ? "warning" : "success"}
+            label={`${failureGroups} top failure groups`}
+            meta={failureGroups > 0 ? tl("Review") : tl("Clear")}
+          />
+          <PanelMicroHeader eyebrow="failure drilldown" title={tl("Run detail")} />
           {selectedRun ? (
             <div className="mt-3 space-y-4">
               <div className="grid grid-cols-3 gap-3">
@@ -922,7 +890,7 @@ function RunsPanel({
           ) : (
             <PageEmptyState icon={GitCompareArrows} title={tl("Select an eval run")} />
           )}
-        </section>
+        </EvalSidePanel>
       </aside>
     </div>
   );
@@ -932,17 +900,17 @@ function ReleasePanel({
   releaseQuality,
   selectedRun,
   trajectoryExport,
-  statusCards,
-  onSynchronizeStatus,
 }: {
   releaseQuality: ReleaseQuality | null;
   selectedRun: EvalRun | null;
   trajectoryExport: TrajectoryExport | null;
-  statusCards: StatusCard[];
-  onSynchronizeStatus: (cardId: string) => void;
 }) {
   const { tl } = useAppI18n();
   const exportPayload = trajectoryExport ?? releaseQuality?.latest_trajectory_export ?? null;
+  const releaseStatus = releaseQuality?.status ?? "unknown";
+  const releaseIsPassing = releaseStatus === "passing" || releaseStatus === "passed";
+  const exportIsReady = Boolean(exportPayload?.redaction_applied);
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
       <section className="app-section min-w-0">
@@ -974,16 +942,23 @@ function ReleasePanel({
         ) : null}
       </section>
 
-      <aside className="min-w-0 space-y-4">
-        <AnimatedCardStatusList
+      <aside className="min-w-0">
+        <EvalSidePanel
           title={tl("Release readiness")}
-          cards={statusCards}
-          sort="attention-first"
-          synchronizeLabel={tl("Sync")}
-          onSynchronize={onSynchronizeStatus}
-        />
-        <section className="app-section min-w-0">
-          <PageSectionHeader compact eyebrow="trajectory_export.v1" title={tl("Trajectory export")} />
+          eyebrow="release_quality.v1"
+          description={tl("Release gates, export safety and failure evidence stay together.")}
+        >
+          <PanelSignal
+            tone={releaseQuality ? (releaseIsPassing ? "success" : "warning") : "neutral"}
+            label={releaseQuality ? `Release quality ${releaseStatus}` : tl("Release quality unpublished")}
+            meta={releaseQuality ? `${releaseQuality.gates.length} gates` : tl("Pending")}
+          />
+          <PanelSignal
+            tone={exportPayload ? (exportIsReady ? "success" : "danger") : "warning"}
+            label={exportIsReady ? tl("Trajectory export redacted") : tl("Trajectory export missing")}
+            meta={exportPayload?.format ?? "jsonl"}
+          />
+          <PanelMicroHeader eyebrow="trajectory_export.v1" title={tl("Trajectory export")} />
           <div className="mt-3 space-y-4">
             {exportPayload ? (
               <>
@@ -1013,15 +988,56 @@ function ReleasePanel({
             )}
             <FailureList failures={releaseQuality?.top_failures ?? []} />
           </div>
-        </section>
+        </EvalSidePanel>
       </aside>
+    </div>
+  );
+}
+
+function PanelSignal({
+  tone,
+  label,
+  meta,
+}: {
+  tone: StatusDotTone;
+  label: string;
+  meta?: string;
+}) {
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2.5">
+      <StatusDot tone={tone} />
+      <span className="min-w-0 truncate text-[0.8125rem] text-[var(--text-primary)]">{label}</span>
+      {meta ? (
+        <span className="truncate font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+          {meta}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function PanelMicroHeader({
+  eyebrow,
+  title,
+}: {
+  eyebrow: string;
+  title: string;
+}) {
+  return (
+    <div>
+      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+        {eyebrow}
+      </p>
+      <p className="m-0 mt-1 text-[0.875rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+        {title}
+      </p>
     </div>
   );
 }
 
 function DetailDatum({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2.5">
+    <div className="min-w-0 border-l border-[var(--border-subtle)] py-1 pl-3">
       <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
         {label}
       </p>

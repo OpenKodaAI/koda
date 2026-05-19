@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   extractRoomAgentMentionIds,
   roomAgentMentionLiteral,
@@ -8,12 +8,6 @@ import {
   splitRoomAgentMentions,
   type RoomAgentMentionMeta,
 } from "@/components/sessions/chat/room-agent-mention";
-
-vi.mock("@/components/ui/agent-glyph", () => ({
-  AgentGlyph: ({ agentId }: { agentId: string }) => (
-    <span data-testid={`agent-glyph-${agentId}`} />
-  ),
-}));
 
 const sage: RoomAgentMentionMeta = {
   id: "DEMO_SAGE",
@@ -42,14 +36,22 @@ describe("room agent mentions", () => {
     ]);
   });
 
-  it("renders a minimal badge with the agent orb", () => {
+  it("renders a minimal badge with a translucent agent color background", () => {
     render(<RoomMentionRichText text="Ask @DEMO_SAGE" mentionsByToken={mentionMap()} />);
 
     expect(screen.getByText("@Sage")).toBeInTheDocument();
-    expect(screen.getByText("@Sage").closest("[data-agent-mention]")).toHaveClass(
-      "text-[var(--tone-info-dot)]",
+    const badge = screen.getByText("@Sage").closest("[data-agent-mention]");
+    expect(badge).not.toBeNull();
+    const style = badge?.getAttribute("style") ?? "";
+    expect(style).toMatch(
+      /--agent-mention-bg: color-mix\(in srgb, (#7c5cff|rgb\(124, 92, 255\)) 14%, transparent\)/,
     );
-    expect(screen.getByTestId("agent-glyph-DEMO_SAGE")).toBeInTheDocument();
+    expect(style).toMatch(
+      /--agent-mention-border: color-mix\(in srgb, (#7c5cff|rgb\(124, 92, 255\)) 28%, var\(--border-subtle\)\)/,
+    );
+    expect(style).toMatch(
+      /--agent-mention-text: color-mix\(in srgb, (#7c5cff|rgb\(124, 92, 255\)) 74%, var\(--text-primary\)\)/,
+    );
   });
 
   it("uses display-name tokens when they are safe for inline composer text", () => {
@@ -76,6 +78,5 @@ describe("room agent mentions", () => {
     );
 
     expect(screen.getByText("@Sage")).toHaveClass("text-[var(--tone-info-dot)]");
-    expect(screen.queryByTestId("agent-glyph-DEMO_SAGE")).not.toBeInTheDocument();
   });
 });

@@ -48,6 +48,13 @@ describe("ExecutionTable", () => {
     );
     expect(desktopSurface).toBeInTheDocument();
 
+    const desktopRowsScroller = Array.from(container.querySelectorAll("div")).find(
+      (node) =>
+        node.className.includes("max-h-[620px]") &&
+        node.className.includes("overflow-y-auto"),
+    );
+    expect(desktopRowsScroller).toBeInTheDocument();
+
     expect(container.querySelector(".sticky-table-last")).not.toBeInTheDocument();
     expect(container.querySelector(".sticky-table-last--header")).not.toBeInTheDocument();
     expect(container.querySelector(".sticky-table-row")).not.toBeInTheDocument();

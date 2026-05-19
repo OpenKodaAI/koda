@@ -8,6 +8,7 @@ from contextlib import suppress
 
 import pytest
 
+from koda.squads import threads as thread_module
 from koda.squads.replies import ThreadReplyError, ThreadReplyService
 from koda.squads.threads import SquadThreadStore
 
@@ -19,6 +20,12 @@ def _schema() -> str:
 def test_rejects_invalid_schema() -> None:
     with pytest.raises(ValueError):
         SquadThreadStore(dsn="postgresql://x/y", schema="bad-schema!")
+
+
+def test_archive_transition_policy_allows_open_and_paused_threads() -> None:
+    assert "archived" in thread_module._ALLOWED_TRANSITIONS["open"]
+    assert "archived" in thread_module._ALLOWED_TRANSITIONS["paused"]
+    assert "archived" in thread_module._ALLOWED_TRANSITIONS["completed"]
 
 
 @pytest.fixture
@@ -100,6 +107,27 @@ async def test_status_state_machine(store: SquadThreadStore) -> None:
     completed = await store.update_thread_status(thread.id, "completed")
     assert completed.status == "completed"
     assert completed.completed_at is not None
+    archived = await store.update_thread_status(thread.id, "archived")
+    assert archived.status == "archived"
+    assert archived.archived_at is not None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_open_thread_can_be_archived_directly(store: SquadThreadStore) -> None:
+    thread = await store.create_thread(workspace_id="acme", squad_id="build", title="t")
+    archived = await store.update_thread_status(thread.id, "archived")
+    assert archived.status == "archived"
+    assert archived.archived_at is not None
+    assert archived.completed_at is None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_paused_thread_can_be_archived_directly(store: SquadThreadStore) -> None:
+    thread = await store.create_thread(workspace_id="acme", squad_id="build", title="t")
+    paused = await store.update_thread_status(thread.id, "paused")
+    assert paused.status == "paused"
     archived = await store.update_thread_status(thread.id, "archived")
     assert archived.status == "archived"
     assert archived.archived_at is not None

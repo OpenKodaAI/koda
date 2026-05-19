@@ -7,6 +7,7 @@ import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provi
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { SessionRail } from "@/components/sessions/rail/session-rail";
 import type { RoomEntry } from "@/hooks/use-rooms";
+import type { SessionSummary } from "@/lib/types";
 import type { AgentDisplay } from "@/lib/agent-constants";
 
 vi.mock("@/components/ui/agent-glyph", () => ({
@@ -66,15 +67,23 @@ function installAgentFetch(agents: AgentDisplay[]) {
 function renderRail({
   agents,
   onNewChat = vi.fn(),
+  sessions = [],
   rooms = [],
   search = "",
   onSearchChange = vi.fn(),
+  sessionsLoading = false,
+  roomsLoading = false,
+  refreshing = false,
 }: {
   agents: AgentDisplay[];
   onNewChat?: (agentId?: string) => void;
+  sessions?: SessionSummary[];
   rooms?: RoomEntry[];
   search?: string;
   onSearchChange?: (value: string) => void;
+  sessionsLoading?: boolean;
+  roomsLoading?: boolean;
+  refreshing?: boolean;
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -82,9 +91,9 @@ function renderRail({
   const rendered = render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider initialLanguage="en-US">
-        <AgentCatalogProvider initialAgents={[]}>
+        <AgentCatalogProvider initialAgents={agents}>
           <SessionRail
-            sessions={[]}
+            sessions={sessions}
             rooms={rooms}
             selectedSessionId={null}
             selectedRoomId={null}
@@ -93,6 +102,9 @@ function renderRail({
             onNewChat={onNewChat}
             search={search}
             onSearchChange={onSearchChange}
+            sessionsLoading={sessionsLoading}
+            roomsLoading={roomsLoading}
+            refreshing={refreshing}
           />
         </AgentCatalogProvider>
       </I18nProvider>
@@ -101,7 +113,36 @@ function renderRail({
   return { ...rendered, queryClient, agents, onNewChat };
 }
 
-function makeRoom(title: string, squadId: string, coordinatorAgentId: string): RoomEntry {
+function makeSession(
+  sessionId = "session-1",
+  botId = "AGENT_00",
+): SessionSummary {
+  return {
+    bot_id: botId,
+    session_id: sessionId,
+    name: null,
+    user_id: 1,
+    created_at: "2026-03-28T10:00:00.000Z",
+    last_used: "2026-03-28T10:05:00.000Z",
+    last_activity_at: "2026-03-28T10:05:00.000Z",
+    query_count: 1,
+    execution_count: 1,
+    total_cost_usd: 0,
+    running_count: 0,
+    failed_count: 0,
+    latest_status: "completed",
+    latest_query_preview: "Review the launch checklist",
+    latest_response_preview: "Done.",
+    latest_message_preview: "Launch checklist updated",
+  };
+}
+
+function makeRoom(
+  title: string,
+  squadId: string,
+  coordinatorAgentId: string,
+  photoUrl: string | null = null,
+): RoomEntry {
   return {
     sortKey: "2026-03-28T10:00:00.000Z",
     squad: {
@@ -134,7 +175,7 @@ function makeRoom(title: string, squadId: string, coordinatorAgentId: string): R
       telegramChatId: null,
       telegramMessageThreadId: null,
       costUsdAccum: "0",
-      photoUrl: null,
+      photoUrl,
       createdAt: "2026-03-28T10:00:00.000Z",
       updatedAt: "2026-03-28T10:00:00.000Z",
       completedAt: null,
@@ -147,6 +188,45 @@ afterEach(() => {
 });
 
 describe("SessionRail new conversation agent picker", () => {
+  it("keeps loaded conversations visible while rooms are still loading", () => {
+    renderRail({
+      agents: [makeAgent(0, "Atlas")],
+      sessions: [makeSession()],
+      roomsLoading: true,
+    });
+
+    expect(screen.getByText("Atlas")).toBeInTheDocument();
+    expect(screen.getAllByTestId("rail-rooms-loading-row")).toHaveLength(2);
+    expect(
+      screen.queryByText(/no conversations yet/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps loaded rooms visible while conversations are still loading", () => {
+    renderRail({
+      agents: [makeAgent(0, "Atlas")],
+      rooms: [makeRoom("Smoke test room", "DEMO_SMOKE", "ATLAS")],
+      sessionsLoading: true,
+    });
+
+    expect(screen.getByRole("button", { name: /Smoke test room/i })).toBeInTheDocument();
+    expect(screen.getAllByTestId("rail-sessions-loading-row")).toHaveLength(3);
+    expect(
+      screen.queryByText(/no conversations yet/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a subtle updating indicator without replacing existing rows", () => {
+    renderRail({
+      agents: [makeAgent(0, "Atlas")],
+      sessions: [makeSession()],
+      refreshing: true,
+    });
+
+    expect(screen.getByRole("status", { name: /updating conversations/i })).toBeInTheDocument();
+    expect(screen.getByText("Atlas")).toBeInTheDocument();
+  });
+
   it("filters rooms with the same rail search used for conversations", () => {
     renderRail({
       agents: [makeAgent(0, "Atlas")],
@@ -161,6 +241,25 @@ describe("SessionRail new conversation agent picker", () => {
     expect(
       screen.queryByRole("button", { name: /Smoke test room/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows the room photo in the rail when one is available", () => {
+    renderRail({
+      agents: [makeAgent(0, "Atlas")],
+      rooms: [
+        makeRoom(
+          "Smoke test room",
+          "DEMO_SMOKE",
+          "ATLAS",
+          "/api/control-plane/dashboard/squads/threads/DEMO_SMOKE-thread/photo",
+        ),
+      ],
+    });
+
+    expect(screen.getByTestId("room-row-photo")).toHaveAttribute(
+      "src",
+      "/api/control-plane/dashboard/squads/threads/DEMO_SMOKE-thread/photo",
+    );
   });
 
   it("loads agents from the backend in compact infinite-scroll pages", async () => {
@@ -228,13 +327,15 @@ describe("SessionRail new conversation agent picker", () => {
       target: { value: "harbor" },
     });
 
-    expect(await screen.findByText("Harbor")).toBeInTheDocument();
-    expect(screen.queryByText("Atlas")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/control-plane/agents?limit=8&offset=0&q=harbor",
         expect.any(Object),
       );
+    });
+    expect(await screen.findByText("Harbor")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Atlas")).not.toBeInTheDocument();
     });
   });
 });

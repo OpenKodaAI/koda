@@ -6,13 +6,23 @@ import SessionsPage from "@/app/sessions/page";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { AppTourProvider } from "@/components/providers/app-tour-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ToastProvider } from "@/hooks/use-toast";
 import { setAgentCatalog } from "@/lib/agent-constants";
+import type { SquadThreadOverviewResponse } from "@/lib/squads";
 import type { ExecutionSummary, SessionDetail, SessionSummary } from "@/lib/types";
 
 const replaceMock = vi.fn();
 
 let currentQueryString = "agent=ATLAS";
 let currentSearchParams = new URLSearchParams(currentQueryString);
+
+function syncTestLocation() {
+  window.history.replaceState(
+    null,
+    "",
+    `/sessions${currentQueryString ? `?${currentQueryString}` : ""}`,
+  );
+}
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/sessions",
@@ -39,6 +49,7 @@ vi.mock("@/hooks/use-animated-presence", () => ({
 }));
 
 const THREAD_PAGE_SIZE = 24;
+const CHAT_TEXT_WAIT = 3_000;
 
 const agentCatalog = [
   {
@@ -249,6 +260,7 @@ const sessionDetails: Record<string, SessionDetail> = {
 function renderSessionsPage(options?: { agents?: typeof agentCatalog }) {
   const agents = options?.agents ?? agentCatalog;
   setAgentCatalog(agents);
+  syncTestLocation();
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -256,15 +268,17 @@ function renderSessionsPage(options?: { agents?: typeof agentCatalog }) {
   const rendered = render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider initialLanguage="en-US">
-        <AppTourProvider
-          pathname="/sessions"
-          mobileNavOpen={false}
-          onMobileNavOpenChange={() => undefined}
-        >
-          <AgentCatalogProvider initialAgents={agents}>
-            <SessionsPage />
-          </AgentCatalogProvider>
-        </AppTourProvider>
+        <ToastProvider>
+          <AppTourProvider
+            pathname="/sessions"
+            mobileNavOpen={false}
+            onMobileNavOpenChange={() => undefined}
+          >
+            <AgentCatalogProvider initialAgents={agents}>
+              <SessionsPage />
+            </AgentCatalogProvider>
+          </AppTourProvider>
+        </ToastProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -273,10 +287,11 @@ function renderSessionsPage(options?: { agents?: typeof agentCatalog }) {
 
 describe("SessionsPage chat redesign", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     currentQueryString = "agent=ATLAS";
     currentSearchParams = new URLSearchParams(currentQueryString);
+    syncTestLocation();
     replaceMock.mockReset();
-    vi.restoreAllMocks();
 
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -395,7 +410,11 @@ describe("SessionsPage chat redesign", () => {
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText(
+        "Everything shipped correctly.",
+        {},
+        { timeout: CHAT_TEXT_WAIT },
+      ),
     ).toBeInTheDocument();
   }, 10_000);
 
@@ -465,15 +484,13 @@ describe("SessionsPage chat redesign", () => {
     renderSessionsPage();
 
     let log = await screen.findByRole("log");
-    expect(await within(log).findByText("Everything shipped correctly.")).toBeInTheDocument();
-    Object.defineProperties(log, {
-      scrollHeight: { configurable: true, value: 1600 },
-      clientHeight: { configurable: true, value: 520 },
-      scrollTop: { configurable: true, value: 260, writable: true },
-    });
-    fireEvent.scroll(log);
-
-    expect(await within(log).findByText("Old alpha context")).toBeInTheDocument();
+    expect(
+      await within(log).findByText(
+        "Everything shipped correctly.",
+        {},
+        { timeout: CHAT_TEXT_WAIT },
+      ),
+    ).toBeInTheDocument();
     const olderFetchCount = () =>
       vi.mocked(global.fetch).mock.calls.filter(([input]) => {
         const url = typeof input === "string" ? input : input.toString();
@@ -483,16 +500,32 @@ describe("SessionsPage chat redesign", () => {
         const parsed = new URL(url, "http://localhost");
         return parsed.searchParams.get("before") === "alpha-before-2";
       }).length;
-    expect(olderFetchCount()).toBe(1);
+    Object.defineProperties(log, {
+      scrollHeight: { configurable: true, value: 1600 },
+      clientHeight: { configurable: true, value: 520 },
+      scrollTop: { configurable: true, value: 260, writable: true },
+    });
+    fireEvent.scroll(log);
+
+    await waitFor(() => expect(olderFetchCount()).toBe(1));
+    expect(
+      await within(log).findByText("Old alpha context", {}, { timeout: CHAT_TEXT_WAIT }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Beta sync/i }));
     expect(
-      await within(await screen.findByRole("log")).findByText("Here is the beta summary."),
+      await within(await screen.findByRole("log")).findByText(
+        "Here is the beta summary.",
+        {},
+        { timeout: CHAT_TEXT_WAIT },
+      ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Alpha conversation/i }));
     log = await screen.findByRole("log");
-    expect(await within(log).findByText("Old alpha context")).toBeInTheDocument();
+    expect(
+      await within(log).findByText("Old alpha context", {}, { timeout: CHAT_TEXT_WAIT }),
+    ).toBeInTheDocument();
     expect(olderFetchCount()).toBe(1);
   }, 10_000);
 
@@ -531,15 +564,102 @@ describe("SessionsPage chat redesign", () => {
     );
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
+  }, 10_000);
+
+  it("does not start hidden conversation loading while a room is selected", async () => {
+    currentQueryString = "room=thread-room";
+    currentSearchParams = new URLSearchParams(currentQueryString);
+    const defaultFetch = vi.mocked(global.fetch).getMockImplementation();
+    const roomDetail: SquadThreadOverviewResponse = {
+      thread: {
+        id: "thread-room",
+        workspaceId: "workspace-1",
+        squadId: "squad-1",
+        title: "Room first",
+        status: "active",
+        ownerUserId: 1,
+        coordinatorAgentId: "ATLAS",
+        currentOwnerAgentId: null,
+        telegramChatId: null,
+        telegramMessageThreadId: null,
+        budgetUsdCap: null,
+        costUsdAccum: "0",
+        createdAt: "2026-03-28T10:00:00.000Z",
+        updatedAt: "2026-03-28T10:05:00.000Z",
+      },
+      coordinatorAgentId: "ATLAS",
+      participants: [
+        {
+          agentId: "ATLAS",
+          role: "coordinator",
+          joinedAt: "2026-03-28T10:00:00.000Z",
+          leftAt: null,
+        },
+      ],
+      recentMessages: [],
+      page: {
+        limit: 32,
+        returned: 0,
+        nextCursor: null,
+        hasMore: false,
+      },
+      activeTasks: [],
+      artifacts: [],
+      openTaskCount: 0,
+      doneTaskCount: 0,
+    };
+
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      if (
+        method === "GET" &&
+        url.includes("/api/control-plane/dashboard/squads/threads/thread-room")
+      ) {
+        return Promise.resolve(
+          new Response(JSON.stringify(roomDetail), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (!defaultFetch) {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderSessionsPage();
+
+    expect(await screen.findByText("Room first")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /Alpha conversation/i }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const fetchedUrls = vi.mocked(global.fetch).mock.calls.map(([input]) =>
+      typeof input === "string" ? input : input.toString(),
+    );
+    expect(
+      fetchedUrls.some((url) =>
+        url.includes("/api/control-plane/dashboard/agents/ATLAS/sessions/session-alpha"),
+      ),
+    ).toBe(false);
+    expect(
+      replaceMock.mock.calls.some(([url]) => String(url).includes("session=")),
+    ).toBe(false);
   }, 10_000);
 
   it("shows the contextual files panel only from real session artifacts", async () => {
     renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
     const contextPanel = screen.getByLabelText("Session details");
     expect(within(contextPanel).getByText("Files")).toBeInTheDocument();
@@ -553,7 +673,7 @@ describe("SessionsPage chat redesign", () => {
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
   }, 10_000);
 
@@ -563,7 +683,7 @@ describe("SessionsPage chat redesign", () => {
     renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
   }, 10_000);
@@ -573,13 +693,13 @@ describe("SessionsPage chat redesign", () => {
     renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Beta sync/i }));
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Here is the beta summary."),
+      await within(await screen.findByRole("log")).findByText("Here is the beta summary.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
   }, 10_000);
 
@@ -588,7 +708,7 @@ describe("SessionsPage chat redesign", () => {
     renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
 
     const railNewButton = screen.getAllByRole("button", { name: /New conversation/i })[0];
@@ -676,26 +796,27 @@ describe("SessionsPage chat redesign", () => {
       await screen.findByRole("button", { name: /Alpha conversation/i }),
     ).toBeInTheDocument();
     replaceMock.mockClear();
+    const replaceState = vi.spyOn(window.history, "replaceState");
 
     const search = screen.getByPlaceholderText(/Search conversations/i);
     await user.type(search, "Beta");
 
     expect(
-      replaceMock.mock.calls.some(([url]) => String(url).includes("search=Beta")),
+      replaceState.mock.calls.some(([, , url]) => String(url).includes("search=Beta")),
     ).toBe(false);
+    expect(replaceMock).not.toHaveBeenCalled();
 
     await waitFor(() => {
-      expect(
-        replaceMock.mock.calls.some(([url]) => String(url).includes("search=Beta")),
-      ).toBe(true);
+      expect(window.location.search).toContain("search=Beta");
     });
+    expect(replaceMock).not.toHaveBeenCalled();
   }, 10_000);
 
   it("renders the composer model and agent indicator once a session is loaded", async () => {
     renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
 
     await waitFor(() => {
@@ -738,7 +859,7 @@ describe("SessionsPage chat redesign", () => {
     const { queryClient } = renderSessionsPage();
 
     expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly."),
+      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(

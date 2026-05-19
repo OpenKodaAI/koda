@@ -280,6 +280,66 @@ def test_validate_agent_spec_rejects_unknown_integration_grants() -> None:
     assert "unknown integrations" in " ".join(validation["errors"])
 
 
+def test_validate_agent_spec_accepts_known_whispercpp_variant_without_downloaded_catalog() -> None:
+    validation = validate_agent_spec(
+        {
+            "model_policy": {
+                "functional_defaults": {
+                    "transcription": {
+                        "provider_id": "whispercpp",
+                        "model_id": "large-v3-turbo-q5_0",
+                    }
+                }
+            }
+        },
+        available_models_by_provider={"whispercpp": []},
+        enabled_providers=["claude", "whispercpp"],
+    )
+
+    assert validation["ok"] is True
+    assert not validation["errors"]
+
+
+def test_validate_agent_spec_accepts_custom_whispercpp_local_model_path() -> None:
+    validation = validate_agent_spec(
+        {
+            "model_policy": {
+                "functional_defaults": {
+                    "transcription": {
+                        "provider_id": "whispercpp",
+                        "model_id": "/models/custom-whisper.ggml.bin",
+                    }
+                }
+            }
+        },
+        available_models_by_provider={"whispercpp": []},
+        enabled_providers=["claude", "whispercpp"],
+    )
+
+    assert validation["ok"] is True
+    assert not validation["errors"]
+
+
+def test_validate_agent_spec_rejects_unknown_whispercpp_variant() -> None:
+    validation = validate_agent_spec(
+        {
+            "model_policy": {
+                "functional_defaults": {
+                    "transcription": {
+                        "provider_id": "whispercpp",
+                        "model_id": "large-v3-turbo-q9_not_real",
+                    }
+                }
+            }
+        },
+        available_models_by_provider={"whispercpp": []},
+        enabled_providers=["claude", "whispercpp"],
+    )
+
+    assert validation["ok"] is False
+    assert "references unknown model" in " ".join(validation["errors"])
+
+
 def test_mission_profile_renders_capability_fields() -> None:
     docs = render_markdown_documents_from_agent_spec(
         {

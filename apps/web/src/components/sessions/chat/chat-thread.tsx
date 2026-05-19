@@ -172,6 +172,15 @@ function ChatThreadImpl({
 
   useEffect(() => {
     const viewport = viewportRef.current;
+    if (!viewport || !hasOlder || loadingOlder) return;
+    if (viewport.clientHeight <= 0) return;
+    if (viewport.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
+    }
+  }, [hasOlder, items.length, loadingOlder, triggerLoadOlder]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
     if (!viewport || items.length === 0) return;
     if (viewport.clientHeight <= 0) return;
     if (viewport.scrollHeight <= viewport.clientHeight + TOP_LOAD_THRESHOLD_PX) {

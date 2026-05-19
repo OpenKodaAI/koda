@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ExecutionDetailContent } from "@/components/executions/execution-detail-content";
 import type { ExecutionDetail } from "@/lib/types";
 
@@ -37,8 +38,12 @@ const detail: ExecutionDetail = {
 };
 
 describe("ExecutionDetailContent", () => {
+  function renderDetail(ui: React.ReactNode) {
+    return render(<I18nProvider initialLanguage="en-US">{ui}</I18nProvider>);
+  }
+
   it("uses a theme-safe primary CTA for the operational room link", () => {
-    render(<ExecutionDetailContent data={detail} variant="drawer" />);
+    renderDetail(<ExecutionDetailContent data={detail} variant="drawer" />);
 
     const link = screen.getByRole("link", { name: /operational room|sala operacional/i });
     expect(link).toHaveAttribute("href", "/runtime/KODA/tasks/351");
@@ -47,7 +52,7 @@ describe("ExecutionDetailContent", () => {
   });
 
   it("renders granular visuals for metadata, timeline, tools, and artifacts", () => {
-    const { container } = render(
+    const { container } = renderDetail(
       <ExecutionDetailContent
         data={{
           ...detail,

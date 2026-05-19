@@ -446,6 +446,24 @@ def _timeline_node_type(event_type: str) -> str:
         return "retry_scheduled"
     if "dead_letter" in event or "dlq" in event:
         return "dlq_inserted"
+    if any(token in event for token in ("routing_decision", "squad_awareness", "contribution_proposal")):
+        return "agent_request"
+    if "coordination_decision" in event or "coordination_dispatched" in event:
+        return "agent_request"
+    if "mention_unresolved" in event or "agent_dispatch_unavailable" in event:
+        return "agent_request"
+    if "reply_obligation" in event:
+        return "reply_obligation"
+    if "followup" in event or "follow_up" in event:
+        return "agent_followup"
+    if "synthesis" in event or "synthesize" in event:
+        return "coordinator_synthesis"
+    if "squad_reply" in event:
+        return "squad_reply"
+    if "task_request" in event or "delegation_request" in event:
+        return "agent_request"
+    if "task_result" in event or "delegation_result" in event:
+        return "squad_reply"
     if "breaker" in event:
         return "breaker_open"
     if any(token in event for token in ("dependency", "provider", "mcp", "browser", "postgres", "timeout")):

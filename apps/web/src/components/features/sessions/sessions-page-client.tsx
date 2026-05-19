@@ -1,8 +1,8 @@
 "use client";
 
 
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useAnimatedPresence,
   useBodyScrollLock,
@@ -19,9 +19,14 @@ import {
 } from "@tanstack/react-query";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useContentStable } from "@/hooks/use-content-stable";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
+import { useToast } from "@/hooks/use-toast";
+import {
+  readCurrentUrlSearchParam,
+  replaceUrlSearchParamsSilently,
+  useUrlSyncedSearch,
+} from "@/hooks/use-url-synced-search";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ChatComposer } from "@/components/sessions/chat/chat-composer";
 import type { ChatCommand } from "@/lib/contracts/chat-commands";
@@ -227,17 +232,23 @@ function SessionsPageContent() {
   const { t } = useAppI18n();
   const { currentStep, status } = useAppTour();
   const { agents } = useAgentCatalog();
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
-  const queryBotId = searchParams.get("agent");
+  const [queryBotId, setQueryBotId] = useState<string | null>(() =>
+    searchParams.get("agent"),
+  );
+  const searchState = useUrlSyncedSearch({
+    debounceMs: 220,
+    initialValue: searchParams.get("search"),
+    syncToUrl: false,
+  });
 
   const [activeBotId, setActiveBotId] = useState<string | undefined>(() =>
     normalizeSelectedBotId(queryBotId, availableBotIds)
   );
-  const [search, setSearch] = useState(searchParams.get("search") ?? "");
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     searchParams.get("session")
   );
@@ -258,7 +269,6 @@ function SessionsPageContent() {
   const [activeRoomDetail, setActiveRoomDetail] =
     useState<SquadThreadOverviewResponse | null>(null);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
-  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [threadScrolled, setThreadScrolled] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
   const [pendingRequest, setPendingRequest] = useState<{
@@ -272,8 +282,18 @@ function SessionsPageContent() {
   const autoSelectedContextRef = useRef<string | null>(null);
 
   const queryClient = useQueryClient();
-  const deferredSearch = useDeferredValue(search.trim());
-  const debouncedSearch = useDebouncedValue(deferredSearch, 220);
+  const { showToast } = useToast();
+  const debouncedSearch = searchState.debouncedValue;
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setQueryBotId(readCurrentUrlSearchParam("agent") || null);
+      setSelectedSessionId(readCurrentUrlSearchParam("session") || null);
+      setSelectedRoomId(readCurrentUrlSearchParam("room") || null);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (availableBotIds.length === 0) {
@@ -319,47 +339,36 @@ function SessionsPageContent() {
 
   useEffect(() => {
     if (queryBotId && availableBotIds.length === 0) return;
-    const params = new URLSearchParams(searchParams.toString());
-    if (activeBotId) {
-      params.set("agent", activeBotId);
-    } else {
-      params.delete("agent");
-    }
-    if (debouncedSearch) {
-      params.set("search", debouncedSearch);
-    } else {
-      params.delete("search");
-    }
-    if (selectedSessionId) {
-      params.set("session", selectedSessionId);
-    } else {
-      params.delete("session");
-    }
-    if (selectedRoomId) {
-      params.set("room", selectedRoomId);
-    } else {
-      params.delete("room");
-    }
-    const nextQuery = params.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery === currentQuery) return;
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    replaceUrlSearchParamsSilently((params) => {
+      if (activeBotId) params.set("agent", activeBotId);
+      else params.delete("agent");
+
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      else params.delete("search");
+
+      if (selectedSessionId) params.set("session", selectedSessionId);
+      else params.delete("session");
+
+      if (selectedRoomId) params.set("room", selectedRoomId);
+      else params.delete("room");
+    });
   }, [
     activeBotId,
     availableBotIds.length,
     debouncedSearch,
-    pathname,
     queryBotId,
-    router,
-    searchParams,
     selectedRoomId,
     selectedSessionId,
   ]);
 
-  const sessionsQueryKey = queryKeys.dashboard.sessionPages({
-    search: debouncedSearch,
-    limit: SESSION_FETCH_LIMIT,
-  });
+  const sessionsQueryKey = useMemo(
+    () =>
+      queryKeys.dashboard.sessionPages({
+        search: debouncedSearch,
+        limit: SESSION_FETCH_LIMIT,
+      }),
+    [debouncedSearch],
+  );
   const fetchSessionsPage = useCallback(
     async ({
       signal,
@@ -426,6 +435,7 @@ function SessionsPageContent() {
     gcTime: DASHBOARD_CACHE_GC_MS,
     retry: 1,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
     getNextPageParam: (lastPage) =>
       lastPage.page.has_more ? lastPage.page.next_offset : undefined,
     queryFn: async ({ signal, pageParam }) => {
@@ -463,6 +473,7 @@ function SessionsPageContent() {
     () => normalizeSelectedBotId(selectedSessionSummary?.bot_id, availableBotIds),
     [availableBotIds, selectedSessionSummary?.bot_id],
   );
+  const conversationPaneActive = !selectedRoomId;
   const detailBotId = selectedSessionBotId ?? activeBotId;
 
   const detailQueryBaseKey = useMemo(
@@ -520,14 +531,14 @@ function SessionsPageContent() {
   const { connected: streamConnected } = useSessionStream({
     agentId: detailBotId ?? null,
     sessionId: streamSessionId,
-    enabled: Boolean(detailBotId && streamSessionId),
+    enabled: Boolean(conversationPaneActive && detailBotId && streamSessionId),
     onEvent: handleSessionStreamEvent,
   });
 
   const detailQuery = useControlPlaneQuery<SessionDetail>({
     tier: "realtime",
     queryKey: detailQueryKey,
-    enabled: Boolean(detailBotId && selectedSessionId),
+    enabled: Boolean(conversationPaneActive && detailBotId && selectedSessionId),
     refetchInterval: streamConnected
       ? false
       : pendingRequest
@@ -577,7 +588,10 @@ function SessionsPageContent() {
     [detailBotId, latestHistoryBoundaryCursor, selectedSessionId],
   );
   const olderDetailPagesEnabled = Boolean(
-    detailBotId && selectedSessionId && latestHistoryBoundaryCursor,
+    conversationPaneActive &&
+      detailBotId &&
+      selectedSessionId &&
+      latestHistoryBoundaryCursor,
   );
   const olderDetailPagesQuery = useInfiniteQuery({
     queryKey: olderDetailPagesQueryKey,
@@ -651,6 +665,7 @@ function SessionsPageContent() {
   useEffect(() => {
     if (stableSessionsQuery.initialLoading) return;
     if (isNewChatMode) return;
+    if (selectedRoomId) return;
     const contextKey = `${activeBotId ?? "*"}:${debouncedSearch || "*"}`;
     if (autoSelectedContextRef.current === contextKey) return;
     if (!selectedSessionId && sessions.length > 0 && isDesktop) {
@@ -663,6 +678,7 @@ function SessionsPageContent() {
     isDesktop,
     isNewChatMode,
     selectedSessionId,
+    selectedRoomId,
     sessions,
     stableSessionsQuery.initialLoading,
   ]);
@@ -718,7 +734,6 @@ function SessionsPageContent() {
       );
       setSelectedSessionId(session.session_id);
       setSelectedRoomId(null);
-      setRoomSettingsOpen(false);
       setContextPanelOpen(true);
       setNewChatSessionId(null);
       setIsNewChatMode(false);
@@ -738,7 +753,6 @@ function SessionsPageContent() {
     (entry: RoomEntry) => {
       setSelectedRoomId(entry.thread.id);
       setSelectedSessionId(null);
-      setRoomSettingsOpen(false);
       setContextPanelOpen(true);
       setNewChatSessionId(null);
       setIsNewChatMode(false);
@@ -757,7 +771,6 @@ function SessionsPageContent() {
       setNewRoomOpen(false);
       setSelectedRoomId(result.threadId);
       setSelectedSessionId(null);
-      setRoomSettingsOpen(false);
       setContextPanelOpen(true);
       setNewChatSessionId(null);
       setIsNewChatMode(false);
@@ -797,6 +810,14 @@ function SessionsPageContent() {
       }
       setPendingDeleteSession(null);
       void refreshSessionsFirstPage();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : t("sessions.delete.failed", {
+              defaultValue: "Could not delete this conversation.",
+            });
+      showToast(message, "error");
     } finally {
       setDeleteSubmitting(false);
     }
@@ -807,6 +828,7 @@ function SessionsPageContent() {
     refreshSessionsFirstPage,
     resetThreadState,
     selectedSessionId,
+    showToast,
     t,
   ]);
 
@@ -819,7 +841,6 @@ function SessionsPageContent() {
     });
     setSelectedSessionId(null);
     setSelectedRoomId(null);
-    setRoomSettingsOpen(false);
     setContextPanelOpen(false);
     setNewChatSessionId(nextSessionId);
     setIsNewChatMode(true);
@@ -922,7 +943,7 @@ function SessionsPageContent() {
           error instanceof Error && error.message.trim()
             ? error.message
             : t("sessions.sendUnavailable");
-        setComposerError(message);
+        showToast(message, "error");
         setPendingMessages((current) =>
           current.flatMap((item) => {
             if (item.requestId !== requestId) return [item];
@@ -934,7 +955,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, refreshSessionsFirstPage, selectedSessionId, t]
+    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, refreshSessionsFirstPage, selectedSessionId, showToast, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -1028,6 +1049,18 @@ function SessionsPageContent() {
 
   const roomsQuery = useRooms();
   const rooms = roomsQuery.rooms;
+  const railSearchPending =
+    searchState.isSearching ||
+    (sessionsQuery.isFetching &&
+      !sessionsQuery.isFetchingNextPage &&
+      search.trim() === debouncedSearch);
+  const railSessionsLoading = useMinDurationFlag(
+    stableSessionsQuery.initialLoading || railSearchPending,
+    180,
+  );
+  const railRoomsLoading = useMinDurationFlag(roomsQuery.loading, 180);
+  const railRefreshing =
+    stableSessionsQuery.refreshing || roomsQuery.refreshing || railSearchPending;
   const selectedRoomEntry = useMemo(
     () => rooms.find((entry) => entry.thread.id === selectedRoomId) ?? null,
     [rooms, selectedRoomId],
@@ -1081,11 +1114,15 @@ function SessionsPageContent() {
           onDeleteSession={handleRequestDeleteSession}
           search={search}
           onSearchChange={setSearch}
-          loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
+          searching={railSearchPending}
+          sessionsLoading={railSessionsLoading}
+          roomsLoading={railRoomsLoading}
+          refreshing={railRefreshing}
           hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
           loadingMoreSessions={sessionsQuery.isFetchingNextPage}
           onLoadMoreSessions={loadMoreSessions}
           error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
+          roomsError={roomsQuery.error?.message ?? null}
           unavailable={sessionsUnavailable}
         />
       </div>
@@ -1094,18 +1131,8 @@ function SessionsPageContent() {
         {selectedRoomId ? (
           <RoomChatPane
             threadId={selectedRoomId}
-            onArchived={() => {
-              setSelectedRoomId(null);
-              setRoomSettingsOpen(false);
-              setContextPanelOpen(false);
-            }}
             onOpenRail={() => setMobileRailOpen(true)}
             showRailToggle
-            showContextToggle={contextPanelAvailable}
-            contextPanelOpen={contextPanelOpen}
-            onToggleContextPanel={() => setContextPanelOpen((current) => !current)}
-            settingsOpen={roomSettingsOpen}
-            onSettingsOpenChange={setRoomSettingsOpen}
             onThreadDetailChange={setActiveRoomDetail}
           />
         ) : (
@@ -1182,9 +1209,12 @@ function SessionsPageContent() {
         detail={selectedRoomId ? null : activeDetail}
         summary={selectedRoomId ? null : selectedSummary}
         room={selectedRoomEntry}
-        open={contextPanelOpen && contextPanelAvailable}
-        onOpenChange={setContextPanelOpen}
-        onOpenRoomSettings={() => setRoomSettingsOpen(true)}
+        open={selectedRoomId ? true : contextPanelOpen && contextPanelAvailable}
+        onOpenChange={selectedRoomId ? undefined : setContextPanelOpen}
+        onRoomArchived={() => {
+          setSelectedRoomId(null);
+          setContextPanelOpen(false);
+        }}
         roomThreadMessages={selectedRoomId ? activeRoomDetail?.recentMessages ?? [] : []}
       />
 
@@ -1222,11 +1252,15 @@ function SessionsPageContent() {
               onDeleteSession={handleRequestDeleteSession}
               search={search}
               onSearchChange={setSearch}
-              loading={stableSessionsQuery.initialLoading || roomsQuery.loading}
+              searching={railSearchPending}
+              sessionsLoading={railSessionsLoading}
+              roomsLoading={railRoomsLoading}
+              refreshing={railRefreshing}
               hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
               loadingMoreSessions={sessionsQuery.isFetchingNextPage}
               onLoadMoreSessions={loadMoreSessions}
               error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
+              roomsError={roomsQuery.error?.message ?? null}
               unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}
               className="border-r-0"

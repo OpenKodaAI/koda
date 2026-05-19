@@ -26,6 +26,8 @@ from koda.services.queue_manager import (
     _control_plane_prompt_for_agent,
     _detect_audio_response_request,
     _get_throttle_interval,
+    _maybe_enqueue_squad_coordinator_synthesis,
+    _maybe_enqueue_squad_reply_synthesis,
     _maybe_enqueue_unblocked_squad_tasks,
     _native_tool_schemas_for_runtime,
     _parse_queue_item,
@@ -421,6 +423,315 @@ class TestSquadTaskDependencyDispatch:
         assert enqueue.await_args.kwargs["executing_agent_id"] == "FE"
         assert enqueue.await_args.kwargs["squad_task_id"] == "frontend-task"
         thread_store.post_thread_message.assert_awaited_once()
+
+
+class TestSquadDeliverySynthesis:
+    def _task_context(self) -> QueryContext:
+        return QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="FE",
+            squad_thread_id="thread-1",
+            squad_task_id="frontend-task",
+            parent_message_id="msg-1",
+            telegram_message_thread_id=7,
+        )
+
+    @pytest.mark.asyncio
+    async def test_coordinator_synthesis_waits_for_open_tasks(self) -> None:
+        ctx = self._task_context()
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(return_value=[_squad_task_descriptor("qa-task", agent_id="QA", kind="qa")])
+        bus = MagicMock()
+        bus.send = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.agents.get_message_bus", return_value=bus),
+            patch("koda.services.queue_manager.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await _maybe_enqueue_squad_coordinator_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="frontend done",
+                squad_message_id="msg-2",
+                artifact_ids=[],
+            )
+
+        bus.send.assert_not_awaited()
+        assert sleep.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_coordinator_synthesis_rechecks_open_tasks_before_dispatch(self) -> None:
+        ctx = self._task_context()
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        thread_store.thread_history = AsyncMock(
+            return_value=[
+                {
+                    "type": "task_result",
+                    "from": "QA",
+                    "content": "qa done",
+                    "metadata": {"parent_message_id": "msg-1", "squad_task_id": "qa-task"},
+                },
+                {
+                    "type": "task_result",
+                    "from": "FE",
+                    "content": "frontend done",
+                    "metadata": {"parent_message_id": "msg-1", "squad_task_id": "frontend-task"},
+                },
+            ]
+        )
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(
+            side_effect=[[_squad_task_descriptor("qa-task", agent_id="QA", kind="qa")], []]
+        )
+        bus = MagicMock()
+        bus.send = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.agents.get_message_bus", return_value=bus),
+            patch("koda.services.queue_manager.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await _maybe_enqueue_squad_coordinator_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="frontend done",
+                squad_message_id="msg-2",
+                artifact_ids=[],
+            )
+
+        sleep.assert_awaited_once_with(0.5)
+        bus.send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_coordinator_synthesis_dispatches_after_all_tasks_close(self) -> None:
+        ctx = self._task_context()
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        thread_store.thread_history = AsyncMock(
+            return_value=[
+                {
+                    "type": "task_result",
+                    "from": "QA",
+                    "content": "qa done",
+                    "metadata": {"parent_message_id": "msg-1", "squad_task_id": "qa-task"},
+                },
+                {
+                    "type": "task_result",
+                    "from": "FE",
+                    "content": "frontend done",
+                    "metadata": {"parent_message_id": "msg-1", "squad_task_id": "frontend-task"},
+                },
+            ]
+        )
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(return_value=[])
+        bus = MagicMock()
+        bus.send = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.agents.get_message_bus", return_value=bus),
+        ):
+            await _maybe_enqueue_squad_coordinator_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="frontend done",
+                squad_message_id="msg-2",
+                artifact_ids=["artifact-1"],
+            )
+
+        bus.send.assert_awaited_once()
+        payload = bus.send.await_args.kwargs
+        assert payload["from_agent"] == "FE"
+        assert payload["to_agent"] == "PM"
+        assert "Todos os task_result abertos" in payload["content"]
+        assert "QA / qa-task" in payload["content"]
+        assert "FE / frontend-task" in payload["content"]
+        assert "Não use apenas o último resultado" in payload["content"]
+        assert "Preserve literalmente marcadores" in payload["content"]
+        assert "Resultados confirmados:" in payload["content"]
+        assert "- QA / qa-task: qa done" in payload["content"]
+        assert "- FE / frontend-task: frontend done" in payload["content"]
+        assert payload["metadata"]["kind"] == "task_result"
+        assert payload["metadata"]["delivery_intent"] == "final_synthesis"
+        assert payload["metadata"]["idempotency_key"] == "squad_synthesis:thread-1:msg-1:PM"
+        assert payload["metadata"]["payload"]["artifact_ids"] == ["artifact-1"]
+
+    @pytest.mark.asyncio
+    async def test_coordinator_synthesis_skips_existing_synthesis_request(self) -> None:
+        ctx = self._task_context()
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        thread_store.thread_history = AsyncMock(
+            return_value=[
+                {
+                    "type": "task_result",
+                    "from": "FE",
+                    "content": "already queued",
+                    "metadata": {"idempotency_key": "squad_synthesis:thread-1:msg-1:PM"},
+                }
+            ]
+        )
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(return_value=[])
+        bus = MagicMock()
+        bus.send = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.agents.get_message_bus", return_value=bus),
+        ):
+            await _maybe_enqueue_squad_coordinator_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="frontend done",
+                squad_message_id="msg-2",
+                artifact_ids=[],
+            )
+
+        bus.send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reply_synthesis_waits_for_open_reply_obligations(self) -> None:
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="FE",
+            squad_thread_id="thread-1",
+            delegation_request_id="reply:thread-1:10:FE",
+            parent_message_id="msg-10",
+        )
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(return_value=MagicMock(coordinator_agent_id="PM"))
+        reply_service = AsyncMock()
+        reply_service.list_obligations = AsyncMock(return_value=[MagicMock(status="open")])
+        dispatch = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_thread_reply_service", return_value=reply_service),
+            patch("koda.squads.dispatch_squad_turn", dispatch),
+        ):
+            await _maybe_enqueue_squad_reply_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="reply done",
+                squad_message_id="msg-11",
+            )
+
+        dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reply_synthesis_dispatches_when_obligations_are_resolved(self) -> None:
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            executing_agent_id="FE",
+            squad_thread_id="thread-1",
+            delegation_request_id="reply:thread-1:10:FE",
+            parent_message_id="msg-10",
+        )
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        thread_store.notify_event = AsyncMock()
+        reply_service = AsyncMock()
+        reply_service.list_obligations = AsyncMock(return_value=[])
+        dispatch = AsyncMock(return_value=MagicMock(dispatched=True, to_dict=lambda: {"dispatched": True}))
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_thread_reply_service", return_value=reply_service),
+            patch("koda.squads.dispatch_squad_turn", dispatch),
+        ):
+            await _maybe_enqueue_squad_reply_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="reply done",
+                squad_message_id="msg-11",
+            )
+
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.kwargs["target_agent_id"] == "PM"
+        assert dispatch.await_args.kwargs["parent_message_id"] == "msg-11"
+        assert dispatch.await_args.kwargs["metadata"]["source"] == "reply_obligations_resolved"
+        assert dispatch.await_args.kwargs["metadata"]["reply_kind"] == "synthesis_request"
+        thread_store.notify_event.assert_awaited_once()
 
 
 class TestAudioResponseIntent:

@@ -1,8 +1,7 @@
 "use client";
 
 import { memo, type MouseEvent } from "react";
-import { Trash2 } from "lucide-react";
-import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { CircleMinus, MessageCircle } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { SessionSummary } from "@/lib/types";
 import { cn, truncateText } from "@/lib/utils";
@@ -10,7 +9,6 @@ import { cn, truncateText } from "@/lib/utils";
 interface SessionRowProps {
   session: SessionSummary;
   agentLabel: string;
-  agentColor?: string | null;
   active: boolean;
   onSelect: () => void;
   onRequestDelete?: () => void;
@@ -31,22 +29,6 @@ function relativeShort(value: string | null): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
 }
 
-function resolveTone(session: SessionSummary): {
-  tone: StatusDotTone;
-  pulse: boolean;
-  visible: boolean;
-} {
-  if (session.running_count > 0) return { tone: "accent", pulse: true, visible: true };
-  if (session.failed_count > 0) return { tone: "danger", pulse: false, visible: true };
-  if (
-    session.latest_status === "retrying" ||
-    session.latest_status === "stalled" ||
-    session.latest_status === "degraded"
-  )
-    return { tone: "warning", pulse: true, visible: true };
-  return { tone: "neutral", pulse: false, visible: false };
-}
-
 function resolvePreview(session: SessionSummary): string {
   if (session.latest_message_preview?.trim())
     return truncateText(session.latest_message_preview.trim(), 64);
@@ -59,13 +41,11 @@ function resolvePreview(session: SessionSummary): string {
 function SessionRowImpl({
   session,
   agentLabel,
-  agentColor,
   active,
   onSelect,
   onRequestDelete,
 }: SessionRowProps) {
   const { t } = useAppI18n();
-  const { tone, pulse, visible } = resolveTone(session);
   const preview = resolvePreview(session);
   const timeLabel = relativeShort(session.last_activity_at);
 
@@ -86,32 +66,29 @@ function SessionRowImpl({
           : "hover:bg-[var(--hover-tint)]",
       )}
     >
-      <span
-        aria-hidden
-        className="absolute left-1 top-2 bottom-2 w-1 rounded-full"
-        style={{ background: agentColor ?? "#A7ADB4" }}
-      />
       <button
         type="button"
         onClick={onSelect}
         aria-current={active ? "true" : undefined}
         className={cn(
-          "flex min-w-0 flex-1 items-start gap-2.5 rounded-[var(--radius-panel-sm)] py-1.5 pl-4 pr-2 text-left",
+          "flex min-w-0 flex-1 items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-left",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
           active
             ? "text-[var(--text-primary)]"
             : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]",
         )}
       >
+        <MessageCircle
+          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text-secondary)]"
+          strokeWidth={1.75}
+          aria-hidden
+        />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex items-baseline justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-[var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
                 {agentLabel}
               </span>
-              {visible ? (
-                <StatusDot tone={tone} pulse={pulse} className="shrink-0" />
-              ) : null}
             </span>
             <span
               className={cn(
@@ -142,13 +119,13 @@ function SessionRowImpl({
           })}
           className={cn(
             "absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)]",
-            "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)]",
+            "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "hover:text-[var(--tone-danger-dot)]",
             "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
             "group-hover:opacity-100",
           )}
         >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+          <CircleMinus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
         </button>
       ) : null}
     </div>

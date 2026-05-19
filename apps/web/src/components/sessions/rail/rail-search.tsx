@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { LoaderCircle, Search, X } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
@@ -8,10 +8,11 @@ interface RailSearchProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  loading?: boolean;
   className?: string;
 }
 
-export function RailSearch({ value, onChange, placeholder, className }: RailSearchProps) {
+export function RailSearch({ value, onChange, placeholder, loading = false, className }: RailSearchProps) {
   const { t } = useAppI18n();
   const resolvedPlaceholder =
     placeholder ?? t("chat.rail.search", { defaultValue: "Search conversations" });
@@ -25,13 +26,27 @@ export function RailSearch({ value, onChange, placeholder, className }: RailSear
         className,
       )}
     >
-      <Search className="icon-sm text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+      {loading ? (
+        <span
+          role="status"
+          aria-label={t("chat.rail.searching", { defaultValue: "Searching conversations" })}
+        >
+          <LoaderCircle
+            className="icon-sm animate-spin text-[var(--text-quaternary)]"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+        </span>
+      ) : (
+        <Search className="icon-sm text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+      )}
       <input
-        type="search"
+        type="text"
+        role="searchbox"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={resolvedPlaceholder}
-        className="flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+        className="search-input--custom-clear flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
       />
       {value ? (
         <button

@@ -27,8 +27,8 @@ _VALID_STATUSES = {"open", "paused", "completed", "archived"}
 _VALID_VISIBILITIES = {"squad", "private"}
 _VALID_ROLES = {"coordinator", "worker", "observer"}
 _ALLOWED_TRANSITIONS = {
-    "open": {"paused", "completed"},
-    "paused": {"open", "completed"},
+    "open": {"paused", "completed", "archived"},
+    "paused": {"open", "completed", "archived"},
     "completed": {"archived"},
     "archived": set(),
 }

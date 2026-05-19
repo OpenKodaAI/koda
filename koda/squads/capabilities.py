@@ -25,6 +25,8 @@ _DO_NOT_DELEGATE_MAX = 300
 _DOMAINS_MAX = 8
 _OUTCOMES_MAX = 3
 _TOOL_CATEGORIES_MAX = 6
+_ALLOWED_TOOL_IDS_MAX = 32
+_INTEGRATION_IDS_MAX = 16
 
 _TOOL_PREFIX_CATEGORY: dict[str, str] = {
     "mcp_": "mcp",
@@ -62,6 +64,15 @@ class CapabilitySummary:
     delegate_when: str = ""
     do_not_delegate: str = ""
     is_coordinator: bool = False
+    allowed_tool_ids: list[str] = field(default_factory=list)
+    integration_ids: list[str] = field(default_factory=list)
+    preferred_provider: str = ""
+    preferred_model: str = ""
+    cost_weight: float = 1.0
+    load_score: float = 0.0
+    quality_score: float = 0.5
+    recent_success_rate: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +85,15 @@ class CapabilitySummary:
             "delegate_when": self.delegate_when,
             "do_not_delegate": self.do_not_delegate,
             "is_coordinator": self.is_coordinator,
+            "allowed_tool_ids": list(self.allowed_tool_ids),
+            "integration_ids": list(self.integration_ids),
+            "preferred_provider": self.preferred_provider,
+            "preferred_model": self.preferred_model,
+            "cost_weight": self.cost_weight,
+            "load_score": self.load_score,
+            "quality_score": self.quality_score,
+            "recent_success_rate": self.recent_success_rate,
+            "metadata": dict(self.metadata),
         }
 
 
@@ -109,10 +129,16 @@ def build_capability_summary(
     """Derive a CapabilitySummary from an AgentSpec payload (normalized or raw)."""
     mission = agent_spec.get("mission_profile") or {}
     tool_policy = agent_spec.get("tool_policy") or {}
+    model_policy = agent_spec.get("model_policy") or {}
+    integration_policy = agent_spec.get("integration_policy") or agent_spec.get("integrations") or {}
     if not isinstance(mission, dict):
         mission = {}
     if not isinstance(tool_policy, dict):
         tool_policy = {}
+    if not isinstance(model_policy, dict):
+        model_policy = {}
+    if not isinstance(integration_policy, dict):
+        integration_policy = {}
 
     raw_aid = agent_id or agent_spec.get("agent_id") or ""
     aid = str(raw_aid).strip().upper()
@@ -124,12 +150,15 @@ def build_capability_summary(
     delegate_when = _coerce_text(mission.get("delegate_when"), cap=_DELEGATE_WHEN_MAX)
     do_not_delegate = _coerce_text(mission.get("do_not_delegate"), cap=_DO_NOT_DELEGATE_MAX)
 
-    allowed_tool_ids = tool_policy.get("allowed_tool_ids") or []
-    if not isinstance(allowed_tool_ids, (list, tuple, set)):
-        allowed_tool_ids = []
+    allowed_tool_ids = _coerce_list(tool_policy.get("allowed_tool_ids"), cap=_ALLOWED_TOOL_IDS_MAX)
     categories = sorted({_infer_tool_category(t) for t in allowed_tool_ids if isinstance(t, str) and t})[
         :_TOOL_CATEGORIES_MAX
     ]
+    preferred_provider, preferred_model = _resolve_preferred_model(model_policy)
+    integration_ids = _extract_integration_ids(integration_policy)
+    ops = agent_spec.get("routing_profile") or agent_spec.get("delivery_profile") or {}
+    if not isinstance(ops, dict):
+        ops = {}
 
     return CapabilitySummary(
         agent_id=aid,
@@ -141,7 +170,58 @@ def build_capability_summary(
         delegate_when=delegate_when,
         do_not_delegate=do_not_delegate,
         is_coordinator=bool(is_coordinator),
+        allowed_tool_ids=allowed_tool_ids,
+        integration_ids=integration_ids,
+        preferred_provider=preferred_provider,
+        preferred_model=preferred_model,
+        cost_weight=_coerce_float(ops.get("cost_weight"), default=1.0, low=0.1, high=10.0),
+        load_score=_coerce_float(ops.get("load_score"), default=0.0, low=0.0, high=1.0),
+        quality_score=_coerce_float(ops.get("quality_score"), default=0.5, low=0.0, high=1.0),
+        recent_success_rate=_coerce_optional_float(ops.get("recent_success_rate"), low=0.0, high=1.0),
+        metadata={key: value for key, value in ops.items() if key in {"notes", "quality_source", "load_source"}},
     )
+
+
+def _coerce_float(value: Any, *, default: float, low: float, high: float) -> float:
+    try:
+        parsed = float(value if value is not None else default)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(low, min(high, parsed))
+
+
+def _coerce_optional_float(value: Any, *, low: float, high: float) -> float | None:
+    if value is None:
+        return None
+    return _coerce_float(value, default=low, low=low, high=high)
+
+
+def _resolve_preferred_model(model_policy: dict[str, Any]) -> tuple[str, str]:
+    allowed = _coerce_list(model_policy.get("allowed_providers"))
+    provider = str(model_policy.get("default_provider") or "").strip().lower()
+    if not provider and allowed:
+        provider = allowed[0].lower()
+    default_models = model_policy.get("default_models") or {}
+    if not isinstance(default_models, dict):
+        default_models = {}
+    model = str(default_models.get(provider) or "").strip() if provider else ""
+    functional_defaults = model_policy.get("functional_defaults") or {}
+    if not model and isinstance(functional_defaults, dict):
+        general = functional_defaults.get("general") or {}
+        if isinstance(general, dict):
+            provider = provider or str(general.get("provider_id") or "").strip().lower()
+            model = str(general.get("model_id") or "").strip()
+    return provider, model
+
+
+def _extract_integration_ids(integration_policy: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    for key in ("allowed_integration_ids", "integration_ids", "enabled_integrations"):
+        candidates.extend(_coerce_list(integration_policy.get(key)))
+    grants = integration_policy.get("grants") or integration_policy.get("permissions") or {}
+    if isinstance(grants, dict):
+        candidates.extend(str(key) for key in grants if key)
+    return _coerce_list(candidates, cap=_INTEGRATION_IDS_MAX)
 
 
 def format_capability_block(
@@ -169,6 +249,9 @@ def format_capability_block(
             lines.append(f"  do_not_delegate: {cs.do_not_delegate}")
         if cs.tool_categories:
             lines.append(f"  tools: {', '.join(cs.tool_categories)}")
+        if cs.preferred_provider or cs.preferred_model:
+            model_label = "/".join(part for part in [cs.preferred_provider, cs.preferred_model] if part)
+            lines.append(f"  model: {model_label}")
     lines.append("</squad_members>")
     return "\n".join(lines)
 

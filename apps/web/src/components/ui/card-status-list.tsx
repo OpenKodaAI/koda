@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   CheckCircle2,
@@ -15,15 +15,22 @@ export interface Card {
   id: string;
   title: string;
   status: "completed" | "updates-found" | "syncing";
+  detail?: ReactNode;
+  meta?: ReactNode;
+  statusLabel?: string | null;
 }
 
 interface AnimatedCardStatusListProps {
+  eyebrow?: string;
   title?: string;
+  description?: ReactNode;
   cards?: Card[];
+  children?: ReactNode;
   onSynchronize?: (cardId: string) => void;
   onAddCard?: () => void;
   onBack?: () => void;
   className?: string;
+  bodyClassName?: string;
   synchronizeLabel?: string;
   sort?: "completed-first" | "attention-first" | "stable";
 }
@@ -100,19 +107,22 @@ function getStatusGradient(status: Card["status"]) {
 }
 
 export function AnimatedCardStatusList({
+  eyebrow,
   title = "Fundamentals",
+  description,
   cards: initialCards = defaultCards,
+  children,
   onSynchronize,
   onAddCard,
   onBack,
   className = "",
+  bodyClassName = "",
   synchronizeLabel = "Synchronize",
   sort = "completed-first",
 }: AnimatedCardStatusListProps = {}) {
   const [cards, setCards] = useState<Card[]>(initialCards);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const shouldReduceMotion = Boolean(useReducedMotion());
-  const showHeaderActions = Boolean(onBack || onAddCard);
 
   useEffect(() => {
     setCards(initialCards);
@@ -144,17 +154,12 @@ export function AnimatedCardStatusList({
       data-testid="animated-card-status-list"
     >
       <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] p-4 shadow-none">
-        <div
-          className={cn(
-            "mb-4 flex items-center gap-3",
-            showHeaderActions ? "justify-between" : "justify-start",
-          )}
-        >
+        <div className="mb-4 flex items-start gap-3">
           {onBack ? (
             <motion.button
               type="button"
               onClick={onBack}
-              className="button-shell button-shell--secondary button-shell--sm h-8 w-8 p-0"
+              className="button-shell button-shell--secondary button-shell--sm mt-0.5 h-8 w-8 p-0"
               whileHover={shouldReduceMotion ? undefined : { y: -1 }}
               whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
               aria-label="Back"
@@ -163,15 +168,27 @@ export function AnimatedCardStatusList({
             </motion.button>
           ) : null}
 
-          <h2 className="m-0 min-w-0 flex-1 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-            {title}
-          </h2>
+          <div className="min-w-0 flex-1">
+            {eyebrow ? (
+              <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                {eyebrow}
+              </p>
+            ) : null}
+            <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              {title}
+            </h2>
+            {description ? (
+              <div className="mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+                {description}
+              </div>
+            ) : null}
+          </div>
 
           {onAddCard ? (
             <motion.button
               type="button"
               onClick={onAddCard}
-              className="button-shell button-shell--secondary button-shell--sm h-8 w-8 p-0"
+              className="button-shell button-shell--secondary button-shell--sm mt-0.5 h-8 w-8 p-0"
               whileHover={shouldReduceMotion ? undefined : { y: -1 }}
               whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
               aria-label="Add card"
@@ -182,7 +199,7 @@ export function AnimatedCardStatusList({
         </div>
 
         <motion.div
-          className="space-y-2.5"
+          className={cn("space-y-2.5", bodyClassName)}
           variants={{
             visible: {
               transition: {
@@ -196,7 +213,10 @@ export function AnimatedCardStatusList({
         >
           <AnimatePresence initial={false}>
             {sortedCards.map((card) => {
-              const statusText = getStatusText(card.status);
+              const statusText =
+                card.statusLabel === undefined
+                  ? getStatusText(card.status)
+                  : card.statusLabel;
               const canSynchronize = Boolean(onSynchronize) && card.status === "updates-found";
               return (
                 <motion.div
@@ -238,8 +258,8 @@ export function AnimatedCardStatusList({
                       />
                     ) : null}
 
-                    <div className="relative flex min-w-0 items-center justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3">
+                    <div className="relative flex min-w-0 items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden">
                           <AnimatePresence mode="wait" initial={false}>
                             <motion.span
@@ -253,12 +273,24 @@ export function AnimatedCardStatusList({
                             </motion.span>
                           </AnimatePresence>
                         </span>
-                        <span className="min-w-0 truncate text-[0.8125rem] text-[var(--text-primary)]">
-                          {card.title}
+                        <span className="min-w-0">
+                          <span className="block truncate text-[0.8125rem] text-[var(--text-primary)]">
+                            {card.title}
+                          </span>
+                          {card.detail ? (
+                            <span className="mt-0.5 block text-[0.6875rem] leading-4 text-[var(--text-tertiary)]">
+                              {card.detail}
+                            </span>
+                          ) : null}
                         </span>
                       </div>
 
-                      <div className="flex h-7 shrink-0 items-center">
+                      <div className="flex min-h-7 shrink-0 items-center gap-2">
+                        {card.meta ? (
+                          <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+                            {card.meta}
+                          </span>
+                        ) : null}
                         <AnimatePresence mode="wait" initial={false}>
                           {canSynchronize && hoveredCard === card.id ? (
                             <motion.button
@@ -293,6 +325,12 @@ export function AnimatedCardStatusList({
             })}
           </AnimatePresence>
         </motion.div>
+
+        {children ? (
+          <div className="mt-4 border-t border-[var(--divider-hair)] pt-4">
+            {children}
+          </div>
+        ) : null}
       </div>
     </section>
   );

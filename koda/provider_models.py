@@ -1813,6 +1813,38 @@ def _general_model_title(provider_id: str, model_id: str) -> str:
     return lookup.get(model_id, model_id)
 
 
+def _resolve_known_whispercpp_variant_models() -> list[dict[str, Any]]:
+    try:
+        from koda.services.whisper_manager import KNOWN_WHISPER_VARIANTS
+    except Exception:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for variant_id, descriptor in KNOWN_WHISPER_VARIANTS.items():
+        normalized = str(variant_id).strip()
+        if not normalized:
+            continue
+        items.append(
+            {
+                "provider_id": "whispercpp",
+                "model_id": normalized,
+                "title": str(descriptor.get("label") or normalized),
+                "function_id": "transcription",
+                "description": str(descriptor.get("description") or "Transcricao local via whisper.cpp."),
+                "status": "current",
+                "context_window": 0,
+                "input_cost_per_1m": 0,
+                "output_cost_per_1m": 0,
+                "speed_tier": 3,
+                "intelligence_tier": 3,
+                "filename": str(descriptor.get("filename") or "") or None,
+                "size_bytes": int(descriptor.get("approx_size_bytes") or 0) or None,
+                "downloaded": False,
+            }
+        )
+    return items
+
+
 def resolve_known_general_model_ids(provider_id: str) -> list[str]:
     normalized_provider = provider_id.strip().lower()
     return list(_DYNAMIC_GENERAL_MODEL_LABELS.get(normalized_provider, {}).keys())
@@ -2110,6 +2142,17 @@ def resolve_provider_function_model_catalog(
                     "downloaded": True,
                 }
             )
+
+    if normalized_provider == "whispercpp" and whisper_catalog_items is None:
+        for item in _resolve_known_whispercpp_variant_models():
+            variant_id = str(item.get("model_id") or "").strip()
+            if not variant_id:
+                continue
+            entry_key = ("transcription", variant_id)
+            if entry_key in seen:
+                continue
+            seen.add(entry_key)
+            items.append(item)
 
     for model_id in general_models:
         normalized_model = str(model_id).strip()

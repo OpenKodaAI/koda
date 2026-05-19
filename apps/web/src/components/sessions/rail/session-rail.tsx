@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { LoaderCircle, MessageSquare, Plus, Search, Users, X } from "lucide-react";
 import { SessionRow } from "@/components/sessions/rail/session-row";
 import { RoomRow } from "@/components/sessions/rail/room-row";
@@ -10,6 +10,7 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { SessionSummary } from "@/lib/types";
 import type { RoomEntry } from "@/hooks/use-rooms";
 import { fetchAgentCatalogPage } from "@/lib/agent-catalog-pages";
@@ -35,15 +36,22 @@ interface SessionRailProps {
   onDeleteRoom?: (room: RoomEntry) => void;
   search: string;
   onSearchChange: (value: string) => void;
+  searching?: boolean;
   loading?: boolean;
+  sessionsLoading?: boolean;
+  roomsLoading?: boolean;
+  refreshing?: boolean;
   hasMoreSessions?: boolean;
   loadingMoreSessions?: boolean;
   onLoadMoreSessions?: () => void;
   error?: string | null;
+  roomsError?: string | null;
   unavailable?: boolean;
   onClose?: () => void;
   className?: string;
 }
+
+type RailSectionKind = "rooms" | "sessions";
 
 function sortSessionsByRecency(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((a, b) => {
@@ -51,6 +59,77 @@ function sortSessionsByRecency(sessions: SessionSummary[]): SessionSummary[] {
     const bTime = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0;
     return bTime - aTime;
   });
+}
+
+function RailSectionHeader({
+  children,
+  loading = false,
+  loadingLabel,
+}: {
+  children: string;
+  loading?: boolean;
+  loadingLabel?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2.5 pb-1 pt-2">
+      <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+        {children}
+      </span>
+      {loading ? (
+        <LoaderCircle
+          className="h-3 w-3 animate-spin text-[var(--text-quaternary)]"
+          strokeWidth={1.75}
+          role="status"
+          aria-label={loadingLabel}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function RailLoadingRow({ kind = "sessions" }: { kind?: RailSectionKind }) {
+  return (
+    <div
+      className={cn(
+        "flex w-full items-center gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5",
+        "animate-pulse",
+      )}
+      data-testid={`rail-${kind}-loading-row`}
+      aria-hidden="true"
+    >
+      <span
+        className={cn(
+          "shrink-0 bg-[var(--panel-soft)]",
+          kind === "rooms"
+            ? "h-7 w-8 rounded-[0.45rem]"
+            : "h-4 w-4 rounded-full",
+        )}
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="h-3.5 w-[72%] rounded-full bg-[var(--panel-soft)]" />
+        {kind === "sessions" ? (
+          <span className="h-3 w-[52%] rounded-full bg-[var(--panel-soft)]" />
+        ) : null}
+      </span>
+      <span className="h-3 w-7 shrink-0 rounded-full bg-[var(--panel-soft)]" />
+    </div>
+  );
+}
+
+function RailLoadingRows({
+  count,
+  kind,
+}: {
+  count: number;
+  kind: RailSectionKind;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5" role="presentation">
+      {Array.from({ length: count }).map((_, index) => (
+        <RailLoadingRow key={`${kind}-${index}`} kind={kind} />
+      ))}
+    </div>
+  );
 }
 
 function SessionRailImpl({
@@ -66,11 +145,16 @@ function SessionRailImpl({
   onDeleteRoom,
   search,
   onSearchChange,
+  searching = false,
   loading = false,
+  sessionsLoading,
+  roomsLoading,
+  refreshing = false,
   hasMoreSessions = false,
   loadingMoreSessions = false,
   onLoadMoreSessions,
   error,
+  roomsError,
   unavailable = false,
   onClose,
   className,
@@ -82,12 +166,13 @@ function SessionRailImpl({
   const [agentSearch, setAgentSearch] = useState("");
   const [createMode, setCreateMode] = useState<CreateMode>("conversation");
   const normalizedAgentSearch = agentSearch.trim();
+  const debouncedAgentSearch = useDebouncedValue(normalizedAgentSearch, 180);
 
   const newChatAgentsQuery = useInfiniteQuery({
-    queryKey: ["control-plane", "agents", "session-new-chat", normalizedAgentSearch],
+    queryKey: ["control-plane", "agents", "session-new-chat", debouncedAgentSearch],
     queryFn: ({ pageParam }) =>
       fetchAgentCatalogPage({
-        search: normalizedAgentSearch,
+        search: debouncedAgentSearch,
         offset: Number(pageParam),
         limit: NEW_CHAT_AGENT_PAGE_SIZE,
       }),
@@ -95,6 +180,7 @@ function SessionRailImpl({
     enabled: createOpen && createMode === "conversation",
     staleTime: 10_000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
     getNextPageParam: (lastPage) =>
       lastPage.has_more && lastPage.items.length > 0
         ? lastPage.offset + lastPage.items.length
@@ -202,6 +288,20 @@ function SessionRailImpl({
     agentMetaMap.get(botId.toLowerCase()) || { label: botId, color: "#A7ADB4" };
 
   const isSearching = effectiveSearch.length > 0;
+  const effectiveSessionsLoading = sessionsLoading ?? loading;
+  const effectiveRoomsLoading = roomsLoading ?? loading;
+  const showRoomsLoading = effectiveRoomsLoading && filteredRooms.length === 0;
+  const showSessionsLoading = effectiveSessionsLoading && sortedSessions.length === 0;
+  const hasVisibleRows = filteredRooms.length > 0 || sortedSessions.length > 0;
+  const showUpdatingIndicator = refreshing && hasVisibleRows;
+  const showEmptyState =
+    !error &&
+    !roomsError &&
+    !unavailable &&
+    !effectiveRoomsLoading &&
+    !effectiveSessionsLoading &&
+    filteredRooms.length === 0 &&
+    sortedSessions.length === 0;
 
   return (
     <aside
@@ -212,9 +312,21 @@ function SessionRailImpl({
       )}
     >
       <div className="flex h-14 shrink-0 items-center justify-between px-3">
-        <span className="text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-          {t("chat.rail.title", { defaultValue: "Conversations" })}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            {t("chat.rail.title", { defaultValue: "Conversations" })}
+          </span>
+          {showUpdatingIndicator ? (
+            <LoaderCircle
+              className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--text-quaternary)]"
+              strokeWidth={1.75}
+              role="status"
+              aria-label={t("chat.rail.updating", {
+                defaultValue: "Updating conversations",
+              })}
+            />
+          ) : null}
+        </div>
         <div className="flex items-center gap-1">
           <Popover open={createOpen} onOpenChange={handleCreateOpenChange}>
             <PopoverTrigger asChild>
@@ -273,11 +385,12 @@ function SessionRailImpl({
                   <label className="mb-2 flex h-8 items-center gap-2 rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-soft)] px-2.5">
                     <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
                     <input
-                      type="search"
+                      type="text"
+                      role="searchbox"
                       value={agentSearch}
                       onChange={(event) => setAgentSearch(event.target.value)}
                       placeholder={t("chat.rail.searchAgents", { defaultValue: "Search agents" })}
-                      className="h-full min-w-0 flex-1 bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                      className="search-input--custom-clear h-full min-w-0 flex-1 bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
                     />
                     {agentSearch ? (
                       <button
@@ -406,21 +519,19 @@ function SessionRailImpl({
         <RailSearch
           value={search}
           onChange={onSearchChange}
+          loading={searching}
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-4 pt-1">
-        {loading && sessions.length === 0 && rooms.length === 0 ? (
-          <div className="flex flex-col gap-0.5">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className="h-12 w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]"
-                style={{ animationDelay: `${index * 35}ms` }}
-              />
-            ))}
-          </div>
-        ) : error ? (
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-4 pt-1"
+        aria-busy={
+          effectiveRoomsLoading || effectiveSessionsLoading || refreshing
+            ? true
+            : undefined
+        }
+      >
+        {error ? (
           <InlineAlert tone="danger" className="mx-0 my-1">
             {error}
           </InlineAlert>
@@ -430,7 +541,7 @@ function SessionRailImpl({
               defaultValue: "Sessions are not available right now.",
             })}
           </InlineAlert>
-        ) : sortedSessions.length === 0 && filteredRooms.length === 0 ? (
+        ) : showEmptyState ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-4 text-center">
             <MessageSquare
               className="icon-lg text-[var(--text-quaternary)]"
@@ -450,11 +561,21 @@ function SessionRailImpl({
           </div>
         ) : (
           <>
-            {filteredRooms.length > 0 ? (
+            {filteredRooms.length > 0 || showRoomsLoading || roomsError ? (
               <>
-                <div className="px-2.5 pb-1 pt-2 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+                <RailSectionHeader
+                  loading={showRoomsLoading}
+                  loadingLabel={t("chat.rail.loadingRooms", {
+                    defaultValue: "Loading rooms",
+                  })}
+                >
                   {t("chat.rail.roomsHeading", { defaultValue: "Rooms" })}
-                </div>
+                </RailSectionHeader>
+                {roomsError && filteredRooms.length === 0 && !showRoomsLoading ? (
+                  <InlineAlert tone="warning" className="mx-0 my-1">
+                    {roomsError}
+                  </InlineAlert>
+                ) : null}
                 {filteredRooms.map((entry) => (
                   <RoomRow
                     key={entry.thread.id}
@@ -468,16 +589,22 @@ function SessionRailImpl({
                     }
                   />
                 ))}
+                {showRoomsLoading ? <RailLoadingRows count={2} kind="rooms" /> : null}
               </>
             ) : null}
-            {sortedSessions.length > 0 ? (
+            {sortedSessions.length > 0 || showSessionsLoading ? (
               <>
-                {filteredRooms.length > 0 ? (
-                  <div className="px-2.5 pb-1 pt-3 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+                {filteredRooms.length > 0 || showRoomsLoading || roomsError ? (
+                  <RailSectionHeader
+                    loading={showSessionsLoading}
+                    loadingLabel={t("chat.rail.loadingConversations", {
+                      defaultValue: "Loading conversations",
+                    })}
+                  >
                     {t("chat.rail.sessionsHeading", {
                       defaultValue: "Conversations",
                     })}
-                  </div>
+                  </RailSectionHeader>
                 ) : null}
                 {sortedSessions.map((session) => {
                   const meta = metaForBot(session.bot_id);
@@ -486,7 +613,6 @@ function SessionRailImpl({
                       key={`${session.bot_id}:${session.session_id}`}
                       session={session}
                       agentLabel={meta.label}
-                      agentColor={meta.color}
                       active={session.session_id === selectedSessionId}
                       onSelect={() => onSelectSession(session)}
                       onRequestDelete={
@@ -495,6 +621,12 @@ function SessionRailImpl({
                     />
                   );
                 })}
+                {showSessionsLoading ? (
+                  <RailLoadingRows
+                    count={filteredRooms.length > 0 || showRoomsLoading ? 3 : 6}
+                    kind="sessions"
+                  />
+                ) : null}
                 {onLoadMoreSessions ? (
                   <InfiniteListFooter
                     hasMore={hasMoreSessions}

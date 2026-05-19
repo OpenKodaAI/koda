@@ -467,6 +467,7 @@ async def _notify_squad_targets(
     from koda.config import SQUAD_COORDINATOR_MODE
     from koda.squads import (
         SquadCoordinatorEngine,
+        build_member_profiles,
         build_squad_capability_summaries,
         dispatch_squad_turn,
         get_squad_mention_resolver,
@@ -495,6 +496,7 @@ async def _notify_squad_targets(
         summary.agent_id: " ".join(str(value) for value in summary.to_dict().values())
         for summary in capability_summaries
     }
+    member_profiles = build_member_profiles(capability_summaries)
     semantic_router = get_squad_semantic_router()
     semantic_result = await semantic_router.rank_agents(
         text,
@@ -557,7 +559,11 @@ async def _notify_squad_targets(
             source=f"{channel}_mention",
             targets=targets,
             parent_message_id=parent_message_id,
-            metadata={"mention_resolution": mention_resolution.to_dict()},
+            metadata={
+                "mention_resolution": mention_resolution.to_dict(),
+                "explicit_mentions": mention_resolution.resolved_agent_ids,
+                "member_profiles": member_profiles,
+            },
         )
         for target in targets:
             await dispatch_squad_turn(
@@ -637,7 +643,13 @@ async def _notify_squad_targets(
                         source="coordinator_engine",
                         targets=execution.dispatched_agents,
                         parent_message_id=parent_message_id,
-                        metadata={"mode": execution.decision.mode, "task_ids": execution.task_ids},
+                        metadata={
+                            "mode": execution.decision.mode,
+                            "task_ids": execution.task_ids,
+                            "final_response_strategy": execution.decision.final_response_strategy,
+                            "member_profiles": member_profiles,
+                            "semantic_result_object": semantic_result,
+                        },
                     )
                     log.info(
                         "squad_supervisor_coordinated",
@@ -664,6 +676,7 @@ async def _notify_squad_targets(
             capability_hints=capability_hints,
             semantic_result=semantic_result,
             explicit_mention_agent_ids=mention_resolution.resolved_agent_ids,
+            member_profiles=member_profiles,
         )
     if not targets:
         log.info("squad_routing_no_targets", thread_id=thread.id, participants=len(participant_ids))
@@ -688,6 +701,8 @@ async def _notify_squad_targets(
         parent_message_id=parent_message_id,
         metadata={
             "semantic_result": semantic_result.to_dict(),
+            "semantic_result_object": semantic_result,
+            "member_profiles": member_profiles,
             "reply_to_agent_id": reply_to_agent_id,
             "triage": triage_result.to_dict(),
         },

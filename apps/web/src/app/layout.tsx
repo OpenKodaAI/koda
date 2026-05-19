@@ -6,6 +6,7 @@ import { Inter, Fraunces, JetBrains_Mono } from "next/font/google";
 import { SkipToContentLink } from "@/components/layout/skip-to-content-link";
 import { AppShell } from "@/components/layout/app-shell";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
+import { ConsoleSignature } from "@/components/providers/console-signature";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { buildThemeBootstrapScript, normalizeThemePreference } from "@/components/providers/theme";
@@ -155,6 +156,7 @@ export default async function RootLayout({
         <QueryProvider>
           <ThemeProvider initialThemePreference={initialThemePreference}>
             <I18nProvider initialLanguage={initialLanguage}>
+              <ConsoleSignature />
               <SkipToContentLink />
               <AgentCatalogProvider initialAgents={initialAgents}>
                 <AppShell serverPathname={serverPathname} initialAuth={initialAuth}>
