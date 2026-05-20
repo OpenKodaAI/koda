@@ -1,6 +1,6 @@
 {
   "name": "@openkodaai/koda",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Open-source control plane for running, supervising, and documenting multi-agent AI systems.",
   "license": "Apache-2.0",
   "type": "module",
